@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   collectOutput,
   executeAgentCliAsync,
+  fixturesDir,
   killAsync,
   readDevLockAsync,
   readStubExpoInvocations,
@@ -278,6 +279,31 @@ describe('@expo/agent-cli start', () => {
       await waitForAsync(() => fs.existsSync(skillLink), 5000);
       expect(fs.existsSync(skillLink)).toBe(false);
       expect(readStubExpoInvocations(projectRoot)[0]?.args).toEqual(['start']);
+    } finally {
+      await killAsync(child);
+    }
+  });
+
+  // `dev` serves through the same wrapper, and passes the opt-out on to it. The Expo Go module
+  // dump of `go-app` makes the plan one `expo start --go`, which the stub keeps alive.
+  it.each([
+    ['syncs the skills', [], true],
+    ['skips the skill sync with `--no-agent-skills`', ['--no-agent-skills'], false],
+  ])('`dev` %s too', async (_case, flags, synced) => {
+    await writeAgentSelectionAsync(projectRoot, ['claude-code']);
+    await fs.promises.copyFile(
+      path.join(fixturesDir, 'go-app', 'node_modules', 'expo', 'bundledNativeModules.json'),
+      path.join(projectRoot, 'node_modules', 'expo', 'bundledNativeModules.json')
+    );
+
+    const child = spawnAgentCli(projectRoot, ['dev', '--ios', ...flags], {
+      env: { STUB_EXPO_DELAY_MS: '15000' },
+    });
+    try {
+      expect(await waitForAsync(() => fs.existsSync(skillLink), synced ? 30_000 : 5000)).toBe(
+        synced
+      );
+      expect(readStubExpoInvocations(projectRoot).map(({ args }) => args[0])).toEqual(['start']);
     } finally {
       await killAsync(child);
     }

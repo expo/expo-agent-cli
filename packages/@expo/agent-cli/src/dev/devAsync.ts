@@ -23,13 +23,7 @@ import {
   type DevicePlatform,
 } from '../deviceBinding';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
-import {
-  buildStartPlanFollowUps,
-  followUpsEnabled,
-  reportFollowUps,
-  resolveDevServerPort,
-  type FollowUp,
-} from '../followups';
+import { buildStartPlanFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import { Log } from '../log';
 import { classifySubprocessFailure } from '../needsHuman/detect';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
@@ -47,7 +41,6 @@ import { clearFingerprintCache } from '../project/fingerprintCache';
 import { dropEasNoneEntry } from '../status/easBuilds';
 import { probeProjectStateAsync } from '../project/probe';
 import type { PlanStep, ProjectState, StartPlan } from '../project/types';
-import { resolveStartFollowUpsAsync } from '../start/followUps';
 import { runDevServerAsync, type DevServerRun } from '../start/startAsync';
 import {
   localRequirement,
@@ -71,6 +64,7 @@ import {
 import { appReachedDevice } from './buildEvidence';
 import { detachedPidLine } from './childVerdict';
 import { recordLastDevRequest } from './lastRequest';
+import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
@@ -258,7 +252,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // it so they can name the port it actually took. A terminal cannot wait for that: the bundler
   // takes the screen and anything printed afterwards scrolls away with its output.
   if (!options.json) {
-    reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, null), {});
+    reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, PLANNED), {});
   }
 
   // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated — the plan was printed
@@ -306,7 +300,14 @@ async function reportRunResultAsync(
 ): Promise<void> {
   // One object, when the run is over and there is something true to say about it.
   const ran = planAsRun(plan, run);
-  const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
+  // A run whose last step started no dev server (a forwarded `--no-bundler`) has nothing that
+  // reported a port, so its follow-ups read the plan, as they do before a run.
+  const followups = await resolveRunFollowUpsAsync(
+    projectRoot,
+    ran,
+    options,
+    run.devServer ? { phase: 'ran', devServer: run.devServer } : PLANNED
+  );
   reportFollowUps('dev', followups, { json: true });
   Log.log(JSON.stringify({ ...ran, followups }, null, 2));
 }
@@ -1349,52 +1350,6 @@ function planStepFailedError(
   error.suggestedCommand = cause?.command ?? invocation;
   error.exitCode = exitCode;
   return error;
-}
-
-/**
- * The follow-ups of a run, which are the dev server's.
- *
- * `devServer` is what the run learned about the server it started, and null before it has started
- * one. The port is only claimed when something reported it: `source: 'default'` means neither the
- * dev server nor the command line named one, and a URL built on that assumption is how this
- * command came to tell an agent to open a *different project's* app
- * [observed — friction run, 2026-08-23].
- *
- * The dev-server options a follow-up may quote are the **plan's last step**, never the caller's own
- * arguments. They are the same list for a plan that ends in `expo start`, and they differ for every
- * plan that does not: `--tunnel` cannot be forwarded to `expo run:ios`, and reading the raw
- * arguments once made it print a development-build URL naming a port the step did not serve on
- * [F120, observed — wave 29 live, 2026-08-27]. The plan is the argv that will run (llp/0015 §The
- * plan approved is the plan run), so it is the one thing a follow-up may read.
- */
-async function resolveRunFollowUpsAsync(
-  projectRoot: string,
-  plan: StartPlan,
-  options: DevOptions,
-  devServer: DevServerRun | null
-): Promise<FollowUp[]> {
-  const planArgs = plan.steps.at(-1)?.argv.slice(1) ?? [];
-  const port = devServer
-    ? // After the run: what the dev server reported, and nothing when it reported nothing.
-      devServer.port && devServer.port.source !== 'default'
-      ? devServer.port.port
-      : null
-    : // Before it: the port the plan's own last step carries, or the one the Expo CLI defaults to.
-      resolveDevServerPort(planArgs);
-
-  return await resolveStartFollowUpsAsync(
-    projectRoot,
-    { ...options, expoArgs: planArgs },
-    {
-      expoGo: plan.target === 'expo-go',
-      web: plan.target === 'web',
-      eas: options.deviceBackend === 'eas',
-      port,
-      // Whatever the plan's own probe established, and null when it planned no build and probed
-      // nothing. The cloud-build rung reads it to say why the cloud is still worth choosing.
-      localBuild: plan.buildLocation?.status ?? null,
-    }
-  );
 }
 
 /**
