@@ -1595,10 +1595,7 @@ async function runPhasesAsync(
 
   if (appsConnected === 0) {
     const appPhase = phases[phases.length - 1]!;
-    if (skippedApps.length > 0) {
-      const skipped = describeSkippedApps(skippedApps);
-      appPhase.reason = appPhase.reason == null ? skipped : `${appPhase.reason} · ${skipped}`;
-    }
+    if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
     // @ref ./phases §SmokeDeps.explainSilentApp
     //
     // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is
@@ -1618,8 +1615,7 @@ async function runPhasesAsync(
       // Appended rather than substituted: "the link was opened and nothing attached" is what the
       // phase measured, and the device fact is why. A reader needs both — the second without the
       // first would not say that the open itself succeeded.
-      appPhase.reason =
-        appPhase.reason == null ? silent.mismatch : `${appPhase.reason} · ${silent.mismatch}`;
+      appendReason(appPhase, silent.mismatch);
     }
 
     // No app, so no runtime and no window — but there may still be a device, and a picture of
@@ -1680,8 +1676,7 @@ async function runPhasesAsync(
       // Appended rather than substituted. The sentence already there says how the app got where it
       // is — "opened … to connect one" — which is the fact the row exists for, and a note that
       // replaced it would trade a finding for a finding.
-      appPhase.reason =
-        appPhase.reason == null ? appFit.note : `${appPhase.reason} · ${appFit.note}`;
+      appendReason(appPhase, appFit.note);
     }
   }
 
@@ -2068,6 +2063,11 @@ async function captureIfPossible(
   // [observed — live cloud, 2026-08-27]. The device a run used is a fact of the run, whichever phase
   // found it.
   return { screenshot: result, deviceId: device, deviceBackend: backend };
+}
+
+/** Add a finding to a phase's sentence, after the one already there. */
+function appendReason(phase: SmokePhase, finding: string): void {
+  phase.reason = phase.reason == null ? finding : `${phase.reason} · ${finding}`;
 }
 
 /** What an `ok` screenshot says it captured, or null when it is the app itself. */
