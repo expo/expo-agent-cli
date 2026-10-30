@@ -21,6 +21,7 @@ import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../../utils/__tests__/mockPlatform';
+import { printed } from '../../../utils/__tests__/printed';
 
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>();
@@ -260,10 +261,6 @@ function writeProject(files: Record<string, string> = {}) {
     [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     ...files,
   });
-}
-
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
 }
 
 let originalFetch: typeof fetch | undefined;

@@ -11,6 +11,7 @@ import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { forgetExpoConfigReads } from '../../project/appConfig';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { printed } from '../../utils/__tests__/printed';
 
 // The declared plugins are read off the loaded module, which these tests do not load.
 vi.mock('@expo/config', () => ({
@@ -176,11 +177,6 @@ function options(overrides: Partial<NavigateOptions> = {}): NavigateOptions {
     attachTimeoutMs: 0,
     ...overrides,
   };
-}
-
-/** Everything the command wrote to stdout, joined into one string. */
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
 }
 
 let originalFetch: typeof fetch | undefined;
