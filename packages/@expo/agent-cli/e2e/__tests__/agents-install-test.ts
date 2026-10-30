@@ -37,6 +37,7 @@ describe('Installing agents through setup', () => {
       CODEX_HOME: path.join(homeDir, '.codex'),
       CLAUDE_CONFIG_DIR: path.join(homeDir, '.claude'),
       SETUP_STUB_LOG: logPath,
+      AGENT_CLI_NO_DOCS_SYNC: '1',
     };
     for (const name of ['claude', 'codex', 'bunx', 'npx']) {
       const script = path.join(scratch, `${name}.js`);
@@ -364,6 +365,7 @@ process.stderr.rows = 40;`
       agents: ['cursor'],
       scope: 'user',
       plugins: [{ agent: 'cursor', status: 'installed' }],
+      docs: { status: 'skipped', reason: 'AGENT_CLI_NO_DOCS_SYNC is set' },
     });
     expect(invocations().every((call) => call.name === 'bunx')).toBe(true);
   });
