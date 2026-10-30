@@ -3,12 +3,18 @@ import { buildInstallFollowUps, followUpsEnabled, reportFollowUps } from '../fol
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
 import type { InstallImpactReport } from '../project/types';
+import { PROGRAM_PREFIX } from '../programName';
 import {
   autoSyncSkillsAsync,
   listSkillPackagesAsync,
   printSkillsForAgentAsync,
 } from '../skills/skillsAsync';
+import { resolvePackageRootSync } from '../project/nodeModules';
+import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
+import { runInheritedAsync } from '../utils/inheritedRun';
+import { lockfileInstall } from '../utils/packageRunner';
+import { spawnSubprocessAsync } from '../utils/subprocess';
 import { diagnoseCheckedPackagesAsync, type InstallCheckReport } from './checkReport';
 import { reportInstallImpactAsync } from './impactReport';
 import type { InstallPlan } from './resolveOptions';
@@ -25,7 +31,16 @@ import type { InstallReport } from './types';
  * @returns the exit code of the `expo install` subprocess.
  */
 export async function installAsync(projectRoot: string, plan: InstallPlan): Promise<number> {
-  const { exitCode, checkPayload, checkOutput } = await runInstallAsync(projectRoot, plan);
+  const dependenciesMissing =
+    !plan.check &&
+    !plan.expoArgs.includes('--fix') &&
+    resolvePackageRootSync(projectRoot, 'expo') == null;
+  if (dependenciesMissing && plan.packages.length > 0) {
+    throw dependenciesNotInstalledError();
+  }
+  const { exitCode, checkPayload, checkOutput } = dependenciesMissing
+    ? await runLockfileInstallAsync(projectRoot, plan)
+    : await runInstallAsync(projectRoot, plan);
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
     // that asked for JSON still gets one object, the way a successful run does.
@@ -62,6 +77,54 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
 
   await reportAsync(projectRoot, plan, { exitCode, impact, checkPayload, checkOutput });
   return exitCode;
+}
+
+/**
+ * Install the lockfile's dependencies, for a project whose `expo` does not resolve yet.
+ *
+ * `expo install` cannot do this: the `expo` it would run is fetched by the package runner, and it
+ * cannot read the SDK of a project with no `node_modules`. The package manager's own frozen install
+ * can, so it runs, in the lockfile's directory. Output follows {@link runInstallAsync}: inherited
+ * for a person, captured and sent to stderr under `--json`.
+ *
+ * @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception
+ */
+async function runLockfileInstallAsync(
+  projectRoot: string,
+  plan: InstallPlan
+): Promise<{ exitCode: number; checkPayload: unknown; checkOutput: string | null }> {
+  const { lockfile, cwd, argv } = lockfileInstall(projectRoot);
+  const [command, ...args] = argv as [string, ...string[]];
+  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${argv.join(' ')}`;
+
+  if (!plan.json) {
+    Log.log(message);
+    return {
+      exitCode: await runInheritedAsync(command, args, { cwd }),
+      checkPayload: null,
+      checkOutput: null,
+    };
+  }
+  Log.error(message);
+  const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
+  const printed = `${result.stdout}${result.stderr}`.trim();
+  if (printed) {
+    Log.error(printed);
+  }
+  return { exitCode: result.exitCode ?? 1, checkPayload: null, checkOutput: null };
+}
+
+function dependenciesNotInstalledError(): CommandError {
+  const error = new CommandError(
+    'DEPENDENCIES_NOT_INSTALLED',
+    [
+      `This project has no installed dependencies, so no package was added.`,
+      `Why: the expo package does not resolve from this project or any directory above it, and "expo install" cannot read the SDK of a project with no node_modules.`,
+      `How: run "${PROGRAM_PREFIX} install" with no packages first. It installs the lockfile. Then add the package.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = `${PROGRAM_PREFIX} install`;
+  return error;
 }
 
 /**
