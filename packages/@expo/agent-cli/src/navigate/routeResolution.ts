@@ -289,13 +289,16 @@ export function finalizeRouteUrl(facts: RouteFacts, decisionTargets: CdpTarget[]
  * Device-free URL API for print/connect consumers.
  *
  * Scoped like `navigate`: the bound device decides which attached apps count. An unreadable own
- * binding refuses, as it does for every scoped command.
+ * binding refuses, as it does for every scoped command, once the dev server lists an app.
  */
 export async function resolveRouteUrlAsync(
   projectRoot: string,
   options: RouteUrlOptions
 ): Promise<ResolvedRoute> {
   const facts = await loadRouteFactsAsync(projectRoot, options);
+  // With no app listed there is nothing to place, so the binding is not read and an unreadable one
+  // does not refuse a URL that does not depend on it.
+  if (facts.devServer.targets.length === 0) return finalizeRouteUrl(facts, []);
   const { classifiedTargets } = await resolveTargetSelectionAsync({
     projectRoot,
     flags: { platform: options.platform, eas: options.cloud === 'required' },

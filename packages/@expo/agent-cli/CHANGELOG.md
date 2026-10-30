@@ -36,6 +36,7 @@
 
 ### 🐛 Bug fixes
 
+- `navigate --print-url` prints its URL when the worktree's binding file cannot be read and the dev server lists no app. It still refuses with `NO_BOUND_DEVICE` once an app is listed, because the binding decides which app counts.
 - `navigate` says the app was stopped, and reports `attachRecovered: true`, only when the app was running. When nothing was running it still opens the link a second time, and says nothing was stopped.
 - `runtime:stop --eas` on an Android session asks the controller once more when its `close` ran out of time ("process remained running after close"), instead of exiting 1. About 1 stop in 3 on an EAS Expo Go session hit this. ([#211](https://github.com/expo/expo-agent-cli/pull/211) by [@vonovak](https://github.com/vonovak))
 - The entry-bundle check that runs before `runtime:tree`, `runtime:tap`, `runtime:type`, `runtime:reload` and `smoke` sends its HEAD to the dev server it was given, never to the tunnel host the manifest names. Through the Expo tunnel that HEAD closed every websocket on the tunnel, the app's debugger socket too, so on a dev server started with `--tunnel` (every EAS Simulator session) every runtime read answered "No target found". ([#197](https://github.com/expo/expo-agent-cli/pull/197) by [@vonovak](https://github.com/vonovak))

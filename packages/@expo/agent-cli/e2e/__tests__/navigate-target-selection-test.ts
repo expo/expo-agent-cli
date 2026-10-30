@@ -504,3 +504,60 @@ it('--print-url reads the bound emulator beside a twin as navigate does, through
     await server.close();
   }
 });
+
+describe('--print-url beside an unreadable binding file', () => {
+  const PRINT_URL = ['navigate', '/profile/42', '--print-url', '--no-route-check', '--json'];
+
+  async function setupAsync(targets: ReturnType<typeof makeTarget>[]) {
+    const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
+    const scenario = scenarios.find((each) => each.backend === 'local-ios')!;
+    const device = await deviceFixture(root, scenario);
+    await fs.promises.writeFile(
+      await bindingFixture(root, BOOTED_SIMULATOR.udid, BOOTED_SIMULATOR.name),
+      '{not json'
+    );
+    const server = await startStubDevServerAsync({ projectRoot: root, targets: () => targets });
+    const releaseLock = await holdDevLockAsync(root, {
+      url: server.url,
+      port: server.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot: root,
+    });
+    return {
+      root,
+      env: { ...device.env, AGENT_CLI_NO_DEVICE: '0' },
+      close: async () => {
+        await releaseLock();
+        await server.close();
+      },
+    };
+  }
+
+  it('prints the URL when the dev server lists no app', async () => {
+    const { root, env, close } = await setupAsync([]);
+    try {
+      const result = await executeAgentCliAsync(root, PRINT_URL, { reject: false, env });
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        url: 'exp+dev-client-app://profile/42',
+        printUrl: true,
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it('refuses with NO_BOUND_DEVICE once the dev server lists an app', async () => {
+    const { root, env, close } = await setupAsync([
+      makeTarget({ id: 'go', appId: 'host.exp.Exponent', deviceName: BOOTED_SIMULATOR.name }),
+    ]);
+    try {
+      const result = await executeAgentCliAsync(root, PRINT_URL, { reject: false, env });
+      expect(result.exitCode, result.all).toBe(7);
+      expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+    } finally {
+      await close();
+    }
+  });
+});
