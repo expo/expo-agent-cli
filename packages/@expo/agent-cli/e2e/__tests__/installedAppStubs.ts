@@ -304,6 +304,9 @@ export function appStartedMarkerPath(root: string): string {
 
 const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
 
+/** The eight bytes every PNG starts with, as a JS string escape a stub can write. */
+export const PNG_HEADER_ESCAPE = '\\x89PNG\\r\\n\\x1a\\n';
+
 /**
  * A stub `xcrun`, installed into `<root>/.stub-bin`, which has to be first on the `PATH` of the
  * process that spawns it.
@@ -317,6 +320,7 @@ const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
  * iOS runtime.
  *
  * `openurl` and `terminate` mark the app started and stopped at {@link appStartedMarkerPath}.
+ * `io screenshot` writes a PNG to the path it is given.
  * `terminate` refuses an app outside `runningAppIds` the way `simctl` does, when the list is given.
  *
  * `devicectl list` answers with the fixture phones when `phone` is given; a `launch` then answers
@@ -444,6 +448,11 @@ export async function installStubXcrunAsync(
       `    process.exit(4);`,
       `  }`,
       `  fs.rmSync(marker, { force: true });`,
+      `  process.exit(0);`,
+      `}`,
+      // `simctl io <udid> screenshot <path>` is given the path and writes the file itself.
+      `if (args[0] === 'simctl' && args[1] === 'io' && args[3] === 'screenshot') {`,
+      `  fs.writeFileSync(args[4], Buffer.from("${PNG_HEADER_ESCAPE}stub-screenshot", 'binary'));`,
       `  process.exit(0);`,
       `}`,
       `if (args[1] === 'get_app_container') {`,

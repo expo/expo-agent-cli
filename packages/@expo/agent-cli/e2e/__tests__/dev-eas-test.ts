@@ -30,6 +30,7 @@ import {
   setupFixtureAsync,
   stubExpoEnv,
   waitForAsync,
+  readLastBuildRecord,
 } from '../utils';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
@@ -42,7 +43,6 @@ const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
 const STEPS_ONLY_ENV = { env: { STUB_EXPO_NO_PORT_REPORT: '1' } };
 
 /** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
-const LAST_BUILD_FILE = path.join('.expo', 'agent-cli-last-build.json');
 
 /**
  * An `eas` that is not the EAS CLI: a wrapper that panics before it runs anything.
@@ -78,12 +78,6 @@ async function setupAsync(
 /** The arguments of every recorded stub `expo` invocation, in the order they happened. */
 function expoInvocationArgs(projectRoot: string): string[][] {
   return readStubExpoInvocations(projectRoot).map((invocation) => invocation.args);
-}
-
-/** Read the last-build record, or null when the run wrote none. */
-function readLastBuildRecord(projectRoot: string): Record<string, string> | null {
-  const filePath = path.join(projectRoot, LAST_BUILD_FILE);
-  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
 }
 
 /** Write the developer config into a copied fixture, at `package.json` › `expo` › `@expo/agent-cli`. */

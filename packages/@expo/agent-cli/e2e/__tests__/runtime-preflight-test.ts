@@ -26,7 +26,10 @@ import {
   stubExpoEnv,
   type StubDevServer,
 } from '../utils';
-import { bindingFixture } from './installedAppStubs';
+import {
+  appStartedMarkerPath,
+  installStubXcrunAsync as installStatefulXcrunAsync,
+} from './installedAppStubs';
 
 /** A port nothing listens on, for the "no dev server" state. */
 const DEAD_URL = 'http://127.0.0.1:1';
@@ -189,13 +192,13 @@ describe('a dev server with no app connected', () => {
   // The one command of the family that does not refuse here, and the reason is in its ladder: a
   // relaunch is what *starts* an app, so "no app is connected" is a rung rather than a refusal.
   it('runtime:reload does not refuse: it starts the app instead', async () => {
-    const started = path.join(projectRoot, '.preflight-app-started');
+    const started = appStartedMarkerPath(projectRoot);
     const withApp = await startStubDevServerAsync({
       targets: [EXPO_GO_TARGET],
       messagePeers: {},
       targetsAppearWithFile: started,
     });
-    await installStubXcrunAsync(projectRoot, started);
+    await installStubXcrunAsync(projectRoot);
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
@@ -216,7 +219,7 @@ describe('a dev server with no app connected', () => {
   // already holds, and an agent that stops an app twice must not have to special-case the second
   // run. The dev server is its evidence for *which* app, never a precondition.
   it('runtime:stop exits 0 with nothing connected, and with no dev server at all', async () => {
-    await installStubXcrunAsync(projectRoot, null);
+    await installStubXcrunAsync(projectRoot);
 
     for (const devServerUrl of [stub.url, DEAD_URL]) {
       const result = await executeAgentCliAsync(
@@ -370,38 +373,11 @@ describe('a dev server whose app is re-registering', () => {
   });
 });
 
-/**
- * Install a stub `xcrun` that reports one booted simulator.
- *
- * `startedMarker` is the file the stub dev server watches to decide whether an app is attached: the
- * device method *starts* the app, so its runtime registers because a device tool ran.
- */
-async function installStubXcrunAsync(root: string, startedMarker: string | null): Promise<void> {
-  await bindingFixture(root, 'PREFLIGHT-SIM', 'iPhone 17 Pro');
-  const scriptPath = path.join(root, '.stub-bin', 'xcrun-preflight.js');
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      `const args = process.argv.slice(2);`,
-      `if (args[1] === 'list') {`,
-      `  process.stdout.write(JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{ udid: 'PREFLIGHT-SIM', name: 'iPhone 17 Pro', state: 'Booted' }] } }));`,
-      `}`,
-      startedMarker == null
-        ? ''
-        : [
-            `if (args[1] === 'openurl') {`,
-            `  fs.writeFileSync(${JSON.stringify(startedMarker)}, '');`,
-            `}`,
-            `if (args[1] === 'terminate') {`,
-            `  try { fs.unlinkSync(${JSON.stringify(startedMarker)}); } catch {}`,
-            `}`,
-          ].join('\n'),
-      `process.exit(0);`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(root, '.stub-bin'), 'xcrun', scriptPath);
+/** The stateful stub `xcrun`, listing this file's one booted simulator. */
+async function installStubXcrunAsync(root: string): Promise<void> {
+  await installStatefulXcrunAsync(root, {
+    simulators: [{ udid: 'PREFLIGHT-SIM', name: 'iPhone 17 Pro', state: 'Booted' }],
+  });
 }
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
@@ -571,7 +547,7 @@ describe('a worktree bound to an EAS Simulator session, beside a local app', () 
  * and not bound to it. Returns the binding file.
  */
 async function bindToSessionAsync(): Promise<string> {
-  await installStubXcrunAsync(projectRoot, null);
+  await installStubXcrunAsync(projectRoot);
   const root = canonicalizeExistingPath(projectRoot);
   const bindings = path.join(expoHomeOf(projectRoot), 'agent-cli', 'bindings');
   await fs.promises.rm(path.join(bindings, `${digestOf(root)}-ios-local-ios.json`), {

@@ -1306,6 +1306,35 @@ export async function holdDevLockAsync(
   };
 }
 
+/** Every JSONL event a run wrote to its `LOG_EVENTS` file. `2g` names each one in `_e`. */
+export function readEvents(eventsFile: string): any[] {
+  return fs
+    .readFileSync(eventsFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Point the project's dev-server lock at the stub, the way an `@expo/agent-cli`-started server does. */
+export async function holdLockForAsync(
+  projectRoot: string,
+  stub: StubDevServer
+): Promise<() => void> {
+  return await holdDevLockAsync(projectRoot, {
+    url: stub.url,
+    port: stub.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot,
+  });
+}
+
+/** Read the last-build record `dev` writes after a build, or null when the run wrote none. */
+export function readLastBuildRecord(projectRoot: string): Record<string, string> | null {
+  const filePath = path.join(projectRoot, '.expo', 'agent-cli-last-build.json');
+  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
+}
+
 /**
  * Make `xcode-select -p` fail in a fixture copy, the way a Mac without Xcode answers.
  *

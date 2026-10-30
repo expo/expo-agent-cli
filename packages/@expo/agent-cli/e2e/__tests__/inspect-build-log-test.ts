@@ -16,6 +16,7 @@ import {
   setupFixtureAsync,
   waitForExitAsync,
   type ExecuteResult,
+  readEvents,
 } from '../utils';
 
 /**
@@ -85,15 +86,6 @@ async function pipeIntoAgentCliAsync(
   const output = collectOutput(child);
   child.stdin!.end(input);
   return waitForExitAsync(child, output);
-}
-
-/** Every JSONL event of one run, as `2g` wrote them. */
-function readEvents(eventsFile: string): Record<string, any>[] {
-  return fs
-    .readFileSync(eventsFile, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
 }
 
 describe('@expo/agent-cli inspect:build-log --file', () => {

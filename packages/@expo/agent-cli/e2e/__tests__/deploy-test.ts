@@ -15,6 +15,7 @@ import {
   readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
+  readEvents,
 } from '../utils';
 
 /** The shape `deploy --json` prints, per `src/deploy/types.ts`. */
@@ -36,15 +37,6 @@ type StubEasInvocation = { args: string[]; cwd: string; isTTY: boolean };
  * one that read the constant from the source could not notice the number changing.
  */
 const EXIT_NEEDS_HUMAN = 7;
-
-/** Every JSONL event a run wrote to its `LOG_EVENTS` file. `2g` names each one in `_e`. */
-function readEvents(eventsFile: string): any[] {
-  return fs
-    .readFileSync(eventsFile, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-}
 
 /** The last `count` non-empty lines of a stream, which is where the handoff block sits. */
 function lastLines(output: string, count: number): string[] {

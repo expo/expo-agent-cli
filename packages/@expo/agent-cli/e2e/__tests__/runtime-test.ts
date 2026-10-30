@@ -12,10 +12,9 @@
 // agent hits most often and the ones the contract is about.
 import {
   executeAgentCliAsync,
-  holdDevLockAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
-  type StubDevServer,
+  holdLockForAsync,
 } from '../utils';
 
 /**
@@ -35,17 +34,6 @@ const EXPO_GO_TARGET = {
   reactNative: { capabilities: { nativePageReloads: true } },
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
-
-/** Point the project's dev-server lock at the stub, the way an `@expo/agent-cli`-started server does. */
-async function holdLockForAsync(projectRoot: string, stub: StubDevServer): Promise<() => void> {
-  return await holdDevLockAsync(projectRoot, {
-    url: stub.url,
-    port: stub.port,
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    projectRoot,
-  });
-}
 
 /** A port nothing listens on, for the "no dev server" cases. */
 const DEAD_URL = 'http://127.0.0.1:1';

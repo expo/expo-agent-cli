@@ -22,6 +22,7 @@ import {
   waitForAsync,
   waitForDevLockAsync,
   expoHomeOf,
+  readLastBuildRecord,
 } from '../utils';
 import {
   EMULATOR_NAME,
@@ -35,7 +36,6 @@ import {
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
 
 /** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
-const LAST_BUILD_FILE = path.join('.expo', 'agent-cli-last-build.json');
 
 /** The hash the stub `@expo/fingerprint` bin of `dev-client-fresh-app` prints by default. */
 const RECORDED_HASH = '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567';
@@ -53,12 +53,6 @@ async function setupAsync(fixtureName: string): Promise<string> {
 /** The arguments of every recorded stub `expo` invocation, in the order they happened. */
 function invocationArgs(projectRoot: string): string[][] {
   return readStubExpoInvocations(projectRoot).map((invocation) => invocation.args);
-}
-
-/** Read the last-build record, or null when the run wrote none. */
-function readLastBuildRecord(projectRoot: string): Record<string, string> | null {
-  const filePath = path.join(projectRoot, LAST_BUILD_FILE);
-  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
 }
 
 /** The `cli:start_plan` events a run wrote to its `LOG_EVENTS` file. */

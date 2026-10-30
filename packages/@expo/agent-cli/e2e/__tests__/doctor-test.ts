@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { executeAgentCliAsync, installStubBinAsync, setupFixtureAsync } from '../utils';
+import { executeAgentCliAsync, installStubBinAsync, readEvents, setupFixtureAsync } from '../utils';
 
 /** The shape `doctor:check --json` prints, per `src/doctor/types.ts`. */
 type DoctorPayload = {
@@ -115,15 +115,6 @@ function readInvocations(projectRoot: string): { args: string[]; cwd: string }[]
         .filter(Boolean)
         .map((line) => JSON.parse(line))
     : [];
-}
-
-/** Every JSONL event of one run. `2g` names the event in the `_e` field. */
-function readEvents(eventsFile: string): any[] {
-  return fs
-    .readFileSync(eventsFile, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
 }
 
 describe('@expo/agent-cli doctor:check', () => {
