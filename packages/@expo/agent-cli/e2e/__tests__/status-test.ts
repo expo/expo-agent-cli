@@ -10,6 +10,10 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
+import { recordLastDevRequest } from '../../src/dev/lastRequest';
+import { resolveDevOptions } from '../../src/dev/resolveOptions';
+import { lockInfo } from '../../src/devLock/__tests__/fakeLock';
+
 import { BOOTED_SIMULATOR, installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
 
 import {
@@ -2996,24 +3000,37 @@ describe('@expo/agent-cli status', () => {
     });
 
     // A dev server that serves someone else is not this project's, so the plan still stands.
-    it('keeps the plan when the dev server belongs to another project', async () => {
+    it.each(['ios', 'android'] as const)('excludes a foreign port (%s)', async (platform) => {
       const projectRoot = await setupAsync('go-app');
-      const env = await bindDefaultDeviceAsync(projectRoot);
+      recordLastDevRequest(projectRoot, resolveDevOptions([`--${platform}`, '--local', '--go']));
       const stub = await startStubDevServerAsync({ projectRoot: '/somewhere/else', targets: [] });
+      // A build can publish its planned port before another project's Metro takes it.
+      const releaseLock = await holdDevLockAsync(
+        projectRoot,
+        lockInfo({
+          projectRoot,
+          url: stub.url,
+          port: Number(new URL(stub.url).port),
+          pid: process.pid,
+        })
+      );
 
       try {
-        const result = await executeAgentCliAsync(
-          projectRoot,
-          ['status', '--json', '--dev-server-url', stub.url],
-          { env }
-        );
+        const result = await executeAgentCliAsync(projectRoot, [
+          'status',
+          '--json',
+          '--dev-server-url',
+          stub.url,
+        ]);
 
         const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.devServer?.projectRootMatched).toBe(false);
         expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+          `npx @expo/agent-cli dev --${platform} --local --go --detach --wait-ready`
         );
         expect(report.next?.why).toBeNull();
       } finally {
+        releaseLock();
         await stub.close();
       }
     });

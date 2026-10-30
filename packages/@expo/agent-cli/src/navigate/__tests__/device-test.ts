@@ -517,9 +517,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(spawn).toHaveBeenCalled();
     expect(error.code).toBe('NO_BOUND_DEVICE');
     expect(error.message).toContain('The bound ios EAS session is expired.');
-    expect(error.suggestedCommand).toBe(
-      'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
-    );
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
   function writeUnreadableCloudFile(): void {
@@ -572,8 +570,8 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
       'exp://127.0.0.1:8081/--/settings'
     );
     expect(lines.at(-1)).toMatch(/^How: /);
-    // The next action stays the `dev` command; `--print-url` is a door, not the Try line.
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
+    // The next action checks server state with `status`; `--print-url` is a door, not the Try line.
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
     expect(lines.find((line: string) => line.startsWith('Or: this is the URL'))).toContain(
       'navigate <route> --print-url'
     );

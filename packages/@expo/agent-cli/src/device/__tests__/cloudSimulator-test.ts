@@ -1146,7 +1146,7 @@ describe(cloudSessionUnavailableError, () => {
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
     expect(error.message).toContain('selects Expo Go or a development build');
     expect(error.message).toContain('npx @expo/agent-cli dev:stop --eas');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
   // The probe treats a pending session as live, so the advice lists the pending statuses too.
@@ -1185,7 +1185,7 @@ describe(cloudNeedsTunnelError, () => {
 
     expect(error.code).toBe('CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER');
     expect(error.message).toContain('exp://127.0.0.1:8081/--/?');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --detach --tunnel');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev:stop');
   });
 
   it(`refuses a LAN URL too, because the session is not on this network`, () => {

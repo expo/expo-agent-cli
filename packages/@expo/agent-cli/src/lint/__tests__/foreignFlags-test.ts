@@ -67,7 +67,8 @@ describe('the flags this CLI writes onto a command line', () => {
     // are here because leaving them out would mean keeping an exclusion list, which is a place for
     // a real one to hide.
     // The `--json` and `--no-followups` rows of `src/docs/autoSync.ts` are the same: a background
-    // `docs:sync` of this CLI.
+    // `docs:sync` of this CLI. The cloudRecovery flags likewise form this CLI's own
+    // stop/start advice, exercised by the printed-command cloud-binding process test.
     //
     // `--yes  src/utils/easCli.ts` is the one row whose command line belongs to **npm's exec**
     // rather than to a member of the Expo family: it is what keeps the EAS CLI's runner from
@@ -142,6 +143,7 @@ describe('the flags this CLI writes onto a command line', () => {
         [
           "--detach  src/smoke/smokeAsync.ts",
           "--device  src/device/installDevBuild.ts",
+          "--eas  src/navigate/cloudRecovery.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
           "--is-inside-work-tree  src/new/git.ts",
@@ -161,6 +163,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--platform  src/deploy/deployAsync.ts",
           "--platform  src/project/fingerprint.ts",
           "--port  src/dev/forwardedArgs.ts",
+          "--port  src/navigate/cloudRecovery.ts",
           "--preset  src/project/fingerprint.ts",
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",

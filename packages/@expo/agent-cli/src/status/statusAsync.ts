@@ -11,8 +11,9 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
+import { readDetachedRunWarning } from '../dev/detachedRun';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
-import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
+import { withDevServerPort } from '../dev/forwardedArgs';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { rerunDevCommand } from '../plan/rerun';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
@@ -20,7 +21,6 @@ import { deletedWorktreeSessions } from '../deviceBinding/reap';
 import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
-import { deviceCommand } from '../deviceBinding/errors';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
@@ -31,6 +31,7 @@ import type { ImpactClass, OtaSafety } from '../impact/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
+import { loopbackPortOfUrl } from '../navigate/adbReverse';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
@@ -405,12 +406,12 @@ export async function collectStatusReportAsync(
       (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
     const requestedPort =
       options.devServerUrl != null
-        ? localPortOf(options.devServerUrl)
+        ? loopbackPortOfUrl(options.devServerUrl)
         : (ownServer?.port ?? request?.port ?? null);
     // A selected address is a preference, not permission to take another project's port.
     const recoveryPort =
       report.devServer?.projectRootMatched === false &&
-      requestedPort === localPortOf(report.devServer.url)
+      requestedPort === loopbackPortOfUrl(report.devServer.url)
         ? null
         : requestedPort;
     // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — where `dev` would put
@@ -459,11 +460,21 @@ export async function collectStatusReportAsync(
       null,
       recoveryPlan
     );
-    const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
+    const easServer = ownServer?.easPlatform === platform ? ownServer : null;
+    const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
+    const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
+    const expiredSession =
+      cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
+    const backend =
+      easServer || expiredSession
+        ? 'eas'
+        : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
+    const port =
+      ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
     const devArgs = [
       ...(backend ? [`--${backend}`] : []),
       ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-      ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
+      ...(port != null ? ['--port', String(port)] : []),
     ];
     const devCommand = rerunDevCommand(
       platform,
@@ -478,19 +489,16 @@ export async function collectStatusReportAsync(
         platform === 'web'
           ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
           : devCommand;
-    const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
-    const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
-    const expiredSession =
-      cloud.length === 0 && !liveBound
-        ? expiredCloud.find((entry) => entry.platform === platform)
-        : undefined;
-    // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
-    const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    if (expiredSession) {
+    // An unfinished session start is observed; rebinding after it finishes needs a deliberate restart.
+    const pendingSession =
+      easServer?.easPlatform &&
+      childStartsSessionSync(projectRoot, easServer, easServer.easPlatform);
+    const stopFirst = ownServer ? `${PROGRAM_PREFIX} dev:stop && ` : '';
+    if (expiredSession && !pendingSession) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
         ...devNext,
-        command: deviceCommand(expiredSession.platform, { eas: true }),
+        command: `${stopFirst}${devCommand}`,
         why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
       };
     } else if (
@@ -512,37 +520,37 @@ export async function collectStatusReportAsync(
         (deviceBackend !== 'eas' && !devicesDisabled() && hostBindsPlatform(platform)))
     ) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
-      // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-      // A server that runs an EAS session is never stopped, for any platform.
-      const restart = ownServer != null && ownServer.easPlatform == null && bound.length === 0;
       const [unreadable] = unreadableBindingFiles(projectRoot, platform);
-      // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
-      const command = easServer
-        ? rerunDevCommand(platform, ['--eas', ...withoutPortArgs(devArgs.slice(backend ? 1 : 0))])
-        : restart
-          ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}`
-          : devCommand;
+      const command = pendingSession ? `${PROGRAM_PREFIX} dev:logs` : `${stopFirst}${devCommand}`;
       const easWhy = easServer
-        ? `${
-            childStartsSessionSync(projectRoot, easServer, platform)
-              ? `The dev server's EAS Simulator session for ${platform} is starting.`
-              : `The dev server's EAS Simulator session for ${platform} is not bound yet.`
-          } This command waits for it, or reopens the app on the running Metro. No restart is needed.`
+        ? pendingSession
+          ? `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`
+          : `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`
         : null;
       report.next = {
         ...devNext,
         command: unreadable ? `rm -f '${unreadable.file}' && ${command}` : command,
+        steps: pendingSession ? [] : devNext.steps,
         why: unreadable
           ? `The binding file ${unreadable.file} does not parse; a newer CLI may have written it.`
           : (easWhy ??
             (bound.length
-              ? `The lease on the bound ${platform} device expired.`
-              : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
+              ? `The lease on the bound ${platform} device expired.${ownServer ? ' Stop the running dev server before rebinding it.' : ''}`
+              : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`)),
       };
     }
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
+  }
+
+  if (!ownServer && report.next) {
+    const why = readDetachedRunWarning(projectRoot);
+    if (why) {
+      report.next.command = `${PROGRAM_PREFIX} dev:logs`;
+      report.next.steps = [];
+      report.next.why = why;
+    }
   }
 
   if ('value' in skills) {
@@ -827,18 +835,6 @@ async function resolveOtaSafetyAsync(
 function devBuildSchemeSync(projectRoot: string): string | null {
   const config = readProjectSchemeConfig(projectRoot);
   return config.scheme ?? (config.slug ? `exp+${config.slug}` : null);
-}
-
-/** A remote URL's port is not a request to start a local Metro on that port. */
-function localPortOf(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) && parsed.port
-      ? Number(parsed.port)
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

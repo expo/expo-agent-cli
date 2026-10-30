@@ -26,6 +26,7 @@ import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { debugEvent } from './events';
+import { withCloudRecoveryAsync } from './cloudRecovery';
 
 export type NavigatePlatform = 'ios' | 'android';
 
@@ -182,7 +183,9 @@ async function cloudFallbackAsync(
     return null;
   }
   return deviceRung(
-    await cloudRungAsync(context.projectRoot, platform ?? null, 'fallback', undefined, snapshot)
+    await withCloudRecoveryAsync(context.projectRoot, () =>
+      cloudRungAsync(context.projectRoot, platform ?? null, 'fallback', undefined, snapshot)
+    )
   );
 }
 
@@ -196,7 +199,11 @@ async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
-  const rung = deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'required'));
+  const rung = deviceRung(
+    await withCloudRecoveryAsync(context.projectRoot, () =>
+      cloudRungAsync(context.projectRoot, platform ?? null, 'required')
+    )
+  );
   if (rung.kind === 'device') {
     return rung.device;
   }

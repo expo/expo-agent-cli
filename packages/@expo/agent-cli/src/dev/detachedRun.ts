@@ -74,6 +74,24 @@ function removeEmpty(directory: string): void {
   }
 }
 
+/** Read-only recovery advice when a startup claim would prevent another detached run. */
+export function readDetachedRunWarning(root: string): string | null {
+  const directory = path.join(canonicalizeExistingPath(root), '.expo', 'dev', 'detached-run');
+  let found: ReturnType<typeof readOwner>;
+  try {
+    found = readOwner(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    return `Startup ownership cannot be read at ${directory}. Inspect the claim and any surviving work before starting again.`;
+  }
+  if (!found) return null;
+  const { owner } = found;
+  if (alive(owner.pid))
+    return `Detached run (pid ${owner.pid}) still holds startup ownership. Read its log at ${owner.logFile} and check status again when it finishes.`;
+  if (owner.phase === 'claimed') return null; // Acquire can recover this owner without work.
+  return `Detached run (pid ${owner.pid}) ended without releasing startup ownership; subprocesses may survive. Inspect ${owner.logFile} and any surviving work before recovering the claim.`;
+}
+
 /** Capture before Windows taskkill; invoke only after its tree stop succeeds and the lock is gone. */
 export function prepareDetachedTreeStop(root: string, pid: number): () => void {
   const directory = path.join(canonicalizeExistingPath(root), '.expo', 'dev', 'detached-run');

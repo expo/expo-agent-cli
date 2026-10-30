@@ -1076,7 +1076,7 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    it('rebinds the parked simulator next to the reused dev server when no app connected', async () => {
+    it('suggests explicit restart after releasing a simulator beside a reused server', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       await installStatefulXcrunAsync(projectRoot, {
         simulators: [{ udid: 'E2E-PARKED', name: 'agent-cli deadbeef', state: 'Shutdown' }],
@@ -1094,7 +1094,7 @@ describe('@expo/agent-cli smoke', () => {
         expect(report.environment).toMatchObject({ devServer: 'reused', device: 'booted' });
         expect(report.environment.boundDevice).toMatchObject({ id: 'E2E-PARKED', released: true });
         expect(report.followups[0].command).toBe(
-          'npx @expo/agent-cli dev --ios --detach --wait-ready'
+          'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --detach --wait-ready'
         );
       } finally {
         await stub.close();

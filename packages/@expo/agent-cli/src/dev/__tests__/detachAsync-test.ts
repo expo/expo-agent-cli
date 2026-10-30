@@ -838,31 +838,6 @@ describe('the bound device', () => {
     }
   );
 
-  it('leaves the question to the reopen and passes it the running tunnel', async () => {
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue({
-      url: 'https://abc.tunnel.example',
-      host: 'abc.tunnel.example',
-      hostType: 'tunnel',
-    });
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--eas']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
-    expect(reopenEasAsync).toHaveBeenCalledTimes(1);
-    expect(reopenEasAsync).toHaveBeenCalledWith(
-      projectRoot,
-      expect.objectContaining({ deviceBackend: 'eas' }),
-      running.url,
-      'https://abc.tunnel.example'
-    );
-  });
-
   describe('human report of a reuse beside a running dev server', () => {
     const humanReport = () =>
       vi
@@ -1255,7 +1230,7 @@ describe('the EAS session under --wait-ready', () => {
     expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-kept' } });
   });
 
-  it('stops the wait when the open finished and no binding is live, and says the same command reopens', async () => {
+  it('stops the wait when the open finished and no binding is live, and names an explicit restart', async () => {
     setTimeout(
       () => vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...lock, easOpenFinished: true }),
       2_000
@@ -1268,7 +1243,7 @@ describe('the EAS session under --wait-ready', () => {
     expect(error).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING', exitCode: 22 });
     expect(Date.now()).toBeLessThan(10_000);
     expect(error.message).toContain('already returned without a session binding');
-    expect(error.message).toContain('reopens');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev:stop');
     expect(error.message).not.toContain('keeps going');
   });
 
@@ -1282,7 +1257,7 @@ describe('the EAS session under --wait-ready', () => {
       exitCode: 22,
       data: { pid: 4242, url: lock.url, tunnelUrl: tunnel.url, platform: 'ios' },
     });
-    expect(error.suggestedCommand).toMatch(/dev --ios .*--eas.*--wait-ready/);
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev:logs');
     expect(error.message).toContain('dev:stop --eas');
     expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
     expect(Date.now()).toBeGreaterThanOrEqual(180_000);
@@ -1298,7 +1273,7 @@ describe('the EAS session under --wait-ready', () => {
     expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
   });
 
-  it('does not wait without --wait-ready, and the Session row says what waits for it', async () => {
+  it('does not wait without --wait-ready, and the Session row names observation commands', async () => {
     const result = start(['--ios', '--eas', '--detach']);
     await vi.runAllTimersAsync();
 
@@ -1309,7 +1284,7 @@ describe('the EAS session under --wait-ready', () => {
       .mock.calls.map(([text]) => String(text))
       .join('\n');
     expect(printed).toMatch(/Session\s+not bound yet/);
-    expect(printed).toContain('dev --ios --eas --detach --wait-ready');
+    expect(printed).toContain('status" checks progress');
   });
 
   describe('beside a running EAS Metro', () => {

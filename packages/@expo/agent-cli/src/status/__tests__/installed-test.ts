@@ -98,10 +98,10 @@ describe(withCloudSessions, () => {
     currentHash: null,
   });
 
-  it(`marks the no-device row of the session's own platform only`, () => {
+  it.each(['recorded', 'gone'] as const)(`marks only the session's own platform: %s`, (state) => {
     const status = withCloudSessions(
       { outcome: 'unknown', platforms: [noDevice('ios'), noDevice('android')] },
-      [{ platform: 'android', id: 'sess-1' }]
+      [{ platform: 'android', id: 'sess-1', state }]
     );
 
     expect(status.platforms).toEqual([
@@ -109,8 +109,7 @@ describe(withCloudSessions, () => {
       {
         ...noDevice('android'),
         reason: 'cloud-session',
-        recommendation:
-          'not checked; this check reads local devices, and the app runs on EAS Simulator session sess-1',
+        recommendation: expect.stringContaining(state === 'gone' ? 'expired' : 'app runs on'),
         commands: [],
       },
     ]);

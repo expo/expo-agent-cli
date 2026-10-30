@@ -372,6 +372,95 @@ it.each(['pid', 'url'] as const)(
   }
 );
 
+it.skipIf(process.platform !== 'darwin')(
+  'a missing-device suggestion leads to state-aware recovery beside a running server',
+  async () => {
+    const f = await fixture();
+    const { binDir } = await installStubXcrunAsync(f.root);
+    const env = { ...f.env, ...pathEnvVars(binDir), AGENT_CLI_NO_DEVICE: '0' };
+    try {
+      f.release();
+      const started = await f.start().result;
+      expect(started.exitCode, started.all).toBe(0);
+      const refused = await executeAgentCliAsync(f.root, ['navigate', '/', '--ios', '--json'], {
+        reject: false,
+        env,
+      });
+      expect(JSON.parse(refused.stdout).error.code).toBe('NO_BOUND_DEVICE');
+      const command = JSON.parse(refused.stdout).error.suggestedCommand;
+      expect(command).toBe('npx @expo/agent-cli status');
+      const recovery = await executeAgentCliAsync(
+        f.root,
+        [...command.split(' ').slice(2), '--json'],
+        { env }
+      );
+      expect(JSON.parse(recovery.stdout).next.command).toMatch(
+        /^npx @expo\/agent-cli dev:stop && npx @expo\/agent-cli dev --ios /
+      );
+      expect(await readDevLockAsync(f.root)).toMatchObject({ pid: JSON.parse(started.stdout).pid });
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
+it.each(['live', 'dead-executing', 'unreadable', 'dead-claimed'])(
+  'status respects pre-publication ownership: %s',
+  async (state) => {
+    const f = await fixture();
+    try {
+      const recoverable = state === 'dead-claimed';
+      const first = f.start(recoverable ? { DETACH_TEST_CLAIM_BARRIER: '1' } : {});
+      const mark = recoverable ? 'claimed' : 'blocked';
+      expect(await waitForAsync(() => f.marks(mark).length === 1, 15_000)).toBe(true);
+      const pid = Number(f.marks(mark)[0]!.slice(mark.length + 1));
+      if (state.startsWith('dead-')) {
+        process.kill(pid, 'SIGKILL');
+        await first.result;
+      } else if (state === 'unreadable') {
+        const claim = path.join(f.root, '.expo', 'dev', 'detached-run');
+        const marker = fs.readdirSync(claim).find((name) => name.startsWith('owner-'))!;
+        fs.writeFileSync(path.join(claim, marker), '{');
+      }
+      const status = await executeAgentCliAsync(f.root, ['status', '--json']);
+      const next = JSON.parse(status.stdout).next;
+      if (recoverable) {
+        expect(next.command).toContain(' dev --');
+        f.release();
+        expect((await f.start().result).exitCode).toBe(0);
+      } else {
+        expect(next).toMatchObject({ command: 'npx @expo/agent-cli dev:logs', steps: [] });
+        expect(next.why).toContain('ownership');
+      }
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
+it.skipIf(process.platform !== 'darwin')(
+  'startup observation takes priority over unreadable-binding cleanup',
+  async () => {
+    const f = await fixture();
+    const { binDir } = await installStubXcrunAsync(f.root);
+    const binding = await bindingFixture(f.root, 'E2E-STARTUP-BINDING');
+    fs.writeFileSync(binding, '{');
+    const env = { ...pathEnvVars(binDir), AGENT_CLI_NO_DEVICE: '0' };
+    try {
+      f.start();
+      expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+      const status = await executeAgentCliAsync(f.root, ['status', '--json'], { env });
+      const next = JSON.parse(status.stdout).next;
+      expect(next).toMatchObject({ command: 'npx @expo/agent-cli dev:logs', steps: [] });
+      await executeAgentCliAsync(f.root, [...next.command.split(' ').slice(2), '--json'], { env });
+      expect(fs.readFileSync(binding, 'utf8')).toBe('{');
+      expect(f.marks('blocked')).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
 it('stopping and starting again selects a new log without changing the previous run', async () => {
   const f = await fixture();
   try {
