@@ -1,5 +1,4 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
 import {
@@ -20,6 +19,15 @@ import { reloadOverDevServerAsync } from '../rungOne';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
+import { mockPlatform } from '../../../utils/__tests__/mockPlatform';
+import { printed } from '../../../utils/__tests__/printed';
+import {
+  answerNoLocalDevices,
+  mockSpawnQueue,
+  type SpawnAnswer,
+  type SpawnCall,
+} from '../../../utils/__tests__/fakeSpawn';
+import { mockDevServer } from '../../__tests__/fakeDevServer';
 
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>();
@@ -36,7 +44,6 @@ vi.mock('../../messageSocket', async () => ({
 }));
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
 const RUNNER_DIR = (process.env.PATH ?? '/usr/bin').split(path.delimiter)[0]!;
 const NPX_FILES = {
   [path.join(RUNNER_DIR, 'npx')]: '#!/bin/sh\n',
@@ -91,80 +98,6 @@ function mockConnect(socket: any) {
 }
 
 /**
- * Answer `GET /json/list` with the given targets, or make the dev server unreachable.
- *
- * The list is mutable through the returned handle, so a test can say what the dev server reports
- * *after* the app acted on the reload — which is the only thing a reload may be believed on.
- */
-function mockDevServer(
-  targets: unknown[] | null,
-  {
-    bundle = 'compiles',
-    manifestOrigin = 'http://127.0.0.1:8081',
-  }: {
-    bundle?: 'compiles' | 'broken' | 'no-manifest';
-    /**
-     * Origin of the manifest's `launchAsset.url`, which is where the tunnel host comes from.
-     *
-     * The dev server builds it from `getDevServerUrl()`, so a tunnelled run advertises the tunnel
-     * origin here and nowhere else a detached run can read (`src/dev/advertisedUrl.ts`, S3).
-     */
-    manifestOrigin?: string;
-  } = {}
-): { listing: (next: unknown[]) => void } {
-  let now = targets;
-  globalThis.fetch = (async (input: unknown) => {
-    if (now == null) {
-      throw new Error('fetch failed');
-    }
-    const url = String(input);
-    if (url.endsWith('/json/list')) {
-      return { ok: true, json: async () => now };
-    }
-    // The entry bundle. A broken one answers the way Metro answers a failed build: 500 with a
-    // small JSON body rather than megabytes of JavaScript.
-    if (url.includes('entry.bundle')) {
-      if (bundle === 'broken') {
-        return {
-          ok: false,
-          status: 500,
-          statusText: 'Internal Server Error',
-          headers: {
-            get: (name: string) =>
-              name.toLowerCase() === 'content-type' ? 'application/json' : null,
-          },
-          text: async () => JSON.stringify(TRANSFORM_ERROR),
-        };
-      }
-      return { ok: true, status: 200, text: async () => '' };
-    }
-    // The manifest: `GET /` with an `expo-platform` header, whose `launchAsset.url` is the entry
-    // bundle. `no-manifest` is the dev server that answers nothing this check understands.
-    if (bundle === 'no-manifest') {
-      return { ok: false, status: 404, statusText: 'Not Found' };
-    }
-    return {
-      ok: true,
-      status: 200,
-      headers: {
-        get: (name: string) => (name.toLowerCase() === 'content-type' ? 'application/json' : null),
-      },
-      json: async () => ({ launchAsset: { url: `${manifestOrigin}/entry.bundle?dev=true` } }),
-    };
-  }) as unknown as typeof fetch;
-  return { listing: (next) => (now = next) };
-}
-
-/** What Metro answers a failed build with, cut to the fields this CLI reads. */
-const TRANSFORM_ERROR = {
-  type: 'TransformError',
-  lineNumber: 76,
-  column: 4,
-  filename: 'src/app/notes.tsx',
-  message: 'SyntaxError: /project/src/app/notes.tsx: Unexpected token (76:4)',
-};
-
-/**
  * A dev server whose app reloads when it is told to: the page id changes on the broadcast.
  *
  * This is what a real app does [observed — 2026-08-23, live], and building it into the default
@@ -178,57 +111,27 @@ function mockReloadingDevServer() {
   );
 }
 
-function mockSpawnQueue(
-  answers: { stdout?: string; stderr?: string; exitCode?: number | null }[],
-  onCall?: (index: number) => void
-) {
-  let call = 0;
-  vi.mocked(spawn).mockImplementation((() => {
-    // The index advances on every spawn, whether or not a caller passed `onCall`. It used to
-    // advance inside `onCall?.(call++)`, where the optional call skips its own argument — so a test
-    // with no `onCall` answered every spawn from `answers[0]`, and an exit code meant for the
-    // second command was never delivered.
-    const index = call++;
-    const answer = answers[index] ?? {};
-    onCall?.(index);
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (answer.stdout) child.stdout.emit('data', answer.stdout);
-      if (answer.stderr) child.stderr.emit('data', answer.stderr);
-      child.emit('close', answer.exitCode === undefined ? 0 : answer.exitCode, null);
-    });
-    return child as any;
-  }) as any);
-}
-
 /**
- * Answer this machine's device tools as a host with no local device, outside the queue.
- *
- * A cloud scope asks them whether a listed app is on a local device before it reads the app.
+ * Answer the spawns in turn, and run `effect` as the `at`th queued spawn is answered (the third by
+ * default): the relaunched app registers a runtime, or a line reaches the bundler log, as the
+ * command's own spawn lands. A spawn that `byCommand` answers takes no entry and does not count.
  */
-function withNoLocalDevices() {
-  const queued = vi.mocked(spawn).getMockImplementation()!;
-  vi.mocked(spawn).mockImplementation(((command: string, args: string[], ...rest: unknown[]) => {
-    const answer =
-      command === 'xcrun' && args[1] === 'list'
-        ? JSON.stringify({ devices: {} })
-        : args[0] === 'devices'
-          ? 'List of devices attached\n'
-          : null;
-    if (answer == null) return (queued as any)(command, args, ...rest);
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      child.stdout.emit('data', answer);
-      child.emit('close', 0, null);
-    });
-    return child as any;
-  }) as any);
+function mockSpawnQueueThen(
+  answers: SpawnAnswer[],
+  effect: () => void,
+  {
+    at = 2,
+    byCommand,
+  }: { at?: number; byCommand?: (call: SpawnCall) => SpawnAnswer | undefined } = {}
+) {
+  let queued = 0;
+  mockSpawnQueue(answers, {
+    byCommand: (call) => {
+      const answer = byCommand?.(call);
+      if (!answer && queued++ === at) effect();
+      return answer;
+    },
+  });
 }
 
 const BOOTED_SIMULATOR = JSON.stringify({
@@ -262,17 +165,13 @@ function writeProject(files: Record<string, string> = {}) {
   });
 }
 
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
-}
-
 let originalFetch: typeof fetch | undefined;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -282,7 +181,6 @@ afterEach(() => {
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
-  Object.defineProperty(process, 'platform', { value: realPlatform });
   vol.reset();
 });
 
@@ -430,7 +328,7 @@ describe(reloadAsync, () => {
 
     await reloadAsync(projectRoot, options());
 
-    const printedError = vi.mocked(console.error).mock.calls.flat().join('\n');
+    const printedError = printed(console.error);
     expect(printedError).toContain('does not compile');
     expect(printedError).toContain('src/app/notes.tsx:76');
   });
@@ -519,9 +417,7 @@ describe(reloadAsync, () => {
       appsConnected: 1,
       appsReconnected: 0,
     });
-    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
-      'the same debugger target'
-    );
+    expect(printed(console.error)).toContain('the same debugger target');
   });
 
   // F39: the app is mid-reload when the wait starts, so the first read answers with the runtime
@@ -549,15 +445,15 @@ describe(reloadAsync, () => {
     writeProject();
     const server = mockDevServer([]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    // The relaunched app registers a runtime of its own, which is what the hold waits for.
+    mockSpawnQueueThen(
       [
         { stdout: BOOTED_SIMULATOR }, // simctl list devices booted
         { stdout: '' }, // simctl terminate
         { stdout: BOOTED_SIMULATOR }, // simctl list devices booted, for the deep link
         { stdout: '' }, // simctl openurl
       ],
-      // The relaunched app registers a runtime of its own, which is what the hold waits for.
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
@@ -601,9 +497,9 @@ describe(reloadAsync, () => {
   it(`should never open the command socket with --method device`, async () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ method: 'device' }))).resolves.toBe(EXIT_OK);
@@ -689,9 +585,9 @@ describe(reloadAsync, () => {
     // One client, and the same one afterwards: delivered, and no churn.
     mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }]).socket);
     const server = mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
@@ -947,9 +843,9 @@ describe('an app the command socket cannot see', () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
@@ -970,9 +866,9 @@ describe('an app the command socket cannot see', () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await reloadAsync(projectRoot, options({ json: true }));
@@ -993,7 +889,7 @@ describe('an app the command socket cannot see', () => {
     await expect(reloadAsync(projectRoot, options({ timeoutMs: 300 }))).resolves.toBe(
       EXIT_OUTCOME_FAILED
     );
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
+    const explained = printed(console.error);
 
     expect(explained).toContain('the app is connected');
     // And what the other one costs on Expo Go, said where the caller is deciding.
@@ -1030,9 +926,9 @@ describe('an app the command socket cannot see', () => {
   it(`still force-stops it when --method device says so`, async () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true, method: 'device' }))).resolves.toBe(
@@ -1051,7 +947,7 @@ describe('an app the command socket cannot see', () => {
     await expect(
       reloadAsync(projectRoot, options({ method: 'device', timeoutMs: 300 }))
     ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
-    const stderr = vi.mocked(console.error).mock.calls.flat().join('\n');
+    const stderr = printed(console.error);
     expect(stderr).toContain('The app was relaunched, and nothing was observed to confirm it');
     expect(stderr).not.toContain('the runtime that answers now is the one from before');
   });
@@ -1245,9 +1141,9 @@ describe('reloading an app on a cloud simulator session', () => {
     writeCloudProject();
     mockDevServer([]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine
     );
 
     await expect(reloadAsync(projectRoot, cloudOptions({ json: true }))).resolves.toBe(EXIT_OK);
@@ -1279,9 +1175,9 @@ describe('reloading an app on a cloud simulator session', () => {
     writeCloudProject();
     mockDevServer([]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine
     );
 
     await expect(
@@ -1329,9 +1225,9 @@ describe('reloading an app on a cloud simulator session', () => {
       })
     );
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine
     );
 
     await expect(
@@ -1349,9 +1245,9 @@ describe('reloading an app on a cloud simulator session', () => {
     mockDevServer([]);
     const { socket, sent } = fakeSocket([{}]);
     mockConnect(socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine
     );
 
     await reloadAsync(projectRoot, cloudOptions({ json: true }));
@@ -1370,11 +1266,11 @@ describe('reloading an app on a cloud simulator session', () => {
     writeCloudProject();
     mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine,
+      { byCommand: answerNoLocalDevices }
     );
-    withNoLocalDevices();
 
     await reloadAsync(projectRoot, cloudOptions({ json: true }));
 
@@ -1385,11 +1281,11 @@ describe('reloading an app on a cloud simulator session', () => {
     writeCloudProject();
     mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine,
+      { byCommand: answerNoLocalDevices }
     );
-    withNoLocalDevices();
 
     await reloadAsync(projectRoot, cloudOptions());
 
@@ -1436,7 +1332,7 @@ describe('reloading an app on a cloud simulator session', () => {
       verifiedBy: null,
       bundlesAfterReload: { observed: false, count: 0 },
     });
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
+    const explained = printed(console.error);
     expect(explained).toContain('was relaunched');
     expect(explained).toContain('no debugger target');
   });
@@ -1447,7 +1343,7 @@ describe('reloading an app on a cloud simulator session', () => {
     writeCloudProject();
     mockDevServer([]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [
         { stdout: SESSION_LISTING },
         {
@@ -1457,7 +1353,8 @@ describe('reloading an app on a cloud simulator session', () => {
         { stdout: '{"success":true}' },
         { stdout: '{"success":true}' },
       ],
-      (index) => index === 3 && appendBundledLine()
+      appendBundledLine,
+      { at: 3 }
     );
 
     await expect(reloadAsync(projectRoot, cloudOptions({ json: true }))).resolves.toBe(EXIT_OK);
@@ -1483,7 +1380,7 @@ describe('reloading an app on a cloud simulator session', () => {
     await expect(reloadAsync(projectRoot, cloudOptions({ json: true }))).resolves.toBe(
       EXIT_OUTCOME_FAILED
     );
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
+    const explained = printed(console.error);
     expect(explained).toContain('terminates the app before it launches it');
     expect(explained).toContain('eas-cli simulator:exec');
   });
@@ -1491,9 +1388,9 @@ describe('reloading an app on a cloud simulator session', () => {
   it(`reaches the same one-verb relaunch when --method device names it`, async () => {
     writeCloudProject();
     mockDevServer([]);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
-      (index) => index === 2 && appendBundledLine()
+      appendBundledLine
     );
 
     await expect(
@@ -1535,8 +1432,7 @@ describe('the rung the ladder picks', () => {
         server.listing([RELOADED_EXPO_GO_TARGET])
       ).socket
     );
-    mockSpawnQueue([{ stdout: SESSION_LISTING }]);
-    withNoLocalDevices();
+    mockSpawnQueue([{ stdout: SESSION_LISTING }], { byCommand: answerNoLocalDevices });
 
     await expect(
       reloadAsync(
@@ -1739,9 +1635,9 @@ describe('the verification payload', () => {
     writeProject();
     const server = mockDevServer([]);
     mockConnect(fakeSocket([{}]).socket);
-    mockSpawnQueue(
+    mockSpawnQueueThen(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      () => server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);

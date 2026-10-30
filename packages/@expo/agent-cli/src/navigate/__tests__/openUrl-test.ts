@@ -1,61 +1,13 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
 import { openUrlOnDeviceAsync } from '../deepLink';
+import { mockSpawnAlways } from '../../utils/__tests__/fakeSpawn';
 
 /**
  * Covers `openUrlOnDeviceAsync` with the process spawn mocked, so the argv the device command
  * receives is asserted without a device.
  */
-
-interface FakeChild extends EventEmitter {
-  stdout: EventEmitter;
-  stderr: EventEmitter;
-}
-
-function makeChild(): FakeChild {
-  return Object.assign(new EventEmitter(), {
-    stdout: new EventEmitter(),
-    stderr: new EventEmitter(),
-  });
-}
-
-/**
- * Mock the spawn so that every child settles itself, once the awaits in front of it have run.
- *
- * @ref src/device/approveScheme.ts — the reason this stopped being a `mockReturnValue` whose child
- * the test emitted on by hand. Two things changed at once for a local iOS open: it is now **two**
- * spawns rather than one, because the URL's scheme approval is written before the link is opened,
- * and the spawn itself now happens one microtask later, behind that `await`. A test that emitted
- * synchronously was therefore emitting at a child that did not exist yet, and every iOS case here
- * timed out. `setImmediate` settles after the microtasks, which is what makes this independent of
- * how many awaits precede the spawn.
- *
- * @param settle what each child does. `close` with a code, or an `error` for a tool that will not
- * start — the distinction `openUrlOnDeviceAsync` turns into two different failures.
- */
-function mockSpawn(
-  settle: ({ close?: number } & { stdout?: string; stderr?: string }) | { error: Error } = {}
-): void {
-  vi.mocked(spawn).mockImplementation((() => {
-    const child = makeChild();
-    setImmediate(() => {
-      if ('error' in settle) {
-        child.emit('error', settle.error);
-        return;
-      }
-      if (settle.stdout != null) {
-        child.stdout.emit('data', settle.stdout);
-      }
-      if (settle.stderr != null) {
-        child.stderr.emit('data', settle.stderr);
-      }
-      child.emit('close', settle.close ?? 0, null);
-    });
-    return child as any;
-  }) as never);
-}
 
 /**
  * The argv of the **link open**, which is the last spawn of the call rather than the first.
@@ -78,7 +30,7 @@ function allSpawnedArgv(): string[][] {
 
 describe(openUrlOnDeviceAsync, () => {
   it(`should spawn simctl openurl on iOS`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
 
     const promise = openUrlOnDeviceAsync({
       platform: 'ios',
@@ -100,7 +52,7 @@ describe(openUrlOnDeviceAsync, () => {
   });
 
   it(`should spawn an adb ACTION_VIEW intent on Android`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
 
     const promise = openUrlOnDeviceAsync({
       platform: 'android',
@@ -143,7 +95,7 @@ describe(openUrlOnDeviceAsync, () => {
   // `am start -f 0x20000000 -n <app>/.MainActivity -d <url>`
   // [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §launchActivityAsync].
   it(`should launch a named activity by component, the way the Expo CLI opens a dev client`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
 
     const promise = openUrlOnDeviceAsync({
       platform: 'android',
@@ -172,7 +124,7 @@ describe(openUrlOnDeviceAsync, () => {
 
   // iOS has one way in — `simctl openurl` — and it is what the Expo CLI uses there too.
   it(`should ignore a launch activity on iOS`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
 
     const promise = openUrlOnDeviceAsync({
       platform: 'ios',
@@ -186,7 +138,7 @@ describe(openUrlOnDeviceAsync, () => {
   });
 
   it(`should report a failing device command instead of throwing`, async () => {
-    mockSpawn({ close: 1, stderr: 'Error: Activity not started' });
+    mockSpawnAlways({ exitCode: 1, stderr: 'Error: Activity not started' });
 
     const result = await openUrlOnDeviceAsync({
       platform: 'android',
@@ -199,7 +151,7 @@ describe(openUrlOnDeviceAsync, () => {
   });
 
   it(`should return the device output`, async () => {
-    mockSpawn({ stdout: 'Starting: Intent { act=android.intent.action.VIEW }' });
+    mockSpawnAlways({ stdout: 'Starting: Intent { act=android.intent.action.VIEW }' });
 
     const result = await openUrlOnDeviceAsync({
       platform: 'android',
@@ -211,7 +163,7 @@ describe(openUrlOnDeviceAsync, () => {
   });
 
   it(`should report an adb that could not be started as a tool failure, not a device failure`, async () => {
-    mockSpawn({ error: Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }) });
+    mockSpawnAlways({ error: Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }) });
 
     const promise = openUrlOnDeviceAsync({
       platform: 'android',
@@ -239,7 +191,7 @@ describe(openUrlOnDeviceAsync, () => {
   // one of its own opens, for any app id; this used to write it only for an Expo Go it had just
   // installed, so every development build the caller built themselves hit the alert.
   it(`approves the URL's scheme before opening it on iOS`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
     resetApprovedSchemes();
 
     await openUrlOnDeviceAsync({
@@ -282,7 +234,7 @@ describe(openUrlOnDeviceAsync, () => {
 
   // The key's value *is* the app id, so there is no "approve for whoever" to write.
   it(`writes nothing when the app id is unknown`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
     resetApprovedSchemes();
 
     await openUrlOnDeviceAsync({ platform: 'ios', deviceId: 'SIM-1', url: 'exp+pdfbuild://' });
@@ -294,7 +246,7 @@ describe(openUrlOnDeviceAsync, () => {
   // One `navigate` opens the launcher URL and then the route link — two opens of one scheme, and a
   // second pair of writes would buy nothing. The same memo `@expo/cli` keeps.
   it(`writes each preference once per device and app, however many links are opened`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
     resetApprovedSchemes();
 
     for (const url of ['exp+pdfbuild://?__expo_url=x', 'exp+pdfbuild://notes']) {
@@ -318,7 +270,7 @@ describe(openUrlOnDeviceAsync, () => {
   // Android has no such alert: an `exp://` intent filter is in the manifest, and the link works the
   // moment the package is there. Writing an iOS preference for it would be nonsense.
   it(`writes no approval for Android`, async () => {
-    mockSpawn();
+    mockSpawnAlways();
     resetApprovedSchemes();
 
     await openUrlOnDeviceAsync({
@@ -332,7 +284,7 @@ describe(openUrlOnDeviceAsync, () => {
   });
 
   it(`should report a missing simctl with an install hint`, async () => {
-    mockSpawn({ error: Object.assign(new Error('spawn xcrun ENOENT'), { code: 'ENOENT' }) });
+    mockSpawnAlways({ error: Object.assign(new Error('spawn xcrun ENOENT'), { code: 'ENOENT' }) });
 
     const promise = openUrlOnDeviceAsync({
       platform: 'ios',
@@ -349,7 +301,7 @@ describe(openUrlOnDeviceAsync, () => {
 
 describe('Quoting the launch activity for the device shell', () => {
   it('should quote the component of an am start', async () => {
-    mockSpawn();
+    mockSpawnAlways();
 
     const promise = openUrlOnDeviceAsync({
       platform: 'android',

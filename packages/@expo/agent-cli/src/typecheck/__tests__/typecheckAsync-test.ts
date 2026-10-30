@@ -6,6 +6,7 @@ import { printTypeCheckAsync } from '../typecheckAsync';
 import type { TypeCheckReport } from '../types';
 import { event as eventFn } from '../../events';
 import { runTypeCheckAsync as runTypeCheckAsyncFn } from '../checkAsync';
+import { printed } from '../../utils/__tests__/printed';
 
 const event = vi.mocked(eventFn);
 const runTypeCheckAsync = vi.mocked(runTypeCheckAsyncFn);
@@ -36,11 +37,6 @@ function payload(): any {
   return JSON.parse(calls[0]![0]!);
 }
 
-/** Everything the command printed, joined into one string. */
-function printed(): string {
-  return vi.mocked(Log.log).mock.calls.flat().join('\n');
-}
-
 const ERROR = {
   file: 'src/app/notes.tsx',
   line: 66,
@@ -54,7 +50,7 @@ describe(printTypeCheckAsync, () => {
     reports();
 
     await expect(printTypeCheckAsync(projectRoot, {})).resolves.toBe(0);
-    expect(printed()).toContain('no type errors');
+    expect(printed(Log.log)).toContain('no type errors');
   });
 
   // The whole reason the command exists: a type error is an outcome failure, in the band an agent
@@ -65,8 +61,8 @@ describe(printTypeCheckAsync, () => {
     await expect(printTypeCheckAsync(projectRoot, {})).resolves.toBe(20);
     // `file:line:column`, the form an editor jumps to and the form every other location in this
     // CLI is printed in.
-    expect(printed()).toContain('src/app/notes.tsx:66:22');
-    expect(printed()).toContain('TS2339');
+    expect(printed(Log.log)).toContain('src/app/notes.tsx:66:22');
+    expect(printed(Log.log)).toContain('TS2339');
   });
 
   // A gate that went red for the absence of TypeScript would be red for every JavaScript project
@@ -75,8 +71,8 @@ describe(printTypeCheckAsync, () => {
     reports({ checked: false, reason: 'this project has no tsconfig.json', durationMs: 0 });
 
     await expect(printTypeCheckAsync(projectRoot, {})).resolves.toBe(0);
-    expect(printed()).toContain('not run');
-    expect(printed()).toContain('no tsconfig.json');
+    expect(printed(Log.log)).toContain('not run');
+    expect(printed(Log.log)).toContain('no tsconfig.json');
   });
 
   it(`should print the nested explanation under the diagnostic it explains`, async () => {
@@ -87,8 +83,8 @@ describe(printTypeCheckAsync, () => {
 
     await printTypeCheckAsync(projectRoot, {});
 
-    expect(printed()).toContain(`Type 'A' is not assignable to type 'B'.`);
-    expect(printed()).toContain('  why it is not');
+    expect(printed(Log.log)).toContain(`Type 'A' is not assignable to type 'B'.`);
+    expect(printed(Log.log)).toContain('  why it is not');
   });
 
   describe('--json', () => {

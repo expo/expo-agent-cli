@@ -7,6 +7,7 @@ import { isPortInUseAsync } from '../portListener';
 import { resolveDevStopOptions } from '../resolveStopOptions';
 import { devStopAsync } from '../stopAsync';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../deviceBinding', () => ({
   devicesDisabled: () => false,
@@ -34,7 +35,6 @@ vi.mock('../portListener', () => ({
 }));
 
 const root = '/work/app';
-const host = process.platform;
 const lock = lockInfo({
   pid: 4141,
   port: 8081,
@@ -144,7 +144,7 @@ it('release-keeps-devices-when-server-is-replaced after a successful stop', asyn
     .mockResolvedValueOnce(null)
     .mockResolvedValue({ ...lock, pid: 4242 });
   // The fixture mocks process.kill, so exercise the Unix signalling branch on every CI host.
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
     throw Object.assign(new Error('gone'), { code: 'ESRCH' });
   });
@@ -162,7 +162,6 @@ it('release-keeps-devices-when-server-is-replaced after a successful stop', asyn
     expect(releaseWorktreeDevicesAsync).not.toHaveBeenCalled();
   } finally {
     kill.mockRestore();
-    Object.defineProperty(process, 'platform', { value: host });
   }
 });
 
@@ -293,7 +292,7 @@ it.each([
   'dev:stop --release ends stderr with one How line, %s',
   async (_case, arrange, expectedHow, sentence) => {
     arrange();
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    mockPlatform('darwin');
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
     const out = vi.spyOn(console, 'log').mockImplementation(() => {});
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -311,7 +310,6 @@ it.each([
       errors.mockRestore();
       out.mockRestore();
       kill.mockRestore();
-      Object.defineProperty(process, 'platform', { value: host });
     }
   }
 );

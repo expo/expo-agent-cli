@@ -25,15 +25,10 @@ import {
   captureScreenshotAsync,
   defaultScreenshotPath,
 } from '../screenshot';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 /** The eight bytes every PNG starts with, which is what a capture is checked against. */
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 describe(buildScreenshotCommand, () => {
   it(`writes the file itself on iOS, because simctl is given the path`, () => {
@@ -297,7 +292,6 @@ describe(`${captureScreenshotAsync.name} on a cloud simulator`, () => {
     });
   });
   afterEach(() => {
-    mockPlatform(realPlatform);
     vol.reset();
   });
 
