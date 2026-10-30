@@ -60,15 +60,22 @@ export function targetSelectionOf({
   };
 }
 
-/** Resolve the device scope and place the caller's target observation. */
-export async function resolveTargetSelectionAsync(
-  options: ResolveTargetSelectionOptions
-): Promise<ResolvedTargetSelection> {
+/** The run's scope: {@link targetSelectionOf} on this worktree's binding when no device is given. */
+export async function resolveScopeAsync(
+  options: Pick<ResolveTargetSelectionOptions, 'projectRoot' | 'flags' | 'device'>
+): Promise<TargetSelection> {
   const binding =
     !options.device && options.projectRoot
       ? await boundDeviceAsync(options.projectRoot, options.flags)
       : null;
-  const targetSelection = targetSelectionOf({ ...options, binding });
+  return targetSelectionOf({ ...options, binding });
+}
+
+/** Resolve the device scope and place the caller's target observation. */
+export async function resolveTargetSelectionAsync(
+  options: ResolveTargetSelectionOptions
+): Promise<ResolvedTargetSelection> {
+  const targetSelection = await resolveScopeAsync(options);
   const deviceInventory =
     options.deviceInventory ??
     (await deviceInventoryForSelectionAsync(

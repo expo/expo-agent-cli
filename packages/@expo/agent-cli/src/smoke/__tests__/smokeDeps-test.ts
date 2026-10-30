@@ -1,4 +1,3 @@
-import { makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
 // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
 // @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
 // Smoke binds and releases only its own platform through the registry.
@@ -23,7 +22,16 @@ import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import { PROGRAM_PREFIX } from '../../programName';
-import { describeSkippedApps } from '../../runtime/targetSelection';
+import { makeDeviceInventory, makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
+import {
+  resolveScopeAsync,
+  resolveTargetSelectionAsync,
+} from '../../runtime/resolveTargetSelection';
+import {
+  classifyTargets,
+  describeSkippedApps,
+  type TargetSelection,
+} from '../../runtime/targetSelection';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';
@@ -50,6 +58,14 @@ vi.mock('../../utils/easCli', async (importOriginal) => ({
 }));
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 vi.mock('../../utils/gitExclude', () => ({ ensureGitExcludedAsync: vi.fn() }));
+vi.mock('../../runtime/resolveTargetSelection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../runtime/resolveTargetSelection')>();
+  return {
+    ...actual,
+    resolveScopeAsync: vi.fn(actual.resolveScopeAsync),
+    resolveTargetSelectionAsync: vi.fn(actual.resolveTargetSelectionAsync),
+  };
+});
 
 const projectRoot = '/project';
 
@@ -338,57 +354,6 @@ describe('ensureEasSession with no EAS build to install', () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Android — the EAS Simulator iOS session rule
-describe('evaluate on an EAS Simulator iOS session', () => {
-  const realPlatform = process.platform;
-  const realFetch = globalThis.fetch;
-  const CLOUD_TARGET = {
-    id: '1',
-    appId: 'dev.vonovak.cyclable',
-    deviceName: 'iPhone 17',
-    description: '',
-    type: 'node',
-    title: 'React Native',
-    devtoolsFrontendUrl: '/devtools',
-    webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=1&page=1',
-  };
-
-  beforeEach(() => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => [CLOUD_TARGET],
-    })) as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: realPlatform });
-    globalThis.fetch = realFetch;
-  });
-
-  it("waitForAppConnection on --ios --eas beside a local simulator's app", async () => {
-    vi.mocked(spawnCaptureAsync).mockResolvedValue({
-      exitCode: 0,
-      stdout: JSON.stringify({
-        devices: { ios: [{ name: 'iPhone 17 Pro', udid: 'LOCAL', state: 'Booted' }] },
-      }),
-      stderr: '',
-    });
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => [
-        makeTarget({ id: 'local', deviceName: 'iPhone 17 Pro' }),
-        makeTarget({ id: 'session' }),
-      ],
-    })) as unknown as typeof fetch;
-    const result = await buildSmokeDeps(
-      projectRoot,
-      resolveSmokeOptions(['--ios', '--eas'])
-    ).waitForAppConnection('http://127.0.0.1:8081', 10);
-    expect(result).toMatchObject({ appsConnected: 1, undeterminedApps: 0 });
-  });
-});
-
 describe('evaluate beside an app of another worktree', () => {
   const realFetch = globalThis.fetch;
   const CLONE = 'agent-cli c4ed0a60';
@@ -459,5 +424,42 @@ describe('evaluate beside an app of another worktree', () => {
     expect(second.skippedApps).toEqual(first.skippedApps);
     expect(first.skippedApps).toHaveLength(1);
     expect(vi.mocked(Log.progress)).not.toHaveBeenCalled();
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
+describe('reloadApp beside a local simulator, on a bound EAS session', () => {
+  const realFetch = globalThis.fetch;
+  const SESSION: TargetSelection = {
+    platform: { value: 'ios', by: 'bound-device' },
+    device: { backend: 'cloud', deviceId: 'session-1' },
+    bound: true,
+  };
+  const target = (id: string, deviceName: string) =>
+    makeTarget({ id, appId: 'host.exp.Exponent', deviceName });
+  const targets = [target('local', 'iPhone 16e'), target('session', 'iPhone 17')];
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it(`keeps the placement the app phase made when simctl fails on the read before rung 1`, async () => {
+    const deviceInventory = makeDeviceInventory({
+      booted: [{ name: 'iPhone 16e', udid: 'SIM-1' }],
+    });
+    vi.mocked(resolveScopeAsync).mockResolvedValue(SESSION);
+    vi.mocked(resolveTargetSelectionAsync).mockResolvedValue({
+      targetSelection: SESSION,
+      deviceInventory,
+      classifiedTargets: classifyTargets(targets, SESSION, deviceInventory),
+    });
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: '', stderr: 'failed', exitCode: 1 });
+    globalThis.fetch = (async () => ({ ok: true, json: async () => targets })) as never;
+    const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
+    await deps.waitForAppConnection('http://127.0.0.1:8081', 1000);
+
+    const result = await deps.reloadApp('http://127.0.0.1:8081', 1000);
+
+    expect(result.targetOutcomes.map((each) => each.targetId)).toEqual(['session']);
   });
 });

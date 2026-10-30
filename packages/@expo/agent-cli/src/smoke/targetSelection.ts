@@ -3,16 +3,23 @@ import { resolveDeviceAsync, type NavigateDevice } from '../navigate/device';
 import type { CdpTarget } from '../runtime/cdpClient';
 import { probeDevServerAsync } from '../runtime/devServer';
 import {
+  resolveScopeAsync,
   resolveTargetSelectionAsync,
   type ResolvedTargetSelection,
 } from '../runtime/resolveTargetSelection';
+import type { RungOneObservation } from '../runtime/reload/rungOne';
+import type { TargetSelection } from '../runtime/targetSelection';
 import type { SmokeOptions } from './resolveOptions';
 
 export interface SmokeTargetSelection {
-  /** The scope of this run, and the target list it placed. */
+  /** The scope, and the one target list and inventory it was resolved on. */
   targetSelectionAsync(
     devServerUrl: string
   ): Promise<ResolvedTargetSelection & { targets: CdpTarget[] }>;
+  /** The scope alone, for a caller that reads its own target list. Probes nothing. */
+  scopeAsync(): Promise<TargetSelection>;
+  /** The last target list `targetSelectionAsync` read, and the inventory that placed it. */
+  lastObservation(): RungOneObservation | null;
   deviceAsync(): Promise<{ device: NavigateDevice | null; reason: string | null }>;
   setDevice(device: NavigateDevice | null): void;
 }
@@ -26,12 +33,19 @@ export interface SmokeTargetSelection {
  * | A lookup in progress    | Shared by the phases that ask while it runs                                |
  * | A failed lookup         | That attempt only; a later phase asks again                                |
  * | A target classification | The one target list it was made from                                       |
+ * | The last observation    | Until the next one; rung 1 keeps it when a device tool stops answering     |
  */
 export function buildSmokeTargetSelection(
   projectRoot: string,
   options: SmokeOptions
 ): SmokeTargetSelection {
   let memo: Promise<{ device: NavigateDevice | null; reason: string | null }> | null = null;
+  let observed: RungOneObservation | null = null;
+  const scope = async () => ({
+    projectRoot,
+    flags: { platform: options.platform, eas: options.cloud === 'required' },
+    device: memo ? (await memo).device : null,
+  });
   return {
     deviceAsync: () => {
       if (memo) return memo;
@@ -57,15 +71,15 @@ export function buildSmokeTargetSelection(
     },
     targetSelectionAsync: async (devServerUrl) => {
       const { targets } = await probeDevServerAsync(devServerUrl);
-      const device = memo ? (await memo).device : null;
       const resolved = await resolveTargetSelectionAsync({
-        projectRoot,
-        flags: { platform: options.platform, eas: options.cloud === 'required' },
+        ...(await scope()),
         targets,
-        device,
         devServerUrl,
       });
+      observed = { targets, deviceInventory: resolved.deviceInventory };
       return { ...resolved, targets };
     },
+    scopeAsync: async () => await resolveScopeAsync(await scope()),
+    lastObservation: () => observed,
   };
 }

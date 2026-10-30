@@ -10,6 +10,7 @@ import type { AcquireAction } from '../deviceBinding';
 import type { FollowUp } from '../followups';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckJson } from '../runtime/bundleCheck';
+import type { TargetReloadOutcome } from '../runtime/reload/attempt';
 import type { DevServerSource } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { SkippedApp } from '../runtime/targetSelection';
@@ -235,11 +236,16 @@ export interface SmokeReloadJson {
   /**
    * What proved it, or null when nothing did.
    *
-   * The same four labels `runtime:reload --json` uses, from the same observations, and under the
-   * same rule: a label may be named only when its own evidence is in this payload and non-empty
-   * (llp/0021 §The rules band).
+   * Chosen by the rule `runtime:reload --json` uses: the strongest label whose own evidence is in
+   * this payload and non-empty (llp/0021 §The rules band). Never `app-relaunch`: the gate does not
+   * relaunch.
    */
-  verifiedBy: 'message-socket-peers' | 'fresh-debugger-target' | 'dev-server-bundle' | null;
+  verifiedBy:
+    | 'message-socket-peers'
+    | 'fresh-debugger-target'
+    | 'dev-server-bundle'
+    | 'debugger-context-replaced'
+    | null;
   /**
    * Debugger targets the dev server had listed *before* the reload, by id.
    *
@@ -251,6 +257,8 @@ export interface SmokeReloadJson {
   freshTargets: number | null;
   /** Whether the app's client on the dev server's command socket was replaced. */
   commandSocketReconnected: boolean | null;
+  /** Per-target delivery and context replacement evidence, empty when not attempted. */
+  targetOutcomes: TargetReloadOutcome[];
   /** Whether the dev server served a bundle after this run acted. */
   bundleServed: boolean | null;
 }

@@ -17,7 +17,6 @@ import type { CdpTarget } from './cdpClient';
 import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
 import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './projectRootHeader';
 import {
-  isSkippedTarget,
   classifyTargets,
   silentTool,
   refreshDeviceInventoryAsync,
@@ -468,12 +467,19 @@ export async function waitForFreshAppConnectionAsync(
   const deadline = startedAt + timeoutMs;
   const known = new Set(knownTargetIds);
   let appsConnected = 0;
+  // Only the run's own apps count: another app's new page proves nothing about this one.
+  // The device facts were read for the list the reload started from.
+  const classify = scopedListClassifier(
+    targetSelection,
+    deviceInventory,
+    deadline,
+    knownTargetIds.map((id) => ({ id })),
+    devServerUrl
+  );
 
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const own = probe.targets.filter(
-      (target) => !isSkippedTarget(target, targetSelection, deviceInventory)
-    );
+    const own = (await classify(probe.targets)).read;
     appsConnected = own.length;
     const fresh = own.filter((target) => !known.has(target.id));
     if (fresh.length > 0) {
@@ -522,9 +528,7 @@ export async function countConnectedAppsAsync(
   const deadline = Date.now() + budgetMs;
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const count = probe.targets.filter(
-      (target) => !isSkippedTarget(target, targetSelection, deviceInventory)
-    ).length;
+    const count = classifyTargets(probe.targets, targetSelection, deviceInventory).read.length;
     if (count > 0 || Date.now() + APP_RECONNECT_POLL_MS >= deadline) {
       return count;
     }

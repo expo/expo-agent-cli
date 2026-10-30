@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { firstLine } from '../utils/text';
 import {
   CdpClient,
+  CdpRequestError,
   CdpTimeoutError,
   runtimeEvaluateAsync,
   type CdpSession,
@@ -28,8 +29,32 @@ export type ContextReplaced =
   | { kind: 'not-replaced'; reason: string }
   /** The action's answer never came, so it may not have run, and no read proved it did. */
   | { kind: 'answer-lost'; reason: string }
-  /** The marker could not be set, so nothing could prove the action: it was not taken. */
+  /** The app answered and did not keep the marker, so nothing could prove the action: not taken. */
   | { kind: 'unmarkable'; reason: string };
+
+/**
+ * Set the marker. A context that does not keep it, or a CDP error answer, is `unmarkable`; a mark
+ * that gets no answer throws.
+ */
+async function markAsync(
+  ask: (expression: string) => Promise<{
+    open: CdpSession;
+    read: Awaited<ReturnType<typeof runtimeEvaluateAsync>>;
+  }>,
+  marker: string,
+  nonce: string
+): Promise<{ kind: 'marked'; session: CdpSession } | { kind: 'unmarkable'; reason: string }> {
+  try {
+    const { open, read } = await ask(
+      `(${marker} = ${JSON.stringify(nonce)}, ${marker} === ${JSON.stringify(nonce)})`
+    );
+    if (read.value === true) return { kind: 'marked', session: open };
+    return { kind: 'unmarkable', reason: read.exceptionText ?? 'the app did not keep the marker' };
+  } catch (error: unknown) {
+    if (error instanceof CdpRequestError) return { kind: 'unmarkable', reason: describe(error) };
+    throw error;
+  }
+}
 
 /**
  * Set a marker on the target, take the action, and read the marker until it is gone.
@@ -37,9 +62,10 @@ export type ContextReplaced =
  * A read that fails, and a read that still finds the marker, are "not yet": a reloading context
  * refuses requests for a moment, and the old one can answer once more after the action.
  *
- * An action whose answer is lost (the socket drops, its time runs out, or the phase is aborted) may
- * have run, so the marker is read anyway, within the same deadline, and the reason names the lost
- * answer. Any other failure of the action, a CDP error included, is thrown.
+ * A mark that gets no answer (an abort, the deadline, a lost connection) throws, and the action is
+ * not taken. An action whose answer is lost (the socket drops, its time runs out, or the phase is
+ * aborted) may have run, so the marker is read anyway, within the same deadline, and the reason
+ * names the lost answer. Any other failure of the action, a CDP error included, is thrown.
  */
 export async function jsContextReplacedAsync(
   devServerUrl: string,
@@ -48,19 +74,22 @@ export async function jsContextReplacedAsync(
     act,
     timeoutMs,
     deadline,
+    signal,
   }: {
     act: (session: Pick<CdpSession, 'sendAsync'>) => Promise<unknown>;
     timeoutMs: number;
     /** Optional deadline for the entire operation, shared by multi-target callers. */
     deadline?: number;
+    /** Stops the check in any phase. The marker is still removed, within the deadline. */
+    signal?: AbortSignal;
   }
 ): Promise<ContextReplaced> {
-  const clock = phaseClock(deadline);
+  const clock = phaseClock(deadline, signal);
   clock.limit(READ_MS);
-  const client = () =>
+  const client = (phase = clock.signal()) =>
     new CdpClient({
       metroUrl: devServerUrl,
-      signal: clock.signal(),
+      signal: phase,
       targetSelection: READ_EVERY_TARGET,
       deviceInventory: EMPTY_DEVICE_INVENTORY,
       targetSelector: async (targets) => targets.find((each) => each.id === target.id) ?? null,
@@ -85,40 +114,25 @@ export async function jsContextReplacedAsync(
     return { open, read };
   };
   const closeSession = async () => {
-    if (session != null) {
-      if (!session.closed && clock.open()) {
-        // Best effort: a failed reload must not leave a new marker behind on every attempt.
-        await runtimeEvaluateAsync(session, `delete ${marker}`, {
-          returnByValue: true,
-          timeoutMs: Math.min(READ_MS, clock.remaining()),
-        }).catch(() => {});
-      }
-      session.close();
+    const cleanupMs = clock.cleanupMs();
+    // A stop closed the session, so a stopped check opens one for the cleanup.
+    if (session?.closed && signal?.aborted && cleanupMs > 0) {
+      session = await client(AbortSignal.timeout(cleanupMs))
+        .openSessionAsync()
+        .catch(() => session);
     }
+    await removeMarkerAsync(session, marker, cleanupMs);
   };
 
   try {
-    let marked: CdpSession;
-    try {
-      const { open, read: set } = await ask(
-        `(${marker} = ${JSON.stringify(nonce)}, ${marker} === ${JSON.stringify(nonce)})`
-      );
-      if (set.value !== true) {
-        return {
-          kind: 'unmarkable',
-          reason: set.exceptionText ?? 'the app did not keep the marker',
-        };
-      }
-      marked = open;
-    } catch (error: unknown) {
-      return { kind: 'unmarkable', reason: describe(error) };
-    }
+    const marked = await markAsync(ask, marker, nonce);
+    if (marked.kind === 'unmarkable') return marked;
 
     clock.limit(ACT_MS);
-    const lost = await act(marked).then(
+    const lost = await act(marked.session).then(
       () => null,
       (error: unknown) => {
-        if (error instanceof CdpTimeoutError || marked.closed || clock.signal().aborted) {
+        if (error instanceof CdpTimeoutError || marked.session.closed || clock.signal().aborted) {
           return describe(error);
         }
         throw error;
@@ -153,25 +167,53 @@ function notReplaced(reason: string, lost: string | null): ContextReplaced {
     : { kind: 'answer-lost', reason: `the answer to the action was lost (${lost}), and ${reason}` };
 }
 
-/** One abort controller per phase, each bounded by its budget and by the whole proof's deadline. */
-function phaseClock(deadline: number | undefined) {
+/** Best effort: a failed reload must not leave a new marker behind on every attempt. */
+async function removeMarkerAsync(session: CdpSession | null, marker: string, timeoutMs: number) {
+  if (session != null && !session.closed && timeoutMs > 0) {
+    await runtimeEvaluateAsync(session, `delete ${marker}`, {
+      returnByValue: true,
+      timeoutMs,
+    }).catch(() => {});
+  }
+  session?.close();
+}
+
+/**
+ * One abort controller per phase, each bounded by its budget and by the whole proof's deadline. The
+ * caller's signal aborts the phase it lands in and every phase after it.
+ */
+function phaseClock(deadline: number | undefined, outer: AbortSignal | undefined) {
   let controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let expiresAt = Date.now();
   const expire = () => controller.abort(new Error('Context proof deadline expired.'));
+  const stopped = () => controller.abort(outer?.reason);
+  outer?.addEventListener('abort', stopped);
+  const open = () => !controller.signal.aborted && Date.now() < expiresAt;
   return {
     signal: () => controller.signal,
     remaining: () => Math.max(1, expiresAt - Date.now()),
-    open: () => !controller.signal.aborted && Date.now() < expiresAt,
+    open,
+    /** What is left of the phase, or of the deadline after a stop, up to one read. */
+    cleanupMs: () =>
+      outer?.aborted
+        ? Math.min(READ_MS, (deadline ?? Infinity) - Date.now())
+        : open()
+          ? Math.min(READ_MS, Math.max(1, expiresAt - Date.now()))
+          : 0,
     limit(budget: number) {
       clearTimeout(timer);
       // A phase that ran out aborted its controller; the next phase gets its own.
       if (controller.signal.aborted) controller = new AbortController();
+      if (outer?.aborted) stopped();
       expiresAt = Math.min(deadline ?? Infinity, Date.now() + budget);
       if (expiresAt <= Date.now()) expire();
       timer = setTimeout(expire, Math.max(0, expiresAt - Date.now()));
     },
-    stop: () => clearTimeout(timer),
+    stop() {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', stopped);
+    },
   };
 }
 

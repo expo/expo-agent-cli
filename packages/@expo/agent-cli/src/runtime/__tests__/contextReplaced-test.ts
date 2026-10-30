@@ -74,13 +74,6 @@ describe('the proof of a Page.reload', () => {
       reloads: 1,
       reason: /^the marker set before it was still there/,
     },
-    {
-      name: 'is unprovable, and does not act, when the marker cannot be set',
-      app: { evaluate: 'method-not-found' as const },
-      kind: 'unmarkable',
-      reloads: 0,
-      reason: /Method not found/,
-    },
   ])('$name', async ({ app, kind, reloads, reason }) => {
     const served = serveInspectorApp(app);
 

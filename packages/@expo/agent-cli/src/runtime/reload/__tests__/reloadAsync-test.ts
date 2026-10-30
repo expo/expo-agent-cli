@@ -21,6 +21,11 @@ import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
 
+vi.mock('ws', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ws')>();
+  return { ...actual, WebSocket: vi.fn() };
+});
+
 vi.mock('../../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
   readLastLoggedDevServerPort: vi.fn(() => null),
@@ -769,6 +774,8 @@ describe(reloadAsync, () => {
 // nothing in this command can restore. The report said only "The app was not reloaded", so a reader
 // was left with a session they could not use and no idea that this run is what emptied it.
 describe(explainReloadFailure, () => {
+  const NO_RUNG_ONE = { unwatched: null, rungOne: null };
+
   function strandedReport(): ReloadResultJson {
     return {
       reloaded: false,
@@ -824,21 +831,25 @@ describe(explainReloadFailure, () => {
   }
 
   it(`says the app was left closed, which is a state this run produced`, () => {
-    const explained = explainReloadFailure(strandedReport(), options({ cloud: true }));
+    const explained = explainReloadFailure(strandedReport(), options({ cloud: true }), NO_RUNG_ONE);
 
     expect(explained).toMatch(/left .*(closed|not running)/i);
     expect(explained).toContain('host.exp.Exponent');
   });
 
   it(`hands back the command that reopens it by hand on a cloud session`, () => {
-    const explained = explainReloadFailure(strandedReport(), options({ cloud: true }));
+    const explained = explainReloadFailure(strandedReport(), options({ cloud: true }), NO_RUNG_ONE);
 
     expect(explained).toContain('eas-cli simulator:exec');
     expect(explained).toContain('open host.exp.Exponent');
   });
 
   it(`does not claim a cloud session for a local run`, () => {
-    const explained = explainReloadFailure(strandedReport(), options({ cloud: false }));
+    const explained = explainReloadFailure(
+      strandedReport(),
+      options({ cloud: false }),
+      NO_RUNG_ONE
+    );
 
     expect(explained).toContain('host.exp.Exponent');
     expect(explained).not.toContain('eas-cli simulator:exec');
@@ -849,7 +860,9 @@ describe(explainReloadFailure, () => {
     const report = strandedReport();
     report.attempts = [report.attempts[0]!];
 
-    expect(explainReloadFailure(report, options({ cloud: true }))).not.toMatch(/left/i);
+    expect(explainReloadFailure(report, options({ cloud: true }), NO_RUNG_ONE)).not.toMatch(
+      /left/i
+    );
   });
 });
 
@@ -1026,6 +1039,21 @@ describe('an app the command socket cannot see', () => {
       EXIT_OK
     );
     expect(JSON.parse(printed())).toMatchObject({ method: 'device', verifiedBy: 'app-relaunch' });
+  });
+
+  // A relaunched app keeps its page id, so a list that still names it says nothing of which runtime
+  // answers.
+  it(`does not call the listed runtime the old one after a relaunch that nothing confirmed`, async () => {
+    writeProject();
+    mockDevServer([EXPO_GO_TARGET]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }]);
+
+    await expect(
+      reloadAsync(projectRoot, options({ method: 'device', timeoutMs: 300 }))
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
+    const stderr = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(stderr).toContain('The app was relaunched, and nothing was observed to confirm it');
+    expect(stderr).not.toContain('the runtime that answers now is the one from before');
   });
 
   it(`reports a runtime whose expo global cannot reload it, without guessing`, async () => {

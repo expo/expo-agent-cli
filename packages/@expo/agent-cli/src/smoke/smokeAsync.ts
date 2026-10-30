@@ -54,8 +54,8 @@ import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
 import { probeDevServerAsync } from '../runtime/devServer';
 import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { markBundleSignalSync } from '../runtime/reload/bundleSignal';
-import { waitForReloadEvidenceAsync } from '../runtime/reload/reloadAsync';
-import { reloadOverDevServerAsync, type CommandSocketChurn } from '../runtime/reload/rungOne';
+import { observeReloadAsync } from '../runtime/reload/evidence';
+import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
@@ -362,10 +362,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     return read.kind === 'binding' ? read.binding : null;
   };
 
-  const { targetSelectionAsync, deviceAsync, setDevice } = buildSmokeTargetSelection(
-    projectRoot,
-    options
-  );
+  const { targetSelectionAsync, scopeAsync, deviceAsync, setDevice, lastObservation } =
+    buildSmokeTargetSelection(projectRoot, options);
 
   return {
     discoverDevServer: (explicitUrl) =>
@@ -956,66 +954,45 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // `dev-server-bundle` says a bundle was served after this run acted, which is only readable
     // against a count from before it.
     reloadApp: async (devServerUrl, timeoutMs) => {
-      const before = await probeDevServerAsync(devServerUrl);
-      const knownTargetIds = before.targets.map((target) => target.id);
-      const bundleMark = markBundleSignalSync(projectRoot);
-
-      let churn: CommandSocketChurn | null = null;
-      const attempt = await reloadOverDevServerAsync(devServerUrl, {
-        connectedApps: before.targets.length,
-        onChurn: (observed) => {
-          churn = observed;
-        },
+      const deadline = Date.now() + timeoutMs;
+      const remainingMs = () => Math.max(0, deadline - Date.now());
+      const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, await scopeAsync(), {
+        budgetMs: remainingMs(),
+        preflight: lastObservation(),
       });
-      // The churn out-parameter is written on every path through the rung, including the ones that
-      // fail before the broadcast, so it is read whatever `attempt.ok` says.
-      const reconnected = ((churn as CommandSocketChurn | null)?.reconnected ?? 0) > 0;
-
-      if (!attempt.ok) {
+      const bundleMark = markBundleSignalSync(projectRoot);
+      const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
+      const result = {
+        knownTargetIds: prepared.targets.map((target) => target.id),
+        commandSocketReconnected: rungOne.churn.reconnected > 0,
+        targetOutcomes: rungOne.attempt.method === 'page-reload' ? rungOne.attempt.outcomes : [],
+      };
+      const settled = settleRungOne(rungOne);
+      if (!settled.ran) {
         return {
+          ...result,
           ok: false,
           verifiedBy: null,
-          knownTargetIds,
           freshTargets: 0,
-          commandSocketReconnected: reconnected,
           bundleServed: false,
-          reason: attempt.reason,
+          reason: rungOne.attempt.reason,
         };
       }
-
-      const { targetSelection, deviceInventory } = await targetSelectionAsync(devServerUrl);
-      const evidence = await waitForReloadEvidenceAsync(devServerUrl, projectRoot, {
-        timeoutMs,
-        knownTargetIds,
-        targetSelection,
-        deviceInventory,
+      const { verifiedBy, evidence } = await observeReloadAsync(devServerUrl, projectRoot, {
+        prepared,
+        mechanismProof: settled.proof,
+        churn: rungOne.churn,
+        attempts: [rungOne.attempt],
         bundleMark,
-        platform: options.platform,
+        timeoutMs: remainingMs(),
       });
-
-      // The same order of preference `runtime:reload` uses, for the same reason: the mechanism's
-      // own observation is the strongest fact, a target the dev server had never listed is the
-      // next, and a bundle line says something fetched a bundle without saying which client did.
-      // Each label is named only where its own evidence in this result is non-empty (llp/0021).
-      const verifiedBy = reconnected
-        ? ('message-socket-peers' as const)
-        : evidence.freshTargets > 0
-          ? ('fresh-debugger-target' as const)
-          : evidence.bundle.observed
-            ? ('dev-server-bundle' as const)
-            : null;
-
       return {
+        ...result,
         ok: verifiedBy != null,
         verifiedBy,
-        knownTargetIds,
-        freshTargets: evidence.freshTargets,
-        commandSocketReconnected: reconnected,
-        bundleServed: evidence.bundle.observed,
-        reason:
-          verifiedBy != null
-            ? null
-            : 'the reload was delivered to the dev server and nothing was seen to come of it: no client reconnected, no debugger target appeared under a new id, and the dev server served no bundle',
+        freshTargets: evidence?.freshTargets ?? 0,
+        bundleServed: evidence?.bundle.observed ?? false,
+        reason: verifiedBy == null ? rungOne.attempt.reason : null,
       };
     },
 

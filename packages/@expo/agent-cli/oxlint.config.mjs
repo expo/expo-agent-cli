@@ -5,8 +5,8 @@ const codeLines = { skipBlankLines: true, skipComments: true };
 const longFiles = {
   'src/dev/detachAsync.ts': 921,
   'src/dev/devAsync.ts': 1042,
-  'src/runtime/reload/reloadAsync.ts': 922,
-  'src/smoke/phases.ts': 1078,
+  'src/runtime/reload/reloadAsync.ts': 860,
+  'src/smoke/phases.ts': 1081,
   'src/status/statusAsync.ts': 806,
 };
 

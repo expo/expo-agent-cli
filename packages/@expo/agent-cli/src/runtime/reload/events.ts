@@ -5,6 +5,8 @@ declare module '2g' {
     'reload:attempt': { method: string; ok: boolean; reason: string | null };
     'reload:peers_read': { count: number | null; when: string };
     'reload:broadcast_sent': { devServerUrl: string };
+    /** `Page.reload` to the own targets, sent instead of the broadcast (`./rungOne.ts`). */
+    'reload:page_reload_sent': { targets: number; answered: number };
     /** The one-verb relaunch on a cloud session (`./cloudReload.ts`). */
     'reload:cloud_relaunch': { exitCode: number | null; url: string; appId: string };
     /** The same verb, bound to the controller session that held the device (S14). */

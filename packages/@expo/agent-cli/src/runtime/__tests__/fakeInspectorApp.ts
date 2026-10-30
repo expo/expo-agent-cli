@@ -15,7 +15,6 @@ export function serveInspectorApp({
   onReload = 'clears',
   reloadAnswer = 'answers',
   evaluate = 'answers',
-  onPageReload,
 }: {
   /**
    * What a `Page.reload` does to the app's globals: a new context at once, a new context that also
@@ -27,8 +26,6 @@ export function serveInspectorApp({
   reloadAnswer?: 'answers' | 'drops';
   /** `method-not-found` is a runtime with no debugger to evaluate in, as Expo Go for Android has. */
   evaluate?: 'answers' | 'method-not-found';
-  /** Called on each `Page.reload`, for a test whose dev server list moves when an app reloads. */
-  onPageReload?: () => void;
 } = {}): { reloaded(): string[] } {
   let globals: Record<string, unknown> = {};
   const reloaded: string[] = [];
@@ -48,7 +45,6 @@ export function serveInspectorApp({
         if (onReload !== 'nothing') {
           globals = {};
         }
-        onPageReload?.();
         if (reloadAnswer === 'drops') {
           sockets.forEach((each) => each.close());
           return;
