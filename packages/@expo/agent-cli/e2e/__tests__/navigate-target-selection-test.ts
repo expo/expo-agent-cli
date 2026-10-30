@@ -40,6 +40,8 @@ type Scenario = {
   flags?: string[];
   initial: 'own' | 'other' | 'empty';
   neverAttaches?: boolean;
+  /** The app is not running when the recovery asks `pidof`, so the run stops nothing. */
+  appNotRunning?: boolean;
   /** The app attaches only once this run has stopped it and opened the link again. */
   attachesAfterStop?: boolean;
   /** An Android app of another model is attached too, which this run must not stop or count. */
@@ -140,6 +142,14 @@ const scenarios: Scenario[] = [
     platform: 'android',
     initial: 'empty',
     twin: 'neither',
+  },
+  {
+    name: 'no flag, bound Android emulator, the app is not running when the recovery asks',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
+    appNotRunning: true,
   },
   {
     name: 'no flag, bound Android emulator, the app attaches after the recovery stops it and opens the link again',
@@ -299,7 +309,14 @@ it.each(scenarios)('$name', async (scenario) => {
         '--json',
         '--no-followups',
       ],
-      { reject: false, env: { ...device.env, ...twinEnv } }
+      {
+        reject: false,
+        env: {
+          ...device.env,
+          ...twinEnv,
+          ...(scenario.appNotRunning ? {} : { STUB_ADB_PIDOF: '4242' }),
+        },
+      }
     );
     expect(result.exitCode, result.all).toBe(scenario.neverAttaches ? 22 : 0);
     const report = JSON.parse(result.stdout);
@@ -317,7 +334,7 @@ it.each(scenarios)('$name', async (scenario) => {
       ownAttached ? [ROUTE] : recovers ? [launcher, ROUTE, ROUTE] : [launcher, ROUTE]
     );
     if (!recovers) expect(device.forceStops?.() ?? []).toEqual([]);
-    expect(report.attachRecovered).toBe(!!recovers);
+    expect(report.attachRecovered).toBe(!!recovers && !scenario.appNotRunning);
     if (ownAttached) expect(report.launch).toBeNull();
     else expect(report.launch).toMatchObject({ url: launcher, attached: !stuck });
     if (device.calls) {
@@ -348,8 +365,11 @@ it.each(scenarios)('$name', async (scenario) => {
         expect(result.stderr).toContain('no android app connected');
         expect(result.stderr).toContain('accepted the intent and nothing more');
         expect(result.stderr).toContain(
-          'The app was stopped and the link opened a second time, and that did not attach either.'
+          scenario.appNotRunning
+            ? 'The app was not running, so nothing was stopped; the link opened a second time'
+            : 'The app was stopped and the link opened a second time, and that did not attach either.'
         );
+        if (scenario.appNotRunning) expect(result.stderr).not.toContain('The app was stopped');
       }
     }
   } finally {
@@ -384,7 +404,7 @@ it('recovers an Expo Go run by stopping Expo Go, not the android.package of the 
     const result = await executeAgentCliAsync(
       root,
       ['navigate', '/profile/42', '--no-route-check', '--attach-timeout', '2s', '--json'],
-      { reject: false, env: device.env }
+      { reject: false, env: { ...device.env, STUB_ADB_PIDOF: '4242' } }
     );
     expect(result.exitCode, result.all).toBe(22);
     const stops = device.forceStops!();

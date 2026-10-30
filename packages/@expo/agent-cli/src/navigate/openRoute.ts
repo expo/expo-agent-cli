@@ -147,8 +147,10 @@ export interface AttachCheck {
   waitedMs: number;
   /** How many debugger targets this platform had when the wait ended. */
   targets: number;
-  /** Whether the app was stopped and the link opened a second time. */
+  /** Whether a running app was stopped and the link opened a second time. */
   recovered: boolean;
+  /** Whether the link was opened a second time, after a stop of an app that was not running. */
+  reopenedWithoutStop: boolean;
   /**
    * What the system dialog on a cloud session turned out to be, or null when none was looked for.
    *
@@ -610,6 +612,7 @@ async function confirmAttachAsync({
 
   let targets = await waitAsync(startedAt + budgetMs);
   let recovered = false;
+  let reopenedWithoutStop = false;
   let alert: AlertCheck | null = null;
 
   // The cloud recovery, before the Android one: a modal that is never answered blocks whatever the
@@ -654,7 +657,8 @@ async function confirmAttachAsync({
     });
     debugEvent('attach_recovery', { appId, stopped: stopped.ok });
     if (stopped.ok) {
-      recovered = true;
+      recovered = !stopped.wasAlreadyStopped;
+      reopenedWithoutStop = stopped.wasAlreadyStopped;
       const again = await openUrlOnDeviceAsync({
         platform: device.platform,
         deviceId: device.deviceId,
@@ -677,12 +681,17 @@ async function confirmAttachAsync({
     waitedMs,
     targets,
     recovered,
+    reopenedWithoutStop,
     alert,
     reason:
       targets > 0
         ? null
         : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${
-            recovered ? ', including after the app was stopped and the link opened again' : ''
+            recovered
+              ? ', including after the app was stopped and the link opened again'
+              : reopenedWithoutStop
+                ? ', including after the link was opened again with the app not running'
+                : ''
           }${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
   };
 }
@@ -695,6 +704,7 @@ function uncheckedAttach(reason: string): AttachCheck {
     waitedMs: 0,
     targets: 0,
     recovered: false,
+    reopenedWithoutStop: false,
     alert: null,
     reason,
   };
