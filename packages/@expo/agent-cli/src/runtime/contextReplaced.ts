@@ -24,8 +24,10 @@ const POLL_MS = 250;
 export type ContextReplaced =
   /** An evaluate answered on the same target, and the marker was gone. */
   | { kind: 'replaced' }
-  /** The budget ran out with no such answer, also after an action whose answer was lost. */
+  /** The budget ran out with no such answer. */
   | { kind: 'not-replaced'; reason: string }
+  /** The action's answer never came, so it may not have run, and no read proved it did. */
+  | { kind: 'answer-lost'; reason: string }
   /** The marker could not be set, so nothing could prove the action: it was not taken. */
   | { kind: 'unmarkable'; reason: string };
 
@@ -114,12 +116,12 @@ export async function jsContextReplacedAsync(
 
     clock.limit(ACT_MS);
     const lost = await act(marked).then(
-      () => '',
+      () => null,
       (error: unknown) => {
-        const answerLost =
-          error instanceof CdpTimeoutError || marked.closed || clock.signal().aborted;
-        if (!answerLost) throw error;
-        return `the answer to the action was lost (${describe(error)}), and `;
+        if (error instanceof CdpTimeoutError || marked.closed || clock.signal().aborted) {
+          return describe(error);
+        }
+        throw error;
       }
     );
 
@@ -128,16 +130,12 @@ export async function jsContextReplacedAsync(
       let reason: string;
       try {
         const { read } = await ask(`${marker} === ${JSON.stringify(nonce)}`);
-        if (read.value === false) {
-          return { kind: 'replaced' };
-        }
-        reason = `${lost}the marker set before it was still there, so the JavaScript context was the same`;
+        if (read.value === false) return { kind: 'replaced' };
+        reason = 'the marker set before it was still there, so the JavaScript context was the same';
       } catch (error: unknown) {
-        reason = `${lost}the last read of the marker failed: ${describe(error)}`;
+        reason = `the last read of the marker failed: ${describe(error)}`;
       }
-      if (last || !clock.open()) {
-        return { kind: 'not-replaced', reason };
-      }
+      if (last || !clock.open()) return notReplaced(reason, lost);
       // Less than an interval left still covers one more read, taken at once.
       if (clock.remaining() > POLL_MS) await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       else last = true;
@@ -146,6 +144,13 @@ export async function jsContextReplacedAsync(
     await closeSession();
     clock.stop();
   }
+}
+
+/** No read proved the action. `lost` names an action's answer that never came. */
+function notReplaced(reason: string, lost: string | null): ContextReplaced {
+  return lost == null
+    ? { kind: 'not-replaced', reason }
+    : { kind: 'answer-lost', reason: `the answer to the action was lost (${lost}), and ${reason}` };
 }
 
 /** One abort controller per phase, each bounded by its budget and by the whole proof's deadline. */

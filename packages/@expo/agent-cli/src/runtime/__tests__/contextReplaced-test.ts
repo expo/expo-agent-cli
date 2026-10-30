@@ -33,7 +33,7 @@ describe('the proof of a Page.reload', () => {
     {
       name: 'does not prove a reload whose answer was lost and whose context stayed',
       app: { reloadAnswer: 'drops' as const, onReload: 'nothing' as const },
-      kind: 'not-replaced',
+      kind: 'answer-lost',
       reloads: 1,
       reason:
         /^the answer to the action was lost \(.+\), and the marker set before it was still there/,
@@ -62,7 +62,7 @@ describe('the proof of a Page.reload', () => {
     {
       name: 'names both the lost answer and the failed read',
       app: { reloadAnswer: 'drops' as const, onReload: 'unreadable' as const },
-      kind: 'not-replaced',
+      kind: 'answer-lost',
       reloads: 1,
       reason:
         /^the answer to the action was lost \(.+\), and the last read of the marker failed: .*destroyed/,
