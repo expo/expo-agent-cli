@@ -12,6 +12,7 @@ import { forgetExpoConfigReads } from '../../project/appConfig';
 import { mockSpawnBy, type SpawnAnswer } from '../../utils/__tests__/fakeSpawn';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { printed } from '../../utils/__tests__/printed';
+import { mockDevServer } from '../../runtime/__tests__/fakeDevServer';
 
 // The declared plugins are read off the loaded module, which these tests do not load.
 vi.mock('@expo/config', () => ({
@@ -101,16 +102,6 @@ const EXPO_GO_TARGET = {
   appId: 'host.exp.Exponent',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
-
-/** Answer `GET /json/list` with the given targets, or make the dev server unreachable. */
-function mockDevServer(targets: unknown[] | null) {
-  globalThis.fetch = (async () => {
-    if (targets == null) {
-      throw new Error('fetch failed');
-    }
-    return { ok: true, json: async () => targets };
-  }) as unknown as typeof fetch;
-}
 
 /**
  * Answer only for the origins in the map, and refuse every other one.
