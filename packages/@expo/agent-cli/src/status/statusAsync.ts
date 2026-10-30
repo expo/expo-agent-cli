@@ -15,8 +15,6 @@ import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { rerunDevCommand } from '../plan/rerun';
-import { cloudStopCommand } from '../deviceBinding/cleanup';
-import { deletedWorktreeSessions } from '../deviceBinding/reap';
 import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
@@ -58,6 +56,7 @@ import {
 } from './easBuilds';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync, withCloudSessions } from './installed';
+import { endedRunNext, readOrphanSessions } from './orphans';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -80,7 +79,6 @@ import type {
   FreshnessState,
   FreshnessStatus,
   LocalDeviceStatus,
-  OrphanSessionStatus,
   SkillsStatus,
   StatusReport,
   StatusSectionName,
@@ -222,19 +220,6 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
   if (report.assertion && !report.assertion.ok) {
     await exitWithCodeAsync(report.assertion.exitCode);
   }
-}
-
-// @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
-function readOrphanSessions(
-  projectRoot: string,
-  { ownServer }: { ownServer: boolean }
-): OrphanSessionStatus[] {
-  return deletedWorktreeSessions(projectRoot, new Date()).map(({ device, projectRoot: root }) => ({
-    platform: device.platform,
-    id: device.id,
-    projectRoot: root,
-    command: ownServer ? cloudStopCommand(device.id) : `${PROGRAM_PREFIX} dev:stop`,
-  }));
 }
 
 /**
@@ -480,25 +465,16 @@ export async function collectStatusReportAsync(
           : devCommand;
     const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
     const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-    const orphanSession =
-      ownServer == null && report.devServer?.running && report.devServer.projectRootMatched === true
-        ? (cloud.find((entry) => entry.origin === 'started' && entry.platform === platform) ??
-          cloud.find((entry) => entry.origin === 'started'))
-        : undefined;
+    const ended = endedRunNext(report, { cloud, platform, ownServer: ownServer != null, devNext });
     const expiredSession =
       cloud.length === 0 && !liveBound
         ? expiredCloud.find((entry) => entry.platform === platform)
         : undefined;
     // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
     const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    if (orphanSession) {
+    if (ended) {
       report.devServer!.ownerEnded = true;
-      report.next = {
-        ...devNext,
-        command: `${PROGRAM_PREFIX} dev:stop --eas`,
-        why: `the run that started this dev server and EAS session ${orphanSession.id} ended; this stops both`,
-      };
+      report.next = ended;
     } else if (expiredSession) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
