@@ -86,6 +86,7 @@ import {
   CHURN_NOT_ASKED,
   prepareRungOneAsync,
   runRungOneAsync,
+  settleRungOne,
   type CommandSocketChurn,
   type PreparedRungOne,
   type RungOneOutcome,
@@ -415,10 +416,10 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       // its own proof is missing, so the two shared observations below — a fresh debugger target,
       // or a bundle the dev server served — decide. That is the difference between exit `20` and
       // exit `22`, and between watching for the evidence and not looking at all.
-      method =
-        rungOne.kind === 'not-delivered' || rungOne.kind === 'unprovable' ? null : 'dev-server';
-      mechanismProof = rungOne.kind === 'proved' ? rungOne.proof : null;
-      relaunchWhy = 'relaunchWhy' in rungOne ? rungOne.relaunchWhy : null;
+      const settled = settleRungOne(rungOne);
+      method = settled.ran ? 'dev-server' : null;
+      mechanismProof = settled.proof;
+      relaunchWhy = settled.relaunchWhy;
     }
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — the cloud loop, K2.

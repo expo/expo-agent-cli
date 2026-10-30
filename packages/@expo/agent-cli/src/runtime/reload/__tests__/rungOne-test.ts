@@ -2,7 +2,7 @@
 import type { CdpTarget } from '../../cdpClient';
 import { classifyTargets, READ_EVERY_TARGET, type TargetSelection } from '../../targetSelection';
 import { makeDeviceInventory } from '../../__tests__/targetSelectionFixtures';
-import { rungOnePolicy } from '../rungOne';
+import { CHURN_NOT_ASKED, rungOnePolicy, settleRungOne, type RungOneOutcome } from '../rungOne';
 
 const CLONE = 'agent-cli c4ed0a60';
 const deviceInventory = makeDeviceInventory({
@@ -116,5 +116,34 @@ describe('what rung 1 does, and which bundle proves it', () => {
       mechanism,
       bundlePlatforms,
     });
+  });
+});
+
+describe('what rung 1 leaves for the rest of the run', () => {
+  const attempt = { method: 'dev-server' as const, ok: false, reason: 'x', leftAppStopped: null };
+  const base = { attempt, churn: CHURN_NOT_ASKED };
+  it.each<{ outcome: RungOneOutcome; settled: ReturnType<typeof settleRungOne> }>([
+    {
+      outcome: { ...base, kind: 'proved', proof: 'message-socket-peers' },
+      settled: { ran: true, proof: 'message-socket-peers', relaunchWhy: null },
+    },
+    {
+      outcome: { ...base, kind: 'acted', reachedOutside: 1 },
+      settled: { ran: true, proof: null, relaunchWhy: null },
+    },
+    {
+      outcome: { ...base, kind: 'delivered', relaunchWhy: 'why' },
+      settled: { ran: true, proof: null, relaunchWhy: 'why' },
+    },
+    {
+      outcome: { ...base, kind: 'not-delivered', relaunchWhy: 'why' },
+      settled: { ran: false, proof: null, relaunchWhy: 'why' },
+    },
+    {
+      outcome: { ...base, kind: 'unprovable', relaunchWhy: 'why' },
+      settled: { ran: false, proof: null, relaunchWhy: 'why' },
+    },
+  ])('$outcome.kind', ({ outcome, settled }) => {
+    expect(settleRungOne(outcome)).toEqual(settled);
   });
 });

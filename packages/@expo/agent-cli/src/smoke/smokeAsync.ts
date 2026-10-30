@@ -55,7 +55,7 @@ import { probeDevServerAsync } from '../runtime/devServer';
 import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { markBundleSignalSync } from '../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../runtime/reload/evidence';
-import { prepareRungOneAsync, runRungOneAsync } from '../runtime/reload/rungOne';
+import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
@@ -967,7 +967,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         commandSocketReconnected: rungOne.churn.reconnected > 0,
         targetOutcomes: rungOne.attempt.method === 'page-reload' ? rungOne.attempt.outcomes : [],
       };
-      if (rungOne.kind === 'not-delivered' || rungOne.kind === 'unprovable') {
+      const settled = settleRungOne(rungOne);
+      if (!settled.ran) {
         return {
           ...result,
           ok: false,
@@ -979,7 +980,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       }
       const { verifiedBy, evidence } = await observeReloadAsync(devServerUrl, projectRoot, {
         prepared,
-        mechanismProof: rungOne.kind === 'proved' ? rungOne.proof : null,
+        mechanismProof: settled.proof,
         churn: rungOne.churn,
         attempts: [rungOne.attempt],
         bundleMark,

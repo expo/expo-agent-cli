@@ -404,6 +404,28 @@ export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn
 );
 
 /**
+ * What rung 1 leaves for the rest of the run. `ran`: a mechanism reached an app, so the shared
+ * observations decide what its own proof did not; `relaunchWhy`: rung 2 may relaunch.
+ */
+export function settleRungOne(outcome: RungOneOutcome): {
+  ran: boolean;
+  proof: Extract<RungOneOutcome, { kind: 'proved' }>['proof'] | null;
+  relaunchWhy: string | null;
+} {
+  switch (outcome.kind) {
+    case 'proved':
+      return { ran: true, proof: outcome.proof, relaunchWhy: null };
+    case 'acted':
+      return { ran: true, proof: null, relaunchWhy: null };
+    case 'delivered':
+      return { ran: true, proof: null, relaunchWhy: outcome.relaunchWhy };
+    case 'not-delivered':
+    case 'unprovable':
+      return { ran: false, proof: null, relaunchWhy: outcome.relaunchWhy };
+  }
+}
+
+/**
  * Run rung 1: the broadcast, or `Page.reload` to the own targets while the scope skips an app.
  *
  * @param budgetMs the caller's budget. The rung's own proof is watched for no longer (F95), and
