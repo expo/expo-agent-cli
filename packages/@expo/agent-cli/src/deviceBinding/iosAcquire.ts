@@ -28,9 +28,9 @@ export async function bindIosSectionAsync(
   projectRoot: string,
   {
     inventory,
-    reuseOnly,
+
     tools,
-  }: { inventory: IosInventory; reuseOnly: boolean; tools: DeviceTools }
+  }: { inventory: IosInventory; tools: DeviceTools }
 ): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction }> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const read = readBindingFile(file);
@@ -38,7 +38,7 @@ export async function bindIosSectionAsync(
     throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
   }
   const own = read.kind === 'binding' ? read.binding : null;
-  const choice = chooseIosDevice({ own, inventory, reuseOnly, digest: digestForRoot(projectRoot) });
+  const choice = chooseIosDevice({ own, inventory, digest: digestForRoot(projectRoot) });
   if (own != null && choice.kind !== 'reuse') {
     removeBindingFile(file);
   }
@@ -63,7 +63,6 @@ export async function bindIosSectionAsync(
 }
 
 type IosAcquireOptions = {
-  reuseOnly: boolean;
   tools: DeviceTools;
   explicit?: ExplicitRequest;
   signal?: AbortSignal;
@@ -72,7 +71,7 @@ type IosAcquireOptions = {
 /** Each inventory belongs to the binding identity observed before the device list was read. */
 export async function bindIosAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit, signal }: IosAcquireOptions
+  { tools, explicit, signal }: IosAcquireOptions
 ) {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -88,7 +87,7 @@ export async function bindIosAsync(
         }
         if (bindingIdentity(read) !== bindingIdentity(before)) return null;
         if (explicit === undefined)
-          return bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+          return bindIosSectionAsync(projectRoot, { inventory, tools });
         const candidates = inventory.simulators
           .filter((sim) => sim.isAvailable)
           .map((sim) => ({
@@ -103,7 +102,6 @@ export async function bindIosAsync(
           'ios',
           candidates,
           explicit,
-          reuseOnly,
           tools,
           actions
         );
