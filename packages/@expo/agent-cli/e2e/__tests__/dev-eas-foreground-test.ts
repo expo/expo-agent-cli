@@ -137,45 +137,6 @@ describe.concurrent('@expo/agent-cli dev --eas — a foreground open that ends',
     }
   );
 
-  // `--max-idle-time-minutes` is the one flag an older eas-cli may not know. Only a refusal before
-  // the session exists is retried: once the receipt is printed, a second start would bill again.
-  it.each<{
-    port: number;
-    name: string;
-    env: Record<string, string>;
-    starts: number;
-    opened: boolean;
-  }>([
-    {
-      port: 8545,
-      name: 'before a session was created, retries without it',
-      env: { STUB_SIM_START_REJECT_FLAG: '--max-idle-time-minutes' },
-      starts: 2,
-      opened: true,
-    },
-    {
-      port: 8546,
-      // A guard row, not a transcript: eas-cli parses flags before it creates a session, so it
-      // never prints both. It proves the receipt alone stops the retry.
-      name: 'after a session was created, starts nothing more',
-      env: {
-        STUB_SIM_START_EXIT: '1',
-        STUB_SIM_START_STDOUT: 'Nonexistent flag: --max-idle-time-minutes',
-      },
-      starts: 1,
-      opened: false,
-    },
-  ])('a start refused for the idle flag $name', async ({ port, env, starts, opened }) => {
-    const projectRoot = await setupAsync();
-    const result = await foregroundOpenAsync(projectRoot, port, { env });
-
-    const sent = easInvocationArgs(projectRoot).filter((args) => args[0] === 'simulator');
-    expect(sent).toHaveLength(starts);
-    expect(sent[0]).toContain('--max-idle-time-minutes');
-    if (starts === 2) expect(sent[1]).not.toContain('--max-idle-time-minutes');
-    expect(result.stderr.includes('Opened the app on EAS Simulator session')).toBe(opened);
-  });
-
   it('starts and lists nothing when the binding of this worktree cannot be read', async () => {
     const projectRoot = await setupAsync();
     const file = sessionBindingFile(projectRoot);

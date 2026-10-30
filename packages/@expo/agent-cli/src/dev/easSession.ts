@@ -483,22 +483,10 @@ async function ensureSessionAsync(
         : 'This run will stop the session afterwards.'
     }`
   );
-  const spawnOptions = {
+  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
     timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
-  };
-  let result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), spawnOptions);
-  // eas-cli prints oclif's refusal on stdout (`Log.error`) and only a summary line on stderr.
-  if (
-    result.exitCode !== 0 &&
-    !readSessionId(`${result.stdout}\n${result.stderr}`) &&
-    /Nonexistent flags?:[^\n]*--max-idle-time-minutes\b/i.test(`${result.stdout}\n${result.stderr}`)
-  ) {
-    event('open_app_eas_flag_unsupported', { flag: '--max-idle-time-minutes' });
-    const index = args.indexOf('--max-idle-time-minutes');
-    const retry = [...args.slice(0, index), ...args.slice(index + 2)];
-    result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, retry), spawnOptions);
-  }
+  });
   const output = `${result.stdout}\n${result.stderr}`;
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
