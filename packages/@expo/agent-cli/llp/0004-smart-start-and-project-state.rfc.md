@@ -389,9 +389,9 @@ directly and never enters the ladder.
 
 ## Dev-server lock
 
-The lock lives in `@expo/agent-cli`, in `src/devLock/`. `runDevServerAsync` takes it, so
-both `@expo/agent-cli start` and the final step of an `@expo/agent-cli dev` plan hold
-it.
+The lock lives in `@expo/agent-cli`, in `src/devLock/`. `@expo/agent-cli start` holds it
+while its dev server runs. An `@expo/agent-cli dev` run whose plan serves holds one lock
+for the whole run: from its first step until its EAS open returns.
 
 It is a listening socket. A file records a fact about a process, and that record
 outlives the process. A listening socket exists only while its owner does. A reader that
@@ -406,12 +406,39 @@ on `sun_path` gets the same digest scheme under the temporary directory. Both si
 that choice from the path length alone.
 
 Protocol. The server writes one JSON line (`url`, `port`, `pid`, `startedAt`,
-`projectRoot`, `easPlatform`, `easOpenFinished`) on connection and ends it. `easPlatform` is the platform of
+`projectRoot`, `easPlatform`, `easOpenFinished`, `phase`) on connection and ends it. `easPlatform` is the platform of
 the EAS session the run opens the app on, or null; a reader treats a line without it as null. `easOpenFinished` is true once
 the run's EAS open returned, bound or failed. It is false before that and for a run with no EAS open. When the open
 returns, the server answers each later connection with the flag set, and a port update keeps it. A reader treats a line
 without it as false. A reader connects with a ~250 ms timeout and
 reads to the close. A refused connection or a timeout is "no dev server".
+
+Phase. The lock says what its run does now, so a reader reads it and does not infer it:
+
+| `phase`     | The run                                                                      | `url` and `port`                      | `startedAt`                                               |
+| ----------- | ---------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
+| `building`  | runs a step before its dev-server step (`eas build`, an install, a prebuild) | the planned port; nothing listens yet | the start of the run                                      |
+| `serving`   | runs its dev-server step; `/status` says whether Metro answers               | as below                              | the spawn of the dev-server step, renewed at a port retry |
+| `finishing` | its dev-server step exited, and its EAS open has not returned                | the last port; nothing listens        | unchanged                                                 |
+
+`start` always answers `serving`. Only a run with an EAS open has `finishing`; a run
+without one releases the lock when its dev-server step exits. A busy-port retry updates
+the same lock, so the lock does not go away between the two spawns. A reader treats a
+line without `phase` as `serving`. A lock answers `building` only for a plan with a
+dev-server step: a plan that serves nothing takes no lock.
+
+What each reader does with the phase:
+
+| Reader                           | `building`                                                  | `serving`                                                            | `finishing`                                                                          |
+| -------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `dev:stop`                       | signals the pid; the run stops before its next step         | signals the pid, waits for it and the lock to go, or for `finishing` | no signal; reports the dev server stopped, the pid alive, and `dev:stop --eas` first |
+| `dev --detach` parent and re-run | waits; at the deadline exits 22 `DEV_DETACH_STILL_BUILDING` | as §Daemonization                                                    | refuses: the run still binds a session                                               |
+| foreground `dev`                 | stops with `DEV_SERVER_RUNNING`, worded for the phase       | same                                                                 | same                                                                                 |
+| `status`                         | next step `dev:logs`                                        | as today                                                             | next step `dev:stop --eas`                                                           |
+
+Tests: lock-test (`phase` on the wire, a line without it), stopAsync-test and
+dev-eas-test (each `dev:stop` column), dev-eas-test and detachAsync-test (the detached
+column).
 
 Acquisition. `EADDRINUSE` on posix means either a live owner or an orphaned socket file.
 Only a connection tells them apart. An answer means another `@expo/agent-cli` owns the
@@ -419,7 +446,7 @@ project's dev server. Silence means the file is an orphan, which is unlinked bef
 listening again. On Windows a pipe dies with its process, so `EADDRINUSE` is a live
 owner by definition.
 
-Release. On the wrapper's `finally` and on process exit, with a best-effort unlink. A
+Release. When the run ends, and on process exit, with a best-effort unlink. A
 leftover socket file answers nothing. The next acquisition removes it.
 
 Never load-bearing. An address that cannot be taken produces one warning and a
@@ -431,7 +458,8 @@ With no port in the arguments, the port published is the one the dev server repo
 falling back to 8081. A `--port` or default port whose `/status` names another project
 root is never published [observed — live suite, 2026-10-05: a lock on 8081 pointed at
 another project's Metro]; the log watch goes on while the dev server runs, and nothing is
-published if the server exits first (`cli:dev_lock_skipped`, reason `foreign-port`).
+published if the server exits first (`cli:dev_lock_skipped`, reason `foreign-port`). A
+`dev` run that already holds its lock in `building` releases it in that case.
 
 Still probed. The lock proves the wrapper is alive. Only an HTTP probe of the URL proves
 the dev server behind it is. Discovery uses the lock to stop guessing which port.
@@ -488,10 +516,10 @@ fenced as untrusted per [[0008-guardrails]]. A dev server started attached has n
 all, and the command says that.
 
 A detached run may not say "the dev server started on `<url>`" while the plan is still
-compiling. The phase is read off the child's own log. `building` names the step.
-`serving` means started. The lock is only ever taken by the plan's dev-server step, so a
-log whose dev-server step is `expo run:*` is a log of a step that builds before it
-serves. Whether that build has finished is the install marker below. `serving` is the
+compiling. Two sources say so. The lock says `building` while a step before the
+dev-server step runs. The child's own log covers a dev-server step that is
+`expo run:*`, which compiles while the lock says `serving`: `building` names the step,
+`serving` means started. Whether that build has finished is the install marker below. `serving` is the
 answer whenever nothing says otherwise, such as a plan whose dev-server step is a plain
 `expo start`.
 
@@ -512,6 +540,24 @@ A build is recorded when the app reaches the device, whatever the launch then do
 `@expo/cli`). A step that failed still has its output read. Two cases are not recorded:
 a build that died before the install, and anything in `inherit` output mode, where
 nothing is captured.
+
+A plan that builds before it serves, such as `eas build` then `expo start`, can build
+for longer than the parent waits. The parent waits while its child's lock says
+`building`. At the deadline, with the child alive and still `building`, it exits 22
+`DEV_DETACH_STILL_BUILDING` with the pid, the log file and the same command as the next
+step. It never says that the dev server did not start. A re-run of the same command
+beside a `building` lock spawns nothing: it follows that run with the same wait and the
+same 22, and reports the server when the lock says `serving`. A re-run beside a
+`finishing` lock spawns nothing and refuses with `dev:stop --eas`. The budget is 120 s
+(`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
+
+A run stops on SIGINT or SIGTERM between steps. The step that was running gets the
+signal and ends, and the run starts no later step and exits 130 or 143. So a plain
+`dev:stop` stops a run in `building`, and no dev server starts after the interrupted
+build. An `eas build` that was already submitted keeps running on EAS; `eas build:cancel`
+ends it. On Windows `dev:stop` ends the process tree at once, with the same result.
+
+Tests: dev-eas-test (the 22, the follow by a re-run, the stop of a building run).
 
 Exit codes. `dev --detach` exits 0 when a dev server is up, whether it started one or
 found one. Exit 1 when the child never published a lock, and 1 when `--wait-ready` gave

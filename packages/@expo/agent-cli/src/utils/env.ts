@@ -91,6 +91,15 @@ class Env {
     return int('AGENT_CLI_EAS_SESSION_WAIT_MS', 180_000);
   }
 
+  /**
+   * How long `dev --detach` waits for its child before it reports.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   */
+  get AGENT_CLI_DETACH_TIMEOUT_MS() {
+    return int('AGENT_CLI_DETACH_TIMEOUT_MS', 120_000);
+  }
+
   /** @internal Force the webcontainer environment checks to pass */
   get EXPO_FORCE_WEBCONTAINER_ENV() {
     return boolish('EXPO_FORCE_WEBCONTAINER_ENV', false);
