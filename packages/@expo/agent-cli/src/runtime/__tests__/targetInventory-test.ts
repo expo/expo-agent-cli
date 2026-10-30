@@ -1,7 +1,8 @@
 import { fakeTools } from '../../deviceBinding/__tests__/fakeTools';
 import { spawnCaptureAsync, type SpawnCaptureResult } from '../../utils/spawnCapture';
 import { resolveTargetSelectionAsync } from '../resolveTargetSelection';
-import { makeTarget } from './targetSelectionFixtures';
+import { refreshDeviceInventoryAsync } from '../targetSelection';
+import { makeDeviceInventory, makeTarget, makeTargetSelection } from './targetSelectionFixtures';
 
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 
@@ -39,6 +40,18 @@ it.each([
   });
   expect(classifiedTargets.read).toEqual(readable ? [target] : []);
   expect(classifiedTargets.undetermined).toEqual(readable ? [] : [target]);
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — the device tools.
+it('does not ask simctl for an --android scope because another worktree holds an iOS lease', async () => {
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: '', stderr: '', exitCode: 1 });
+  const selection = makeTargetSelection({ platform: { value: 'android', by: 'flag' } });
+  const android = makeTarget({ appId: 'host.exp.exponent', deviceName: 'Pixel 9 - 15 - API 35' });
+  const foreign = { udid: 'U9', name: 'iPhone 17', projectRoot: '/other', own: false };
+  const inventory = makeDeviceInventory({ iosBindings: [foreign] });
+  await refreshDeviceInventoryAsync([android], selection, inventory);
+  expect(vi.mocked(spawnCaptureAsync).mock.calls.filter(([bin]) => bin === 'xcrun')).toEqual([]);
 });
 
 it.each(['linux', 'win32'])(

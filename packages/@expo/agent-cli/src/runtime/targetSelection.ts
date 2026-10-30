@@ -277,7 +277,8 @@ function toolsCanPlace(
   // Unscoped reads still need platform evidence for their bundle checks. A binding's stored
   // display name can be stale, so a foreign binding needs the current name-to-UDID mapping.
   return (
-    deviceInventory.iosBindings.some((binding) => !binding.own) ||
+    (targetSelection.platform?.value !== 'android' &&
+      deviceInventory.iosBindings.some((binding) => !binding.own)) ||
     (isCloudScope(targetSelection) && targets.length > 0) ||
     targets.some((target) => platformOfTarget(target, EMPTY_DEVICE_INVENTORY).platform == null)
   );
