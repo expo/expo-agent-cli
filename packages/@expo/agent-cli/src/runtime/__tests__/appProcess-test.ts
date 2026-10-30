@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import { vol } from 'memfs';
 import path from 'path';
 
@@ -245,12 +244,12 @@ describe('stopping the app on a cloud simulator session', () => {
     `asks the controller once more only after a close timeout: %s`,
     async (_, answers, ok, closes) => {
       cloudProject();
-      mockSpawnQueue(answers);
+      const calls = mockSpawnQueue(answers);
 
       const result = await stopAppOnDeviceAsync({ ...cloudParams, platform: 'android' });
 
       expect(result.ok).toBe(ok);
-      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(closes);
+      expect(calls).toHaveLength(closes);
     }
   );
 
@@ -299,7 +298,7 @@ describe('Quoting the application id for the device shell', () => {
   });
 
   it('should quote the app id of the Android liveness probe', async () => {
-    mockSpawnAlways({ stdout: '' });
+    const calls = mockSpawnAlways({ stdout: '' });
 
     await stopAppOnDeviceAsync({
       platform: 'android',
@@ -307,7 +306,12 @@ describe('Quoting the application id for the device shell', () => {
       appId: 'com.x;toybox id;#',
     });
 
-    const probe = vi.mocked(spawn).mock.calls[0]?.[1] as string[];
-    expect(probe).toEqual(['-s', 'emulator-5554', 'shell', 'pidof', `'com.x;toybox id;#'`]);
+    expect(calls[0]?.args).toEqual([
+      '-s',
+      'emulator-5554',
+      'shell',
+      'pidof',
+      `'com.x;toybox id;#'`,
+    ]);
   });
 });

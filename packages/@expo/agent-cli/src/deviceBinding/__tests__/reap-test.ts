@@ -8,6 +8,7 @@ import { bindingPathFor, readBindingFile } from '../registry';
 import { writeCloudBinding } from './fakeCloudBinding';
 import { androidBindingFor, bindingFor, fakeTools, writeBinding } from './fakeTools';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { printed } from '../../utils/__tests__/printed';
 
 const ROOT = '/work/app';
 const OTHER = '/work/other';
@@ -37,7 +38,7 @@ it('deleted-worktree-deletes-simulator after the registry lock is released', asy
       devServerCleanup: 'not-checked',
     },
   ]);
-  expect(stderr.mock.calls.flat().join('\n')).toContain('Dev-server cleanup was not checked');
+  expect(printed(stderr)).toContain('Dev-server cleanup was not checked');
 });
 
 it.each(['returned', 'thrown'])('reports a %s cleanup failure as not released', async (failure) => {
@@ -175,7 +176,7 @@ it('a reaped emulator whose pid now runs another program is reported device-gone
   expect(reports).toMatchObject([
     { id: 'emulator-5554', released: true, shutDown: false, reason: 'device-gone' },
   ]);
-  expect(stderr.mock.calls.flat().join('\n')).toContain(
+  expect(printed(stderr)).toContain(
     '(device-gone): pid 5001 is not the emulator instance of Pixel on port 5554 any more'
   );
 });
@@ -201,7 +202,7 @@ it('a simulator whose delete failed is deleted by the next reap', async () => {
   expect(first.reports[0]!.error).toBe(
     'simctl delete OLD exited 1: delete failed\nHow: run "xcrun simctl delete OLD".'
   );
-  expect(stderr.mock.calls.flat().join('\n')).not.toContain('How:');
+  expect(printed(stderr)).not.toContain('How:');
 });
 
 it('an emulator whose kill threw is killed by the next reap', async () => {
@@ -255,7 +256,7 @@ it('a later reap of a session stopped by hand stops it again with no error and f
   expect(first).toMatchObject({ error: null, reports: [{ id: 'A', released: true }] });
   expect(first.reports[0]!.error).toBeUndefined();
   expect(second).toEqual({ reports: [], error: null });
-  expect(stderr.mock.calls.flat().join('\n')).not.toContain('Could not release');
+  expect(printed(stderr)).not.toContain('Could not release');
 });
 
 describe('deletedWorktreeSessions', () => {

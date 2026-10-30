@@ -28,7 +28,7 @@ delete process.env.npm_execpath;
 process.env.AGENT_CLI_NO_DOCS_SYNC = '1';
 resetInvokerCache();
 
-// A test pins `process.platform` with `mockPlatform` or `Object.defineProperty`; none restores it.
+// A test pins `process.platform` with `mockPlatform` or `Object.defineProperty`; it need not restore it.
 const realPlatform = process.platform;
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
