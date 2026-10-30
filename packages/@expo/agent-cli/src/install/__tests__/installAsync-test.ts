@@ -1,3 +1,6 @@
+import { vol } from 'memfs';
+import path from 'path';
+
 import * as Log from '../../log';
 import type { InstallImpactReport } from '../../project/types';
 import {
@@ -38,6 +41,11 @@ function printed(): string {
 }
 
 beforeEach(() => {
+  // A project whose dependencies are installed: `installAsync` runs `expo install` only then.
+  vol.reset();
+  vol.fromJSON({
+    [path.join(projectRoot, 'node_modules', 'expo', 'package.json')]: '{"name":"expo"}',
+  });
   // `clearMocks` empties the call log but keeps implementations, so every mock whose *answer*
   // matters is given its default back here — otherwise one test's answer leaks into the next.
   vi.mocked(runExpoAsync).mockResolvedValue(0);

@@ -8,6 +8,11 @@ import fs from 'fs';
 import path from 'path';
 import { stripVTControlCharacters } from 'util';
 
+import {
+  listDependencyNames,
+  readJsonFileSync,
+  type ProjectPackageJson,
+} from '../project/nodeModules';
 import { PROGRAM_PREFIX } from '../programName';
 import { fileExistsSync } from '../utils/dir';
 import { CommandError } from '../utils/errors';
@@ -161,7 +166,11 @@ export async function runTypeCheckAsync(projectRoot: string): Promise<TypeCheckR
   const tsConfigPath = resolveTsConfigPath(projectRoot);
   if (!cli) {
     if (tsConfigPath != null || hasTypeScriptSourcesSync(projectRoot)) {
-      throw compilerMissingError(tsConfigPath != null, lookupProjectBin(projectRoot, 'tsc'));
+      throw compilerMissingError(
+        tsConfigPath != null,
+        lookupProjectBin(projectRoot, 'tsc'),
+        declaresTypeScriptSync(projectRoot)
+      );
     }
     return nothingToCheck(
       `this project has no TypeScript in it — no tsconfig.json and no .ts or .tsx files of its own — so there is nothing to type-check`
@@ -227,18 +236,33 @@ export async function runTypeCheckAsync(projectRoot: string): Promise<TypeCheckR
  * @param hasTsConfig whether it was the `tsconfig.json` that identified this as a TypeScript
  * project, or its `.ts` files — the two are different evidence and the reader should see theirs.
  * @param lookup the search that came back empty, which is what says where it looked.
+ * @param declared whether package.json declares typescript. Then the compiler is missing because
+ * the dependencies are not installed, and the bare `install` fixes that without editing package.json.
  */
-function compilerMissingError(hasTsConfig: boolean, lookup: ProjectBinLookup): CommandError {
+function compilerMissingError(
+  hasTsConfig: boolean,
+  lookup: ProjectBinLookup,
+  declared: boolean
+): CommandError {
   const error = new CommandError(
     'TYPECHECK_CLI_MISSING',
     [
       `This project is a TypeScript project with no TypeScript compiler installed, so nothing was type-checked.`,
       `Why: ${hasTsConfig ? 'it has a tsconfig.json' : 'it has .ts or .tsx source files'}, but ${describeProjectBinSearch('tsc', lookup)} — so no copy of it is installed for this project, in its own node_modules or in a workspace's. Nothing here falls back to a compiler from the registry, because a type check is a function of the version this project pinned, its tsconfig.json and its @types — one fetched from elsewhere would answer a question about a project that does not exist.`,
-      `How: add TypeScript to this project with "${PROGRAM_PREFIX} install typescript --dev". If it is already in package.json, then its dependencies have not been installed since — run your package manager's install, at the workspace root when this is a workspace package.`,
+      declared
+        ? `How: This project declares typescript, but its dependencies are not installed. Run "${PROGRAM_PREFIX} install" with no packages, which installs the lockfile and does not change package.json.`
+        : `How: add TypeScript to this project with "${PROGRAM_PREFIX} install typescript --dev". If it is already in package.json, then its dependencies have not been installed since — run your package manager's install, at the workspace root when this is a workspace package.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} install typescript --dev`;
+  error.suggestedCommand = declared
+    ? `${PROGRAM_PREFIX} install`
+    : `${PROGRAM_PREFIX} install typescript --dev`;
   return error;
+}
+
+function declaresTypeScriptSync(projectRoot: string): boolean {
+  const manifest = readJsonFileSync<ProjectPackageJson>(path.join(projectRoot, 'package.json'));
+  return listDependencyNames(manifest).includes('typescript');
 }
 
 /** The error for a compiler that is on disk and could not be started. */

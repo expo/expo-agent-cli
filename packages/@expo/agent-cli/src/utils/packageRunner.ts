@@ -98,6 +98,26 @@ const LOCKFILES: { manager: string; files: string[] }[] = [
   { manager: 'pnpm', files: ['pnpm-lock.yaml'] },
 ];
 
+/** The lockfile that governs a project, the directory it is in, and the manager it belongs to. */
+function findLockfile(projectRoot: string): { manager: string; file: string; dir: string } | null {
+  let dir = path.resolve(projectRoot);
+  // Bounded by the filesystem root: `path.dirname('/')` is `'/'`, which ends the walk.
+  for (;;) {
+    for (const { manager, files } of LOCKFILES) {
+      for (const file of files) {
+        if (fileExistsSync(path.join(dir, file))) {
+          return { manager, file, dir };
+        }
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    dir = parent;
+  }
+}
+
 /**
  * Whether the lockfile that governs this project is bun's.
  *
@@ -105,22 +125,48 @@ const LOCKFILES: { manager: string; files: string[] }[] = [
  * the one that installed it. The first directory holding *any* known lockfile decides.
  */
 export function projectUsesBun(projectRoot: string): boolean {
-  let dir = path.resolve(projectRoot);
-  // Bounded by the filesystem root: `path.dirname('/')` is `'/'`, which ends the walk.
-  for (;;) {
-    for (const { manager, files } of LOCKFILES) {
-      for (const file of files) {
-        if (fileExistsSync(path.join(dir, file))) {
-          return manager === 'bun';
-        }
-      }
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      return false;
-    }
-    dir = parent;
+  return findLockfile(projectRoot)?.manager === 'bun';
+}
+
+/** The command that installs a project's dependencies exactly as its lockfile records them. */
+export interface LockfileInstall {
+  manager: string;
+  /** The lockfile's name, or null when the project has none. */
+  lockfile: string | null;
+  /** The lockfile's directory (a workspace's root), or the project when there is no lockfile. */
+  cwd: string;
+  /** The command and its arguments. */
+  argv: string[];
+}
+
+const LOCKFILE_INSTALL_ARGV: Record<string, string[]> = {
+  bun: ['bun', 'install', '--frozen-lockfile'],
+  pnpm: ['pnpm', 'install', '--frozen-lockfile'],
+  yarn: ['yarn', 'install'],
+  npm: ['npm', 'ci'],
+};
+
+/**
+ * What installs this project's dependencies from its lockfile, found the way {@link projectUsesBun}
+ * finds the lockfile: the nearest directory above holding one. A project with none gets
+ * `npm install`, because `npm ci` refuses to run without a lockfile.
+ */
+export function lockfileInstall(projectRoot: string): LockfileInstall {
+  const found = findLockfile(projectRoot);
+  if (!found) {
+    return {
+      manager: 'npm',
+      lockfile: null,
+      cwd: path.resolve(projectRoot),
+      argv: ['npm', 'install'],
+    };
   }
+  return {
+    manager: found.manager,
+    lockfile: found.file,
+    cwd: found.dir,
+    argv: LOCKFILE_INSTALL_ARGV[found.manager]!,
+  };
 }
 
 /**

@@ -42,7 +42,7 @@ No-dev-server and wrong-platform stay `1`. Neither becomes different within a se
 
 ### Forwarded codes, and the exception
 
-`install`, `start`, `dev`, and the `expo` passthrough hand back whatever the subprocess exited with, verbatim. A wrapper's own failures use the table.
+`install`, `start`, `dev`, and the `expo` passthrough hand back whatever the subprocess exited with, verbatim. A wrapper's own failures use the table. A bare `install` in a project whose `expo` package does not resolve installs the lockfile first (`npm ci`, `bun install --frozen-lockfile`, `pnpm install --frozen-lockfile` or `yarn install`, in the lockfile's directory) and exits with its code.
 
 The exception is a command that adds a verdict. `doctor` is `0` when every check passed, `20` when any failed, `1` only when the run produced no verdict ([[0016-v1-scope]] §Doctor's exit code). expo-doctor's own code stays on the `--json` `exitCode` field.
 
@@ -62,7 +62,7 @@ No `eas --json` payload can contain a `null`. `printJsonOnlyOutput` deletes ever
 
 A project with no TypeScript exits `0`, with `checked: false`. `reason` is present exactly when `checked` is false. The follow-up says so in a command as well as in a field, so "nothing was checked" cannot read as "everything passed".
 
-A TypeScript project with no compiler is `1` (`TYPECHECK_CLI_MISSING`), with `Try: npx @expo/agent-cli install typescript --dev`. Either `tsconfig.json` or `.ts`/`.tsx` sources makes it a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
+A TypeScript project with no compiler is `1` (`TYPECHECK_CLI_MISSING`), with `Try: npx @expo/agent-cli install typescript --dev`. When package.json declares typescript, the Try line is the bare `install`. Either `tsconfig.json` or `.ts`/`.tsx` sources makes it a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
 
 No compiler is ever fetched. `doctor:check` falls back to `npx expo-doctor`. This command does not. A type check is a function of the project's own compiler version, its `tsconfig.json`, and its `@types`. Only `node_modules/.bin/tsc` counts.
 
