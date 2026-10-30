@@ -121,7 +121,7 @@ export const agentCliDev: Command = async (argv) => {
     const { devAsync } = require('./devAsync') as typeof import('./devAsync');
     if (options.detachedChild) {
       const { withDetachedRunAsync } = require('./detachedRun') as typeof import('./detachedRun');
-      process.exitCode = await withDetachedRunAsync(projectRoot, () =>
+      process.exitCode = await withDetachedRunAsync(projectRoot, options, () =>
         devAsync(projectRoot, options)
       );
     } else {

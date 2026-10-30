@@ -140,8 +140,14 @@ function parseData(json: string | undefined): Record<string, unknown> | null {
 }
 
 /** The codes the parent of a detached run rethrows unchanged (llp/0035 §Output and errors). */
-export function isRelayedDeviceCode(code: string | null): code is string {
-  return code != null && (code === 'NO_BOUND_DEVICE' || code.startsWith('DEVICE_'));
+export function isRelayedChildCode(code: string | null): code is string {
+  return (
+    code != null &&
+    (['NO_BOUND_DEVICE', 'DEV_START_BUSY', 'DEV_START_UNCERTAIN', 'DEV_SERVER_RUNNING'].includes(
+      code
+    ) ||
+      code.startsWith('DEVICE_'))
+  );
 }
 
 /**
