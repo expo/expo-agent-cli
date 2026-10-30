@@ -206,6 +206,19 @@ describe('@expo/agent-cli dev', () => {
       expect(connectLine).toContain('8901');
     });
 
+    it('says which options a plan that ends in a build does not pass on', async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      const result = await executeAgentCliAsync(projectRoot, [
+        'dev',
+        '--ios',
+        '--local',
+        '--plan',
+        '--tunnel',
+      ]);
+
+      expect(result.stderr).toContain('so these options were not passed on: --tunnel.');
+    });
+
     it('records no build when the fingerprint is unavailable', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
@@ -264,6 +277,9 @@ describe('@expo/agent-cli dev', () => {
       expect(readLastBuildRecord(projectRoot)).toMatchObject({
         ios: { hash: CHANGED_HASH },
       });
+      expect(built.stderr).toContain(
+        'the app it built is installed on the device, so that build is recorded'
+      );
 
       const next = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--ios', '--json'], {
         env,
@@ -274,6 +290,23 @@ describe('@expo/agent-cli dev', () => {
       expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
         ['expo', 'start', '--dev-client', ...PORT_ARGS],
       ]);
+    });
+
+    // @ref llp/0023-fingerprint-caching.rfc.md §What invalidates an answer — a prebuild creates
+    // `ios/`, which no pinned file of the cache stamps, so the cache goes after every step that ran.
+    it.each([
+      ['forgets the fingerprint cache after its steps ran', '0', false],
+      ['keeps the fingerprint cache when a step failed', '3', true],
+    ])('%s', async (_case, exitCode, kept) => {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local'], {
+        env: { STUB_FINGERPRINT_HASH: CHANGED_HASH, STUB_EXPO_EXIT_CODE: exitCode },
+        reject: false,
+      });
+
+      expect(fs.existsSync(path.join(projectRoot, '.expo', 'agent-cli-fingerprint.json'))).toBe(
+        kept
+      );
     });
 
     it('runs only the dev server when the recorded build still matches', async () => {
@@ -559,6 +592,32 @@ describe('@expo/agent-cli dev', () => {
       });
     });
 
+    // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — `expo start --ios` drives
+    // Simulator.app through AppleScript, and a Mac with no Automation grant ends the whole process
+    // with Node's 7, dev server included.
+    it('exits 7 with the Automation handoff when macOS refused the Expo CLI', async () => {
+      const projectRoot = await setupAsync('go-app');
+
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+        env: {
+          STUB_EXPO_EXIT_CODE: '7',
+          STUB_EXPO_STDERR:
+            'Error: osascript -e tell app "System Events" to count processes whose name is "Simulator" exited with non-zero code: 1',
+        },
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(7);
+      const { error } = JSON.parse(result.stdout);
+      expect(error).toMatchObject({
+        code: 'MACOS_AUTOMATION_REQUIRED',
+        needsHuman: { scenario: 'macos-automation', detectedBy: 'exit-signature' },
+      });
+      expect(error.message).toContain('nothing is listening for this project now');
+      expect(error.message).toContain('npx @expo/agent-cli dev --ios --detach');
+      expect(error.message).toContain('simctl openurl');
+    });
+
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — the port carve-out (F41).
     // A busy port used to be exit 7 with `needsHuman.scenario: "expo-prompt"` and a `How:` line
     // naming the very flag the caller had passed. Nothing about it needs a person.
@@ -613,6 +672,7 @@ describe('@expo/agent-cli dev', () => {
         movedFrom: 8290,
         state: 'picked',
       });
+      expect(report.steps.at(-1).argv).toEqual(['expo', ...starts[1]!.args]);
     });
 
     // A port the caller named is a requirement. Exit 20 is "the outcome failed", never 7, and the
@@ -657,8 +717,9 @@ describe('@expo/agent-cli dev', () => {
     it('reports a failed step as a failure, and names no dev server', async () => {
       const projectRoot = await setupAsync('go-app');
 
+      const env = { STUB_EXPO_EXIT_CODE: '9', STUB_EXPO_STDERR: 'stub step detail' };
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
-        env: { STUB_EXPO_EXIT_CODE: '9' },
+        env,
         reject: false,
       });
 
@@ -671,6 +732,14 @@ describe('@expo/agent-cli dev', () => {
       expect(payload.steps).toBeUndefined();
       expect(payload.followups).toBeUndefined();
       expect(result.stdout).not.toContain('exp://');
+      // Captured output is quoted, because nothing else shows it; in human mode it already showed.
+      expect(payload.error.message).toMatch(/What the tool printed:\n(.*\n)*stub step detail/);
+      const human = await executeAgentCliAsync(projectRoot, ['dev', '--ios'], {
+        env,
+        reject: false,
+      });
+      expect(human.exitCode).toBe(9);
+      expect(human.stderr).not.toContain('What the tool printed');
     });
   });
 
@@ -695,6 +764,23 @@ describe('@expo/agent-cli dev', () => {
       // Nothing was planned and nothing was spawned: the point of checking before the plan.
       expect(invocationArgs(projectRoot)).toEqual([]);
     });
+
+    it.each(['--web', '--ios'])(
+      'refuses --device on a %s run that binds no local device, before anything runs',
+      async (platform) => {
+        const projectRoot = await setupAsync('go-app');
+
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', platform, '--device', 'X', '--json'],
+          { reject: false }
+        );
+
+        expect(result.exitCode).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('BAD_ARGS');
+        expect(invocationArgs(projectRoot)).toEqual([]);
+      }
+    );
 
     it('still accepts the options expo start owns', async () => {
       const projectRoot = await setupAsync('go-app');
@@ -811,6 +897,8 @@ describe('@expo/agent-cli dev', () => {
       ]);
       expect(followups[0]!.command).toBe('http://localhost:8124');
       expect(result.stdout).not.toContain('eas build:configure');
+      // `--web` is the plan's own flag already, so the caller's is not repeated.
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--web', '--port', '8124']]);
     });
 
     it('rejects a value that is not a port, before anything runs', async () => {
@@ -836,6 +924,18 @@ describe('@expo/agent-cli dev', () => {
       // The dev server step runs through the same wrapper as `@expo/agent-cli start`, whose skill sync is
       // covered by `wrapper-test.ts`.
       expect(result.stdout).toContain('stub_expo_dev_server_ready');
+      expect(result.stdout).toContain('Suggested next:');
+      // Only a detached child names its pid first.
+      expect(result.all).not.toContain('Detached dev run');
+    });
+
+    it('prints no Suggested next section under --no-followups, and keeps the flag off expo', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--no-followups']);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain('Suggested next:');
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', ...PORT_ARGS]]);
     });
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
@@ -1206,6 +1306,17 @@ describe('@expo/agent-cli dev', () => {
       home = expoHomeOf(first);
       const env = { ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
 
+      // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — `--plan` only inspects.
+      const unbound = await executeAgentCliAsync(
+        first!,
+        ['dev', '--android', '--local', '--plan', '--json'],
+        { env }
+      );
+      expect(JSON.parse(unbound.stdout).reasons).toContain(
+        'The run will reuse or start an emulator instance for this worktree, and pin the build steps to it.'
+      );
+      expect(fs.existsSync(path.join(home, 'agent-cli', 'bindings'))).toBe(false);
+
       const results = await Promise.all(
         [first!, second!].map((root) =>
           executeAgentCliAsync(root, ['dev', '--android', '--local'], { env })
@@ -1222,6 +1333,15 @@ describe('@expo/agent-cli dev', () => {
           ['run:android', ...PORT_ARGS, '--device', `emulator-${ports[index]}`],
         ]);
       }
+
+      const bound = await executeAgentCliAsync(
+        first!,
+        ['dev', '--android', '--local', '--plan', '--json'],
+        { env }
+      );
+      const run = JSON.parse(bound.stdout).steps.find((step: { id: string }) => step.id === 'run');
+      expect(run.argv).toEqual(expect.arrayContaining(['--device', `emulator-${ports[0]}`]));
+      expect(Object.keys(readBindings(home))).toHaveLength(2);
     });
   });
 });

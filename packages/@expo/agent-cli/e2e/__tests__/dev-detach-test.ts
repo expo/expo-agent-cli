@@ -200,6 +200,9 @@ describe('@expo/agent-cli dev --detach', () => {
       });
       expect(report.pid).toBeGreaterThan(0);
       expect(report.logFile).toContain(LOG_PATH);
+      // Line 1 of the child's log names the child, before its plan, so a re-run can tell who wrote it.
+      const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+      expect(log.split('\n')[0]).toBe(`Detached dev run, pid ${report.pid}.`);
 
       // The parent has exited — this test is running — and the child has not.
       expect(isAlive(report.pid)).toBe(true);
@@ -401,6 +404,27 @@ describe('@expo/agent-cli dev --detach', () => {
           state: 'picked',
         });
 
+        // A named port is a requirement: the plan says it is taken, and the run refuses it before
+        // any step.
+        const namedPlan = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--plan', '--json', '--port', '8081'],
+          { env: stubExpoEnv(projectRoot) }
+        );
+        expect(JSON.parse(namedPlan.stdout)).toMatchObject({
+          devServerPort: { port: 8081, movedFrom: null, state: 'named', taken: true },
+          reasons: expect.not.arrayContaining([
+            'The dev server port is picked again when the plan runs.',
+          ]),
+        });
+        const named = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--json', '--port', '8081'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+        expect(named.exitCode).toBe(20);
+        expect(JSON.parse(named.stdout).error.code).toBe('PORT_IN_USE');
+
         const result = await executeAgentCliAsync(
           projectRoot,
           ['dev', '--ios', '--local', '--detach', '--json'],
@@ -415,6 +439,9 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
           ['run:ios', '--port', String(report.port)],
         ]);
+        // Said once, by the plan, and not again by the step it moved.
+        const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+        expect(log.split('Port 8081 is busy; the dev server uses').length).toBe(2);
       } finally {
         await cleanUpAsync(projectRoot);
         await new Promise((resolve) => (held ? held.close(resolve) : resolve(null)));
@@ -552,8 +579,11 @@ describe('@expo/agent-cli dev --detach', () => {
         { env: { ...detachEnv(projectRoot, port), STUB_EXPO_LISTEN: '1' } }
       );
       const { pid } = JSON.parse(first.stdout);
+      const lastRequest = path.join(projectRoot, '.expo', 'agent-cli-last-dev.json');
+      const startedBy = fs.readFileSync(lastRequest, 'utf8');
 
-      const foreground = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+      // Another platform, so a refused request that replaced the record would show.
+      const foreground = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--json'], {
         env: stubExpoEnv(projectRoot),
         reject: false,
       });
@@ -565,10 +595,13 @@ describe('@expo/agent-cli dev --detach', () => {
       });
       const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
       expect(starts).toHaveLength(1);
+      // The recovery `status` reads is the request that started the running server.
+      expect(fs.readFileSync(lastRequest, 'utf8')).toBe(startedBy);
 
+      // Whatever the forwarded options make of the last step, the plan does none of them.
       const planned = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--plan', '--json'],
+        ['dev', '--ios', '--plan', '--json', '--', '--no-bundler'],
         { env: stubExpoEnv(projectRoot) }
       );
 
