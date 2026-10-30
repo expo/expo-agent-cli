@@ -200,34 +200,17 @@ function otherWorktreesOf(
 }
 
 /**
- * Whether a device tool whose answer can place a target in this scope gave no answer. With no
- * platform, a silent `adb` holds only Android-shaped targets ({@link androidUnproven}), so a lone iOS
- * session app is still read.
+ * The device tool this scope reads that gave no answer, so a wait asks it again. `simctl` comes
+ * first: when it is silent, no target is proven off this machine.
  */
-export function scopeToolsUnknown(
+export function silentTool(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory
-): boolean {
+): 'simctl' | 'adb' | null {
   const platform = targetSelection.platform?.value;
-  return (
-    (platform !== 'android' && deviceInventory.bootedStatus === 'unknown') ||
-    (platform === 'android' && deviceInventory.androidDevices == null)
-  );
-}
-
-/**
- * Whether a device tool this scope reads gave no answer, so a wait asks it again. Wider than
- * {@link scopeToolsUnknown}: with no platform, a silent `adb` still holds Android-shaped targets.
- */
-export function scopeToolsSilent(
-  targetSelection: TargetSelection,
-  deviceInventory: DeviceInventory
-): boolean {
-  const platform = targetSelection.platform?.value;
-  return (
-    (platform !== 'android' && deviceInventory.bootedStatus === 'unknown') ||
-    (platform !== 'ios' && deviceInventory.androidDevices == null)
-  );
+  if (platform !== 'android' && deviceInventory.bootedStatus === 'unknown') return 'simctl';
+  if (platform !== 'ios' && deviceInventory.androidDevices == null) return 'adb';
+  return null;
 }
 
 /** Whether a local device tool names this target's device: a booted simulator or an attached model. */
@@ -244,15 +227,23 @@ function claimedLocally(
   );
 }
 
-/** Whether a target looks Android while `adb` gave no answer, so it may be a local emulator. */
-function androidUnproven(
+/**
+ * Whether a silent device tool could place this target on this machine. A silent `adb` holds only
+ * Android-shaped targets, so a lone iOS session app is still read.
+ */
+function unprovenOffMachine(
   target: Pick<CdpTarget, 'appId' | 'deviceName'>,
+  targetSelection: TargetSelection,
   deviceInventory: DeviceInventory
 ): boolean {
-  return (
-    deviceInventory.androidDevices == null &&
-    platformOfTarget(target, deviceInventory).platform === 'android'
-  );
+  switch (silentTool(targetSelection, deviceInventory)) {
+    case 'simctl':
+      return true;
+    case 'adb':
+      return platformOfTarget(target, deviceInventory).platform === 'android';
+    case null:
+      return false;
+  }
 }
 
 function classifyTarget(
@@ -283,11 +274,9 @@ function classifyTarget(
     // A cloud scope reads no target a local device tool claims. An app id says nothing about which
     // device runs it, so only an answered tool can show that no local device does.
     if (claimedLocally(target, deviceInventory)) return { group: 'other-device' };
-    if (
-      scopeToolsUnknown(targetSelection, deviceInventory) ||
-      androidUnproven(target, deviceInventory)
-    )
+    if (unprovenOffMachine(target, targetSelection, deviceInventory)) {
       return { group: 'undetermined' };
+    }
     return platform == null ? { group: 'undetermined' } : { group: 'read' };
   }
   return targetSelection.platform != null && platform == null
@@ -385,10 +374,9 @@ export function classifyTargets(
   if (
     targetSelection.device?.backend === 'cloud' &&
     targetSelection.platform?.value !== 'android' &&
-    !scopeToolsUnknown(targetSelection, deviceInventory) &&
     only &&
     !more.length &&
-    !androidUnproven(only, deviceInventory) &&
+    !unprovenOffMachine(only, targetSelection, deviceInventory) &&
     (targetSelection.platform != null || classifiedTargets.read.length === 0)
   ) {
     return {

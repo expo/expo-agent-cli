@@ -19,7 +19,7 @@ import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './proj
 import {
   isSkippedTarget,
   classifyTargets,
-  scopeToolsSilent,
+  silentTool,
   refreshDeviceInventoryAsync,
   skippedAppsOf,
   type ClassifiedTargets,
@@ -326,7 +326,7 @@ export function scopedListClassifier(
   return async (targets) => {
     const key = listKey(targets);
     const due = Date.now() - readAt >= INVENTORY_RETRY_MS;
-    const unknown = scopeToolsSilent(targetSelection, deviceInventory);
+    const unknown = silentTool(targetSelection, deviceInventory) != null;
     if (
       ((key !== inventoryListKey && (key !== attemptedKey || due)) || (unknown && due)) &&
       Date.now() < deadline
@@ -340,7 +340,7 @@ export function scopedListClassifier(
         devServerUrl,
         Math.max(1, deadline - Date.now())
       );
-      if (!scopeToolsSilent(targetSelection, fresh) || unknown) {
+      if (silentTool(targetSelection, fresh) == null || unknown) {
         deviceInventory = fresh;
         inventoryListKey = key;
       }
