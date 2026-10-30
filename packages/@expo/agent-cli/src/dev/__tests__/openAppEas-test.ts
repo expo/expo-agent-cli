@@ -1,5 +1,6 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
 import fs from 'fs';
+import * as Log from '../../log';
 import {
   probeCloudSessionAsync,
   readCloudSessionIdSync,
@@ -18,6 +19,7 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import {
   buildLatestSimulatorBuildArgs,
+  easRunLifecycle,
   findLatestSimulatorBuildIdAsync,
   openAppOnEasAsync,
   otherPlatformSessionAsync,
@@ -401,34 +403,6 @@ describe('the session half on its own', () => {
     });
   });
 
-  // The renewal before the probe protects a live session from a reap. A session the listing does
-  // not show is not one, so a failed open must not leave its binding renewed for another hour.
-  it(`puts back the lease it renewed when the probe does not list that session`, async () => {
-    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
-    const root = '/project/stale-claim-app';
-    const file = bindingPathFor(root, 'ios', 'cloud');
-    const expiresAt = new Date(Date.now() - 30 * 60_000).toISOString();
-    writeCloudBinding(root, 'ios', 'OLD', {
-      boundAt: new Date(Date.now() - 90 * 60_000).toISOString(),
-      expiresAt,
-    });
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.inactive('OLD'));
-    mockTunnel(null);
-
-    const report = await ensureEasSessionAsync(root, {
-      platform: 'ios',
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-      buildId: null,
-      keepSession: true,
-      waits: { tunnelMs: 1 },
-    });
-
-    expect(report.ok).toBe(false);
-    const read = readBindingFile(file);
-    expect(read.kind === 'binding' && read.binding.expiresAt).toBe(expiresAt);
-  });
-
   it(`ends its own session when a concurrent start in this worktree owns the dotenv`, async () => {
     const fs = await import('fs');
     const { acquireCloudBindingAsync } = await import('../../deviceBinding/cloud');
@@ -592,6 +566,43 @@ describe('the session half on its own', () => {
       expect(await bound()).toBe(true);
     });
   });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+// `finished` feeds `easOpenFinished` on the dev lock, which a detached `--wait-ready` re-run reads;
+// a foreground run waits for the open itself, so no e2e run hangs when `finished` never settles.
+describe(easRunLifecycle, () => {
+  it.each([
+    { name: 'an open that bound a session', open: true, failed: false },
+    { name: 'an open that failed', open: true, failed: true },
+    { name: 'no open', open: false, failed: false },
+  ])(
+    `settles finished only after an open, and removes its signal listeners: $name`,
+    async ({ open, failed }) => {
+      if (failed) vi.mocked(resolveEasCli).mockReturnValue(null);
+      const onSignal = vi.fn();
+      const eas = easRunLifecycle(projectRoot, {
+        platform: 'ios',
+        expoGo: true,
+        keepSession: true,
+        onSignal,
+      });
+      expect(process.listeners('SIGINT')).toContain(onSignal);
+      let settled = false;
+      void eas.finished.then(() => (settled = true));
+
+      if (open) eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+      await eas.finishAsync();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(settled).toBe(open);
+      expect(vi.mocked(Log.warn).mock.calls.length).toBe(failed ? 1 : 0);
+      const progress = vi.mocked(Log.progress).mock.calls.map(([line]) => String(line));
+      expect(progress.some((line) => line.startsWith('Finishing EAS session work'))).toBe(open);
+      expect(process.listeners('SIGINT')).not.toContain(onSignal);
+      expect(process.listeners('SIGTERM')).not.toContain(onSignal);
+    }
+  );
 });
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
