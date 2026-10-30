@@ -70,14 +70,13 @@ import {
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
 import { detachedPidLine } from './childVerdict';
-import { recordLastDevRequest } from './lastRequest';
+import { readLastDevRequest, recordLastDevRequest } from './lastRequest';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
   forwardedStepArgs,
   isDevServerStep,
   withDevice,
-  withDevServerPort,
   withForwardedExpoArgs,
   withPortArg,
 } from './forwardedArgs';
@@ -89,12 +88,9 @@ import {
   resolvePlannedPortAsync,
   type PortCollision,
 } from './portCollision';
+import { planDevServerPortAsync, portDemandedError } from './devServerPort';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
-import {
-  devServerRunningReason,
-  devServerRunningStopAsync,
-  runningDevServerAsync,
-} from './runningDevServer';
+import { devServerRunningStopAsync } from './runningDevServer';
 import { easCommandPrefix } from '../utils/easCli';
 import { CONFIG_LOCATION } from '../settings/read';
 
@@ -137,6 +133,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
       eas: options.deviceBackend === 'eas',
     });
   }
+  // Read before it is replaced: an untracked dev server is looked for on its port too.
+  const previousPort = readLastDevRequest(projectRoot)?.port;
   recordLastDevRequest(projectRoot, options);
 
   const state = await probeProjectStateAsync(projectRoot, {
@@ -185,7 +183,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // passed it [observed — friction run 7, F71; live run S5].
   const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
 
-  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options);
+  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options, previousPort);
   warnDroppedExpoArgs(plan, dropped);
 
   // A draft that builds is bound here, not in the resolver: after the port check above and the
@@ -309,53 +307,6 @@ async function reportRunResultAsync(
   const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
   reportFollowUps('dev', followups, { json: true });
   Log.log(JSON.stringify({ ...ran, followups }, null, 2));
-}
-
-/**
- * Pick the dev server port and set it on every step that serves. With a live lock, list no steps.
- */
-async function planDevServerPortAsync(
-  projectRoot: string,
-  lock: DevServerLockInfo | null,
-  forwardedPlan: StartPlan,
-  options: DevOptions
-): Promise<StartPlan> {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
-  // the port is picked here, before the plan is printed, and set on every step that
-  // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
-  // holds the port, and exits 0 [observed — live suite, 2026-10-05].
-  const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
-  let plan: StartPlan = forwardedPlan;
-  if (lock) {
-    // Only a plan gets here with a live lock; a run stopped on it before the probe. The plan lists
-    // no steps, because the run does none, whatever the forwarded options made of the last step.
-    const running = await runningDevServerAsync(projectRoot, lock);
-    plan = {
-      ...forwardedPlan,
-      steps: [],
-      reasons: [...forwardedPlan.reasons, devServerRunningReason(running)],
-      devServerPort: { port: lock.port, movedFrom: null, state: 'running', phase: running.phase },
-    };
-  } else if (serving) {
-    const planned = await resolvePlannedPortAsync(options.port);
-    if (!planned.bindable && options.port != null && options.mode !== 'plan') {
-      throw await portDemandedError(options.port, options.platform);
-    }
-    plan = {
-      ...withDevServerPort(forwardedPlan, planned.port),
-      // A port the plan probed is only the port that was free when the plan was printed. A named
-      // `--port` is not picked, so nothing is said about it.
-      reasons:
-        options.mode === 'plan' && options.port == null
-          ? [...forwardedPlan.reasons, 'The dev server port is picked again when the plan runs.']
-          : forwardedPlan.reasons,
-      devServerPort:
-        options.port != null
-          ? { port: planned.port, movedFrom: null, state: 'named', taken: !planned.bindable }
-          : { port: planned.port, movedFrom: planned.movedFrom, state: 'picked' },
-    };
-  }
-  return plan;
 }
 
 /** Warn that the last step is not `expo start`, so the forwarded options were not passed on. */
@@ -991,40 +942,6 @@ function warnPortMove(move: Parameters<typeof formatPortMove>[0], expected: numb
         : `Pass --port ${expected} to require that port instead of moving, which fails when it is taken.`
     }`
   );
-}
-
-/**
- * The failure for a `--port` that was named and could not be had.
- *
- * An **outcome**, not a tool error and not a person: the command worked, and the thing it was asked
- * to do did not happen (llp/0010 §Exit codes). It never suggests the command that just failed —
- * running it again unchanged stops in the same place until the port is freed.
- */
-async function portDemandedError(port: number, platform: PlanPlatform): Promise<CommandError> {
-  const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
-  const [listener, free] = await Promise.all([
-    findPortListenerAsync(port),
-    findFreePortAsync(port + 1),
-  ]);
-  const holder = listener
-    ? `pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}`
-    : 'a process this machine would not name';
-
-  const error = new CommandError(
-    'PORT_IN_USE',
-    [
-      `Port ${port} is taken, so no dev server was started on it.`,
-      `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
-      `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
-    ].join('\n')
-  );
-  // Never the command that just failed: it would stop in exactly the same place.
-  error.suggestedCommand =
-    free == null
-      ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
-      : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
-  error.exitCode = EXIT_OUTCOME_FAILED;
-  return error;
 }
 
 /**

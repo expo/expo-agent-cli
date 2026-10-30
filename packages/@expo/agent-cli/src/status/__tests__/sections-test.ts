@@ -424,6 +424,26 @@ describe(buildDevServerStatus, () => {
     });
   });
 
+  // N2-63: a tunnel the dev server that answered did not confirm is not its tunnel.
+  it(`should not report a tunnel that no lock or manifest confirmed`, () => {
+    const probe: DevServerProbe = { reachable: true, targets: [] };
+    const reach = {
+      advertised: {
+        url: 'https://old-run.on.expo.app',
+        host: 'old-run.on.expo.app',
+        hostType: 'tunnel' as const,
+      },
+      running: false,
+      reason: null,
+      tunnelUnconfirmed: true,
+    };
+
+    expect(buildDevServerStatus(url, probe, readiness, undefined, reach)).toMatchObject({
+      hostType: 'tunnel',
+      tunnelUrl: null,
+    });
+  });
+
   it(`should report a dev server without a connected app`, () => {
     const probe: DevServerProbe = { reachable: true, targets: [] };
 

@@ -365,7 +365,7 @@ export function buildDevServerStatus(
   // A tunnel URL is reported only while both parts hold — see `isTunnelCurrent`. A dev server that
   // is down cannot be reached at its tunnel either, whatever the log still says.
   const tunnelUrl =
-    reach && running && isTunnelCurrent({ ...reach, running: true })
+    reach && running && !reach.tunnelUnconfirmed && isTunnelCurrent({ ...reach, running: true })
       ? (reach.advertised?.url ?? null)
       : null;
   const reachFields = {

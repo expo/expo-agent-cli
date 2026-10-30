@@ -452,6 +452,27 @@ lock would be a process nothing could find, wait on, or stop. The lock names its
 and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
 `expo` child exactly as the foreground one does.
 
+A dev child killed with `SIGKILL` leaves its Metro running with no lock: an untracked dev
+server. With no lock, `dev:stop` looks where `status` looks: the port of the last `dev`
+request, then the discovery ladder. A foreground run on a named port writes no log, so
+the ladder alone does not find it. `dev` records its own request before it looks, so it
+also looks at the port of the request before it and at its own `--port`. The
+server is this project's when its `/status` names this project's root, by the check
+`status` reports as `projectRootMatched` (`waitForBundlerReadyAsync` and
+`matchProjectRoot`, read through `src/dev/untrackedDevServer.ts`). `dev:stop` stops that
+server without `--force`, by the same two proofs `--force` needs about the port and the
+process, and reports `untracked: true`. `--port <n>` with no lock reads the same check
+for that port. A server that names another project's root, or none, still needs
+`--force`. When the process cannot be named or is not a dev server's, nothing is
+signalled, the reason is `untracked-dev-server`, and the exit is 20. The e2e cases "after a SIGKILL of a foreground dev" in
+`e2e/__tests__/stop-test.ts` enforce the stop, and the port the next `dev` takes.
+
+The captured log of an untracked server may be an earlier run's, so `status` does not
+take its tunnel from the log. It asks the manifest of the server that answered
+(`resolveDevServerReachAsync(projectRoot, devServerUrl)`). A manifest that names a tunnel
+is the tunnel. Otherwise the line says `tunnel unknown`, `tunnelUrl` is null, and no
+development-build link is built on a tunnel nobody confirmed.
+
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would
 print an object nobody reads and switch the plan's subprocess output to `capture`, which
@@ -615,6 +636,18 @@ app to whatever holds the port, and exits 0.
 
 A busy port with no live lock of this project behind it is busy whoever holds it, an
 `npx expo start` run outside this CLI included: the plan moves to the next free port.
+
+One exception: this project's untracked dev server (§Daemonization). Before the port is
+resolved, `dev` looks where `status` looks. A server whose `/status` names this project
+is stopped by `dev:stop`'s own check, without `--force`, and the run takes its port. It
+is not reused, as a locked server is: no lock names its pid, so nothing can follow it,
+wait on it, or stop it, and its tunnel is not known. It is not left beside a second
+server either, because that is two servers for one project. Stopping it and taking its
+port is the nearest thing to the lock rule: one project, one dev server, held by a lock.
+A warning names the port and the pid. Under `--plan` nothing is stopped: a reason names
+the server and says the run stops it, and `devServerPort` is its port. When the stop
+fails, the run stops with `UNTRACKED_DEV_SERVER`, exit 20, and recovers into
+`dev:stop --port <n> --force`.
 
 A server on a port is this project's unless `/status` names another project root in the
 `X-React-Native-Project-Root` header. No header, or a root that contains this project (a

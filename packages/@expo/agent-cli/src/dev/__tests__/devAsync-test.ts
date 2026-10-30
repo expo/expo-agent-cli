@@ -28,7 +28,8 @@ import { findFreePortAsync, formatPortMove, resolvePlannedPortAsync } from '../p
 import { findPortListenerAsync } from '../portListener';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
-import { isExpoDevServerAsync } from '../stopAsync';
+import { devStopAsync, isExpoDevServerAsync } from '../stopAsync';
+import { findUntrackedDevServerAsync } from '../untrackedDevServer';
 import { easRunLifecycle } from '../openAppEas';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
@@ -132,6 +133,11 @@ vi.mock('../detachAsync', async () => ({
 vi.mock('../stopAsync', async () => ({
   ...(await vi.importActual<typeof import('../stopAsync')>('../stopAsync')),
   isExpoDevServerAsync: vi.fn(async () => false),
+  devStopAsync: vi.fn(async () => 0),
+}));
+vi.mock('../untrackedDevServer', async () => ({
+  ...(await vi.importActual<typeof import('../untrackedDevServer')>('../untrackedDevServer')),
+  findUntrackedDevServerAsync: vi.fn(async () => null),
 }));
 // The follow-ups of a run are reported rather than embedded in the emitted plan, so this is where
 // a test reads them. The real reporter still runs, so the `Suggested next:` section is real too.
@@ -234,6 +240,8 @@ beforeEach(() => {
   mockReported.length = 0;
   vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
   vi.mocked(probeBundlerAsync).mockReset().mockResolvedValue(notAnswering);
+  vi.mocked(findUntrackedDevServerAsync).mockReset().mockResolvedValue(null);
+  vi.mocked(devStopAsync).mockReset().mockResolvedValue(0);
   vi.mocked(readLastBuildRecord).mockReturnValue({});
   vi.mocked(runExpoAsync).mockResolvedValue(0);
   vi.mocked(isInteractive).mockReturnValue(true);
@@ -779,6 +787,42 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
       expect(Log.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — this project's dev server
+  // with no lock (its CLI process ended) is replaced, not joined by a second one on the next port.
+  describe("this project's dev server with no lock", () => {
+    const untracked = { port: 8081, url: 'http://127.0.0.1:8081', pid: 777 };
+
+    it(`should say under --plan that the run stops it and takes its port`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(findUntrackedDevServerAsync).mockResolvedValue(untracked);
+
+      await devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']));
+
+      expect(devStopAsync).not.toHaveBeenCalled();
+      const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+      expect(plan.devServerPort).toEqual({ port: 8081, movedFrom: null, state: 'picked' });
+      expect(plan.reasons).toContain(
+        "This project's dev server on port 8081 (pid 777) has no lock: its CLI process ended. The run stops it and takes port 8081."
+      );
+    });
+
+    it(`should stop with the reason when it cannot stop it`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(findUntrackedDevServerAsync).mockResolvedValue(untracked);
+      vi.mocked(devStopAsync).mockImplementation(async (_root, _options, report) => {
+        report?.onReport?.({ detail: 'pid 777 was still running' } as never);
+        return 20;
+      });
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'UNTRACKED_DEV_SERVER',
+        exitCode: 20,
+        suggestedCommand: 'npx @expo/agent-cli dev:stop --port 8081 --force',
+      });
+      expect(runDevServerAsync).not.toHaveBeenCalled();
     });
   });
 

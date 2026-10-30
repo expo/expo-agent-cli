@@ -1002,7 +1002,7 @@ async function probeDevServerStatusAsync(
     // What the dev server printed about where a *device* reaches it (`src/dev/advertisedUrl.ts`).
     // One file read and one lock probe, and the answer the `url` above cannot give: a tunnelled run
     // listens on `127.0.0.1` and is reached at its tunnel host.
-    resolveDevServerReachAsync(projectRoot),
+    resolveDevServerReachAsync(projectRoot, discovery.devServerUrl),
   ]);
   return buildDevServerStatus(
     discovery.devServerUrl,

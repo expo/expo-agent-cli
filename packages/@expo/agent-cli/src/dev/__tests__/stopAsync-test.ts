@@ -1,5 +1,7 @@
 import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
+import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
+import { probeBundlerAsync } from '../../runtime/bundlerStatus';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
@@ -28,6 +30,13 @@ vi.mock('../../devLock', () => {
     ),
   };
 });
+vi.mock('../../runtime/discoverDevServer', async (importActual) => ({
+  ...(await importActual<typeof import('../../runtime/discoverDevServer')>()),
+  discoverDevServerAsync: vi.fn(),
+}));
+vi.mock('../../runtime/bundlerStatus', () => ({
+  probeBundlerAsync: vi.fn(),
+}));
 vi.mock('../portListener', () => ({
   findPortListenerAsync: vi.fn(async () => null),
   isPortInUseAsync: vi.fn(async () => false),
@@ -76,6 +85,11 @@ function printedErrors(): string {
   return vi.mocked(console.error).mock.calls.flat().join('\n');
 }
 
+/** What `status` reads as `projectRootMatched` for a dev server that answers. */
+function projectRootMatch(projectRootMatched: boolean | null) {
+  return { answering: true, projectRootMatched, reportedProjectRoot: null };
+}
+
 let originalFetch: typeof fetch | undefined;
 let killed: { pid: number; signal: string }[] = [];
 let killSpy: MockInstance;
@@ -96,6 +110,14 @@ beforeEach(() => {
   vi.mocked(isDevServerLockHeldAsync).mockImplementation(
     async (root) => (await readDevServerLockAsync(root)) != null
   );
+  vi.mocked(discoverDevServerAsync).mockResolvedValue({
+    reachable: false,
+    targets: [],
+    devServerUrl: 'http://127.0.0.1:8081',
+    source: 'default',
+    discovered: false,
+  });
+  vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(null));
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -241,6 +263,7 @@ describe(devStopAsync, () => {
       'reason',
       'signal',
       'stopped',
+      'untracked',
       'url',
       'waitedMs',
     ]);
@@ -466,6 +489,151 @@ describe(devStopAsync, () => {
     await devStopAsync(projectRoot, options());
 
     expect(JSON.parse(printed()).detail).toContain('--port');
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a dev child killed with
+  // SIGKILL leaves Metro running with no lock. `status` finds it by the scan and matches its project
+  // root; dev:stop finds it the same way and stops it.
+  describe('no lock, and the scan finds a dev server', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+      vi.mocked(discoverDevServerAsync).mockResolvedValue({
+        reachable: true,
+        targets: [],
+        devServerUrl: 'http://127.0.0.1:8082',
+        source: 'scan',
+        discovered: true,
+      });
+      vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 9191, command: 'node' });
+      livePids.add(9191);
+      mockPort({ answering: true });
+    });
+
+    it(`should stop it without --force when status matches it to this project`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(probeBundlerAsync).toHaveBeenCalledWith(
+        'http://127.0.0.1:8082',
+        expect.objectContaining({ projectRoot })
+      );
+      expect(killed).toEqual([{ pid: 9191, signal: 'SIGTERM' }]);
+      expect(JSON.parse(printed())).toMatchObject({
+        stopped: true,
+        untracked: true,
+        forced: false,
+        port: 8082,
+        pid: 9191,
+        lockHeld: false,
+        reason: null,
+      });
+    });
+
+    it(`should say the stopped server had no lock`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+
+      await devStopAsync(projectRoot, options({ json: false }));
+
+      expect(printed()).toContain("This project's dev server had no lock: its CLI process ended.");
+    });
+
+    it(`should name it and signal nothing when this machine will not name its process`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+      vi.mocked(findPortListenerAsync).mockResolvedValue(null);
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OUTCOME_FAILED);
+
+      expect(killed).toEqual([]);
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({
+        stopped: false,
+        untracked: true,
+        port: 8082,
+        reason: 'untracked-dev-server',
+      });
+      expect(report.detail).toContain('its CLI process ended');
+    });
+
+    // A foreground `dev --port 8095` writes no log; `status` finds it by the last request's port.
+    it(`should look at the port of the last dev request first, as status does`, async () => {
+      vol.fromJSON({
+        [`${projectRoot}/.expo/agent-cli-last-dev.json`]: JSON.stringify({
+          version: 1,
+          platform: 'web',
+          port: 8095,
+          buildBackend: null,
+          runTarget: null,
+        }),
+      });
+      vi.mocked(discoverDevServerAsync).mockImplementation(async (url) =>
+        url === 'http://127.0.0.1:8095'
+          ? { reachable: true, targets: [], devServerUrl: url, source: 'flag', discovered: false }
+          : {
+              reachable: false,
+              targets: [],
+              devServerUrl: '',
+              source: 'default',
+              discovered: false,
+            }
+      );
+      vi.mocked(probeBundlerAsync).mockImplementation(async (url) =>
+        projectRootMatch(url === 'http://127.0.0.1:8095' ? true : null)
+      );
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(JSON.parse(printed())).toMatchObject({ stopped: true, untracked: true, port: 8095 });
+    });
+
+    it.each([
+      ['names another project', false],
+      ['names no project', null],
+    ] as const)(`should name nothing when its /status %s`, async (_, matched) => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(matched));
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(killed).toEqual([]);
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({ port: null, pid: null, untracked: false });
+      expect(report.detail).toContain('--port');
+    });
+  });
+
+  // The same proof when the caller names the port: a dev server status matches to this project
+  // stops without --force, and another project's still needs it.
+  describe('--port with no lock', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+      vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 9191, command: 'node' });
+      livePids.add(9191);
+      mockPort({ answering: true });
+    });
+
+    it(`should stop this project's dev server without --force`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+
+      await expect(devStopAsync(projectRoot, options({ port: 8081 }))).resolves.toBe(EXIT_OK);
+
+      expect(killed).toEqual([{ pid: 9191, signal: 'SIGTERM' }]);
+      expect(JSON.parse(printed())).toMatchObject({ stopped: true, untracked: true, port: 8081 });
+    });
+
+    it(`should still refuse another project's dev server without --force`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(false));
+
+      await expect(devStopAsync(projectRoot, options({ port: 8081 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+
+      expect(killed).toEqual([]);
+      expect(JSON.parse(printed())).toMatchObject({
+        stopped: false,
+        untracked: false,
+        reason: 'foreign-dev-server',
+      });
+    });
   });
 
   // @ref llp/0021-honest-reports.rfc.md §How they show up — friction run 7,
@@ -924,6 +1092,7 @@ describe(buildFollowUps, () => {
     easPlatform: null,
     reason: null,
     detail: null,
+    untracked: false,
     waitedMs: 0,
     followups: [],
     ...overrides,

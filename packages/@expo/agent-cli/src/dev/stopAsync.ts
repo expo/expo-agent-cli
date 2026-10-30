@@ -51,6 +51,7 @@ import { debugEvent, event } from './events';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
 import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
+import { findUntrackedDevServerAsync, servesThisProjectAsync } from './untrackedDevServer';
 import type { DevStopOptions } from './resolveStopOptions';
 
 /** How often to re-check whether the dev server has gone. */
@@ -70,6 +71,11 @@ export type DevStopSkipReason =
   | 'not-running'
   /** Something listens, but no lock proves this project's ownership of it. */
   | 'foreign-dev-server'
+  /**
+   * This project's dev server with no lock (its CLI process ended), which this run could not
+   * signal: this machine would not name its process, or the process is not a dev server's.
+   */
+  | 'untracked-dev-server'
   /** The signal was sent and the dev server was still there when the wait ran out. */
   | 'still-running';
 
@@ -177,6 +183,12 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   reason: DevStopSkipReason | null;
   /** One sentence of detail for {@link reason}. Null exactly when {@link stopped} is true. */
   detail: string | null;
+  /**
+   * No lock answered, and the dev server on the port names this project on `/status`: its CLI
+   * process ended and left it running. The check is the one `status` reports as
+   * `projectRootMatched`, and it is the proof that lets this run stop it without `--force`.
+   */
+  untracked: boolean;
   /** How long the whole stop took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -234,7 +246,10 @@ export async function devStopAsync(
   const { report, finishing } =
     lock != null && lockOwnsTarget
       ? await stopLockedDevServerAsync(lock, options, startedAt)
-      : { report: await stopUnlockedDevServerAsync(options, startedAt, lock), finishing: false };
+      : {
+          report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
+          finishing: false,
+        };
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
@@ -305,6 +320,7 @@ async function stopLockedDevServerAsync(
     easPlatform: lock.easPlatform,
     reason: null,
     detail: null,
+    untracked: false,
     waitedMs: 0,
     followups: [],
   };
@@ -346,8 +362,18 @@ async function stopLockedDevServerAsync(
   return { report: base, finishing: false };
 }
 
+/** Why this project's dev server with no lock was left running: its process is not a dev server's. */
+function untrackedRefusalDetail(port: number, listener: PortListener | null): string {
+  const holder =
+    listener != null
+      ? `but pid ${listener.pid} (${listener.command}) does not look like a dev server`
+      : 'but this machine would not name the process holding the port';
+  return `port ${port} answers as this project's dev server with no lock (its CLI process ended), ${holder}, so nothing was signalled`;
+}
+
 /**
- * No lock answered *for the target*. A listener may still exist, but its ownership is unknown.
+ * No lock answered *for the target*. A listener may still exist, and its `/status` decides whose it is:
+ * this project's root, which `status` matches too, is stopped as a lock's would be.
  *
  * The two are told apart by the port, and the difference matters more than it looks: killing a
  * listener nobody asked about is the one thing this command must not do by accident. So the
@@ -358,11 +384,12 @@ async function stopLockedDevServerAsync(
  * port, and acting on it is F60.
  */
 async function stopUnlockedDevServerAsync(
+  projectRoot: string,
   options: DevStopOptions,
   startedAt: number,
   elsewhereLock: DevServerLockInfo | null = null
 ): Promise<DevStopResultJson> {
-  const port = options.port ?? null;
+  let port = options.port ?? null;
   const base: DevStopResultJson = {
     stopped: false,
     pid: null,
@@ -377,14 +404,22 @@ async function stopUnlockedDevServerAsync(
     portStillAnswering: null,
     reason: 'not-running',
     detail: 'no dev-server lock answered for this project, and nothing was listening for it',
+    untracked: false,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
 
   if (port == null) {
-    base.detail =
-      'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
-    return base;
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a dev child killed with
+    // SIGKILL leaves its Metro running with no lock. `status` finds it by the discovery ladder,
+    // so this looks there too.
+    const untracked = await findUntrackedDevServerAsync(projectRoot);
+    if (untracked == null) {
+      base.detail =
+        'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
+      return base;
+    }
+    base.port = port = untracked.port;
   }
 
   const listener = await findPortListenerAsync(port);
@@ -405,8 +440,16 @@ async function stopUnlockedDevServerAsync(
     return base;
   }
 
+  // The project root `status` matches is the proof a lock would have given: this project's server.
+  base.untracked = base.url != null && (await servesThisProjectAsync(base.url, projectRoot));
+
   // @ref llp/0005 §Stopping the app — both proofs, or nothing is killed.
-  if (options.force && isDevServer && listener != null && looksLikeDevServerProcess(listener)) {
+  if (
+    (options.force || base.untracked) &&
+    isDevServer &&
+    listener != null &&
+    looksLikeDevServerProcess(listener)
+  ) {
     const sent = await signalProcessAsync(listener.pid, options.signal);
     base.signal = sent.delivered ? options.signal : null;
     // The pid, again, rather than the port. `--force` proved *this process* was the dev server on
@@ -419,13 +462,20 @@ async function stopUnlockedDevServerAsync(
     base.portStillAnswering = !outcome.portFree;
     if (outcome.processGone) {
       base.stopped = true;
-      base.forced = true;
+      base.forced = !base.untracked;
       base.reason = null;
       base.detail = null;
       return base;
     }
     base.reason = 'still-running';
     base.detail = `${options.signal} was sent to ${listener.pid}, and that process was still running ${options.timeoutMs}ms later`;
+    return base;
+  }
+
+  if (base.untracked) {
+    base.reason = 'untracked-dev-server';
+    base.detail = untrackedRefusalDetail(port, listener);
+    base.waitedMs = Date.now() - startedAt;
     return base;
   }
 
@@ -751,6 +801,9 @@ function printHumanReport(report: DevStopResultJson, finishing: boolean): void {
       )
     );
   }
+  if (report.stopped && report.untracked) {
+    lines.push(chalk.dim(` This project's dev server had no lock: its CLI process ended.`));
+  }
   if (finishing && report.pid != null) {
     lines.push(
       chalk.dim(
@@ -767,6 +820,13 @@ function printHumanReport(report: DevStopResultJson, finishing: boolean): void {
 
 /** The what / why / how for a dev server that is still running. */
 function explainFailure(report: DevStopResultJson, options: DevStopOptions): string {
+  if (report.reason === 'untracked-dev-server') {
+    return [
+      chalk.red(`This project's dev server on port ${report.port} was not stopped.`),
+      `Why: ${report.detail}.`,
+      `How: run "lsof -nP -iTCP:${report.port} -sTCP:LISTEN" to name the process, and stop it.`,
+    ].join('\n');
+  }
   if (report.reason === 'foreign-dev-server') {
     // `url` is set on this path exactly when the port answered `packager-status:running`, which is
     // the difference between "someone else's dev server" and "not a dev server at all". They need
