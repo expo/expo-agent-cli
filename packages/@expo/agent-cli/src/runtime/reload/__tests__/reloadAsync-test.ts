@@ -22,6 +22,7 @@ import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../../utils/__tests__/mockPlatform';
 import { printed } from '../../../utils/__tests__/printed';
+import { mockSpawnQueue } from '../../../utils/__tests__/fakeSpawn';
 
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>();
@@ -177,32 +178,6 @@ function mockReloadingDevServer() {
   return fakeSocket([{ 'socket#1': 'role=ios' }, { 'socket#4': 'role=ios' }], () =>
     server.listing([RELOADED_EXPO_GO_TARGET])
   );
-}
-
-function mockSpawnQueue(
-  answers: { stdout?: string; stderr?: string; exitCode?: number | null }[],
-  onCall?: (index: number) => void
-) {
-  let call = 0;
-  vi.mocked(spawn).mockImplementation((() => {
-    // The index advances on every spawn, whether or not a caller passed `onCall`. It used to
-    // advance inside `onCall?.(call++)`, where the optional call skips its own argument — so a test
-    // with no `onCall` answered every spawn from `answers[0]`, and an exit code meant for the
-    // second command was never delivered.
-    const index = call++;
-    const answer = answers[index] ?? {};
-    onCall?.(index);
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (answer.stdout) child.stdout.emit('data', answer.stdout);
-      if (answer.stderr) child.stderr.emit('data', answer.stderr);
-      child.emit('close', answer.exitCode === undefined ? 0 : answer.exitCode, null);
-    });
-    return child as any;
-  }) as any);
 }
 
 /**

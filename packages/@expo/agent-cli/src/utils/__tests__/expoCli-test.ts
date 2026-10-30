@@ -1,11 +1,10 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
 import { resolveExpoCli, runExpoAsync, spawnExpoAsync } from '../expoCli';
-import type { Mock } from 'vitest';
 import { mockPlatform } from './mockPlatform';
+import { mockSpawnChild } from './fakeSpawn';
 
 const projectRoot = path.resolve('/project');
 
@@ -16,22 +15,6 @@ const projectRoot = path.resolve('/project');
  * hold on posix. Building it the same way keeps the assertion about *which* bin was chosen.
  */
 const projectBin = (name: string) => path.join(projectRoot, 'node_modules', '.bin', name);
-
-interface FakeChild extends EventEmitter {
-  stdout: EventEmitter | null;
-  stderr: EventEmitter | null;
-  kill: Mock;
-}
-
-function mockSpawn({ piped = false }: { piped?: boolean } = {}): FakeChild {
-  const child = Object.assign(new EventEmitter(), {
-    stdout: piped ? new EventEmitter() : null,
-    stderr: piped ? new EventEmitter() : null,
-    kill: vi.fn(),
-  });
-  vi.mocked(spawn).mockReturnValue(child as any);
-  return child;
-}
 
 beforeEach(() => {
   // A fixed platform for every test but the Windows one: the resolver picks the bin *name* from
@@ -85,7 +68,7 @@ describe(resolveExpoCli, () => {
 describe(runExpoAsync, () => {
   it(`should spawn the expo CLI in the project with inherited stdio`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['install', 'expo-sqlite']);
     child.emit('close', 0, null);
@@ -100,7 +83,7 @@ describe(runExpoAsync, () => {
 
   it(`should forward a non-zero exit code`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['install']);
     child.emit('close', 17, null);
@@ -110,7 +93,7 @@ describe(runExpoAsync, () => {
 
   it(`should treat an interrupt as a clean exit`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['start']);
     child.emit('close', null, 'SIGINT');
@@ -120,7 +103,7 @@ describe(runExpoAsync, () => {
 
   it(`should report a signal exit as a failure`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['start']);
     child.emit('close', null, 'SIGSEGV');
@@ -130,7 +113,7 @@ describe(runExpoAsync, () => {
 
   it(`should forward terminal signals to the child instead of exiting`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['start']);
     process.emit('SIGINT');
@@ -145,7 +128,7 @@ describe(runExpoAsync, () => {
 
   it(`should stop listening for signals once the child exits`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
     const before = process.listenerCount('SIGINT');
 
     const promise = runExpoAsync(projectRoot, ['start']);
@@ -159,7 +142,7 @@ describe(runExpoAsync, () => {
 
   it(`should explain how to install the CLI when it cannot be spawned`, async () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['start']);
     child.emit('error', Object.assign(new Error('spawn npx ENOENT'), { code: 'ENOENT' }));
@@ -173,7 +156,7 @@ describe(runExpoAsync, () => {
 describe(spawnExpoAsync, () => {
   it(`should tell the captured CLI that nothing can answer it`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn({ piped: true });
+    const child = mockSpawnChild();
 
     const promise = spawnExpoAsync(projectRoot, ['export', '--platform', 'web']);
     child.stdout!.emit('data', 'Exported\n');
@@ -193,7 +176,7 @@ describe(spawnExpoAsync, () => {
   // code it read at start-up; the pipe below is what keeps the prompts failing fast without it.
   it(`should leave CI unset for a caller that needs the file watcher`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn({ piped: true });
+    const child = mockSpawnChild();
 
     const promise = spawnExpoAsync(projectRoot, ['start', '--go'], { output: 'tee', ci: false });
     child.emit('close', 0, null);
@@ -208,7 +191,7 @@ describe(spawnExpoAsync, () => {
 
   it(`should leave the inherited run interactive, where a person has the terminal`, async () => {
     vol.fromJSON({ [`${projectRoot}/node_modules/.bin/expo`]: '' });
-    const child = mockSpawn();
+    const child = mockSpawnChild({ piped: false });
 
     const promise = runExpoAsync(projectRoot, ['prebuild']);
     child.emit('close', 0, null);

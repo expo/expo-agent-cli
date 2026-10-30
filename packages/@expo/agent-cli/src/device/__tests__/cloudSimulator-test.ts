@@ -14,8 +14,6 @@
 // dotenv, and a binary that is not the EAS CLI. What is deliberately *not* pinned is that the
 // service accepts any of it, which no test on a signed-out machine can claim.
 
-import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
@@ -56,6 +54,7 @@ import {
   cloudVerbNotSupportedError,
 } from '../cloudErrors';
 import { LIVE_SESSION_STATUSES, sessionPhase } from '../cloudSessionList';
+import { mockSpawnAlways, mockSpawnQueue, type SpawnCall } from '../../utils/__tests__/fakeSpawn';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 /**
@@ -89,7 +88,7 @@ beforeEach(() => {
 });
 
 /** One recorded spawn, so a test can assert on the argv that was actually sent. */
-let spawned: { command: string; args: string[] }[] = [];
+let spawned: SpawnCall[] = [];
 
 /** Make every `eas` spawn answer the same way. */
 function mockEas({
@@ -103,24 +102,12 @@ function mockEas({
   exitCode?: number | null;
   spawnError?: string;
 } = {}): void {
-  spawned = [];
-  vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-    spawned.push({ command, args });
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (spawnError) {
-        child.emit('error', Object.assign(new Error(spawnError), { code: 'ENOENT' }));
-        return;
-      }
-      if (stdout) child.stdout.emit('data', stdout);
-      if (stderr) child.stderr.emit('data', stderr);
-      child.emit('close', exitCode, null);
-    });
-    return child as any;
-  }) as any);
+  spawned = mockSpawnAlways({
+    stdout,
+    stderr,
+    exitCode,
+    error: spawnError ? Object.assign(new Error(spawnError), { code: 'ENOENT' }) : undefined,
+  });
 }
 
 /** One session row, in the shape `simulator:list --json` prints [observed — eas-cli@22.2.0]. */
@@ -721,24 +708,10 @@ describe(probeCloudSessionAsync, () => {
   // "your session ended" next to an account that cannot start a new one sends a start that fails.
   it(`asks for availability before calling a bound session ended`, async () => {
     project();
-    let call = 0;
-    spawned = [];
-    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-      spawned.push({ command, args });
-      const answer =
-        call++ === 0
-          ? listJson()
-          : `{"available": false, "waitlistUrl": "${CLOUD_SIMULATOR_WAITLIST_URL}"}`;
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        child.stdout.emit('data', answer);
-        child.emit('close', 0, null);
-      });
-      return child as any;
-    }) as any);
+    spawned = mockSpawnQueue([
+      { stdout: listJson() },
+      { stdout: `{"available": false, "waitlistUrl": "${CLOUD_SIMULATOR_WAITLIST_URL}"}` },
+    ]);
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['gone'] });
 
@@ -751,19 +724,7 @@ describe(probeCloudSessionAsync, () => {
 
   it(`calls a bound session that the listing no longer shows ended, once the account has the feature`, async () => {
     project();
-    let call = 0;
-    vi.mocked(spawn).mockImplementation((() => {
-      const answer = call++ === 0 ? listJson() : '{"available": true}';
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        child.stdout.emit('data', answer);
-        child.emit('close', 0, null);
-      });
-      return child as any;
-    }) as any);
+    mockSpawnQueue([{ stdout: listJson() }, { stdout: '{"available": true}' }]);
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['gone'] });
 
@@ -817,21 +778,7 @@ describe(probeCloudSessionAsync, () => {
 
   it(`is none with nothing running, and only then asks the read-only availability question`, async () => {
     project();
-    let call = 0;
-    spawned = [];
-    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-      spawned.push({ command, args });
-      const answer = call++ === 0 ? listJson() : '{"available": true}';
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        child.stdout.emit('data', answer);
-        child.emit('close', 0, null);
-      });
-      return child as any;
-    }) as any);
+    spawned = mockSpawnQueue([{ stdout: listJson() }, { stdout: '{"available": true}' }]);
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: [] });
 
@@ -849,24 +796,10 @@ describe(probeCloudSessionAsync, () => {
 
   it(`says so when the account does not have the feature at all`, async () => {
     project();
-    let call = 0;
-    spawned = [];
-    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-      spawned.push({ command, args });
-      const answer =
-        call++ === 0
-          ? listJson()
-          : `{"available": false, "waitlistUrl": "${CLOUD_SIMULATOR_WAITLIST_URL}"}`;
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        child.stdout.emit('data', answer);
-        child.emit('close', 0, null);
-      });
-      return child as any;
-    }) as any);
+    spawned = mockSpawnQueue([
+      { stdout: listJson() },
+      { stdout: `{"available": false, "waitlistUrl": "${CLOUD_SIMULATOR_WAITLIST_URL}"}` },
+    ]);
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: [] });
 
@@ -908,27 +841,15 @@ describe(probeCloudSessionAsync, () => {
 
   it(`finds a bound session on a later page instead of calling it ended`, async () => {
     project();
-    let call = 0;
-    spawned = [];
-    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-      spawned.push({ command, args });
-      const answer =
-        call++ === 0
-          ? JSON.stringify({
-              sessions: [sessionRow({ id: 'other-1' })],
-              pageInfo: { hasNextPage: true, endCursor: 'c1' },
-            })
-          : listJson(sessionRow({ id: 'sess-1' }));
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        child.stdout.emit('data', answer);
-        child.emit('close', 0, null);
-      });
-      return child as any;
-    }) as any);
+    spawned = mockSpawnQueue([
+      {
+        stdout: JSON.stringify({
+          sessions: [sessionRow({ id: 'other-1' })],
+          pageInfo: { hasNextPage: true, endCursor: 'c1' },
+        }),
+      },
+      { stdout: listJson(sessionRow({ id: 'sess-1' })) },
+    ]);
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['sess-1'] });
 
@@ -971,33 +892,18 @@ describe(probeCloudSessionAsync, () => {
 
   it(`is unknown, with the failure, when a later page fails`, async () => {
     project();
-    let call = 0;
-    spawned = [];
-    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-      spawned.push({ command, args });
-      const first = call++ === 0;
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        if (first)
-          child.stdout.emit(
-            'data',
-            JSON.stringify({
-              sessions: [sessionRow({ id: 'other-1' })],
-              pageInfo: { hasNextPage: true, endCursor: 'c1' },
-            })
-          );
-        else
-          child.stderr.emit(
-            'data',
-            'An Expo user account is required to proceed. Log in with eas login'
-          );
-        child.emit('close', first ? 0 : 1, null);
-      });
-      return child as any;
-    }) as any);
+    spawned = mockSpawnQueue([
+      {
+        stdout: JSON.stringify({
+          sessions: [sessionRow({ id: 'other-1' })],
+          pageInfo: { hasNextPage: true, endCursor: 'c1' },
+        }),
+      },
+      {
+        stderr: 'An Expo user account is required to proceed. Log in with eas login',
+        exitCode: 1,
+      },
+    ]);
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: [] });
 

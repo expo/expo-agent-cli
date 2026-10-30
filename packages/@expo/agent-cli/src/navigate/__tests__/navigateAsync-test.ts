@@ -1,6 +1,5 @@
 import { getConfig } from '@expo/config';
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
@@ -10,6 +9,7 @@ import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { forgetExpoConfigReads } from '../../project/appConfig';
+import { mockSpawnBy, type SpawnAnswer } from '../../utils/__tests__/fakeSpawn';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { printed } from '../../utils/__tests__/printed';
 
@@ -24,11 +24,6 @@ vi.mock('../../devLock', () => ({
 }));
 
 const projectRoot = '/project';
-
-interface SpawnAnswer {
-  stdout?: string;
-  exitCode?: number | null;
-}
 
 /** Answer each `spawn` call in order, and record the argv it was called with. */
 /**
@@ -54,40 +49,14 @@ function isInventoryRead(args: unknown): boolean {
  * no simulator list, and the bound emulator in `adb devices -l`.
  */
 function mockSpawnQueue(answers: SpawnAnswer[], { androidInventory = false } = {}) {
-  let call = 0;
-  vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
+  let queued = 0;
+  mockSpawnBy(({ args }) => {
     if (androidInventory && isInventoryRead(args)) {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        if (args[0] === 'devices') child.stdout.emit('data', ADB_DEVICES);
-        child.emit('close', args[0] === 'devices' ? 0 : 1, null);
-      });
-      return child as never;
+      return args[0] === 'devices' ? { stdout: ADB_DEVICES } : { exitCode: 1 };
     }
-    if (Array.isArray(args) && args.includes('defaults')) {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => child.emit('close', 0, null));
-      return child as never;
-    }
-    const answer = answers[call++] ?? {};
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (answer.stdout) {
-        child.stdout.emit('data', answer.stdout);
-      }
-      child.emit('close', answer.exitCode ?? 0, null);
-    });
-    return child as any;
-  }) as any);
+    if (Array.isArray(args) && args.includes('defaults')) return {};
+    return answers[queued++];
+  });
 }
 
 /** The `index`th spawn that is not a device-fact read. */

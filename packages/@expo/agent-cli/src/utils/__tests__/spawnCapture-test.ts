@@ -1,25 +1,11 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 
 import { spawnCaptureAsync, spawnCaptureBufferAsync } from '../spawnCapture';
-
-interface FakeChild extends EventEmitter {
-  stdout: EventEmitter;
-  stderr: EventEmitter;
-}
-
-function mockSpawn(): FakeChild {
-  const child = Object.assign(new EventEmitter(), {
-    stdout: new EventEmitter(),
-    stderr: new EventEmitter(),
-  });
-  vi.mocked(spawn).mockReturnValue(child as any);
-  return child;
-}
+import { mockSpawnChild } from './fakeSpawn';
 
 describe(spawnCaptureAsync, () => {
   it(`should capture the output and the exit code`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnCaptureAsync('adb', ['devices']);
     child.stdout.emit('data', 'List of devices attached\n');
@@ -35,7 +21,7 @@ describe(spawnCaptureAsync, () => {
   });
 
   it(`should report a non-zero exit code instead of rejecting`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnCaptureAsync('adb', ['shell']);
     child.stderr.emit('data', 'Error: Activity not started');
@@ -48,7 +34,7 @@ describe(spawnCaptureAsync, () => {
   });
 
   it(`should report a missing binary instead of rejecting`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnCaptureAsync('adb', ['devices']);
     child.emit('error', Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }));
@@ -60,7 +46,7 @@ describe(spawnCaptureAsync, () => {
   });
 
   it(`should report a signal as a null exit code`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnCaptureAsync('xcrun', ['simctl']);
     child.emit('close', null, 'SIGKILL');
@@ -71,7 +57,7 @@ describe(spawnCaptureAsync, () => {
 
 describe(spawnCaptureBufferAsync, () => {
   it(`keeps stdout as the bytes the tool wrote`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
     const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0xfe]);
 
     const promise = spawnCaptureBufferAsync('adb', ['exec-out', 'dd']);

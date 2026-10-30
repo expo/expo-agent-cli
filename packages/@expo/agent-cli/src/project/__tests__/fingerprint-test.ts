@@ -13,6 +13,7 @@ import {
   resolveFingerprintCli,
 } from '../fingerprint';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { mockSpawnChild } from '../../utils/__tests__/fakeSpawn';
 
 const projectRoot = path.resolve('/project');
 
@@ -23,20 +24,6 @@ const projectRoot = path.resolve('/project');
  * hold on posix. Building it the same way keeps the assertion about *which* bin was chosen.
  */
 const projectBin = (name: string) => path.join(projectRoot, 'node_modules', '.bin', name);
-
-interface FakeChild extends EventEmitter {
-  stdout: EventEmitter;
-  stderr: EventEmitter;
-}
-
-function mockSpawn(): FakeChild {
-  const child = Object.assign(new EventEmitter(), {
-    stdout: new EventEmitter(),
-    stderr: new EventEmitter(),
-  });
-  vi.mocked(spawn).mockReturnValue(child as any);
-  return child;
-}
 
 /** Install the fingerprint bin the project would get from `@expo/fingerprint`. */
 function writeFingerprintBin(name = 'fingerprint') {
@@ -93,7 +80,7 @@ describe(resolveFingerprintCli, () => {
 describe(generateFingerprintAsync, () => {
   it(`should spawn the fingerprint CLI and parse the hash`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     child.stdout.emit('data', JSON.stringify({ sources: [], hash: 'abc123' }));
@@ -112,7 +99,7 @@ describe(generateFingerprintAsync, () => {
 
   it(`should parse the hash from the last JSON line of the output`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     child.stdout.emit('data', 'warning: something\n');
@@ -134,7 +121,7 @@ describe(generateFingerprintAsync, () => {
 
   it(`should report a non-zero exit code with the stderr output`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     child.stderr.emit('data', 'Invalid project root\n');
@@ -148,7 +135,7 @@ describe(generateFingerprintAsync, () => {
 
   it(`should report unparsable output`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     child.stdout.emit('data', 'not json at all');
@@ -162,7 +149,7 @@ describe(generateFingerprintAsync, () => {
 
   it(`should report a spawn failure instead of throwing`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     child.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
@@ -180,7 +167,7 @@ describe(generateFingerprintAsync, () => {
 describe('the in-process memo', () => {
   it(`should spawn once for two sequential calls with the same key`, async () => {
     writeFingerprintBin();
-    const first = mockSpawn();
+    const first = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     first.stdout.emit('data', JSON.stringify({ hash: 'abc123', sources: [] }));
@@ -200,7 +187,7 @@ describe('the in-process memo', () => {
     // lookup all start at once, so two callers racing for the same key must join one promise
     // rather than start two subprocesses.
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const first = generateFingerprintAsync(projectRoot);
     const second = generateFingerprintAsync(projectRoot);
@@ -214,7 +201,7 @@ describe('the in-process memo', () => {
 
   it(`should keep the platforms apart`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const ios = generateFingerprintAsync(projectRoot, { platform: 'ios' });
     const android = generateFingerprintAsync(projectRoot, {
@@ -229,7 +216,7 @@ describe('the in-process memo', () => {
 
   it(`should keep the presets apart`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const balanced = generateFingerprintAsync(projectRoot, {
       preset: 'balanced',
@@ -244,7 +231,7 @@ describe('the in-process memo', () => {
 
   it(`should never answer a caller that asked for no cache out of the memo of one that did`, async () => {
     writeFingerprintBin();
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const cached = generateFingerprintAsync(projectRoot);
     const fresh = generateFingerprintAsync(projectRoot, { cache: false });
@@ -257,7 +244,7 @@ describe('the in-process memo', () => {
 
   it(`should spawn again after the memo is cleared`, async () => {
     writeFingerprintBin();
-    const first = mockSpawn();
+    const first = mockSpawnChild();
 
     const promise = generateFingerprintAsync(projectRoot);
     first.stdout.emit('data', JSON.stringify({ hash: 'abc123', sources: [] }));
@@ -267,7 +254,7 @@ describe('the in-process memo', () => {
     // What a command that mutates the project calls: a prebuild, an install or a build makes every
     // answer above it a statement about a project that no longer exists.
     clearFingerprintMemo(projectRoot);
-    const second = mockSpawn();
+    const second = mockSpawnChild();
     const again = generateFingerprintAsync(projectRoot);
     second.stdout.emit('data', JSON.stringify({ hash: 'def456', sources: [] }));
     second.emit('close', 0, null);
