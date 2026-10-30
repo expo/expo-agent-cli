@@ -14,6 +14,7 @@ import { killProcessTree, USE_PROCESS_GROUP } from '../processGroup';
 import { spawnSubprocessAsync } from '../subprocess';
 import { windowsTaskkillCommand } from '../windowsShim';
 import type { Mock } from 'vitest';
+import { mockPlatform } from './mockPlatform';
 
 function fakeChild({ pid }: { pid?: number } = {}) {
   return Object.assign(new EventEmitter(), {
@@ -24,12 +25,6 @@ function fakeChild({ pid }: { pid?: number } = {}) {
   });
 }
 
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value, configurable: true });
-}
-
 function mockSpawnSync(status: number | null): Mock {
   const fn = vi.mocked(spawnSync);
   fn.mockReturnValue({ status } as ReturnType<typeof spawnSync>);
@@ -38,7 +33,6 @@ function mockSpawnSync(status: number | null): Mock {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  mockPlatform(realPlatform);
 });
 
 describe(killProcessTree, () => {

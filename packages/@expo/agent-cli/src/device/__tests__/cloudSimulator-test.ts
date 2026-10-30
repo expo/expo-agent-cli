@@ -56,6 +56,7 @@ import {
   cloudVerbNotSupportedError,
 } from '../cloudErrors';
 import { LIVE_SESSION_STATUSES, sessionPhase } from '../cloudSessionList';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 /**
  * The runner every `eas` invocation goes through, planted where the resolver will look.
@@ -65,11 +66,6 @@ import { LIVE_SESSION_STATUSES, sessionPhase } from '../cloudSessionList';
  * actually lists is what makes the lookup hermetic (`src/utils/easCli.ts` §resolveEasCli).
  */
 const RUNNER_DIR = (process.env.PATH ?? '/usr/local/bin').split(path.delimiter)[0]!;
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 /** A project with a reachable runner and nothing else. */
 function project(files: Record<string, string> = {}): void {
@@ -90,10 +86,6 @@ const easArgv = (args: string[]) => [...EAS_PREFIX, ...args];
 beforeEach(() => {
   // Spawn argv assertions are the unquoted form. Windows `.cmd` wrapping quotes every token.
   mockPlatform('darwin');
-});
-
-afterEach(() => {
-  mockPlatform(realPlatform);
 });
 
 /** One recorded spawn, so a test can assert on the argv that was actually sent. */

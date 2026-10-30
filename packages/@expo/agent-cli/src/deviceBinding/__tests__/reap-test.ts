@@ -7,15 +7,13 @@ import { deletedWorktreeSessions, reapDevicesAsync } from '../reap';
 import { bindingPathFor, readBindingFile } from '../registry';
 import { writeCloudBinding } from './fakeCloudBinding';
 import { androidBindingFor, bindingFor, fakeTools, writeBinding } from './fakeTools';
-
-const host = process.platform;
-afterEach(() => Object.defineProperty(process, 'platform', { value: host }));
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const ROOT = '/work/app';
 const OTHER = '/work/other';
 const foreign = () => bindingPathFor(OTHER, 'ios', 'local-ios');
 beforeEach(() => {
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   vol.reset();
   vol.fromJSON({ [`${ROOT}/package.json`]: '{}', [`${OTHER}/package.json`]: '{}' });
 });

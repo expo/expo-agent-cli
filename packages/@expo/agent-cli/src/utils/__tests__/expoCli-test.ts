@@ -5,9 +5,9 @@ import path from 'path';
 
 import { resolveExpoCli, runExpoAsync, spawnExpoAsync } from '../expoCli';
 import type { Mock } from 'vitest';
+import { mockPlatform } from './mockPlatform';
 
 const projectRoot = path.resolve('/project');
-const realPlatform = process.platform;
 
 /**
  * The path of a bin the project installed, spelled the way the running platform spells it.
@@ -16,10 +16,6 @@ const realPlatform = process.platform;
  * hold on posix. Building it the same way keeps the assertion about *which* bin was chosen.
  */
 const projectBin = (name: string) => path.join(projectRoot, 'node_modules', '.bin', name);
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 interface FakeChild extends EventEmitter {
   stdout: EventEmitter | null;
@@ -42,10 +38,6 @@ beforeEach(() => {
   // it, so the tests would otherwise install a bin the resolver on Windows never looks for.
   mockPlatform('darwin');
   vol.reset();
-});
-
-afterEach(() => {
-  mockPlatform(realPlatform);
 });
 
 describe(resolveExpoCli, () => {

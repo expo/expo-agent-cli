@@ -3,13 +3,9 @@ import path from 'path';
 
 import * as subprocess from '../../utils/subprocess';
 import { readAuthPreflightAsync, resetAuthPreflightCache } from '../preflight';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 /**
  * What `eas whoami` printed on a real signed-in machine.
@@ -59,10 +55,6 @@ beforeEach(() => {
   vol.reset();
   resetAuthPreflightCache();
   delete process.env.EXPO_TOKEN;
-});
-
-afterEach(() => {
-  mockPlatform(realPlatform);
 });
 
 describe(readAuthPreflightAsync, () => {

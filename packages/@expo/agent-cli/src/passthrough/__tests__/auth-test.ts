@@ -15,6 +15,7 @@ import {
   resolveRegisterCli,
   sessionFilePath,
 } from '../auth';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -26,11 +27,6 @@ const expoBin = path.join(projectRoot, 'node_modules', '.bin', 'expo');
 const easBin = path.join(projectRoot, 'node_modules', '.bin', 'eas');
 const pathDir = path.resolve('/usr/local/bin');
 const pathEas = path.join(pathDir, 'eas');
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 /** Answer the one `eas --version` probe the PATH candidate gets. */
 function mockProbe(result: Partial<subprocess.SubprocessResult>) {
@@ -48,7 +44,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vi.restoreAllMocks();
 });
 

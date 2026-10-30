@@ -10,14 +10,10 @@ import {
   projectBinFileName,
   resolveProjectBin,
 } from '../projectBin';
+import { mockPlatform } from './mockPlatform';
 
 const workspace = path.resolve('/workspace');
 const projectRoot = path.join(workspace, 'apps', 'mobile');
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 beforeEach(() => {
   mockPlatform('darwin');
@@ -25,7 +21,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vol.reset();
 });
 

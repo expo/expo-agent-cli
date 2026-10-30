@@ -10,6 +10,7 @@ import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { forgetExpoConfigReads } from '../../project/appConfig';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 // The declared plugins are read off the loaded module, which these tests do not load.
 vi.mock('@expo/config', () => ({
@@ -22,11 +23,6 @@ vi.mock('../../devLock', () => ({
 }));
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 interface SpawnAnswer {
   stdout?: string;
@@ -210,7 +206,6 @@ afterEach(() => {
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
-  mockPlatform(realPlatform);
   vol.reset();
   forgetExpoConfigReads();
 });

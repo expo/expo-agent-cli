@@ -20,6 +20,7 @@ import { reloadOverDevServerAsync } from '../rungOne';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
+import { mockPlatform } from '../../../utils/__tests__/mockPlatform';
 
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>();
@@ -36,7 +37,6 @@ vi.mock('../../messageSocket', async () => ({
 }));
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
 const RUNNER_DIR = (process.env.PATH ?? '/usr/bin').split(path.delimiter)[0]!;
 const NPX_FILES = {
   [path.join(RUNNER_DIR, 'npx')]: '#!/bin/sh\n',
@@ -272,7 +272,7 @@ beforeEach(() => {
   originalFetch = globalThis.fetch;
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -282,7 +282,6 @@ afterEach(() => {
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
-  Object.defineProperty(process, 'platform', { value: realPlatform });
   vol.reset();
 });
 
