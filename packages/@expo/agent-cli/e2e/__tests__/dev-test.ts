@@ -23,6 +23,7 @@ import {
   waitForDevLockAsync,
   expoHomeOf,
   readLastBuildFile,
+  readEvents,
 } from '../utils';
 import {
   EMULATOR_NAME,
@@ -57,12 +58,7 @@ function invocationArgs(projectRoot: string): string[][] {
 function startPlanEvents(
   eventsFile: string
 ): { mode: string; steps: { id: string; argv: string[] }[] }[] {
-  return fs
-    .readFileSync(eventsFile, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter((entry) => entry._e === 'cli:start_plan');
+  return readEvents(eventsFile).filter((entry) => entry._e === 'cli:start_plan');
 }
 
 describe('@expo/agent-cli dev', () => {
@@ -316,7 +312,7 @@ describe('@expo/agent-cli dev', () => {
 
       expect(result.exitCode).toBe(1);
       expect(invocationArgs(projectRoot)).toEqual([['run:ios', ...PORT_ARGS]]);
-      expect(readLastBuildRecord(projectRoot)).toEqual({
+      expect(readLastBuildFile(projectRoot)).toEqual({
         ios: RECORDED_HASH,
         android: RECORDED_HASH,
       });
