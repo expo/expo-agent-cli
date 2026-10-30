@@ -21,7 +21,6 @@ import { deletedWorktreeSessions } from '../deviceBinding/reap';
 import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
-import { deviceCommand } from '../deviceBinding/errors';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
@@ -462,10 +461,15 @@ export async function collectStatusReportAsync(
       recoveryPlan
     );
     const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    const backend = easServer
-      ? 'eas'
-      : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-    const port = easServer?.port ?? recoveryPort;
+    const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
+    const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
+    const expiredSession =
+      cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
+    const backend =
+      easServer || expiredSession
+        ? 'eas'
+        : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
+    const port = ownServer?.port ?? recoveryPort;
     const devArgs = [
       ...(backend ? [`--${backend}`] : []),
       ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
@@ -484,10 +488,6 @@ export async function collectStatusReportAsync(
         platform === 'web'
           ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
           : devCommand;
-    const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
-    const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
-    const expiredSession =
-      cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
     // An unfinished session start is observed; rebinding after it finishes needs a deliberate restart.
     const pendingSession =
       easServer?.easPlatform &&
@@ -497,7 +497,7 @@ export async function collectStatusReportAsync(
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
         ...devNext,
-        command: `${stopFirst}${deviceCommand(expiredSession.platform, { eas: true })}`,
+        command: `${stopFirst}${devCommand}`,
         why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
       };
     } else if (

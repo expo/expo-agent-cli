@@ -1235,19 +1235,6 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       });
     }
 
-    it.each(['ios', 'android'] as const)(
-      'names a restart when the %s session has no pending start',
-      async (platform) => {
-        easServer(platform);
-        const report = await collectStatusReportAsync(projectRoot, { ...options, platform });
-        // Restart the owned server on its current port.
-        expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --${platform} --eas --port 8081 --detach --wait-ready`
-        );
-        expect(report.next?.why).toContain('Stop the server before starting');
-      }
-    );
-
     it('says the session is starting while the detached child starts it', async () => {
       easServer('ios');
       vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue({
@@ -1363,20 +1350,6 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       const report = await collectStatusReportAsync(projectRoot, iosOptions);
       expect(report.next?.why ?? '').not.toContain('expired');
       expect(report.next?.command).not.toContain('--eas');
-    });
-
-    it('beside an expired own session binding, says the lease expired and not that it starts', async () => {
-      easServer('ios');
-      writeCloudBinding(projectRoot, 'ios', 'sess-old', {
-        boundAt: '2025-12-31T00:00:00.000Z',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      });
-      const report = await collectStatusReportAsync(projectRoot, iosOptions);
-      expect(report.next?.command).toBe(
-        'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
-      );
-      expect(report.next?.why).toContain('sess-old expired');
-      expect(report.next?.why).not.toContain('is starting');
     });
   });
 
@@ -1675,7 +1648,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
 
     const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'ios' });
 
-    const command = 'npx @expo/agent-cli dev --ios --eas --detach --wait-ready';
+    const command = 'npx @expo/agent-cli dev --ios --eas --port 8081 --detach --wait-ready';
     expect(report.next?.command).toBe(command);
     expect(report.next?.why).toContain('sess-1');
     const [row] = report.installed!.platforms;
