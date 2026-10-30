@@ -21,14 +21,10 @@ import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import type { DevServerSource } from '../runtime/devServer';
 import { openInPhrase } from './connectUrl';
-import {
-  openRouteAsync,
-  resolveRouteUrlAsync,
-  type AlertCheck,
-  type OpenRouteResult,
-} from './openRoute';
+import { openRouteAsync, type AlertCheck, type OpenRouteResult } from './openRoute';
 import type { NavigateOptions } from './resolveOptions';
 import type { RouteCheckJson } from './routeCheck';
+import { resolveRouteUrlAsync } from './routeResolution';
 import { easCommandPrefix } from '../utils/easCli';
 
 /**
@@ -381,6 +377,7 @@ async function printRouteUrlAsync(projectRoot: string, options: NavigateOptions)
     devServerUrl: options.devServerUrl,
     routeCheck: options.routeCheck,
     command: 'navigate',
+    cloud: options.cloud,
   });
 
   const followups = followUpsEnabled(wantFollowUps)
@@ -539,7 +536,9 @@ function attachNotConfirmed(opened: OpenRouteResult): string {
     `Why: "${opened.command}" exited 0, which says the device accepted the intent and nothing more — an app that fails to load its bundle sits on an error screen having accepted one.${reverseClause}${
       opened.attach.recovered
         ? ' The app was stopped and the link opened a second time, and that did not attach either.'
-        : ''
+        : opened.attach.reopenedWithoutStop
+          ? ' The app was not running, so nothing was stopped; the link opened a second time, and that did not attach either.'
+          : ''
     }${alertClause}`,
     `How: look at what the dev server was asked for with "${PROGRAM_PREFIX} dev:logs", and at the screen with "${look}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s. Pass --no-wait-attach to report only what the device tool said, which is what this command used to do.${alertHow}`,
   ].join('\n');

@@ -98,7 +98,6 @@ function opened(overrides: Partial<OpenRouteResult> = {}): OpenRouteResult {
     stderr: '',
     routeCheck: { checked: true, ok: true, matched: '/', routeCount: 4, reason: null },
     isExpoGo: true,
-    appAttached: false,
     // `smoke` has an app-connection phase of its own, so its opens never wait for one — and the
     // launcher-first ladder of F123 needs a budget to wait with, so it never fires here either.
     launch: null,
@@ -110,6 +109,7 @@ function opened(overrides: Partial<OpenRouteResult> = {}): OpenRouteResult {
       waitedMs: 0,
       targets: 0,
       recovered: false,
+      reopenedWithoutStop: false,
       alert: null,
       reason: 'this run did not wait for the app to attach',
     },

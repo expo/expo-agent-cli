@@ -15,6 +15,7 @@ import { simulatorHasAppAsync } from '../device/installedApps';
 import { androidHasAppAsync } from '../device/androidApps';
 import { deviceIdOf, type BoundDevice } from '../deviceBinding';
 import * as Log from '../log';
+import { navigateDeviceOf } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
 import type { NativePlatform } from '../plan/types';
@@ -152,7 +153,7 @@ export async function openAppOnDeviceAsync(
       devServerUrlSource: 'discovered',
       routeCheck: false,
       command: 'navigate',
-      device: bound ?? undefined,
+      device: bound ? navigateDeviceOf(bound) : undefined,
     });
     if (result.exitCode !== 0) {
       return stopped(

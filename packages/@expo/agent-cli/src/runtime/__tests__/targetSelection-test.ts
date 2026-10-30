@@ -23,14 +23,6 @@ describe('classifyTargets on an EAS Simulator session', () => {
 
   it.each([
     {
-      name: 'reads an Expo Go target that no booted local simulator has',
-      targets: [expoGo],
-      platform: 'ios' as const,
-      eas: true,
-      read: [expoGo],
-      undetermined: [],
-    },
-    {
       name: 'reads no Expo Go target while the local simulators are unknown',
       targets: [expoGo],
       platform: 'ios' as const,

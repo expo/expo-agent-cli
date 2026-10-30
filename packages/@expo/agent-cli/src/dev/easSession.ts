@@ -24,7 +24,7 @@ import {
 } from '../device/cloudSimulator';
 import { otherPlatformSessionError } from '../device/cloudErrors';
 import * as Log from '../log';
-import { resolveRouteUrlAsync } from '../navigate/openRoute';
+import { resolveRouteUrlAsync } from '../navigate/routeResolution';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
@@ -548,6 +548,7 @@ export async function resolveEasOpenUrlAsync(
     tunnelHost,
     routeCheck: false,
     command: 'navigate',
+    cloud: 'required',
   });
   const target = options.expoGo ? 'expo-go' : 'dev-build';
   const connect = resolved.connect.find((entry) => entry.target === target);

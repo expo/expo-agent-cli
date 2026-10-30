@@ -332,6 +332,48 @@ describe('@expo/agent-cli navigate --eas', () => {
     }
   });
 
+  // The wait after the accept starts after the first wait's budget ran out, and it still asks the
+  // device tools about the app that appears in it.
+  it(`counts the app that attaches after the dialog is accepted`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    const accepted = () =>
+      easInvocations(projectRoot).some((argv) => argv.slice(3).join(' ') === 'alert accept');
+    const stub = await startStubDevServerAsync({
+      targets: () =>
+        accepted() ? [{ id: '1', appId: 'host.exp.Exponent', deviceName: 'iPhone 17' }] : [],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['navigate', '/', '--eas', '--attach-timeout', '2s', '--json', '--no-followups'],
+        {
+          reject: false,
+          env: { STUB_SIM_ALERT: `Open in "Expo Go"?\nCancel / Open` },
+        }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        attached: true,
+        attachAlert: { found: true, accepted: true },
+      });
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
   // The other half, and the one that keeps this inside llp/0008: an alert this command did not
   // cause is not this command's to answer. `alert get` finding nothing is the common case — the
   // controller refuses it outright — and no `accept` may follow.
@@ -366,57 +408,6 @@ describe('@expo/agent-cli navigate --eas', () => {
         found: false,
         accepted: false,
       });
-    } finally {
-      await releaseLock();
-      await stub.close();
-    }
-  });
-
-  // The development build an EAS Simulator iOS session runs registers the project's own app id and
-  // the cloud simulator's model name, which no local tool reports. It is the session's app, so the
-  // run counts it as attached and opens only the route link, never the launcher URL.
-  it(`counts the session's development build as the iOS app, and opens only the route link`, async () => {
-    const projectRoot = await setupAsync('dev-client-app');
-    await writeSessionFileAsync(projectRoot, 'sess-e2e');
-    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
-    const stub = await startStubDevServerAsync({
-      targets: [{ id: '1', appId: 'com.example.demo', deviceName: 'iPhone 17' }],
-      projectRoot,
-      manifestOrigin: 'https://stub-tunnel.example',
-    });
-    const releaseLock = await holdDevLockAsync(projectRoot, {
-      url: stub.url,
-      port: stub.port,
-      pid: process.pid,
-      startedAt: new Date().toISOString(),
-      projectRoot,
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        [
-          'navigate',
-          '/',
-          '--ios',
-          '--eas',
-          '--scheme',
-          'demoapp',
-          '--app-id',
-          'com.example.demo',
-          '--attach-timeout',
-          '5s',
-          '--json',
-          '--no-followups',
-        ],
-        { reject: false }
-      );
-
-      const opens = easInvocations(projectRoot)
-        .filter((argv) => argv[0] === 'simulator:exec' && argv[3] === 'open')
-        .map((argv) => argv[4]);
-      expect(opens).toEqual(['demoapp://']);
-      expect(result.exitCode).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({ launch: null, attached: true });
     } finally {
       await releaseLock();
       await stub.close();

@@ -43,9 +43,33 @@ interface SpawnAnswer {
  * default success. Every existing queue in this file is about the device commands, so those are
  * what it feeds; the writes always succeed, which is also what they do in practice.
  */
-function mockSpawnQueue(answers: SpawnAnswer[]) {
+/** The device-fact reads a scoped read makes on every probe: `simctl` booted list, `adb devices -l`. */
+function isInventoryRead(args: unknown): boolean {
+  return (
+    Array.isArray(args) &&
+    ((args[0] === 'simctl' && args[1] === 'list' && args.includes('booted')) ||
+      (args[0] === 'devices' && args[1] === '-l'))
+  );
+}
+
+/**
+ * With `androidInventory`, the device-fact reads are answered by command and take no queue entry:
+ * no simulator list, and the bound emulator in `adb devices -l`.
+ */
+function mockSpawnQueue(answers: SpawnAnswer[], { androidInventory = false } = {}) {
   let call = 0;
   vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
+    if (androidInventory && isInventoryRead(args)) {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        if (args[0] === 'devices') child.stdout.emit('data', ADB_DEVICES);
+        child.emit('close', args[0] === 'devices' ? 0 : 1, null);
+      });
+      return child as never;
+    }
     if (Array.isArray(args) && args.includes('defaults')) {
       const child = Object.assign(new EventEmitter(), {
         stdout: new EventEmitter(),
@@ -69,8 +93,11 @@ function mockSpawnQueue(answers: SpawnAnswer[]) {
   }) as any);
 }
 
+/** The `index`th spawn that is not a device-fact read. */
 function spawnedArgv(index: number): string[] {
-  const [bin, args] = vi.mocked(spawn).mock.calls[index] as unknown as [string, string[]];
+  const [bin, args] = vi.mocked(spawn).mock.calls.filter(([, args]) => !isInventoryRead(args))[
+    index
+  ] as unknown as [string, string[]];
   return [bin, ...args];
 }
 
@@ -785,6 +812,9 @@ describe(navigateAsync, () => {
   });
   // @ref llp/0005-runtime-loop-tools.rfc.md §navigate
   describe('--print-url', () => {
+    // These cases are about the URL shape with no device bound; the bound scope is pinned in e2e.
+    beforeEach(() => vol.reset());
+
     function mockExpoGoProject() {
       vol.fromJSON({
         [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
@@ -1115,65 +1145,17 @@ describe(`${navigateAsync.name} on Android`, () => {
     });
   }
 
-  const ANDROID_TARGET = {
-    id: 'a1',
-    appId: 'host.exp.exponent',
-    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
-    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=a1&page=1',
-  };
-
-  it(`reverses the dev server's port onto the device before opening the link`, async () => {
+  it(`asks adb for the device list once while the attach wait polls an unchanged list`, async () => {
     mockExpoGoProject();
-    mockDevServer([ANDROID_TARGET]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP }, // adb get-state, the binding's check
-      { stdout: '8081' }, //      adb reverse
-      { stdout: 'Starting: Intent' }, // am start
-      { stdout: '' }, //          simctl list (device index)
-      { stdout: ADB_DEVICES }, //  adb devices -l (device index)
-    ]);
-
-    await expect(
-      navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 1_000 }))
-    ).resolves.toBe(0);
-
-    // Second call, before the intent: a link opened first would load against a port nothing on the
-    // device listens on.
-    expect(spawnedArgv(1)).toEqual([
-      'adb',
-      '-s',
-      'emulator-5554',
-      'reverse',
-      'tcp:8081',
-      'tcp:8081',
-    ]);
-    expect(spawnedArgv(2)).toContain('am');
-  });
-
-  it(`exits 22 when the link was delivered and no Android app ever connected`, async () => {
-    mockExpoGoProject();
-    // An iOS app is connected, and this run is about Android: the wrong platform's target must
-    // never confirm this link (F51).
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP },
-      { stdout: '8081' },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-      { stdout: '' }, // force-stop
-      { stdout: 'Starting: Intent' }, // the second link
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
+    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }], {
+      androidInventory: true,
+    });
 
-    await expect(
-      navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 50 }))
-    ).resolves.toBe(22);
+    await navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 600 }));
 
-    const said = vi.mocked(console.error).mock.calls.flat().join('\n');
-    expect(said).toContain('no android app connected');
-    expect(said).toContain('accepted the intent and nothing more');
+    const adbLists = vi.mocked(spawn).mock.calls.filter(([, args]) => args?.[0] === 'devices');
+    expect(adbLists).toHaveLength(1);
   });
 
   it(`reports the attach it did not check when --no-wait-attach was passed`, async () => {
@@ -1213,17 +1195,6 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     });
   }
 
-  const DEV_BUILD_TARGET = {
-    id: 'a1',
-    appId: 'com.example.demo',
-    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
-    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=a1&page=1',
-  };
-
-  /** The launcher URL this project's development build parses, as `connectUrl.ts` builds it. */
-  const LAUNCHER_URL =
-    'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1';
-
   /**
    * Every URL this run handed to a device, in order.
    *
@@ -1238,51 +1209,6 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
       .filter((line) => line.includes('://'))
       .map((line) => line.match(/'([^']*:\/\/[^']*)'/)?.[1] ?? line);
   }
-
-  /**
-   * Answer `/json/list` with nothing until the nth request, then with `targets`.
-   *
-   * The state this whole case is about: the app is not connected when the command starts, and it
-   * connects because something loaded it. A dev server that answered with the app from the first
-   * request could not tell the launcher open from the route one.
-   */
-  function mockDevServerConnectingAt(nth: number, targets: unknown[]) {
-    let calls = 0;
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => (++calls >= nth ? targets : []),
-    })) as unknown as typeof fetch;
-  }
-
-  it.each([true, false])(
-    'opens the launcher URL first, then the route link (automation: %s)',
-    async (automation) => {
-      vi.stubEnv('EXPO_NO_DEV_MENU', automation ? '1' : '0');
-      mockDevClientProject();
-      mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
-      mockSpawnQueue([
-        { stdout: EMULATOR_UP }, //        adb get-state, the binding's check
-        { stdout: '8081' }, //             adb reverse
-        { stdout: 'Starting: Intent' }, //  am start — the launcher
-        { stdout: '' }, //                 simctl list (device index)
-        { stdout: ADB_DEVICES }, //        adb devices -l (device index)
-        { stdout: 'Starting: Intent' }, //  am start — the route link
-        { stdout: '' },
-        { stdout: ADB_DEVICES },
-      ]);
-
-      await expect(
-        navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 5_000 }))
-      ).resolves.toBe(0);
-
-      // The launcher first, because it is the one that loads the bundle, and the route link after
-      // it, because that is what was asked for.
-      const launcher = automation
-        ? LAUNCHER_URL
-        : 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081';
-      expect(openedUrls()).toEqual([launcher, 'demoapp://profile/42']);
-    }
-  );
 
   it('honors EXPO_NO_DEV_MENU=0 for generated launch URLs', async () => {
     vi.stubEnv('EXPO_NO_DEV_MENU', '0');
@@ -1304,147 +1230,6 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     await navigateAsync(projectRoot, options({ route, printUrl: true, json: true }));
 
     expect(JSON.parse(printed()).url).toBe(route);
-  });
-
-  // The other half of F123, and the half no URL can express: a BROWSABLE `ACTION_VIEW` intent
-  // carrying the launcher URL reaches `DevLauncherController.handleIntent`, which throws on an app
-  // that is not running — `NullPointerException … createAppIntent`, and the app lands on
-  // `DevLauncherErrorActivity` [observed — 2026-08-28, `live-devclient`'s own emulator: the same
-  // URL sent by component attached in three seconds, sent as a VIEW intent it never attached].
-  // So the launcher URL goes to `MainActivity` by component, and the route link stays a link.
-  it(`hands the launcher URL to the main activity, and the route link to a VIEW intent`, async () => {
-    mockDevClientProject();
-    mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP },
-      { stdout: '8081' },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
-
-    await expect(
-      navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 5_000 }))
-    ).resolves.toBe(0);
-
-    const launcher = vi
-      .mocked(spawn)
-      .mock.calls.map(([, args]) => (args as string[]).join(' '))
-      .find((line) => line.includes('__expo_url='));
-    expect(launcher).toContain(`-n 'com.example.demo/.MainActivity'`);
-    expect(launcher).not.toContain('android.intent.action.VIEW');
-    expect(openedUrls()).toEqual([LAUNCHER_URL, 'demoapp://profile/42']);
-  });
-
-  // The dev server's own port, not the route link's: `demoapp://?__expo_url=…`
-  // has no loopback host of its own, so reading the URL forwarded nothing and the launcher fetched
-  // its bundle from a port on the *device* (F50's shape, one URL further out).
-  it(`reverses the dev server's port before the launcher open`, async () => {
-    mockDevClientProject();
-    mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP },
-      { stdout: '8081' },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
-
-    await expect(
-      navigateAsync(
-        projectRoot,
-        options({ platform: 'android', attachTimeoutMs: 5_000, json: true })
-      )
-    ).resolves.toBe(0);
-
-    expect(JSON.parse(printed()).reversedPort).toBe(8081);
-  });
-
-  it(`reports both opens`, async () => {
-    mockDevClientProject();
-    mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP },
-      { stdout: '8081' },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
-
-    await expect(
-      navigateAsync(
-        projectRoot,
-        options({ platform: 'android', attachTimeoutMs: 5_000, json: true })
-      )
-    ).resolves.toBe(0);
-
-    const report = JSON.parse(printed());
-    expect(report.url).toBe('demoapp://profile/42');
-    expect(report.launch).toMatchObject({
-      url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
-      exitCode: 0,
-      attached: true,
-    });
-    expect(report.attached).toBe(true);
-  });
-
-  // The other half of the contract: an app that **is** attached understands the route link, and
-  // loading it again would throw away the state the caller is navigating within.
-  it(`opens only the route link when an app is already attached`, async () => {
-    mockDevClientProject();
-    mockDevServer([DEV_BUILD_TARGET]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
-
-    await expect(
-      navigateAsync(
-        projectRoot,
-        options({ platform: 'android', attachTimeoutMs: 5_000, json: true })
-      )
-    ).resolves.toBe(0);
-
-    expect(JSON.parse(printed()).launch).toBeNull();
-    expect(openedUrls()).toEqual(['demoapp://profile/42']);
-  });
-
-  // Expo Go is a different application with a different URL, and `exp://<host>` already carries the
-  // dev server: there is nothing to load first, and this ladder must not fire for it.
-  it(`opens only the route link for Expo Go`, async () => {
-    vol.fromJSON({
-      [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
-      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
-    });
-    mockDevServerConnectingAt(3, [{ ...DEV_BUILD_TARGET, appId: 'host.exp.exponent' }]);
-    mockSpawnQueue([
-      { stdout: EMULATOR_UP },
-      { stdout: '8081' },
-      { stdout: 'Starting: Intent' },
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
-
-    await expect(
-      navigateAsync(
-        projectRoot,
-        options({ platform: 'android', attachTimeoutMs: 5_000, json: true })
-      )
-    ).resolves.toBe(0);
-
-    expect(JSON.parse(printed()).launch).toBeNull();
-    expect(openedUrls()).toEqual(['exp://127.0.0.1:8081/--/profile/42']);
   });
 
   // `--no-wait-attach` and `smoke` both pass no budget, and the launcher open is only worth

@@ -36,7 +36,7 @@ import {
   readProjectSchemeConfig,
 } from '../../navigate/deepLink';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
-import { isCallerNamedDevServer } from '../../navigate/openRoute';
+import { isCallerNamedDevServer } from '../../navigate/routeResolution';
 import { checkRoute, routeNotFoundError, type RouteCheckJson } from '../../navigate/routeCheck';
 import { decideExpoGoTarget } from '../../navigate/target';
 import type { PlanPlatform } from '../../plan/types';

@@ -310,19 +310,19 @@ function listKey(targets: readonly Pick<CdpTarget, 'id'>[]): string {
  * poll. A changed list, such as a first app after an empty one, is read again within the budget, and
  * so is a tool answer that is unknown, at most once every {@link INVENTORY_RETRY_MS}; the
  * caller's inventory counts as the first read. A read that loses a tool's answer keeps the facts
- * that placed the last list, and leaves the list to be read again.
+ * that placed the last list, and leaves the list to be read again. `deadline` is the end of the wait
+ * that reads.
  */
 export function scopedListClassifier(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
-  deadline: number,
   inventoryTargets: readonly Pick<CdpTarget, 'id'>[],
   devServerUrl: string | null
-): (targets: CdpTarget[]) => Promise<ClassifiedTargets> {
+): (targets: CdpTarget[], deadline: number) => Promise<ClassifiedTargets> {
   let inventoryListKey = listKey(inventoryTargets);
   let attemptedKey = inventoryListKey;
   let readAt = Date.now();
-  return async (targets) => {
+  return async (targets, deadline) => {
     const key = listKey(targets);
     const due = Date.now() - readAt >= INVENTORY_RETRY_MS;
     const unknown = silentTool(targetSelection, deviceInventory) != null;
@@ -370,13 +370,12 @@ export async function waitForAppConnectionAsync(
   const classify = scopedListClassifier(
     targetSelection,
     deviceInventory,
-    deadline,
     inventoryTargets,
     devServerUrl
   );
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const classifiedTargets = await classify(probe.targets);
+    const classifiedTargets = await classify(probe.targets, deadline);
     const counted = classifiedTargets.read.length;
     const extra = {
       skippedApps: skippedAppsOf(classifiedTargets),
@@ -472,14 +471,13 @@ export async function waitForFreshAppConnectionAsync(
   const classify = scopedListClassifier(
     targetSelection,
     deviceInventory,
-    deadline,
     knownTargetIds.map((id) => ({ id })),
     devServerUrl
   );
 
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const own = (await classify(probe.targets)).read;
+    const own = (await classify(probe.targets, deadline)).read;
     appsConnected = own.length;
     const fresh = own.filter((target) => !known.has(target.id));
     if (fresh.length > 0) {

@@ -9,7 +9,7 @@ declare module '2g' {
     'navigate:adb_reverse': { port: number; deviceId: string; exitCode: number | null };
     /** The reverse did not go in, so the link that follows may reach nothing. */
     'navigate:adb_reverse_failed': { reason: string };
-    /** The app was stopped and the link opened again, because nothing had attached. */
+    /** The app was stopped, if it ran, and the link opened again, because nothing had attached. */
     'navigate:attach_recovery': { appId: string; stopped: boolean };
     /**
      * The dev launcher's URL was opened before the route link, because nothing was loaded (F123).

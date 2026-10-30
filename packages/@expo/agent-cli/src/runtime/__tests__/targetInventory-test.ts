@@ -159,17 +159,11 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
       targets: [emulator],
     });
     const now = Date.now();
-    const classify = scopedListClassifier(
-      targetSelection,
-      deviceInventory,
-      now + 5000,
-      [emulator],
-      null
-    );
-    expect((await classify([emulator])).undetermined).toEqual([emulator]);
+    const classify = scopedListClassifier(targetSelection, deviceInventory, [emulator], null);
+    expect((await classify([emulator], now + 5000)).undetermined).toEqual([emulator]);
     adbAnswers = true;
     vi.spyOn(Date, 'now').mockReturnValue(now + 1100);
-    expect((await classify([emulator])).read).toEqual([emulator]);
+    expect((await classify([emulator], now + 5000)).read).toEqual([emulator]);
   });
 });
 
@@ -203,7 +197,7 @@ it('a wait poll asks `adb reverse` again when a twin of the bound model attached
   const own = makeTarget({ deviceName: 'Pixel 9 - 15 - API 35' });
   const start = await deviceInventoryForSelectionAsync([], selection, null, url);
   twinAttached = true;
-  const classify = scopedListClassifier(selection, start, Date.now() + 5000, [], url);
-  const { read, undetermined } = await classify([own]);
+  const classify = scopedListClassifier(selection, start, [], url);
+  const { read, undetermined } = await classify([own], Date.now() + 5000);
   expect({ read, undetermined }).toEqual({ read: [own], undetermined: [] });
 });
