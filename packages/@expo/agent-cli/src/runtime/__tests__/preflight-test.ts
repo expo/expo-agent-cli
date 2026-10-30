@@ -65,7 +65,7 @@ describe(preflightRuntimeAsync, () => {
       named: true,
       reachable: true,
       targets: [TARGET],
-      classifiedTargets: { read: [TARGET], otherPlatform: [], undetermined: [] },
+      classifiedTargets: { read: [TARGET], otherPlatform: [], undetermined: [], skipped: [] },
     });
   });
 
@@ -375,6 +375,30 @@ describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
     expect(error.message).toContain('could be shown to be running on android');
     // Never a guess in either direction.
     expect(error.message).not.toContain('is connected to the Expo dev server at');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
+describe(`${preflightRuntimeAsync.name} on an EAS Simulator session with no platform`, () => {
+  it(`should refuse two apps nothing places, and say how to name the session's platform`, async () => {
+    mockDevServer([
+      { ...TARGET, appId: 'com.example.app', deviceName: 'iPhone 17' },
+      { ...TARGET, id: '2', appId: 'com.example.app', deviceName: 'iPad Air' },
+    ]);
+
+    const error = await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      cloud: true,
+      deviceInventory: makeDeviceInventory(),
+    }).catch((e) => e);
+
+    expect(error.code).toBe('NO_APP_CONNECTED');
+    expect(error.message).toContain('names 2 apps');
+    expect(error.message).toContain('--ios --eas');
+    expect(error.message).toContain('--android --eas');
+    expect(error.message).toContain('close the apps');
+    expect(error.data).toMatchObject({ debuggerTargets: 2, platform: null });
   });
 });
 

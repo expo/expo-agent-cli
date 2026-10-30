@@ -736,22 +736,22 @@ const ROUTE_ATTACH_FLOOR_MS = 2_000;
 /**
  * A function that waits until an app of this platform holds a debugger target, or the deadline.
  *
- * Built once and shared by the two waits of one run — the launcher's and the route link's — so both
- * ask the same question of the same dev server, and the device facts that scoping needs are read
- * once rather than per open.
+ * The launcher's wait and the route link's wait ask the same question of the same dev server. The
+ * device facts that scoping needs are read once per wait, not once per poll.
  *
  * @returns how many targets this platform had when the wait ended: zero means the deadline won.
  */
 async function attachWaiterAsync(
   devServerUrl: string,
-  platform: NavigatePlatform
+  device: NavigateDevice
 ): Promise<(deadline: number) => Promise<number>> {
   const deviceInventory = await readDeviceInventoryAsync();
   const countAsync = async (): Promise<number> => {
     const probe = await probeDevServerAsync(devServerUrl);
     const { classifiedTargets } = await resolveTargetSelectionAsync({
       projectRoot: null,
-      flags: { platform, eas: false },
+      flags: { platform: device.platform, eas: device.backend === 'cloud' },
+      device,
       targets: probe.targets,
       deviceInventory,
     });
@@ -857,7 +857,7 @@ async function launchDevClientFirstAsync({
     };
   }
 
-  const waitAsync = await attachWaiterAsync(devServerUrl, device.platform);
+  const waitAsync = await attachWaiterAsync(devServerUrl, device);
   const targets = await waitAsync(startedAt + budgetMs);
   return {
     url: launcherUrl,
@@ -949,7 +949,7 @@ async function confirmAttachAsync({
   }
 
   const startedAt = Date.now();
-  const waitAsync = await attachWaiterAsync(devServerUrl, device.platform);
+  const waitAsync = await attachWaiterAsync(devServerUrl, device);
 
   let targets = await waitAsync(startedAt + budgetMs);
   let recovered = false;

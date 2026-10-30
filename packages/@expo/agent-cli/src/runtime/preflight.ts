@@ -257,8 +257,18 @@ export async function preflightRuntimeAsync(
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
-  if (platform != null && classifiedTargets.read.length === 0) {
-    throw noAppOnPlatformError(url, platform, classifiedTargets, cloud);
+  if (
+    classifiedTargets.read.length === 0 &&
+    (platform != null || classifiedTargets.undetermined.length > 0)
+  ) {
+    throw platform == null
+      ? noSessionAppError(url, classifiedTargets.undetermined.length)
+      : noAppOnPlatformError(
+          url,
+          platform,
+          classifiedTargets,
+          targetSelection.device?.backend === 'cloud'
+        );
   }
   return connection;
 }
@@ -397,6 +407,32 @@ export function noAppConnectedError({
 }
 
 /**
+ * The failure for an EAS Simulator session with no platform flag whose app nothing places.
+ *
+ * Two or more unclaimed apps leave no way to say which one is the session's, and a device tool that
+ * gave no answer cannot show that an app is off this machine. The session's platform flag narrows
+ * which tool has to answer.
+ */
+function noSessionAppError(devServerUrl: string, unplaced: number): CommandError {
+  const apps = `${unplaced} app${unplaced === 1 ? '' : 's'}`;
+  const error = new CommandError(
+    'NO_APP_CONNECTED',
+    [
+      `No app connected to the Expo dev server at ${devServerUrl} could be shown to be the EAS Simulator session's app.`,
+      `Why: its debugger target list names ${apps} that nothing on this machine places. One unclaimed app is the session's only when the local device tools answered and no other app is unclaimed.`,
+      `How: close the apps on this dev server that are not the session's, then run this command again. A platform flag ("--ios --eas" or "--android --eas") only chooses which device tool has to answer; it does not choose between two unclaimed apps.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = `${PROGRAM_PREFIX} status --json`;
+  return withData(error, {
+    devServerUrl,
+    devServerReachable: true,
+    debuggerTargets: unplaced,
+    platform: null,
+  });
+}
+
+/**
  * The failure for a dev server whose apps are all on some other platform, or unreadable.
  *
  * Two shapes, because the next steps differ. Apps on another platform means `--android` was asked
@@ -424,7 +460,9 @@ function noAppOnPlatformError(
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
           `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.`,
-          `How: drop --${platform} to read the app that is connected, which is the honest command when only one is. To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,
+          cloud
+            ? `How: close the apps on this dev server that are not the EAS Simulator session's, then run this command again. --${platform} only chooses which device tool has to answer; it does not choose between two unclaimed apps.`
+            : `How: drop --${platform} to read the app that is connected, which is the honest command when only one is. To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,
         ].join('\n')
   );
   error.suggestedCommand =

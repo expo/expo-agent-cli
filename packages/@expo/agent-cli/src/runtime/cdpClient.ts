@@ -204,19 +204,21 @@ export interface CdpClientOptions {
   deviceInventory: DeviceInventory;
 }
 
-/** The failure for a platform-scoped client that found no target of its platform. */
+/** The failure for a scoped client that found no target in its scope. */
 export class NoTargetOnPlatformError extends Error {
   readonly isNoTargetOnPlatform = true;
 
   constructor(
-    readonly platform: NavigatePlatform,
+    readonly platform: NavigatePlatform | null,
     readonly otherPlatforms: NavigatePlatform[],
     readonly undetermined: number
   ) {
     super(
-      otherPlatforms.length > 0
-        ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
-        : `No app connected to the dev server could be shown to be running on ${platform}${undetermined > 0 ? `, and ${undetermined} could not be placed at all` : ''}.`
+      platform == null
+        ? `No app connected to the dev server could be placed in this run's scope: ${undetermined} could not be placed at all.`
+        : otherPlatforms.length > 0
+          ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
+          : `No app connected to the dev server could be shown to be running on ${platform}${undetermined > 0 ? `, and ${undetermined} could not be placed at all` : ''}.`
     );
     this.name = 'NoTargetOnPlatformError';
   }
@@ -276,9 +278,12 @@ export class CdpClient {
       // Two different failures, and only one of them is "the app is not there". A scoped run that
       // found apps on the other platform has to say so, or the reader debugs a healthy app (F51).
       const { platform } = this.options.targetSelection;
-      if (platform != null && classifiedTargets.read.length === 0) {
+      if (
+        classifiedTargets.read.length === 0 &&
+        (platform != null || classifiedTargets.undetermined.length > 0)
+      ) {
         throw new NoTargetOnPlatformError(
-          platform.value,
+          platform?.value ?? null,
           [...new Set(classifiedTargets.otherPlatform.map((entry) => entry.platform))],
           classifiedTargets.undetermined.length
         );

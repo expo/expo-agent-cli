@@ -26,6 +26,8 @@ import {
   startStubDevServerAsync,
   type ExecuteResult,
 } from '../utils';
+import { makeTarget } from '../../src/runtime/__tests__/targetSelectionFixtures';
+import { BOOTED_SIMULATOR, installStubXcrunAsync } from './installedAppStubs';
 
 /** A debugger target that looks like Expo Go, which its app id alone places on iOS. */
 const EXPO_GO_TARGET = {
@@ -370,6 +372,57 @@ describe('@expo/agent-cli navigate --eas', () => {
     }
   });
 
+  // The development build an EAS Simulator iOS session runs registers the project's own app id and
+  // the cloud simulator's model name, which no local tool reports. It is the session's app, so the
+  // run counts it as attached and opens only the route link, never the launcher URL.
+  it(`counts the session's development build as the iOS app, and opens only the route link`, async () => {
+    const projectRoot = await setupAsync('dev-client-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    const stub = await startStubDevServerAsync({
+      targets: [{ id: '1', appId: 'com.example.demo', deviceName: 'iPhone 17' }],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'navigate',
+          '/',
+          '--ios',
+          '--eas',
+          '--scheme',
+          'demoapp',
+          '--app-id',
+          'com.example.demo',
+          '--attach-timeout',
+          '5s',
+          '--json',
+          '--no-followups',
+        ],
+        { reject: false }
+      );
+
+      const opens = easInvocations(projectRoot)
+        .filter((argv) => argv[0] === 'simulator:exec' && argv[3] === 'open')
+        .map((argv) => argv[4]);
+      expect(opens).toEqual(['demoapp://']);
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ launch: null, attached: true });
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
   // A cloud simulator is on EAS's network, so a loopback host in the link resolves to a machine in
   // a datacenter. Refused before anything opens, rather than opened onto an error screen.
   it(`refuses a dev server only this machine can reach`, async () => {
@@ -390,6 +443,118 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(result.stderr).toMatch(/tunnel|reachable from this machine/);
     // Nothing was opened: the check is before the verb, so no `simulator:exec` was ever spawned.
     expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
+describe('@expo/agent-cli runtime:reload --eas with no platform', () => {
+  // A booted local simulator exists only on macOS.
+  it.skipIf(process.platform !== 'darwin')(
+    `reloads the session's app, not the app on a booted local simulator`,
+    async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await writeSessionFileAsync(projectRoot, 'sess-e2e');
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      const evaluated: string[] = [];
+      const stub = await startStubDevServerAsync({
+        targets: [
+          makeTarget({
+            id: 'local',
+            appId: 'host.exp.Exponent',
+            deviceName: BOOTED_SIMULATOR.name,
+            webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=local&page=1',
+            reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'local' },
+          }),
+          makeTarget({
+            id: 'session',
+            appId: 'com.example.demo',
+            deviceName: 'iPhone 17',
+            webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=session&page=1',
+            reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'session' },
+          }),
+        ],
+        projectRoot,
+        inspectorEvaluate: (expression, device) => {
+          if (expression.includes('reloadAppAsync')) evaluated.push(device);
+          return undefined;
+        },
+      });
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          [
+            'runtime:reload',
+            '--eas',
+            '--method',
+            'runtime',
+            '--dev-server-url',
+            stub.url,
+            '--timeout',
+            '2s',
+            '--json',
+            '--no-followups',
+          ],
+          { reject: false }
+        );
+        expect(new Set(evaluated), result.all).toEqual(new Set(['session']));
+      } finally {
+        await stub.close();
+      }
+    }
+  );
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
+describe('@expo/agent-cli runtime:reload --eas with apps nothing claims', () => {
+  const unclaimed = (id: string, deviceName: string) =>
+    makeTarget({
+      id,
+      appId: 'com.example.demo',
+      deviceName,
+      webSocketDebuggerUrl: `ws://127.0.0.1:1/inspector/debug?device=${id}&page=1`,
+      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: id },
+    });
+
+  it.each([
+    { name: 'no platform', flags: [], apps: ['iPhone 17', 'iPad Air'] },
+    { name: '--ios', flags: ['--ios'], apps: ['iPhone 17', 'iPad Air'] },
+    { name: '--android', flags: ['--android'], apps: ['iPhone 17'] },
+  ])(`reads neither unclaimed app with $name`, async ({ flags, apps }) => {
+    const projectRoot = await setupAsync('dev-client-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    const evaluated: string[] = [];
+    const stub = await startStubDevServerAsync({
+      targets: apps.map((name, index) => unclaimed(String(index + 1), name)),
+      projectRoot,
+      inspectorEvaluate: (expression, device) => {
+        if (expression.includes('reloadAppAsync')) evaluated.push(device);
+        return undefined;
+      },
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'runtime:reload',
+          '--eas',
+          ...flags,
+          '--method',
+          'runtime',
+          '--dev-server-url',
+          stub.url,
+          '--timeout',
+          '2s',
+          '--json',
+          '--no-followups',
+        ],
+        { reject: false }
+      );
+      expect(evaluated, result.all).toEqual([]);
+      expect(result.exitCode).not.toBe(0);
+    } finally {
+      await stub.close();
+    }
   });
 });
 

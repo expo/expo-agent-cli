@@ -142,3 +142,61 @@ it('asks the device tools once for a list that does not change', async () => {
   });
   expect(tools.calls.filter((args) => args[0] === 'list')).toHaveLength(1);
 });
+
+it('refreshes failed local exclusion evidence before counting a cloud attachment', async () => {
+  const url = await serverAsync(() => [target()]);
+  const tools = fakeTools();
+  let simulatorReads = 0;
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (command, args) => {
+    if (command !== 'xcrun') return tools.adb(args);
+    if (++simulatorReads === 1) return { exitCode: 1, stdout: '', stderr: 'unavailable' };
+    return tools.simctl(args.slice(1));
+  });
+  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios', '--eas']));
+  expect(await deps.waitForAppConnection(url, 1500)).toMatchObject({
+    appsConnected: 1,
+    timedOut: false,
+    undeterminedApps: 0,
+  });
+  expect(simulatorReads).toBeGreaterThan(1);
+});
+
+it('asks a failing simctl again at most once a second while the wait polls', async () => {
+  const url = await serverAsync(() => [target()]);
+  const tools = fakeTools();
+  let simulatorLists = 0;
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (command, args) => {
+    if (command !== 'xcrun') return tools.adb(args);
+    if (args[1] === 'list') simulatorLists++;
+    return { exitCode: 1, stdout: '', stderr: 'unavailable' };
+  });
+  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios', '--eas']));
+  expect(await deps.waitForAppConnection(url, 2200)).toMatchObject({
+    appsConnected: 0,
+    timedOut: true,
+  });
+  expect(simulatorLists).toBeGreaterThan(1);
+  expect(simulatorLists).toBeLessThanOrEqual(3);
+});
+
+it.each([
+  { case: 'after an empty first list', firstList: [] as string[] },
+  { case: 'after a local simulator boots during the wait', firstList: ['My iPhone'] },
+])('does not count a local Expo Go app as the cloud session $case', async ({ firstList }) => {
+  const tools = inventory();
+  const expoGo = (deviceName: string) =>
+    target({ id: deviceName, appId: 'host.exp.Exponent', deviceName });
+  let reads = 0;
+  const url = await serverAsync(() => {
+    if (++reads <= 2) return firstList.map(expoGo);
+    if (!tools.simulators.some((simulator) => simulator.name === 'Second iPhone')) {
+      tools.simulators.push({ udid: 'IOS-2', name: 'Second iPhone', state: 'Booted' });
+    }
+    return [...firstList, 'Second iPhone'].map(expoGo);
+  });
+  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios', '--eas']));
+  expect(await deps.waitForAppConnection(url, 600)).toMatchObject({
+    appsConnected: 0,
+    timedOut: true,
+  });
+});

@@ -202,6 +202,33 @@ function mockSpawnQueue(
   }) as any);
 }
 
+/**
+ * Answer this machine's device tools as a host with no local device, outside the queue.
+ *
+ * A cloud scope asks them whether a listed app is on a local device before it reads the app.
+ */
+function withNoLocalDevices() {
+  const queued = vi.mocked(spawn).getMockImplementation()!;
+  vi.mocked(spawn).mockImplementation(((command: string, args: string[], ...rest: unknown[]) => {
+    const answer =
+      command === 'xcrun' && args[1] === 'list'
+        ? JSON.stringify({ devices: {} })
+        : args[0] === 'devices'
+          ? 'List of devices attached\n'
+          : null;
+    if (answer == null) return (queued as any)(command, args, ...rest);
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+    });
+    process.nextTick(() => {
+      child.stdout.emit('data', answer);
+      child.emit('close', 0, null);
+    });
+    return child as any;
+  }) as any);
+}
+
 const BOOTED_SIMULATOR = JSON.stringify({
   devices: {
     'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
@@ -1390,6 +1417,7 @@ describe('reloading an app on a cloud simulator session', () => {
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
       (index) => index === 2 && appendBundledLine()
     );
+    withNoLocalDevices();
 
     await reloadAsync(projectRoot, cloudOptions({ json: true }));
 
@@ -1404,6 +1432,7 @@ describe('reloading an app on a cloud simulator session', () => {
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],
       (index) => index === 2 && appendBundledLine()
     );
+    withNoLocalDevices();
 
     await reloadAsync(projectRoot, cloudOptions());
 
@@ -1550,6 +1579,7 @@ describe('the rung the ladder picks', () => {
       ).socket
     );
     mockSpawnQueue([{ stdout: SESSION_LISTING }]);
+    withNoLocalDevices();
 
     await expect(
       reloadAsync(
@@ -1563,7 +1593,11 @@ describe('the rung the ladder picks', () => {
       commandSocketClients: 1,
     });
     // No controller verb was spawned, so no billed session was touched.
-    expect(spawn).not.toHaveBeenCalled();
+    expect(
+      vi
+        .mocked(spawn)
+        .mock.calls.filter(([command]) => command !== 'xcrun' && !String(command).endsWith('adb'))
+    ).toEqual([]);
   });
 
   // The other half of one ladder: the verification is the same on every rung. A `Bundled` line in

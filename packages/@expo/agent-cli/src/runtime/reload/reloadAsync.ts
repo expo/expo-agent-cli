@@ -67,7 +67,7 @@ import {
   type DevServerMessageSocket,
   type MessageSocketPeers,
 } from '../messageSocket';
-import { preflightRuntimeAsync } from '../preflight';
+import { preflightRuntimeAsync, type RuntimeConnection } from '../preflight';
 import { type TargetSelection, type DeviceInventory } from '../targetSelection';
 import { waitForFreshAppConnectionAsync, countConnectedAppsAsync } from '../waitReady';
 import {
@@ -467,7 +467,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
     // a less predictable one.
     if (method == null && options.method === 'runtime') {
-      const attempt = await reloadOverRuntimeAsync(devServerUrl, options, observedApps);
+      const attempt = await reloadOverRuntimeAsync(devServer, observedApps);
       attempts.push(attempt);
       if (attempt.ok) {
         // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
@@ -1123,8 +1123,11 @@ const RUNTIME_RELOAD_ANSWER_MS = 4000;
  * the call is reported as "sent" rather than as a failure.
  */
 async function reloadOverRuntimeAsync(
-  devServerUrl: string,
-  options: ReloadOptions,
+  {
+    devServerUrl,
+    targetSelection,
+    deviceInventory,
+  }: Pick<RuntimeConnection, 'devServerUrl' | 'targetSelection' | 'deviceInventory'>,
   connectedApps: number
 ): Promise<ReloadAttempt> {
   const failed = (reason: string): ReloadAttempt => ({
@@ -1142,16 +1145,9 @@ async function reloadOverRuntimeAsync(
 
   const { CdpClient, isMethodNotFoundError } =
     require('../cdpClient') as typeof import('../cdpClient');
-  const { resolveTargetSelectionAsync } =
-    require('../resolveTargetSelection') as typeof import('../resolveTargetSelection');
 
   let client: import('../cdpClient').CdpClient;
   try {
-    const { targetSelection, deviceInventory } = await resolveTargetSelectionAsync({
-      projectRoot: null,
-      flags: { platform: options.platform, eas: false },
-      targets: (await probeDevServerAsync(devServerUrl)).targets,
-    });
     client = new CdpClient({ metroUrl: devServerUrl, targetSelection, deviceInventory });
   } catch (error: unknown) {
     return failed(

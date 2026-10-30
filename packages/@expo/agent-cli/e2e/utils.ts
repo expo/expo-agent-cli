@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -672,6 +672,8 @@ export type StubDevServerOptions = {
    * are connected. Defaults to none, which is a dev server nothing has attached to yet.
    */
   targets?: unknown[];
+  /** Begin listening only after the stub Expo start creates this file. */
+  readyWithFile?: string;
   /**
    * Delay before `GET /status` answers, in milliseconds.
    *
@@ -746,7 +748,7 @@ export type StubDevServerOptions = {
    * `undefined` answers `{type: "undefined"}`, which is what an expression whose value is nothing
    * comes back as — and is what the target selector's own probe expects.
    */
-  inspectorEvaluate?: (expression: string) => unknown;
+  inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
@@ -864,6 +866,7 @@ export type StubDevServer = {
  */
 export async function startStubDevServerAsync({
   targets = [],
+  readyWithFile,
   statusDelayMs = 0,
   projectRoot = '/stub-project',
   bundle = 'compiles',
@@ -1057,7 +1060,8 @@ export async function startStubDevServerAsync({
   // `no-debugger` socket keeps its `-32601` answer instead: the responder is a runtime that talks,
   // and that socket's whole point is a runtime that cannot.
   if (inspectorEvaluate && inspectorSocket !== 'no-debugger') {
-    inspectorServer?.on('connection', (socket: WebSocket) => {
+    inspectorServer?.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+      const device = new URL(request.url ?? '/', 'http://stub').searchParams.get('device') ?? '';
       socket.on('message', (data) => {
         let message: { id?: number; method?: string; params?: { expression?: string } };
         try {
@@ -1069,7 +1073,7 @@ export async function startStubDevServerAsync({
           return;
         }
         const expression = message.params?.expression ?? '';
-        const value = inspectorEvaluate(expression);
+        const value = inspectorEvaluate(expression, device);
         // The reload asked for over the debugger, which `runtime:reload --method runtime` sends.
         // Its probe half carries the diagnostic string below and the call does not, which is the
         // only thing that tells them apart: every expression this CLI sends is wrapped, and the
@@ -1151,11 +1155,25 @@ export async function startStubDevServerAsync({
   // Read back rather than chosen, and captured for the manifest: the bundle URL a dev server
   // publishes is absolute, so the stub has to know the ephemeral port it ended up on.
   port = (server.address() as AddressInfo).port;
+  let startup: ReturnType<typeof setInterval> | undefined;
+  let relistenError: Error | undefined;
+  if (readyWithFile) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    startup = setInterval(() => {
+      if (fs.existsSync(readyWithFile)) {
+        clearInterval(startup);
+        // The port is free only while nothing else took it; close() reports a lost race.
+        server.once('error', (error) => (relistenError = error));
+        server.listen(port, '127.0.0.1');
+      }
+    }, 10).unref();
+  }
   return {
     url: `http://127.0.0.1:${port}`,
     port,
     close: () =>
-      new Promise<void>((resolve) => {
+      new Promise<void>((resolve, reject) => {
+        clearInterval(startup);
         // Any request left waiting on `statusDelayMs` holds the server open otherwise.
         for (const client of [
           ...(messageServer?.clients ?? []),
@@ -1166,7 +1184,13 @@ export async function startStubDevServerAsync({
         messageServer?.close();
         inspectorServer?.close();
         server.closeAllConnections?.();
-        server.close(() => resolve());
+        server.close(() =>
+          relistenError
+            ? reject(
+                new Error(`stub dev server could not listen again on ${port}: ${relistenError}`)
+              )
+            : resolve()
+        );
       }),
   };
 }

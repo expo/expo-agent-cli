@@ -76,7 +76,7 @@ export function platformOfTarget(
     };
   }
 
-  const model = deviceInventory?.androidModels.find(
+  const model = deviceInventory?.androidModels?.find(
     (candidate) => candidate === deviceName || deviceName.startsWith(`${candidate} - `)
   );
   if (model) {
