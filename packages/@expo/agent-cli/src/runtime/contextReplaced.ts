@@ -43,12 +43,12 @@ async function markAsync(
   }>,
   marker: string,
   nonce: string
-): Promise<CdpSession | ContextReplaced> {
+): Promise<{ kind: 'marked'; session: CdpSession } | { kind: 'unmarkable'; reason: string }> {
   try {
     const { open, read } = await ask(
       `(${marker} = ${JSON.stringify(nonce)}, ${marker} === ${JSON.stringify(nonce)})`
     );
-    if (read.value === true) return open;
+    if (read.value === true) return { kind: 'marked', session: open };
     return { kind: 'unmarkable', reason: read.exceptionText ?? 'the app did not keep the marker' };
   } catch (error: unknown) {
     if (error instanceof CdpRequestError) return { kind: 'unmarkable', reason: describe(error) };
@@ -126,13 +126,13 @@ export async function jsContextReplacedAsync(
 
   try {
     const marked = await markAsync(ask, marker, nonce);
-    if ('kind' in marked) return marked;
+    if (marked.kind === 'unmarkable') return marked;
 
     clock.limit(ACT_MS);
-    const lost = await act(marked).then(
+    const lost = await act(marked.session).then(
       () => null,
       (error: unknown) => {
-        if (error instanceof CdpTimeoutError || marked.closed || clock.signal().aborted) {
+        if (error instanceof CdpTimeoutError || marked.session.closed || clock.signal().aborted) {
           return describe(error);
         }
         throw error;
