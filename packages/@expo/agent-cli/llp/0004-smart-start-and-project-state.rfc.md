@@ -466,8 +466,10 @@ the parent keeps waiting for its own server. The missing-header compatibility ru
 §A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
 reject a foreign root. Without the flag `ready` is `null`.
 
-One dev server per project. The lock is read before anything is spawned. A project that
-already has one gets the running server reported back with `alreadyRunning: true`;
+One detached startup run per project, owned by its child before project probing. Overlapping
+detached starts follow that owner, even if its parent exits before a server exists. A live
+server lock is also checked before spawning and again by the elected child. A project that
+already has a server gets it reported back with `alreadyRunning: true`;
 `--wait-ready` performs the same readiness check before exit 0, without spawning another
 child. A second detached one is a process nobody could find. A foreground `dev` stops on
 the same lock instead (§A busy port): `--detach` promises a running server and reports
@@ -478,9 +480,10 @@ Reuse checks the process and its verdict after tunnel lookup and any final readi
 probe, and before reporting a readiness timeout. Logs older than the lock's start time
 cannot supply a current verdict. Reuse adds no platform-opening grace period.
 
-The log is one file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. A
-name carrying the port could not be resolved by `dev:logs` before the port was known. A
-file that accumulated across runs would answer with last week's output.
+Detached candidates write separate attempt logs. Only the owning child selects the current
+log read by `dev:logs`; waiting callers pin that run's log. A losing start cannot truncate
+or replace the owner's output. Older `.expo/dev/logs/dev-detached.log` files remain readable.
+See [[0036-detached-run-ownership]] for startup ownership and recovery.
 
 `dev:logs` has no `--follow`. A tail that never returns is the thing `--detach` exists
 to avoid. It polls instead. Each read is the last 100 lines by default, ANSI stripped,

@@ -23,7 +23,7 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
-import { detachedLogPath } from '../logFile';
+import { pinDetachedLog } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
@@ -61,7 +61,20 @@ function mockPlatform(value: NodeJS.Platform) {
 }
 
 const projectRoot = '/project';
-const logFile = detachedLogPath(projectRoot);
+const attemptId = '00000000-0000-0000-0000-000000000001';
+const logFile = path.join(projectRoot, '.expo/dev/logs', `dev-detached-${attemptId}.log`);
+vi.mock('crypto', async (original) => ({
+  ...(await original<typeof import('crypto')>()),
+  randomUUID: () => '00000000-0000-0000-0000-000000000001',
+}));
+
+function fakeChild() {
+  const child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+  Promise.resolve().then(() =>
+    child.emit('message', { detachedRun: { id: attemptId, pid: child.pid, logFile } })
+  );
+  return child;
+}
 const startLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
 const servingPlan = '  1. expo run:ios  ~minutes\n› Installing on iPhone\n';
 
@@ -76,6 +89,7 @@ function readiness(ready = true): BundlerReadyResult {
 }
 
 beforeEach(() => {
+  pinDetachedLog(projectRoot, logFile);
   vi.useFakeTimers();
   vi.setSystemTime(0);
   vi.mocked(readDevServerLockAsync)
@@ -96,10 +110,7 @@ beforeEach(() => {
       startLog,
       JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: 8393 })
     );
-    return Object.assign(new EventEmitter(), {
-      pid: 4242,
-      unref: vi.fn(),
-    }) as unknown as ChildProcess;
+    return fakeChild() as unknown as ChildProcess;
   });
   vi.mocked(isProcessAlive).mockReturnValue(true);
   vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(readiness());
@@ -568,7 +579,7 @@ describe('a lock whose port Metro has not logged', () => {
       .mockResolvedValue(pending);
     vi.mocked(spawn).mockImplementation(() => {
       fs.writeFileSync(logFile, servingPlan);
-      child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      child = fakeChild();
       return child as unknown as ChildProcess;
     });
   });
@@ -976,7 +987,7 @@ describe('the bound device', () => {
     refusal.suggestedCommand = 'xcodebuild -downloadPlatform iOS';
     let child: EventEmitter;
     vi.mocked(spawn).mockImplementation(() => {
-      child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      child = fakeChild();
       fs.writeFileSync(logFile, `${childLogOf(refusal).join('\n')}\n`);
       setTimeout(() => child.emit('exit', 7, null), 50);
       return child as unknown as ChildProcess;
@@ -1009,7 +1020,7 @@ describe('the bound device', () => {
       options: { env: NodeJS.ProcessEnv }
     ) => {
       spawned = { args, env: options.env };
-      const child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      const child = fakeChild();
       setTimeout(() => child.emit('exit', 1, null), 50);
       return child as unknown as ChildProcess;
     }) as typeof spawn);
@@ -1134,7 +1145,7 @@ describe('the EAS session under --wait-ready', () => {
         startLog,
         JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: 8082 })
       );
-      return Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() }) as any;
+      return fakeChild() as any;
     });
   });
 

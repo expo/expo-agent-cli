@@ -119,6 +119,13 @@ export const agentCliDev: Command = async (argv) => {
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — Renamed: the
     // plan-first engine is `@expo/agent-cli dev`, and `@expo/agent-cli start` is the plain `expo start` wrapper.
     const { devAsync } = require('./devAsync') as typeof import('./devAsync');
-    process.exitCode = await devAsync(projectRoot, options);
+    if (options.detachedChild) {
+      const { withDetachedRunAsync } = require('./detachedRun') as typeof import('./detachedRun');
+      process.exitCode = await withDetachedRunAsync(projectRoot, options, () =>
+        devAsync(projectRoot, options)
+      );
+    } else {
+      process.exitCode = await devAsync(projectRoot, options);
+    }
   })().catch(logCmdError);
 };

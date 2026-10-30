@@ -1,15 +1,8 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// Where a detached dev server's output goes, and how it is read back.
-//
-// One file per project, not one per port, and truncated on each run. Both follow from the rule the
-// lock already enforces: **one detached dev server per project**. A name carrying the port could
-// not be resolved by `dev:logs` before the port was known, and a file that accumulated across runs
-// would answer "what is my dev server doing" with what a dev server did last week.
-//
-// It sits in `.expo/dev/logs/`, which `src/utils/dotExpo.ts` already documents as the directory of
-// per-run logs — so nothing new appears in a project, and `.expo` is already gitignored.
+// @ref llp/0036-detached-run-ownership.rfc.md
+// Each candidate writes a private log. Only the owner publishes the current log;
+// observers pin their selected run so a later start cannot change what they read.
 
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { stripVTControlCharacters } from 'util';
@@ -19,24 +12,53 @@ const DEV_LOGS_DIR = path.join('.expo', 'dev', 'logs');
 
 /** Name of the file a detached dev server's stdout and stderr are written to. */
 const DETACHED_LOG_NAME = 'dev-detached.log';
+const pinnedLogs = new Map<string, string>();
+
+/** An observer keeps reading the run it selected, even if a later run becomes current. */
+export function pinDetachedLog(projectRoot: string, file: string): void {
+  pinnedLogs.set(path.resolve(projectRoot), file);
+}
+
+/** Only the owning child publishes a new log. Candidates never truncate the current run. */
+export function publishDetachedLog(projectRoot: string, file: string): void {
+  const pointer = path.join(projectRoot, DEV_LOGS_DIR, 'dev-detached-current.json');
+  const temp = `${pointer}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(path.basename(file)));
+  fs.renameSync(temp, pointer);
+}
 
 /** Where this project's detached dev server writes its output. */
 export function detachedLogPath(projectRoot: string): string {
+  const pinned = pinnedLogs.get(path.resolve(projectRoot));
+  if (pinned) return pinned;
+  try {
+    const name: unknown = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, DEV_LOGS_DIR, 'dev-detached-current.json'), 'utf8')
+    );
+    if (typeof name === 'string' && /^dev-detached-[\da-f-]{36}\.log$/.test(name)) {
+      return path.join(projectRoot, DEV_LOGS_DIR, name);
+    }
+  } catch {
+    /* Older runs used the fixed filename. */
+  }
   return path.join(projectRoot, DEV_LOGS_DIR, DETACHED_LOG_NAME);
 }
 
 /**
- * Create the log file for a new detached run, truncating whatever was there.
+ * Create an empty private log for a new detached candidate.
  *
  * @returns the path and an open file descriptor for the child's stdout and stderr. The caller
  * closes the descriptor once the child owns it.
  */
-export function openDetachedLogSync(projectRoot: string): { logFile: string; fd: number } {
-  const logFile = detachedLogPath(projectRoot);
+export function openDetachedLogSync(
+  projectRoot: string,
+  id: string = randomUUID()
+): { logFile: string; fd: number } {
+  const logFile = path.join(projectRoot, DEV_LOGS_DIR, `dev-detached-${id}.log`);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
-  // `w`, so a new run starts a new log: the previous run's Metro output under a question about
-  // this one is worse than no answer.
-  return { logFile, fd: fs.openSync(logFile, 'w') };
+  const fd = fs.openSync(logFile, 'wx');
+  pinDetachedLog(projectRoot, logFile);
+  return { logFile, fd };
 }
 
 /** What a read of the log amounts to. */
