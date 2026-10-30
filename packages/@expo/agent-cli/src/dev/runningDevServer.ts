@@ -26,7 +26,7 @@ export async function runningDevServerAsync(
   projectRoot: string,
   lock: DevServerLockInfo
 ): Promise<RunningDevServer> {
-  if (lock.phase === 'finishing') return { lock, phase: 'finishing' };
+  if (lock.phase !== 'serving') return { lock, phase: lock.phase };
   const probe = await probeBundlerAsync(lock.url, { projectRoot });
   const serving = probe.answering && probe.projectRootMatched !== false;
   return { lock, phase: serving ? 'serving' : 'starting' };

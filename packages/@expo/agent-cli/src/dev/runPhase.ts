@@ -29,6 +29,18 @@ const pidOf = ({ pid }: RunAt) => (pid == null ? '' : ` (pid ${pid})`);
 const stopAndRetry = `or stop it with "${PROGRAM_PREFIX} dev:stop" and run this command again.`;
 
 export const RUN_PHASE: Record<RunningDevServerPhase, RunPhase> = {
+  building: {
+    state: (at) =>
+      `This project's dev run${pidOf(at)} is building before it serves on port ${at.port}`,
+    second: 'one',
+    portState: ', building before it serves',
+    command: () => `${PROGRAM_PREFIX} dev:logs`,
+    does: `This shows the build; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+    why: () =>
+      'one project has one dev run. Its lock says that it builds, and it starts its dev server when the build ends.',
+    how: () =>
+      `wait for it ("${PROGRAM_PREFIX} dev:logs" shows the build, "${PROGRAM_PREFIX} status" says when it serves), ${stopAndRetry}`,
+  },
   serving: {
     state: (at) => `This project's dev server is already running on port ${at.port}${pidOf(at)}`,
     second: 'one',

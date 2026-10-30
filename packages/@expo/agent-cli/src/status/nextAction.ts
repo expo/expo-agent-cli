@@ -256,7 +256,7 @@ function unservedRunNext(
   run: DevServerLockInfo,
   devNext: NextActionStatus
 ): NextActionStatus | null {
-  if (run.phase !== 'finishing') return null;
+  if (run.phase === 'serving') return null;
   const row = RUN_PHASE[run.phase];
   return { ...devNext, command: row.command(''), why: `${row.state(run)}. ${row.does}` };
 }
