@@ -52,8 +52,10 @@ export interface DevLockAddress {
  *
  * A project buried deep enough that its socket path would exceed
  * {@link MAX_UNIX_SOCKET_PATH} gets the same digest treatment in the temporary directory, because
- * the kernel would refuse the in-project path outright. The choice is a pure function of the path
- * length, so both sides of the lock make it identically without asking each other.
+ * the kernel would refuse the in-project path outright. A temporary directory that is itself too
+ * deep for the cap (a long `TMPDIR`) is skipped for `/tmp`, which every posix host has. The choice
+ * is a pure function of the path length, so both sides of the lock make it identically without
+ * asking each other.
  *
  * @param platform Overrides the host platform, so both branches are testable from either one.
  */
@@ -76,9 +78,11 @@ export function lockAddressFor(
   if (inProject.length <= MAX_UNIX_SOCKET_PATH) {
     return { kind: 'unix', address: inProject };
   }
+  const derivedName = `${DEV_LOCK_PIPE_PREFIX}${digestOf(canonical)}.sock`;
+  const inTmpdir = path.join(os.tmpdir(), derivedName);
   return {
     kind: 'unix',
-    address: path.join(os.tmpdir(), `${DEV_LOCK_PIPE_PREFIX}${digestOf(canonical)}.sock`),
+    address: inTmpdir.length <= MAX_UNIX_SOCKET_PATH ? inTmpdir : path.join('/tmp', derivedName),
   };
 }
 
