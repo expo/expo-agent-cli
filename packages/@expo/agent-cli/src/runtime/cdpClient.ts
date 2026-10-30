@@ -18,11 +18,11 @@ import {
   wrapExpressionForPromises,
 } from './promiseSettling';
 import {
-  buildDeviceNameIndexIfNeededAsync,
-  scopeTargets,
-  type DeviceNameIndex,
-  type ScopedTargets,
-} from './targetPlatform';
+  classifyTargets,
+  type DeviceInventory,
+  type ClassifiedTargets,
+  type TargetSelection,
+} from './targetSelection';
 
 /**
  * Metro's inspector proxy rejects WebSocket handshakes without a same-origin `Origin`
@@ -191,17 +191,17 @@ export interface CdpClientOptions {
    */
   targetRetryMs?: number;
   /**
-   * Talk only to an app on this platform.
+   * Talk only to an app this scope reads.
    *
-   * @ref ./targetPlatform — friction run 6's F51. Every reading command took the first target the
+   * @ref ./targetSelection — friction run 6's F51. Every reading command took the first target the
    * selector accepted, so a run told `--android` on a dev server that also had an iOS simulator
    * attached evaluated its expression, and earned its verdict, in the **simulator**. The list is
    * narrowed before the selector rather than inside it, so "which target answers the debugger" and
    * "which platform is this run about" stay two separate questions.
    */
-  platform?: NavigatePlatform;
-  /** What this machine's device tools reported, for {@link platform}. */
-  deviceIndex?: DeviceNameIndex;
+  targetSelection: TargetSelection;
+  /** What this machine's device tools reported, for placing targets in {@link targetSelection}. */
+  deviceInventory: DeviceInventory;
 }
 
 /** The failure for a platform-scoped client that found no target of its platform. */
@@ -255,23 +255,18 @@ export class CdpClient {
       this.options.targetSelector ??
       createDefaultTargetSelector({ createWebSocket: this.options.createWebSocket });
 
-    // Read once: what this machine has attached does not change while a reconnect runs, and asking
-    // the device tools on every poll would be a subprocess every 250 ms.
-    const index =
-      this.options.platform == null
-        ? null
-        : (this.options.deviceIndex ??
-          (await buildDeviceNameIndexIfNeededAsync(await this.listTargetsAsync())));
-
     // Re-read the list rather than re-run the selector over the same array: what changes during a
     // reconnect is which targets the dev server lists, not what this can make of a given one.
     const deadline = Date.now() + (this.options.targetRetryMs ?? 0);
     let target: CdpTarget | null = null;
-    let scope: ScopedTargets | null = null;
+    let classifiedTargets: ClassifiedTargets;
     for (;;) {
-      const listed = await this.listTargetsAsync();
-      scope = index == null ? null : scopeTargets(listed, this.options.platform!, index);
-      target = await selector(scope ? scope.matched : listed);
+      classifiedTargets = classifyTargets(
+        await this.listTargetsAsync(),
+        this.options.targetSelection,
+        this.options.deviceInventory
+      );
+      target = await selector(classifiedTargets.read);
       if (target || Date.now() >= deadline) {
         break;
       }
@@ -280,11 +275,12 @@ export class CdpClient {
     if (!target) {
       // Two different failures, and only one of them is "the app is not there". A scoped run that
       // found apps on the other platform has to say so, or the reader debugs a healthy app (F51).
-      if (scope && scope.matched.length === 0) {
+      const { platform } = this.options.targetSelection;
+      if (platform != null && classifiedTargets.read.length === 0) {
         throw new NoTargetOnPlatformError(
-          this.options.platform!,
-          [...new Set(scope.otherPlatform.map((entry) => entry.platform))],
-          scope.undetermined.length
+          platform.value,
+          [...new Set(classifiedTargets.otherPlatform.map((entry) => entry.platform))],
+          classifiedTargets.undetermined.length
         );
       }
       throw new Error('No target found.');

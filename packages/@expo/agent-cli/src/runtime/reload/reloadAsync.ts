@@ -68,7 +68,8 @@ import {
   type MessageSocketPeers,
 } from '../messageSocket';
 import { preflightRuntimeAsync } from '../preflight';
-import { waitForFreshAppConnectionAsync } from '../waitReady';
+import { type TargetSelection, type DeviceInventory } from '../targetSelection';
+import { waitForFreshAppConnectionAsync, countConnectedAppsAsync } from '../waitReady';
 import {
   markBundleSignalSync,
   waitForNewBundleAsync,
@@ -330,8 +331,9 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // for is a question about the app being reloaded, and this used to answer it with a host-free
   // default: with an Android-only break and both apps attached, a `runtime:reload` with no flag
   // checked the **iOS** bundle, passed, and reloaded the Android app onto the broken one.
+  const { targetSelection, deviceInventory } = devServer;
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(options.platform ?? null, devServer.targets);
+    await resolveBundleCheckPlatformsAsync(targetSelection, devServer.targets, { deviceInventory });
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck) {
     for (const platform of bundlePlatforms) {
@@ -543,6 +545,8 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       ? await waitForReloadEvidenceAsync(devServerUrl, projectRoot, {
           timeoutMs: remainingMs(),
           knownTargetIds,
+          targetSelection,
+          deviceInventory,
           bundleMark,
           // The flag the caller typed, never the resolved default: `null` here means "nobody said",
           // and `waitForNewBundleAsync` counts every platform for it (F126).
@@ -567,9 +571,10 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // (`APP_RECONNECT_GRACE_MS`, F39's own), it either finds the runtime that came back — and the next
   // command in the chain finds it too — or it does not, and then zero is a fact about an app that is
   // genuinely not there and the report says so in words.
+  const reconnectBudget = Math.min(APP_RECONNECT_GRACE_MS, remainingMs());
   const appsConnected =
     observed && connection.appsConnected === 0
-      ? await countConnectedAppsAsync(devServerUrl, Math.min(APP_RECONNECT_GRACE_MS, remainingMs()))
+      ? await countConnectedAppsAsync(devServerUrl, reconnectBudget, devServer)
       : connection.appsConnected;
 
   // What the run may claim. The mechanism's own observation is the label when it has one, because
@@ -953,7 +958,11 @@ export async function waitForReloadEvidenceAsync(
     knownTargetIds,
     bundleMark,
     platform,
+    targetSelection,
+    deviceInventory,
   }: {
+    targetSelection: TargetSelection;
+    deviceInventory: DeviceInventory;
     timeoutMs: number;
     knownTargetIds: readonly string[];
     bundleMark: BundleSignalMark;
@@ -969,6 +978,8 @@ export async function waitForReloadEvidenceAsync(
   const targets = waitForFreshAppConnectionAsync(devServerUrl, {
     timeoutMs,
     knownTargetIds,
+    targetSelection,
+    deviceInventory,
     signal: settled.signal,
   }).then((result) => {
     if (result.freshTargets > 0) {
@@ -996,28 +1007,6 @@ export async function waitForReloadEvidenceAsync(
     bundle: observation,
   };
 }
-
-/**
- * How many debugger targets the dev server lists, asked until one appears or the budget runs out.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — F141. Deliberately *not* a wait
- * for a **fresh** target: the question here is only "is there a runtime on this dev server now",
- * which is the question every command after this reload will ask. Whether it is a new one was
- * already answered above, and answering it twice would make a report of the second answer.
- */
-async function countConnectedAppsAsync(devServerUrl: string, budgetMs: number): Promise<number> {
-  const deadline = Date.now() + budgetMs;
-  for (;;) {
-    const probe = await probeDevServerAsync(devServerUrl);
-    if (probe.targets.length > 0 || Date.now() + APP_RECONNECT_POLL_MS >= deadline) {
-      return probe.targets.length;
-    }
-    await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
-  }
-}
-
-/** How often that question is asked again. */
-const APP_RECONNECT_POLL_MS = 200;
 
 /** The first line of a message, for a reason that has to fit on one. */
 function firstLine(text: string): string {
@@ -1153,18 +1142,17 @@ async function reloadOverRuntimeAsync(
 
   const { CdpClient, isMethodNotFoundError } =
     require('../cdpClient') as typeof import('../cdpClient');
-  const { buildDeviceNameIndexIfNeededAsync } =
-    require('../targetPlatform') as typeof import('../targetPlatform');
+  const { resolveTargetSelectionAsync } =
+    require('../resolveTargetSelection') as typeof import('../resolveTargetSelection');
 
   let client: import('../cdpClient').CdpClient;
   try {
-    const deviceIndex =
-      options.platform == null
-        ? undefined
-        : await buildDeviceNameIndexIfNeededAsync(
-            (await probeDevServerAsync(devServerUrl)).targets
-          );
-    client = new CdpClient({ metroUrl: devServerUrl, platform: options.platform, deviceIndex });
+    const { targetSelection, deviceInventory } = await resolveTargetSelectionAsync({
+      projectRoot: null,
+      flags: { platform: options.platform, eas: false },
+      targets: (await probeDevServerAsync(devServerUrl)).targets,
+    });
+    client = new CdpClient({ metroUrl: devServerUrl, targetSelection, deviceInventory });
   } catch (error: unknown) {
     return failed(
       `could not open a debugger connection to the app: ${error instanceof Error ? firstLine(error.message) : String(error)}`

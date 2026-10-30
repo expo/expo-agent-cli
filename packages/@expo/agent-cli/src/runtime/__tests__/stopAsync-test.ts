@@ -309,7 +309,7 @@ describe(runtimeStopAsync, () => {
   // The mechanism is one line: `resolveAppId` took `targetAppIds.find(Boolean)` off the *unscoped*
   // target list, and Expo Go's two application ids differ by one capital letter (llp/0005 §The dev
   // server does not label its targets). The dev server happened to list iOS first. So this command
-  // now reads `appTargets` — the platform-scoped list the preflight already builds for every other
+  // now reads `classifiedTargets.read` — the platform-scoped list the preflight already builds for every other
   // command in the family — and the ids in its report are the ones on the device it acted on.
   it(`resolves the application id from the platform it is stopping, not the first one listed (F101)`, async () => {
     Object.defineProperty(process, 'platform', { value: 'linux' });

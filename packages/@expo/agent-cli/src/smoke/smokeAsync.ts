@@ -38,9 +38,9 @@ import { captureScreenshotAsync, defaultScreenshotPath } from '../device/screens
 import { event } from '../events';
 import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
-import { resolveDeviceAsync, type DeviceBackend } from '../navigate/device';
+import { navigateDeviceOf, type DeviceBackend } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
-import { EXPO_GO_APP_IDS } from '../navigate/target';
+import { isExpoGoAppId } from '../navigate/target';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { PROGRAM_PREFIX } from '../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
@@ -59,12 +59,7 @@ import {
   type CommandSocketChurn,
 } from '../runtime/reload/reloadAsync';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
-import {
-  buildDeviceNameIndexIfNeededAsync,
-  platformOfTarget,
-  scopeTargets,
-  type DeviceNameIndex,
-} from '../runtime/targetPlatform';
+import { buildSmokeTargetSelection } from './targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
 import {
@@ -364,37 +359,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     return read.kind === 'binding' ? read.binding : null;
   };
 
-  /**
-   * What this machine's device tools reported, kept for as long as it still answers.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — F51, F152.
-   *
-   * The index exists to place a target whose own fields name no platform, and it is built by
-   * spawning `xcrun` and `adb`, so it is asked for exactly when its answer could change the
-   * outcome (`buildDeviceNameIndexIfNeededAsync`). **A gate asks that question before the app it is
-   * waiting for exists**, and a cached "nothing to place" is then an answer about an empty list:
-   * the first probe of this run finds no targets, `EMPTY_DEVICE_INDEX` is cached, and the
-   * development build that attaches a moment later — whose app id is the project's own and whose
-   * device name is a simulator's — cannot be placed by it. Every wait after that counted zero, so
-   * `smoke --ios` against a development build spent its whole budget and reported "no app had
-   * attached" about an app that had [observed — `smoke-test.ts` "opens the dev-client loading link
-   * before the route link", 55.8 s of a 60 s budget with the app listed throughout, 2026-09-06].
-   *
-   * So the cache is kept only while it still places what is listed **now**. An empty list places
-   * vacuously and costs nothing, which is the case the laziness was for; a list the cache cannot
-   * read is the case it was never an answer to.
-   */
-  let deviceIndex: DeviceNameIndex | null = null;
-  const indexAsync = async (devServerUrl: string): Promise<DeviceNameIndex> => {
-    const probe = await probeDevServerAsync(devServerUrl);
-    const placesEverything =
-      deviceIndex != null &&
-      probe.targets.every((target) => platformOfTarget(target, deviceIndex!).platform != null);
-    if (placesEverything) {
-      return deviceIndex!;
-    }
-    return (deviceIndex = await buildDeviceNameIndexIfNeededAsync(probe.targets));
-  };
+  const { targetSelectionAsync, deviceAsync, setDevice } = buildSmokeTargetSelection(
+    projectRoot,
+    options
+  );
 
   return {
     discoverDevServer: (explicitUrl) =>
@@ -555,6 +523,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // with the app named. A development build needs a finished simulator build of this fingerprint
     // on EAS; the gate never compiles one — `dev --eas` does, and is named.
     ensureEasSession: async (devServerUrl) => {
+      setDevice(null);
       const { ensureEasSessionAsync } =
         require('../dev/easSession') as typeof import('../dev/easSession');
       const target = await targetAsync();
@@ -568,6 +537,9 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         keepSession: false,
         noBuildReason: `no EAS Simulator session is up, and EAS has no finished "${EAS_SIMULATOR_PROFILE}" build of this project's ${options.platform} fingerprint to start one with — "${PROGRAM_PREFIX} dev --${options.platform} --eas" builds it and starts the session; this gate compiles nothing`,
       });
+      if (result.ok && result.sessionId) {
+        setDevice({ backend: 'cloud', platform: options.platform, deviceId: result.sessionId });
+      }
       return smokeSessionResult(result);
     },
     stopEasSession: async (sessionId) => {
@@ -610,6 +582,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       };
     },
     bootDevice: async () => {
+      setDevice(null);
       const platform = options.platform;
       if (devicesDisabled()) {
         return {
@@ -622,6 +595,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       }
       try {
         const acquired = await acquireDeviceAsync(projectRoot, platform);
+        setDevice(navigateDeviceOf(acquired.device));
         bootBinding = acquired.binding;
         Log.progress(acquireLine(acquired));
         return {
@@ -756,12 +730,16 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // Scoped to this run's platform: a `smoke --android` that counted the iOS simulator already
     // attached to this dev server would go on to read that simulator's runtime, and report the
     // verdict as Android's [friction run 6, F51].
-    waitForAppConnection: async (devServerUrl, timeoutMs) =>
-      waitForAppConnectionAsync(devServerUrl, {
+    waitForAppConnection: async (devServerUrl, timeoutMs) => {
+      const { targetSelection, deviceInventory, targets } =
+        await targetSelectionAsync(devServerUrl);
+      return waitForAppConnectionAsync(devServerUrl, {
         timeoutMs,
-        platform: options.platform,
-        deviceIndex: await indexAsync(devServerUrl),
-      }),
+        targetSelection,
+        deviceInventory,
+        inventoryTargets: targets,
+      });
+    },
 
     // The same ladder `navigate` walks, through the same function — local device first, then this
     // project's EAS Simulator session (llp/0005 §Cloud simulator). A second resolution
@@ -773,19 +751,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // bound, that line is the `dev` command that binds one, and a skip row without it left a
     // reader with a booted simulator and no way forward [observed — issue #171].
     probeDevice: async () => {
-      try {
-        const device = await resolveDeviceAsync(options.platform, {
-          cloud: options.cloud,
-          projectRoot,
-        });
-        return { deviceId: device.deviceId, backend: device.backend, reason: null };
-      } catch (error: unknown) {
-        return {
-          deviceId: null,
-          backend: null,
-          reason: error instanceof Error ? whatAndHow(error.message) : String(error),
-        };
-      }
+      const { device, reason } = await deviceAsync();
+      return {
+        deviceId: device?.deviceId ?? null,
+        backend: device?.backend ?? null,
+        reason: reason == null ? null : whatAndHow(reason),
+      };
     },
 
     // The dev server this run settled on, not the flag: a run that discovered one in its first
@@ -827,14 +798,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // attached to the same dev server must not decide an `--android` run's answer.
     checkAppFitsProject: async (devServerUrl) => {
       const nothing = { mismatch: null, kind: null, note: null };
-      const probe = await probeDevServerAsync(devServerUrl);
-      // `matched` only, never `undetermined`: a target whose platform nothing decided must not earn
-      // this run's verdict either way (@ref src/runtime/targetPlatform §scopeTargets). Erring that
-      // way keeps the check from turning an unreadable target into a refusal.
-      const scoped = scopeTargets(probe.targets, options.platform, await indexAsync(devServerUrl));
-      const expoGo = scoped.matched
-        .map((target) => target.appId)
-        .find((appId): appId is string => appId != null && EXPO_GO_APP_IDS.includes(appId));
+      // `read` only: a target nothing placed must not earn this run's verdict either way (@ref
+      // src/runtime/targetSelection §classifyTargets), so an unreadable target never becomes a refusal.
+      const { classifiedTargets } = await targetSelectionAsync(devServerUrl);
+      const expoGo = classifiedTargets.read.map((target) => target.appId).find(isExpoGoAppId);
       // Everything below is about Expo Go. A development build is this project's own app and its
       // version is the project's own business, so there is nothing here to ask about it.
       if (expoGo == null) {
@@ -861,23 +828,15 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       // The same resolution `probeDevice` performs, and for the same reason: the device this run is
       // about. Any failure to find one is nothing to check rather than something to report — the
       // app answered, so whatever it is running on is beyond this check's reach.
-      let localDeviceId: string | null = null;
-      try {
-        const device = await resolveDeviceAsync(options.platform, {
-          cloud: options.cloud,
-          projectRoot,
-        });
-        // @ref llp/0005-runtime-loop-tools.rfc.md §Android — both local backends now, because both
-        // have a reader for the version on the device (@ref src/device/expoGoVersion). A cloud
-        // session is still excluded: the check reads the device, and that device is not this
-        // machine's (llp/0005 §Cloud simulator).
-        localDeviceId =
-          device.backend === 'local-ios' || device.backend === 'local-android'
-            ? device.deviceId
-            : null;
-      } catch {
-        localDeviceId = null;
-      }
+      const { device } = await deviceAsync();
+      // @ref llp/0005-runtime-loop-tools.rfc.md §Android — both local backends now, because both
+      // have a reader for the version on the device (@ref src/device/expoGoVersion). A cloud
+      // session is still excluded: the check reads the device, and that device is not this
+      // machine's (llp/0005 §Cloud simulator).
+      const localDeviceId =
+        device?.backend === 'local-ios' || device?.backend === 'local-android'
+          ? device.deviceId
+          : null;
       if (localDeviceId == null) {
         return nothing;
       }
@@ -1021,9 +980,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         };
       }
 
+      const { targetSelection, deviceInventory } = await targetSelectionAsync(devServerUrl);
       const evidence = await waitForReloadEvidenceAsync(devServerUrl, projectRoot, {
         timeoutMs,
         knownTargetIds,
+        targetSelection,
+        deviceInventory,
         bundleMark,
         platform: options.platform,
       });
@@ -1056,10 +1018,11 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
 
     evaluate: async (devServerUrl) => {
       try {
+        const { targetSelection, deviceInventory } = await targetSelectionAsync(devServerUrl);
         await new CdpClient({
           metroUrl: devServerUrl,
-          platform: options.platform,
-          deviceIndex: await indexAsync(devServerUrl),
+          targetSelection,
+          deviceInventory,
         }).evaluateAsync(LIVENESS_EXPRESSION, {
           awaitPromise: false,
           timeoutMs: LIVENESS_TIMEOUT_MS,
@@ -1085,11 +1048,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
 
     collectErrors: async (devServerUrl, windowMs) => {
       try {
+        const { targetSelection, deviceInventory } = await targetSelectionAsync(devServerUrl);
         const records = await new CdpRuntimeErrorCollector({
           metroUrl: devServerUrl,
           durationMs: windowMs,
-          platform: options.platform,
-          deviceIndex: await indexAsync(devServerUrl),
+          targetSelection,
+          deviceInventory,
         }).collectAsync();
         return { ok: true, records, reason: null };
       } catch (error: unknown) {

@@ -13,14 +13,17 @@
 // that the dev server that answered belongs to this project — the caveat `discoverDevServerAsync`
 // documents but cannot close.
 
-import type { NavigatePlatform } from '../navigate/device';
+import type { CdpTarget } from './cdpClient';
 import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
 import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './projectRootHeader';
 import {
-  buildDeviceNameIndexIfNeededAsync,
-  scopeTargets,
-  type DeviceNameIndex,
-} from './targetPlatform';
+  isSkippedTarget,
+  classifyTargets,
+  refreshDeviceInventoryAsync,
+  type ClassifiedTargets,
+  type DeviceInventory,
+  type TargetSelection,
+} from './targetSelection';
 
 /** The body `GET /status` answers with once the bundler has finished. */
 export const PACKAGER_STATUS_READY = 'packager-status:running';
@@ -253,15 +256,17 @@ export interface WaitForAppConnectionOptions {
   /** How long to wait between two target-list reads. */
   intervalMs?: number;
   /**
-   * Count only apps on this platform, instead of every app attached.
+   * Count only apps this scope reads, instead of every app attached. Unset reads every app.
    *
    * The fix for friction run 6's F51: with an iOS simulator and an Android emulator on one dev
    * server, `--android` waits used to be satisfied by the simulator, and every phase after them
    * read the wrong runtime.
    */
-  platform?: NavigatePlatform;
-  /** What this machine's device tools reported, for {@link platform}. */
-  deviceIndex?: DeviceNameIndex;
+  targetSelection: TargetSelection;
+  /** Initial device facts, read for `inventoryTargets`. */
+  deviceInventory: DeviceInventory;
+  /** The target list `deviceInventory` was read for. A poll that lists it again keeps the facts. */
+  inventoryTargets: readonly Pick<CdpTarget, 'id'>[];
 }
 
 export interface AppConnectionResult {
@@ -286,6 +291,39 @@ export interface AppConnectionResult {
   undeterminedApps?: number;
 }
 
+function listKey(targets: readonly Pick<CdpTarget, 'id'>[]): string {
+  return targets.map((target) => target.id).join('\n');
+}
+
+/**
+ * Classify every list a poll reads, and ask the device tools again for a changed list.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads
+ * An unchanged list keeps its facts, so a target nothing places costs one tool read, not one per
+ * poll. A changed list, such as a first app after an empty one, is read again within the budget.
+ */
+export function scopedListClassifier(
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory,
+  deadline: number,
+  inventoryTargets: readonly Pick<CdpTarget, 'id'>[]
+): (targets: CdpTarget[]) => Promise<ClassifiedTargets> {
+  let inventoryListKey = listKey(inventoryTargets);
+  return async (targets) => {
+    const key = listKey(targets);
+    if (key !== inventoryListKey && Date.now() < deadline) {
+      inventoryListKey = key;
+      deviceInventory = await refreshDeviceInventoryAsync(
+        targets,
+        targetSelection,
+        deviceInventory,
+        Math.max(1, deadline - Date.now())
+      );
+    }
+    return classifyTargets(targets, targetSelection, deviceInventory);
+  };
+}
+
 /**
  * Wait for at least one app to attach to the dev server.
  *
@@ -295,30 +333,33 @@ export interface AppConnectionResult {
  */
 export async function waitForAppConnectionAsync(
   devServerUrl: string,
-  { timeoutMs, intervalMs = 250, platform, deviceIndex }: WaitForAppConnectionOptions
+  {
+    timeoutMs,
+    intervalMs = 250,
+    targetSelection,
+    deviceInventory,
+    inventoryTargets,
+  }: WaitForAppConnectionOptions
 ): Promise<AppConnectionResult> {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
-  // Read once, before the loop: what is attached changes during the wait, what this machine has
-  // does not, and asking the device tools on every poll would be a subprocess every 250 ms.
-  const index =
-    platform == null
-      ? null
-      : (deviceIndex ??
-        (await buildDeviceNameIndexIfNeededAsync(
-          (await probeDevServerAsync(devServerUrl)).targets
-        )));
-
+  const classify = scopedListClassifier(
+    targetSelection,
+    deviceInventory,
+    deadline,
+    inventoryTargets
+  );
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const scoped = platform == null ? null : scopeTargets(probe.targets, platform, index!);
-    const counted = scoped ? scoped.matched.length : probe.targets.length;
-    const extra = scoped
-      ? {
-          otherPlatformApps: scoped.otherPlatform.length,
-          undeterminedApps: scoped.undetermined.length,
-        }
-      : {};
+    const classifiedTargets = await classify(probe.targets);
+    const counted = classifiedTargets.read.length;
+    const extra =
+      targetSelection.platform != null
+        ? {
+            otherPlatformApps: classifiedTargets.otherPlatform.length,
+            undeterminedApps: classifiedTargets.undetermined.length,
+          }
+        : {};
 
     if (counted > 0) {
       return {
@@ -335,7 +376,10 @@ export async function waitForAppConnectionAsync(
   }
 }
 
-export interface WaitForFreshAppConnectionOptions extends WaitForAppConnectionOptions {
+export interface WaitForFreshAppConnectionOptions extends Omit<
+  WaitForAppConnectionOptions,
+  'inventoryTargets'
+> {
   /**
    * Debugger target ids the dev server listed *before* the app was reloaded.
    *
@@ -383,7 +427,14 @@ export interface FreshAppConnectionResult extends AppConnectionResult {
  */
 export async function waitForFreshAppConnectionAsync(
   devServerUrl: string,
-  { timeoutMs, intervalMs = 250, knownTargetIds, signal }: WaitForFreshAppConnectionOptions
+  {
+    timeoutMs,
+    intervalMs = 250,
+    knownTargetIds,
+    signal,
+    targetSelection,
+    deviceInventory,
+  }: WaitForFreshAppConnectionOptions
 ): Promise<FreshAppConnectionResult> {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
@@ -392,8 +443,11 @@ export async function waitForFreshAppConnectionAsync(
 
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    appsConnected = probe.targets.length;
-    const fresh = probe.targets.filter((target) => !known.has(target.id));
+    const own = probe.targets.filter(
+      (target) => !isSkippedTarget(target, targetSelection, deviceInventory)
+    );
+    appsConnected = own.length;
+    const fresh = own.filter((target) => !known.has(target.id));
     if (fresh.length > 0) {
       return {
         appsConnected,
@@ -420,3 +474,35 @@ function excerpt(body: string): string {
   const line = body.split('\n')[0]!;
   return line.length > BODY_EXCERPT_LENGTH ? `${line.slice(0, BODY_EXCERPT_LENGTH)}…` : line;
 }
+
+/**
+ * How many debugger targets the dev server lists, asked until one appears or the budget runs out.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — F141. Deliberately *not* a wait
+ * for a **fresh** target: the question here is only "is there a runtime on this dev server now",
+ * which is the question every command after this reload will ask. Whether it is a new one was
+ * already answered above, and answering it twice would make a report of the second answer.
+ */
+export async function countConnectedAppsAsync(
+  devServerUrl: string,
+  budgetMs: number,
+  {
+    targetSelection,
+    deviceInventory,
+  }: { targetSelection: TargetSelection; deviceInventory: DeviceInventory }
+): Promise<number> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const probe = await probeDevServerAsync(devServerUrl);
+    const count = probe.targets.filter(
+      (target) => !isSkippedTarget(target, targetSelection, deviceInventory)
+    ).length;
+    if (count > 0 || Date.now() + APP_RECONNECT_POLL_MS >= deadline) {
+      return count;
+    }
+    await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
+  }
+}
+
+/** How often that question is asked again. */
+const APP_RECONNECT_POLL_MS = 200;

@@ -8,6 +8,10 @@
 /** Expo Go application ids, per platform. */
 export const EXPO_GO_APP_IDS = ['host.exp.Exponent', 'host.exp.exponent'];
 
+export function isExpoGoAppId(appId: string | null | undefined): appId is string {
+  return appId != null && EXPO_GO_APP_IDS.includes(appId);
+}
+
 export interface ExpoGoDecisionInput {
   /** Application id passed with `--app-id`, which the user knows better than we do. */
   appIdOverride?: string | null;

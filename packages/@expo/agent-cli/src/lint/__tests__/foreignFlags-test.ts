@@ -187,7 +187,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-j  src/deviceBinding/ios.ts",
           "-j  src/deviceBinding/ios.ts",
           "-j  src/deviceBinding/ios.ts",
-          "-j  src/runtime/targetPlatform.ts",
+          "-j  src/runtime/targetSelection.ts",
           "-l  src/deviceBinding/emulator.ts",
           "-list-avds  src/deviceBinding/emulator.ts",
           "-nP  src/dev/portListener.ts",

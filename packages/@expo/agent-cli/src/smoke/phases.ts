@@ -302,6 +302,8 @@ export interface SmokeDeps {
    *
    * Answers the *backend* too, because the picture is taken through a different tool for each and
    * the phase that takes it must not guess. Null when nothing was found.
+   * The dependencies retain successful choices and adopt devices from boot/session creation;
+   * an unsuccessful lookup may be retried by a later phase.
    */
   probeDevice(): Promise<{
     deviceId: string | null;
@@ -1170,16 +1172,9 @@ async function runPhasesAsync(
 
   // ---- Phase 4: is there a device, and does this run boot one? ------------------------------
   //
-  // The probe is resolved here rather than inside the two phases that used to ask for one, so the
-  // whole run is about one device (F98, pointed one step earlier). Cached, so an attach-only run
-  // pays for it exactly where it used to: at the first phase that needs a device.
-
-  let probed: {
-    deviceId: string | null;
-    backend: DeviceBackend | null;
-    reason: string | null;
-  } | null = null;
-  const deviceAsync = async () => (probed ??= await deps.probeDevice());
+  // The dependencies own the chosen device, including one returned by boot/session creation.
+  // Asking again lets a failed lookup recover without a second cache in the phase runner.
+  const deviceAsync = () => deps.probeDevice();
 
   /**
    * The app probe the boot decision needed, kept for the `app` phase that asks the same question.
@@ -1298,7 +1293,6 @@ async function runPhasesAsync(
           environment.boundDevice = boot.bound
             ? { id: boot.deviceId, ...boot.bound, released: false, shutDown: false }
             : null;
-          probed = { deviceId: boot.deviceId, backend: boot.backend, reason: null };
           bootInstallNeeded = boot.installNeeded === true;
         } else {
           environment.device = 'failed';

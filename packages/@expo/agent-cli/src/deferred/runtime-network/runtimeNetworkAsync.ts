@@ -11,7 +11,7 @@ import * as Log from '../../log';
 import { PROGRAM_PREFIX } from '../../programName';
 import type { CdpTarget } from '../../runtime/cdpClient';
 // The family's one resolution step (`src/runtime/preflight.ts`): the dev server, the app and the
-// platform index in one read. This command asked for all three separately when it shipped.
+// device facts in one read. This command asked for all three separately when it shipped.
 import { preflightRuntimeAsync, type RuntimeContext } from '../../runtime/preflight';
 import { CommandError } from '../../utils/errors';
 import { buildRuntimeNetworkFollowUps } from './followups';
@@ -42,8 +42,9 @@ export async function runtimeNetworkAsync(
   const { durationMs, json } = options;
   const {
     devServerUrl,
-    deviceIndex,
-    appTargets: targets,
+    targetSelection,
+    deviceInventory,
+    classifiedTargets: { read: targets },
   } = await preflightRuntimeAsync(
     { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
     context
@@ -53,8 +54,8 @@ export async function runtimeNetworkAsync(
   const collector = new CdpNetworkCollector({
     metroUrl: devServerUrl,
     durationMs,
-    platform: options.platform,
-    deviceIndex,
+    targetSelection,
+    deviceInventory,
   });
   try {
     requests = await collector.collectAsync();

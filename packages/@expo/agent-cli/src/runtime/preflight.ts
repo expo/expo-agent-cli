@@ -29,6 +29,7 @@
 // question is asked for the length of that window before it is answered, and a list that is still
 // empty afterwards is reported as inconclusive rather than as a call to fix.
 
+import { resolveTargetSelectionAsync } from './resolveTargetSelection';
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
@@ -44,10 +45,11 @@ import {
 } from './devServer';
 import { discoverDevServerAsync } from './discoverDevServer';
 import {
-  buildDeviceNameIndexIfNeededAsync,
-  scopeTargets,
-  type DeviceNameIndex,
-} from './targetPlatform';
+  EMPTY_DEVICE_INVENTORY,
+  type DeviceInventory,
+  type ClassifiedTargets,
+  type TargetSelection,
+} from './targetSelection';
 
 /**
  * Where a runtime command was run, when it was run in a project.
@@ -89,16 +91,12 @@ export interface RuntimeConnection {
   unreachableReason: string | null;
   /** Every debugger target it listed, unscoped — what the *report* owes a reader. */
   targets: CdpTarget[];
-  /**
-   * The targets this command may read: {@link targets} scoped to the platform the caller named.
-   *
-   * The same list when no platform was named. Kept apart from {@link targets} because a command
-   * told `--android` must not be answered by the iOS simulator on the same dev server (F51), while
-   * its report still has to say that the iOS one is there.
-   */
-  appTargets: CdpTarget[];
-  /** What this machine's device tools reported, when a platform had to be resolved. */
-  deviceIndex?: DeviceNameIndex;
+  /** Connected targets classified once for every reader of this connection. */
+  classifiedTargets: ClassifiedTargets;
+  /** The platform and device this command intends to read. */
+  targetSelection: TargetSelection;
+  /** Known devices and worktree bindings used to classify {@link targets} for {@link targetSelection}. */
+  deviceInventory: DeviceInventory;
   /** The platform the caller named, or undefined. */
   platform?: NavigatePlatform;
 }
@@ -152,11 +150,11 @@ export interface RuntimePreflightOptions {
   /**
    * What this machine's device tools reported, instead of asking them.
    *
-   * Commands never pass one — reading it from the targets that were just listed is the point of the
-   * preflight. It is here for a caller that already has the index, and for the tests, which must
+   * Commands never pass them — reading them for the targets that were just listed is the point of
+   * the preflight. They are here for a caller that already has them, and for the tests, which must
    * not spawn `simctl` and `adb` to ask about a platform.
    */
-  deviceIndex?: DeviceNameIndex;
+  deviceInventory?: DeviceInventory;
 }
 
 /** How often the target list is re-read while the grace period runs. */
@@ -175,7 +173,7 @@ export async function preflightRuntimeAsync(
     platform,
     cloud = false,
     retryMs,
-    deviceIndex: knownDeviceIndex,
+    deviceInventory: knownDeviceInventory,
   }: RuntimePreflightOptions,
   context: RuntimeContext = {}
 ): Promise<RuntimeConnection> {
@@ -209,6 +207,16 @@ export async function preflightRuntimeAsync(
     }
   }
 
+  const { targetSelection, deviceInventory, classifiedTargets } = await resolveTargetSelectionAsync(
+    {
+      projectRoot: context.projectRoot ?? null,
+      flags: { platform, eas: cloud },
+      targets: reachable ? targets : [],
+      deviceInventory: reachable
+        ? knownDeviceInventory
+        : (knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY),
+    }
+  );
   const base: RuntimeConnection = {
     devServerUrl: url,
     devServerSource: discovery.source,
@@ -216,13 +224,15 @@ export async function preflightRuntimeAsync(
     reachable,
     unreachableReason: reachable ? null : unreachableReason,
     targets,
-    appTargets: targets,
+    classifiedTargets,
+    targetSelection,
+    deviceInventory,
     platform,
   };
 
   if (!reachable) {
     if (need === 'optional') {
-      return { ...base, targets: [], appTargets: [] };
+      return { ...base, targets: [] };
     }
     throw noDevServerError({
       devServerUrl: url,
@@ -234,26 +244,7 @@ export async function preflightRuntimeAsync(
     });
   }
 
-  // The device index is built from the list that was already read, so the platform this command was
-  // told about is the platform of the app it reads — the two steps cannot disagree about which app
-  // that is (F51, F53). It costs a subprocess only when a target's platform cannot be read off its
-  // application id or its device name, which for Expo Go is never.
-  const deviceIndex =
-    platform == null
-      ? undefined
-      : (knownDeviceIndex ?? (await buildDeviceNameIndexIfNeededAsync(targets)));
-
-  // Scoped for **every** caller that named a platform, whatever it needs, and that is F101. This
-  // used to sit below the `need` branch, so `appTargets` — documented as the list a command may read
-  // — was the unscoped list for `runtime:stop` (`optional`) and `runtime:reload` (`dev-server`).
-  // Live consequence: `runtime:stop --android` took the first application id the dev server listed,
-  // which was the iOS one, and force-stopped a package that is not installed on Android while
-  // reporting `stopped: true, wasRunning: true`. Reading the other platform's app is F51 whether or
-  // not the command also required one to exist.
-  const scoped = platform == null ? null : scopeTargets(targets, platform, deviceIndex!);
-  const connection: RuntimeConnection = scoped
-    ? { ...base, appTargets: scoped.matched, deviceIndex }
-    : base;
+  const connection = base;
 
   if (need !== 'debugger-target') {
     return connection;
@@ -266,8 +257,8 @@ export async function preflightRuntimeAsync(
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
-  if (scoped && scoped.matched.length === 0) {
-    throw noAppOnPlatformError(url, platform!, scoped, cloud);
+  if (platform != null && classifiedTargets.read.length === 0) {
+    throw noAppOnPlatformError(url, platform, classifiedTargets, cloud);
   }
   return connection;
 }
@@ -416,7 +407,7 @@ export function noAppConnectedError({
 function noAppOnPlatformError(
   devServerUrl: string,
   platform: NavigatePlatform,
-  scoped: { otherPlatform: { platform: NavigatePlatform }[]; undetermined: unknown[] },
+  scoped: Pick<ClassifiedTargets, 'otherPlatform' | 'undetermined'>,
   cloud: boolean
 ): CommandError {
   const others = scoped.otherPlatform.map((entry) => entry.platform);

@@ -173,13 +173,30 @@ Each carries what, why, and how. The how is one ladder, in one order: `npx @expo
 
 The connection is asked before the bundle gate. With nothing connected the exit is 1, whatever the code on disk would have compiled to. Nothing can be read off a screen that is not there. The other runtime commands already gave 1 for this. The bundle gate's budget is twenty seconds. The connection answer takes a millisecond.
 
-The preflight reads the target list once and hands back the populated connection: the URL, how it was found, the targets, the platform-scoped subset a command may read, and the device index.
+The preflight reads the target list once and hands back the populated connection: the URL, how it was found, the targets, the platform-scoped subset a command may read, the run scope, and the device facts.
 
 Both refusals are exit 1 in every command, including under a gate-shaped flag. `runtime:errors --fail-on-error` with no app is 1, never 0. `1` is "fix the call". The fix is to start a dev server or open the app.
 
 Every command whose `need` is `debugger-target` waits out `APP_RECONNECT_GRACE_MS` (3 s) by default. `reload` can start the app it finds nothing of. `stop` calls an app that is not running a success. After that window, an empty list is exit 22 ([[0010-agent-conventions]] §An empty target list is inconclusive). No-dev-server and wrong-platform stay 1.
 
 Every command of this group takes `--port <n>` as sugar for `--dev-server-url http://127.0.0.1:<n>`. `runtime:reload` and `runtime:stop` take `--platform ios|android` alongside `--ios`/`--android`. Passing both `--dev-server-url` and `--port` is `BAD_ARGS`. `--ios` and `--platform ios` together are fine. `--ios --platform android` is refused. A "no dev server" error names the URL that was tried when the caller already named one (`howToNameTheDevServer`).
+
+## Which app a run reads
+
+A run reads only the apps in its scope. The scope comes from the caller's flags and from the device the run opens. A target's own fields and the facts this machine's device tools report place it (§Android). A target that nothing places is undetermined: it is never read, and it never earns a platform's verdict.
+
+| Scope source | Target                    | Result                 | Test                                                                                    |
+| ------------ | ------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| none         | any                       | read                   | e2e runtime-reload-test "checks the bundle on both platforms when no platform is named" |
+| flag only    | platform evidence matches | read                   | e2e runtime-preflight-test "reads the app it places on that platform"                   |
+| flag only    | other platform            | skip as other-platform | same                                                                                    |
+| flag only    | no platform evidence      | undetermined           | e2e runtime-preflight-test "does not read an app nothing places"                        |
+
+Three rules hold for every caller of the scope:
+
+- A classification belongs to one target list and the device facts read for it. A later list is classified again, even when it names the same target ids. Test: smoke targetSelection-test "reclassifies an unchanged target after a failed inventory read recovers".
+- A connection with no platform scope gives bundle inference every platform it can identify. Test: e2e runtime-reload-test "checks the bundle on both platforms when no platform is named".
+- An attachment wait keeps its device facts while the target list is unchanged, and reads them again for a changed list, within the wait's budget. So an empty first list cannot keep a later development build from being placed, and a target that nothing places costs one read of the device tools, not one per poll. Tests: smoke targetSelection-test "places a development-build target that appears after the first empty wait probe" and "asks the device tools once for a list that does not change".
 
 ## Reloading the app
 
@@ -295,6 +312,8 @@ Nine phases:
 
 The URL the first phase settled on is threaded into every phase after it. A gate whose phases talk to two dev servers is a gate whose phases are about two different things.
 
+The device is chosen once per run too. A device that a boot or a session start supplies is the choice for the phases after it, with no second lookup, and a failed lookup is asked again by a later phase. Tests: smoke targetSelection-test "retries a failed device lookup, shares concurrent discovery, and retains the successful choice" and "publishes an acquired device to subsequent phases without another lookup"; smokeDeps-test "keeps the session returned by ensure for subsequent device reads".
+
 `--start` must not name a platform. `expo start --ios` drives Simulator.app through AppleScript. On a Mac that has granted no Automation grant the Expo CLI does not catch the refusal and the dev server exits with it. The recovery is the one this command performs: start the dev server without opening anything, then open the app with `navigate`. `START_DEV_SERVER_ARGV` is pinned by a test. `--start` also carries `--port` through when the caller named a loopback one.
 
 | Code | Outcome        | Meaning                                                                                                                                   |
@@ -343,7 +362,7 @@ And `status.next` is read as "run this", so it states a platform rather than lea
 
 **The first sweep still missed a handful, and a second one found them — F151.** All were the same kind: a surface that names the platform from the _project_ rather than from a device, which the first pass, aimed at the report surfaces, did not look at. `dev --detach`'s and `dev:logs`'s `smoke` follow-ups, the own-dev-server `PORT_IN_USE` how-line, `typecheck`'s two follow-ups, the interact commands' bundle-not-ready refusal, `runtime:reload`'s and `runtime:eval`'s recovery lines, `navigate`'s cloud look-command — and the worst of them, the `AGENTS.md` this CLI **writes into the user's project** (`src/agents/content.ts`), where an agent reads the block and runs the command verbatim. The rule now lives in one place (`src/smoke/suggest.ts`): a `smokeCommand(platform)` and the project-default it needs, so the two copies of that default collapse into one.
 
-**The index that places a target must not be an answer about an empty list — F152.** Scoping by platform needs a device-name index whenever the target's own fields name none, which is every development build: its app id is the project's own, and its device name is a simulator's. Building that index costs two subprocesses, so it is built only when a target actually needs placing — and `smoke` asked that question **before the app it was waiting for existed**. The first probe of a run finds nothing attached, "nothing to place" is cached, and the app that attaches a moment later can never be placed by it. Every wait after that counted zero: `smoke --ios` against a development build spent its whole budget and reported "no app had attached" about an app that was listed in `/json/list` the entire time [observed — 55.8 s of a 60 s budget, 2026-09-06]. The cache is now kept only while it still places what is listed _now_, which costs an empty list nothing — it places vacuously — and re-asks exactly once, when there is finally something to place.
+**The device facts that place a target must not be an answer about an empty list — F152.** Scoping by platform needs the device facts whenever the target's own fields name none, which is every development build: its app id is the project's own, and its device name is a simulator's. Reading them costs two subprocesses, so they are read only when a target actually needs placing — and `smoke` asked that question **before the app it was waiting for existed**. The first probe of a run finds nothing attached, "nothing to place" is cached, and the app that attaches a moment later can never be placed by it. Every wait after that counted zero: `smoke --ios` against a development build spent its whole budget and reported "no app had attached" about an app that was listed in `/json/list` the entire time [observed — 55.8 s of a 60 s budget, 2026-09-06]. The device facts belong to the target list they were read for, and a changed list is read again (§Which app a run reads). An empty list costs nothing, because it places vacuously.
 
 What made both sweeps necessary is that nothing counted the surface. So the countable-flags trick that already pins the flags this CLI writes onto other CLIs ([[0002-testing-and-evals]] §A flag is not shipped) now has a second instance: `src/lint/checkCommandMentions.ts` gained a **required-option** rule, `REQUIRED_OPTION_GROUPS`, that fails on any printed `smoke` with no platform. The next command that grows a required flag is one row of a table, not a wave of exit-1 suggestions a person finds one at a time.
 
@@ -536,7 +555,7 @@ The target is resolved once and memoized, deliberately — a run that fails at t
 
 So a start that built forgets the target, and the next reader re-reads the project the build left behind. The memo still holds for every run that compiles nothing, which is almost all of them.
 
-The general shape is the one this document keeps meeting: **a fact captured before the thing it describes existed.** The pre-install app probe (§Putting Expo Go on a simulator that has not got it), the device-name index, and this. Each was a value read at the cheapest moment rather than at the moment it was needed.
+The general shape is the one this document keeps meeting: **a fact captured before the thing it describes existed.** The pre-install app probe (§Putting Expo Go on a simulator that has not got it), the device facts, and this. Each was a value read at the cheapest moment rather than at the moment it was needed.
 
 #### `--device` takes the bound device's id on both platforms
 
@@ -621,11 +640,11 @@ Expo Go for Android now reaches the gate on the same footing as iOS in everythin
 
 Expo Go for Android ships a Hermes without any CDP debugger [observed, `HermesRuntime[RNBridgeless] does not support debugging over the Chrome DevTools Protocol`]. `Runtime.enable`, `Log.enable`, `Network.enable`, and `Debugger.enable` acknowledge. `Runtime.evaluate` answers `-32601`. The ack is what makes an empty window look like a healthy app. Collectors probe the runtime as they open their window, with `Log.enable` for the announcement and one `Runtime.evaluate` of `1` for the code. The verdict is `RuntimeDebuggerCapability`. `RUNTIME_EVALUATE_UNSUPPORTED` is reached by asking, not by knowing the platform.
 
-The target selector skips only on transport failure, and ranks `-32601` targets behind answering ones. It no longer drops such targets. `CdpRuntimeErrorCollector` forwards every `CdpClientOptions` key, including `platform` and `deviceIndex`.
+The target selector skips only on transport failure, and ranks `-32601` targets behind answering ones. It no longer drops such targets. `CdpRuntimeErrorCollector` forwards every `CdpClientOptions` key, including `targetSelection` and `deviceInventory`.
 
 `/json/list` does not name a platform. Two live targets on one dev server differ in `appId` (`host.exp.Exponent` vs `host.exp.exponent`), `deviceName`, and `title`. `description`, `type`, and `reactNative.capabilities` are identical. `src/runtime/targetPlatform.ts` infers the platform, strongest evidence first: a device name this machine's own device tools just reported (`simctl list devices booted`, `adb devices -l`), then React Native Android's `<model> - <release> - API <sdk>` shape, then Expo Go's two app ids. A target none of them place is `null` and is never counted as either.
 
-Scoping reaches `requireConnectedAppAsync`, `waitForAppConnectionAsync`, `CdpClient` target selection, and `preflightRuntimeAsync`'s `appTargets` for every caller that names a platform. Only a command that requires a runtime still refuses on an empty scope. For `reload` an empty scope is a rung of its ladder. For `stop` it is already-stopped success. `resolveAppId` drops the other platform's Expo Go id before it takes the first one. An id it cannot place is kept: a development build's package name says nothing about a platform.
+Scoping reaches `requireConnectedAppAsync`, `waitForAppConnectionAsync`, `CdpClient` target selection, and the preflight's classified targets for every caller that names a platform. Only a command that requires a runtime still refuses on an empty scope. For `reload` an empty scope is a rung of its ladder. For `stop` it is already-stopped success. `resolveAppId` drops the other platform's Expo Go id before it takes the first one. An id it cannot place is kept: a development build's package name says nothing about a platform.
 
 The bundle-check platform is derived from the apps that are actually connected (`resolveBundleCheckPlatformsAsync`). A named `--platform` wins. One connected platform is that platform. Two are both. Nothing connected leaves the fixed default, and the report says so. A broken bundle decides the run whichever platform it was found on.
 

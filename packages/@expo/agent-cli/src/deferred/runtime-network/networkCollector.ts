@@ -161,8 +161,8 @@ export class CdpNetworkCollector {
       metroUrl,
       targetSelector,
       createWebSocket,
-      platform: this.config.platform,
-      deviceIndex: this.config.deviceIndex,
+      targetSelection: this.config.targetSelection,
+      deviceInventory: this.config.deviceInventory,
     });
     const ws: WebSocket = await client.createWebSocketAsync();
     this.clientWebSocketDebuggerUrl = client.getWebSocketDebuggerUrl();

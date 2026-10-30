@@ -14,6 +14,12 @@ import {
   waitForFreshAppConnectionAsync,
 } from '../waitReady';
 import { matchProjectRoot } from '../projectRootHeader';
+import { EVERY_TARGET_CLIENT } from './targetSelectionFixtures';
+
+// A target nothing places makes the attachment wait ask the device tools; they answer nothing here.
+vi.mock('../../utils/spawnCapture', () => ({
+  spawnCaptureAsync: vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: '' })),
+}));
 
 type StatusHandler = (request: { url: string }) => {
   status?: number;
@@ -419,7 +425,12 @@ describe(waitForAppConnectionAsync, () => {
   it(`returns as soon as a target is listed`, async () => {
     const url = await startServerAsync(() => ({ body: JSON.stringify([{ id: '1' }]) }));
 
-    const result = await waitForAppConnectionAsync(url, { timeoutMs: 2000, intervalMs: 10 });
+    const result = await waitForAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
+      inventoryTargets: [],
+      timeoutMs: 2000,
+      intervalMs: 10,
+    });
 
     expect(result).toMatchObject({ appsConnected: 1, timedOut: false });
   });
@@ -431,7 +442,12 @@ describe(waitForAppConnectionAsync, () => {
       body: JSON.stringify(attached ? [{ id: '1' }] : []),
     }));
 
-    const result = await waitForAppConnectionAsync(url, { timeoutMs: 2000, intervalMs: 20 });
+    const result = await waitForAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
+      inventoryTargets: [],
+      timeoutMs: 2000,
+      intervalMs: 20,
+    });
 
     expect(result).toMatchObject({ appsConnected: 1, timedOut: false });
   });
@@ -439,7 +455,12 @@ describe(waitForAppConnectionAsync, () => {
   it(`times out when no app ever attaches`, async () => {
     const url = await startServerAsync(() => ({ body: '[]' }));
 
-    const result = await waitForAppConnectionAsync(url, { timeoutMs: 120, intervalMs: 20 });
+    const result = await waitForAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
+      inventoryTargets: [],
+      timeoutMs: 120,
+      intervalMs: 20,
+    });
 
     expect(result).toMatchObject({ appsConnected: 0, timedOut: true });
   });
@@ -458,6 +479,7 @@ describe(waitForFreshAppConnectionAsync, () => {
     }));
 
     const result = await waitForFreshAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
       timeoutMs: 2000,
       intervalMs: 20,
       knownTargetIds: ['device-1'],
@@ -470,6 +492,7 @@ describe(waitForFreshAppConnectionAsync, () => {
     const url = await startServerAsync(() => ({ body: JSON.stringify([{ id: 'device-1' }]) }));
 
     const result = await waitForFreshAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
       timeoutMs: 120,
       intervalMs: 20,
       knownTargetIds: ['device-1'],
@@ -485,6 +508,7 @@ describe(waitForFreshAppConnectionAsync, () => {
     const url = await startServerAsync(() => ({ body: JSON.stringify([{ id: 'device-9' }]) }));
 
     const result = await waitForFreshAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
       timeoutMs: 2000,
       intervalMs: 20,
       knownTargetIds: [],
@@ -498,6 +522,7 @@ describe(waitForFreshAppConnectionAsync, () => {
     const url = await startServerAsync(() => ({ body: '[]' }));
 
     const result = await waitForFreshAppConnectionAsync(url, {
+      ...EVERY_TARGET_CLIENT,
       timeoutMs: 120,
       intervalMs: 20,
       knownTargetIds: ['device-1'],
