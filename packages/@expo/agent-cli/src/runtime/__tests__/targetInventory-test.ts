@@ -55,7 +55,7 @@ it('does not ask simctl for an --android scope because another worktree holds an
   const android = makeTarget({ appId: 'host.exp.exponent', deviceName: 'Pixel 9 - 15 - API 35' });
   const foreign = { udid: 'U9', name: 'iPhone 17', projectRoot: '/other', own: false };
   const inventory = makeDeviceInventory({ iosBindings: [foreign] });
-  await refreshDeviceInventoryAsync([android], selection, inventory);
+  await refreshDeviceInventoryAsync([android], selection, inventory, null);
   expect(vi.mocked(spawnCaptureAsync).mock.calls.filter(([bin]) => bin === 'xcrun')).toEqual([]);
 });
 
