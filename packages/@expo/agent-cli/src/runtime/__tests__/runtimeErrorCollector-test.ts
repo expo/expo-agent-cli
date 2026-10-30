@@ -244,7 +244,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
       ...EVERY_TARGET_CLIENT,
       metroUrl: 'http://localhost:8081',
     });
-    await expect(collector.collectAsync()).rejects.toThrow(/No target found/);
+    await expect(collector.collectAsync()).rejects.toThrow(/no app is connected to it/);
   });
 
   it(`should reject when the debugger connection does not open in time`, async () => {
@@ -351,7 +351,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
       createWebSocket: (url) => new MockWebSocket(url, () => {}) as unknown as WebSocketImpl,
     });
 
-    // The message `NoTargetOnPlatformError` writes: an empty window from the wrong app is worse
+    // The refusal `emptyScopeError` writes: an empty window from the wrong app is worse
     // than no window, so the scoped failure has to reach the caller as a failure.
     await expect(collector.collectAsync()).rejects.toThrow(/No android app is connected/);
   });

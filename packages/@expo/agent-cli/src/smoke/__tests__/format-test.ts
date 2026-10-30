@@ -62,6 +62,7 @@ function run(overrides: Partial<SmokeRun> = {}): SmokeRun {
       cleanup: [],
     },
     appsConnected: 1,
+    skippedApps: [],
     bundle: {
       outcome: 'ok',
       platform: 'ios',
@@ -124,6 +125,7 @@ describe(smokeResultToJson, () => {
       'routeCheck',
       'runtimeSupported',
       'screenshot',
+      'skippedApps',
       'source',
       'started',
       'untrusted',

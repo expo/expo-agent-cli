@@ -389,6 +389,7 @@ describe(reloadAsync, () => {
       'reloaded',
       'route',
       'routeCheck',
+      'skippedApps',
       'url',
       'verifiedBy',
       'waitedMs',
@@ -864,6 +865,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
+      skippedApps: [],
       route: null,
       routeCheck: {
         checked: false,

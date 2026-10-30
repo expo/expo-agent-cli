@@ -115,3 +115,55 @@ describe('resolveTargetSelectionAsync with --eas and no platform', () => {
     expect(classifiedTargets).toEqual({ read, undetermined, skipped, otherPlatform: [] });
   });
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Another worktree's clone simulator, still booted, loads its JavaScript from this port. A target
+// names its device by name only; the booted simulators and the live bindings say whose it is.
+const CLONE = 'agent-cli c4ed0a60';
+const ON_CLONE = { appId: 'host.exp.Exponent', deviceName: CLONE } as CdpTarget;
+const bound = (udid: string, projectRoot: string, own = false) => ({
+  udid,
+  name: CLONE,
+  projectRoot,
+  own,
+});
+
+describe('classifyTargets and the worktree that bound the simulator', () => {
+  it.each([
+    {
+      name: 'reads a target on the simulator this worktree binds',
+      booted: ['SIM-A'],
+      iosBindings: [bound('SIM-A', '/wt/mapfilter', true)],
+      projectRoots: null,
+    },
+    {
+      name: "skips a target with a foreign binding's name when the simulator list could not be read",
+      booted: [],
+      bootedStatus: 'unknown' as const,
+      iosBindings: [bound('SIM-B', '/wt/b')],
+      projectRoots: ['/wt/b'],
+    },
+  ])('$name', ({ booted, bootedStatus = 'observed' as const, iosBindings, projectRoots }) => {
+    const deviceInventory = makeDeviceInventory({
+      booted: booted.map((udid) => ({ name: CLONE, udid })),
+      bootedStatus,
+      iosBindings,
+    });
+
+    expect(
+      classifyTargets(
+        [ON_CLONE],
+        makeTargetSelection({ platform: null, device: null }),
+        deviceInventory
+      )
+    ).toEqual({
+      read: projectRoots == null ? [ON_CLONE] : [],
+      otherPlatform: [],
+      undetermined: [],
+      skipped:
+        projectRoots == null
+          ? []
+          : [{ target: ON_CLONE, classification: { group: 'other-worktree', projectRoots } }],
+    });
+  });
+});

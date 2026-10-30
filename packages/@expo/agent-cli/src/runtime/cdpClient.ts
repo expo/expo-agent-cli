@@ -5,7 +5,6 @@
 import type CdpMessageType from 'devtools-protocol';
 import { WebSocket } from 'ws';
 
-import type { NavigatePlatform } from '../navigate/device';
 import { formatCdpExceptionDetails, stringifyCdpValue } from './cdpFormat';
 import { debugEvent } from './events';
 import {
@@ -17,6 +16,7 @@ import {
   parseSettledPromiseSlot,
   wrapExpressionForPromises,
 } from './promiseSettling';
+import { emptyScopeError, noAppConnectedError } from './scopeRefusal';
 import {
   classifyTargets,
   type DeviceInventory,
@@ -204,26 +204,6 @@ export interface CdpClientOptions {
   deviceInventory: DeviceInventory;
 }
 
-/** The failure for a scoped client that found no target in its scope. */
-export class NoTargetOnPlatformError extends Error {
-  readonly isNoTargetOnPlatform = true;
-
-  constructor(
-    readonly platform: NavigatePlatform | null,
-    readonly otherPlatforms: NavigatePlatform[],
-    readonly undetermined: number
-  ) {
-    super(
-      platform == null
-        ? `No app connected to the dev server could be placed in this run's scope: ${undetermined} could not be placed at all.`
-        : otherPlatforms.length > 0
-          ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
-          : `No app connected to the dev server could be shown to be running on ${platform}${undetermined > 0 ? `, and ${undetermined} could not be placed at all` : ''}.`
-    );
-    this.name = 'NoTargetOnPlatformError';
-  }
-}
-
 /** How often the target list is re-read while {@link CdpClientOptions.targetRetryMs} runs. */
 const TARGET_RETRY_POLL_MS = 250;
 
@@ -275,17 +255,27 @@ export class CdpClient {
       await new Promise((resolve) => setTimeout(resolve, TARGET_RETRY_POLL_MS));
     }
     if (!target) {
+      const { read, otherPlatform, undetermined, skipped } = classifiedTargets;
+      // An empty list is the preflight's "no app is connected", whatever the scope.
+      if (read.length + otherPlatform.length + undetermined.length + skipped.length === 0) {
+        throw noAppConnectedError({
+          devServerUrl: this.options.metroUrl,
+          platform: this.options.targetSelection.platform?.value,
+        });
+      }
       // Two different failures, and only one of them is "the app is not there". A scoped run that
-      // found apps on the other platform has to say so, or the reader debugs a healthy app (F51).
-      const { platform } = this.options.targetSelection;
+      // found apps on the other platform, only another worktree's app, or only apps nothing placed
+      // has to say so, or the reader debugs a healthy app (F51, llp/0005 §Target owner).
       if (
         classifiedTargets.read.length === 0 &&
-        (platform != null || classifiedTargets.undetermined.length > 0)
+        (this.options.targetSelection.platform != null ||
+          classifiedTargets.skipped.length > 0 ||
+          classifiedTargets.undetermined.length > 0)
       ) {
-        throw new NoTargetOnPlatformError(
-          platform?.value ?? null,
-          [...new Set(classifiedTargets.otherPlatform.map((entry) => entry.platform))],
-          classifiedTargets.undetermined.length
+        throw emptyScopeError(
+          this.options.metroUrl,
+          this.options.targetSelection,
+          classifiedTargets
         );
       }
       throw new Error('No target found.');

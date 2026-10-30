@@ -47,6 +47,7 @@ import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/
 import { readSdkVersionAsync } from '../project/nodeModules';
 import type { StartPlan } from '../project/types';
 import { EAS_SIMULATOR_PROFILE, localRequirement } from '../toolchain/runsOn';
+import { CommandError } from '../utils/errors';
 import { smokeCommand } from './suggest';
 import { checkEntryBundleAsync } from '../runtime/bundleCheck';
 import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
@@ -59,6 +60,7 @@ import {
   type CommandSocketChurn,
 } from '../runtime/reload/reloadAsync';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
+import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
@@ -182,6 +184,10 @@ export async function smokeAsync(projectRoot: string, options: SmokeOptions): Pr
     await assertEasProjectConfiguredAsync(projectRoot);
   }
   const run = await runSmokePhasesAsync(buildSmokeDeps(projectRoot, options), options);
+  // Once per run, from the connection the verdict rests on, not once per wait.
+  if (run.appsConnected != null && run.appsConnected > 0 && run.skippedApps.length > 0) {
+    Log.progress(describeSkippedApps(run.skippedApps));
+  }
 
   event('smoke', {
     outcome: run.outcome,
@@ -733,7 +739,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     waitForAppConnection: async (devServerUrl, timeoutMs) => {
       const { targetSelection, deviceInventory, targets } =
         await targetSelectionAsync(devServerUrl);
-      return waitForAppConnectionAsync(devServerUrl, {
+      return await waitForAppConnectionAsync(devServerUrl, {
         timeoutMs,
         targetSelection,
         deviceInventory,
@@ -1041,7 +1047,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         return {
           ok: false,
           unsupported: false,
-          reason: error instanceof Error ? firstLine(error.message) : String(error),
+          reason: debuggerFailureReason(error),
         };
       }
     },
@@ -1062,7 +1068,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         return {
           ok: false,
           records: [],
-          reason: `the app could not be watched (${error instanceof Error ? firstLine(error.message) : String(error)})`,
+          reason: `the app could not be watched (${debuggerFailureReason(error)})`,
         };
       }
     },
@@ -1254,6 +1260,17 @@ function whatAndHow(message: string): string {
   const lines = message.split('\n').filter((line) => line.trim());
   const how = lines.find((line) => line.startsWith('How:'));
   return how && how !== lines[0] ? `${lines[0]} ${how}` : (lines[0] ?? message);
+}
+
+/** A debugger failure as one phase reason: a refusal keeps its Why, because that names what was skipped. */
+function debuggerFailureReason(error: unknown): string {
+  if (error instanceof CommandError) {
+    return error.message
+      .split('\n')
+      .filter((line) => line.trim() && !line.startsWith('How:'))
+      .join(' ');
+  }
+  return error instanceof Error ? firstLine(error.message) : String(error);
 }
 
 function firstLine(text: string): string {

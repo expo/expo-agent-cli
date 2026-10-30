@@ -79,6 +79,9 @@ export async function runtimeEvalAsync(
     if (error instanceof CdpPromisePendingError) {
       throw promisePendingError(devServerUrl, expression, timeoutMs, error, options.platform);
     }
+    if (error instanceof CommandError) {
+      throw error;
+    }
     throw new CommandError(
       'RUNTIME_EVALUATE_FAILED',
       [
@@ -186,6 +189,9 @@ function otherPlatformsOf(
 
 /** The error for a debugger window that could not be read. */
 function runtimeErrorsFailedError(devServerUrl: string, error: unknown): CommandError {
+  if (error instanceof CommandError) {
+    return error;
+  }
   const failure = new CommandError(
     'RUNTIME_ERRORS_FAILED',
     [

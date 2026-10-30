@@ -184,9 +184,15 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       reportedProjectRoot: '/project',
       timedOut: false,
       waitedMs: 5,
+      skippedApps: [],
     }),
     checkEntryBundle: async () => bundle(),
-    waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 3 }),
+    waitForAppConnection: async () => ({
+      appsConnected: 1,
+      timedOut: false,
+      waitedMs: 3,
+      skippedApps: [],
+    }),
     probeDevice: async () => ({ deviceId: 'SIM-1', backend: 'local-ios' as const, reason: null }),
     openRoute: async (route) => opened({ route }),
     // The ordinary case: the app that answered is one this project can run, with nothing to note.
@@ -345,7 +351,12 @@ describe(runSmokePhasesAsync, () => {
       ),
       runSmokePhasesAsync(
         deps({
-          waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 0,
+            timedOut: true,
+            waitedMs: 1,
+            skippedApps: [],
+          }),
         }),
         options()
       ),
@@ -446,6 +457,7 @@ describe(runSmokePhasesAsync, () => {
           appsConnected: (await device.probeDevice()).deviceId ? 1 : 0,
           timedOut: false,
           waitedMs: 3,
+          skippedApps: [],
         }),
         ...overrides,
       };
@@ -759,7 +771,12 @@ describe(runSmokePhasesAsync, () => {
             backend: 'cloud' as const,
             reason: null,
           }),
-          waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 3 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 1,
+            timedOut: false,
+            waitedMs: 3,
+            skippedApps: [],
+          }),
         }),
         options({ bootstrap: true, cloud: 'required' })
       );
@@ -777,7 +794,12 @@ describe(runSmokePhasesAsync, () => {
         deps({
           bootDevice,
           probeDevice: async () => ({ deviceId: null, backend: null, reason: 'no simulator' }),
-          waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 3 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 1,
+            timedOut: false,
+            waitedMs: 3,
+            skippedApps: [],
+          }),
         }),
         options({ bootstrap: true })
       );
@@ -952,7 +974,7 @@ describe(runSmokePhasesAsync, () => {
           waitForAppConnection: async (_url, timeoutMs) => {
             budgets.push(timeoutMs);
             // Nothing until the run opened the app on the device it booted.
-            return { appsConnected: booted ? 1 : 0, timedOut: false, waitedMs: 3 };
+            return { appsConnected: booted ? 1 : 0, timedOut: false, waitedMs: 3, skippedApps: [] };
           },
           now: () => (clock += 10),
         }),
@@ -992,6 +1014,7 @@ describe(runSmokePhasesAsync, () => {
               reportedProjectRoot: '/project',
               timedOut: false,
               waitedMs: 5,
+              skippedApps: [],
             };
           },
           checkEntryBundle: async (_url, timeoutMs) => {
@@ -1002,7 +1025,12 @@ describe(runSmokePhasesAsync, () => {
           },
           waitForAppConnection: async (_url, timeoutMs) => {
             given.attach.push(timeoutMs);
-            return { appsConnected: given.attach.length > 1 ? 1 : 0, timedOut: false, waitedMs: 3 };
+            return {
+              appsConnected: given.attach.length > 1 ? 1 : 0,
+              timedOut: false,
+              waitedMs: 3,
+              skippedApps: [],
+            };
           },
           waitForStableTargets: async (_url, timeoutMs) => {
             given.settle.push(timeoutMs);
@@ -1190,7 +1218,12 @@ describe(runSmokePhasesAsync, () => {
           }),
           // The open succeeds — exit code 0, a URL handed to the device — and nothing ever
           // attaches. This is Expo Go missing from a simulator, exactly.
-          waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 0,
+            timedOut: true,
+            waitedMs: 1,
+            skippedApps: [],
+          }),
         }),
         options({ bootstrap: true })
       );
@@ -1216,7 +1249,12 @@ describe(runSmokePhasesAsync, () => {
           waitForAppConnection: async () => {
             seen.push(seen.length);
             // Nothing on the first look; one target once the deep link has been opened.
-            return { appsConnected: seen.length > 1 ? 1 : 0, timedOut: false, waitedMs: 3 };
+            return {
+              appsConnected: seen.length > 1 ? 1 : 0,
+              timedOut: false,
+              waitedMs: 3,
+              skippedApps: [],
+            };
           },
         }),
         options({ bootstrap: true })
@@ -1248,8 +1286,13 @@ describe(runSmokePhasesAsync, () => {
           }),
           waitForAppConnection: vi
             .fn()
-            .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-            .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
+            .mockResolvedValueOnce({
+              appsConnected: 0,
+              timedOut: true,
+              waitedMs: 1,
+              skippedApps: [],
+            })
+            .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1, skippedApps: [] }),
           evaluate: async () => {
             tries += 1;
             return tries >= attempt
@@ -1418,6 +1461,7 @@ describe(runSmokePhasesAsync, () => {
             appsConnected: booted ? 1 : 0,
             timedOut: false,
             waitedMs: 3,
+            skippedApps: [],
           }),
           openRoute: async (route, _url, attachBudgetMs) => {
             budgets.push(attachBudgetMs);
@@ -1444,8 +1488,13 @@ describe(runSmokePhasesAsync, () => {
         deps({
           waitForAppConnection: vi
             .fn()
-            .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-            .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
+            .mockResolvedValueOnce({
+              appsConnected: 0,
+              timedOut: true,
+              waitedMs: 1,
+              skippedApps: [],
+            })
+            .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1, skippedApps: [] }),
           openRoute: async (route, _url, attachBudgetMs) => {
             budgets.push(attachBudgetMs);
             return opened({ route });
@@ -1479,7 +1528,12 @@ describe(runSmokePhasesAsync, () => {
           // The open succeeded — the launcher took the link and showed its own screen — and the
           // project never loaded, so nothing registered a target.
           openRoute: async (route) => opened({ route, launch: null }),
-          waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 0,
+            timedOut: true,
+            waitedMs: 1,
+            skippedApps: [],
+          }),
           evaluate,
           collectErrors,
         }),
@@ -1507,6 +1561,7 @@ describe(runSmokePhasesAsync, () => {
             reportedProjectRoot: '/other',
             timedOut: false,
             waitedMs: 4,
+            skippedApps: [],
           }),
           waitForAppConnection,
         }),
@@ -1530,6 +1585,7 @@ describe(runSmokePhasesAsync, () => {
             reportedProjectRoot: null,
             timedOut: false,
             waitedMs: 4,
+            skippedApps: [],
           }),
         }),
         options()
@@ -1649,6 +1705,7 @@ describe(runSmokePhasesAsync, () => {
             appsConnected: connected,
             timedOut: connected === 0,
             waitedMs: 2,
+            skippedApps: [],
           }),
           openRoute,
         }),
@@ -1673,6 +1730,7 @@ describe(runSmokePhasesAsync, () => {
             appsConnected: connected,
             timedOut: false,
             waitedMs: 2,
+            skippedApps: [],
           }),
           openRoute,
         }),
@@ -1688,7 +1746,12 @@ describe(runSmokePhasesAsync, () => {
     it(`is inconclusive when nothing is attached and there is no device to open one on`, async () => {
       const run = await runSmokePhasesAsync(
         deps({
-          waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 2 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 0,
+            timedOut: true,
+            waitedMs: 2,
+            skippedApps: [],
+          }),
           probeDevice: async () => ({
             backend: null,
             deviceId: null,
@@ -1708,7 +1771,12 @@ describe(runSmokePhasesAsync, () => {
     it(`fails when the device refused the link that would have opened one`, async () => {
       const run = await runSmokePhasesAsync(
         deps({
-          waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 2 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 0,
+            timedOut: true,
+            waitedMs: 2,
+            skippedApps: [],
+          }),
           openRoute: async () => opened({ exitCode: 4 }),
         }),
         options()
@@ -1722,7 +1790,12 @@ describe(runSmokePhasesAsync, () => {
     it(`still photographs the device when no app attached`, async () => {
       const run = await runSmokePhasesAsync(
         deps({
-          waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 2 }),
+          waitForAppConnection: async () => ({
+            appsConnected: 0,
+            timedOut: true,
+            waitedMs: 2,
+            skippedApps: [],
+          }),
           openRoute: async () => opened(),
         }),
         options()
@@ -2007,7 +2080,12 @@ describe(smokeExitCode, () => {
     [{ checkEntryBundle: async () => bundle({ outcome: 'timeout' }) }, 22],
     [
       {
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         probeDevice: async () => ({ deviceId: null, backend: null, reason: 'no simulator' }),
       },
       22,
@@ -2026,7 +2104,12 @@ describe(`${runSmokePhasesAsync.name} and what the picture shows`, () => {
   it(`says the app was not connected, on a run where it was not`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         probeDevice: async () => ({
           deviceId: 'SIM-1',
           backend: 'local-ios' as const,
@@ -2065,7 +2148,12 @@ describe(`${runSmokePhasesAsync.name} and what the picture shows`, () => {
               waitedMs: 20_000,
             },
           }),
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
       }),
       options({ bootstrap: true })
     );
@@ -2096,8 +2184,8 @@ describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
         // Nothing attached at first, so the run opens the app itself.
         waitForAppConnection: vi
           .fn()
-          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
+          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1, skippedApps: [] })
+          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1, skippedApps: [] }),
         waitForStableTargets: async (_url, timeoutMs) => {
           waits.push(timeoutMs);
           return { stable: true };
@@ -2121,8 +2209,8 @@ describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
       deps({
         waitForAppConnection: vi
           .fn()
-          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
+          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1, skippedApps: [] })
+          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1, skippedApps: [] }),
         waitForStableTargets: async () => {
           order.push('settle');
           return { stable: true };
@@ -2257,9 +2345,16 @@ describe(`${runSmokePhasesAsync.name} and the code on disk`, () => {
     const run = await runSmokePhasesAsync(
       deps({
         waitForAppConnection: vi
-          .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
-          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
+          .fn<
+            () => Promise<{
+              appsConnected: number;
+              timedOut: boolean;
+              waitedMs: number;
+              skippedApps: [];
+            }>
+          >()
+          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1, skippedApps: [] })
+          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2, skippedApps: [] }),
         reloadApp,
       }),
       options()
@@ -2471,9 +2566,16 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
       deps({
         checkAppFitsProject,
         waitForAppConnection: vi
-          .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
-          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
+          .fn<
+            () => Promise<{
+              appsConnected: number;
+              timedOut: boolean;
+              waitedMs: number;
+              skippedApps: [];
+            }>
+          >()
+          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1, skippedApps: [] })
+          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2, skippedApps: [] }),
       }),
       options()
     );
@@ -2487,7 +2589,12 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
     await runSmokePhasesAsync(
       deps({
         checkAppFitsProject,
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         openRoute: async (route) => opened({ route, exitCode: 115 }),
       }),
       options()
@@ -2553,9 +2660,16 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
       deps({
         checkAppFitsProject: async () => ({ mismatch: null, kind: null, note: NOTE }),
         waitForAppConnection: vi
-          .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
-          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
+          .fn<
+            () => Promise<{
+              appsConnected: number;
+              timedOut: boolean;
+              waitedMs: number;
+              skippedApps: [];
+            }>
+          >()
+          .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1, skippedApps: [] })
+          .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2, skippedApps: [] }),
       }),
       options()
     );
@@ -2588,9 +2702,16 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
     bootstrap: true,
     ...bootableDevice(),
     waitForAppConnection: vi
-      .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
-      .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-      .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
+      .fn<
+        () => Promise<{
+          appsConnected: number;
+          timedOut: boolean;
+          waitedMs: number;
+          skippedApps: [];
+        }>
+      >()
+      .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1, skippedApps: [] })
+      .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2, skippedApps: [] }),
   });
 
   it(`installs the app onto a device that was booted without it`, async () => {
@@ -2750,7 +2871,12 @@ describe(`${runSmokePhasesAsync.name} and the app the install replaced`, () => {
         ...attachedThenReplaced(),
         // One app all along, which is the stale target the live run tripped over: the count says
         // yes both before the install and after it.
-        waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 1,
+          timedOut: false,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         openRoute,
       }),
       options({ bootstrap: true })
@@ -2768,7 +2894,12 @@ describe(`${runSmokePhasesAsync.name} and the app the install replaced`, () => {
     const run = await runSmokePhasesAsync(
       deps({
         ...attachedThenReplaced(),
-        waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 1,
+          timedOut: false,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         reloadApp,
       }),
       options({ bootstrap: true })
@@ -2873,7 +3004,12 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
     const { said, runAsync } = narrated(
       {
         discoverDevServer: async () => discovery({ reachable: looks++ > 0 }),
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         ...bootableDevice(),
         installNeededOnDevice: async () => true,
       },
@@ -2913,7 +3049,12 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
           }
         },
         // Nothing attached, so the phase opens one and waits.
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
       }),
       options()
     );
@@ -2950,7 +3091,12 @@ describe(`${runSmokePhasesAsync.name} and an app that never attached`, () => {
   /** A run whose app never turns up, which is the only path this question is asked on. */
   function nothingAttaches(overrides: Partial<SmokeDeps> = {}) {
     return deps({
-      waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      waitForAppConnection: async () => ({
+        appsConnected: 0,
+        timedOut: true,
+        waitedMs: 1,
+        skippedApps: [],
+      }),
       ...overrides,
     });
   }
@@ -3044,7 +3190,12 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
   /** A run whose deep link is refused, the way `simctl openurl` refuses one with `115`. */
   function refused(overrides: Partial<SmokeDeps> = {}) {
     return deps({
-      waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      waitForAppConnection: async () => ({
+        appsConnected: 0,
+        timedOut: true,
+        waitedMs: 1,
+        skippedApps: [],
+      }),
       openRoute: async (route) =>
         opened({
           route,
@@ -3083,7 +3234,12 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
   it(`still says so for a launch that was opened and never loaded`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
         openRoute: async (route) =>
           opened({
             route,
@@ -3184,7 +3340,12 @@ describe(`${runSmokePhasesAsync.name} and a start that changed the project`, () 
           order.push('install-needed');
           return false;
         },
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
       }),
       options({ bootstrap: true })
     );
@@ -3213,7 +3374,12 @@ describe(`${runSmokePhasesAsync.name} and an install it was told is needed`, () 
           replaced: null,
           reason: null,
         }),
-        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        waitForAppConnection: async () => ({
+          appsConnected: 0,
+          timedOut: true,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
       }),
       options({ bootstrap: true })
     );
@@ -3232,7 +3398,12 @@ describe('the start-session phase, on --eas', () => {
   const cloudDeps = (overrides: Partial<SmokeDeps> = {}) =>
     deps({
       probeDevice: async () => ({ deviceId: 'sess-up', backend: 'cloud' as const, reason: null }),
-      waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 3 }),
+      waitForAppConnection: async () => ({
+        appsConnected: 1,
+        timedOut: false,
+        waitedMs: 3,
+        skippedApps: [],
+      }),
       ...overrides,
     });
 

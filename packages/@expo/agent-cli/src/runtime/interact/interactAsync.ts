@@ -142,17 +142,20 @@ async function openAppAsync(
   },
   context: RuntimeContext
 ): Promise<OpenApp> {
-  const { devServerUrl, targets, targetSelection, deviceInventory } = await preflightRuntimeAsync(
-    { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
-    context
-  );
+  const { devServerUrl, targetSelection, deviceInventory, classifiedTargets } =
+    await preflightRuntimeAsync(
+      { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
+      context
+    );
   const wantBundleCheck = options.bundleCheck !== false;
 
   let bundle: BundleCheckResult | null = null;
   if (wantBundleCheck) {
-    const { platforms } = await resolveBundleCheckPlatformsAsync(targetSelection, targets, {
-      deviceInventory,
-    });
+    const { platforms } = await resolveBundleCheckPlatformsAsync(
+      targetSelection,
+      classifiedTargets.read,
+      { deviceInventory }
+    );
     const results: BundleCheckResult[] = [];
     for (const platform of platforms) {
       results.push(
@@ -218,6 +221,9 @@ async function askAppAsync(
   } catch (error: unknown) {
     if (isMethodNotFoundError(error)) {
       throw evaluateUnsupportedError(devServerUrl);
+    }
+    if (error instanceof CommandError) {
+      throw error;
     }
     throw new CommandError(
       'RUNTIME_TREE_FAILED',

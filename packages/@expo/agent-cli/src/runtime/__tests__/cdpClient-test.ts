@@ -1,3 +1,4 @@
+import { describeSkippedApps } from '../targetSelection';
 import { EventEmitter } from 'events';
 import type WebSocketImpl from 'ws';
 
@@ -15,7 +16,7 @@ import {
 } from '../cdpClient';
 import { MockWebSocket } from './MockWebSocket';
 import LIVE from './fixtures/live-promise-frames.json';
-import { EVERY_TARGET_CLIENT } from './targetSelectionFixtures';
+import { EVERY_TARGET_CLIENT, makeDeviceInventory } from './targetSelectionFixtures';
 
 const TARGET = {
   id: '1',
@@ -226,7 +227,34 @@ describe('CdpClient.evaluateAsync', () => {
     })) as unknown as typeof fetch;
 
     const client = new CdpClient({ ...EVERY_TARGET_CLIENT, metroUrl: 'http://localhost:8081' });
-    await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
+    await expect(client.evaluateAsync('1')).rejects.toThrow(/no app is connected to it/);
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner. The client re-reads the list, so it
+  // refuses the same way the preflight does when only another worktree's app is left on it.
+  it(`should refuse when only another worktree's app is listed, and name that worktree`, async () => {
+    const onClone = { ...TARGET, deviceName: 'agent-cli c4ed0a60' };
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => [onClone],
+    })) as unknown as typeof fetch;
+
+    const client = new CdpClient({
+      ...EVERY_TARGET_CLIENT,
+      metroUrl: 'http://localhost:8081',
+      deviceInventory: makeDeviceInventory({
+        booted: [{ name: 'agent-cli c4ed0a60', udid: 'SIM-LEGEND' }],
+        iosBindings: [
+          { udid: 'SIM-LEGEND', name: 'agent-cli c4ed0a60', projectRoot: '/wt/legend', own: false },
+        ],
+      }),
+    });
+
+    await expect(client.evaluateAsync('1')).rejects.toThrow(
+      describeSkippedApps([
+        { deviceName: 'agent-cli c4ed0a60', group: 'other-worktree', projectRoots: ['/wt/legend'] },
+      ])
+    );
   });
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — friction run 4, F39.
@@ -270,7 +298,7 @@ describe('CdpClient.evaluateAsync', () => {
       metroUrl: 'http://localhost:8081',
       targetRetryMs: 300,
     });
-    await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
+    await expect(client.evaluateAsync('1')).rejects.toThrow(/no app is connected to it/);
   });
 });
 

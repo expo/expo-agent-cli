@@ -54,6 +54,7 @@ export const smokeHelp: CommandHelp = {
       'started',
       'environment',
       'appsConnected',
+      'skippedApps',
       'bundle',
       'route',
       'routeCheck',

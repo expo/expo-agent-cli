@@ -21,8 +21,10 @@ import {
   classifyTargets,
   scopeToolsUnknown,
   refreshDeviceInventoryAsync,
+  skippedAppsOf,
   type ClassifiedTargets,
   type DeviceInventory,
+  type SkippedApp,
   type TargetSelection,
 } from './targetSelection';
 
@@ -290,6 +292,8 @@ export interface AppConnectionResult {
   otherPlatformApps?: number;
   /** Apps attached that nothing placed in the scope. Never counted. */
   undeterminedApps?: number;
+  /** Apps attached that another worktree's simulator or another device runs. Never counted. */
+  skippedApps: SkippedApp[];
 }
 
 /** How often a wait asks again for a device tool answer that is unknown. */
@@ -372,13 +376,15 @@ export async function waitForAppConnectionAsync(
     const probe = await probeDevServerAsync(devServerUrl);
     const classifiedTargets = await classify(probe.targets);
     const counted = classifiedTargets.read.length;
-    const extra =
-      targetSelection.platform != null || targetSelection.device != null
+    const extra = {
+      skippedApps: skippedAppsOf(classifiedTargets),
+      ...(targetSelection.platform != null || targetSelection.device != null
         ? {
             otherPlatformApps: classifiedTargets.otherPlatform.length,
             undeterminedApps: classifiedTargets.undetermined.length,
           }
-        : {};
+        : {}),
+    };
 
     if (counted > 0) {
       return {
@@ -418,7 +424,7 @@ export interface WaitForFreshAppConnectionOptions extends Omit<
   signal?: AbortSignal;
 }
 
-export interface FreshAppConnectionResult extends AppConnectionResult {
+export interface FreshAppConnectionResult extends Omit<AppConnectionResult, 'skippedApps'> {
   /**
    * Targets the dev server listed that it had not listed before the reload.
    *

@@ -103,7 +103,11 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   const { platforms: bundlePlatforms, source: bundlePlatformSource } = options.platformExplicit
     ? { platforms: [options.platform], source: 'flag' as const }
     : await resolveBundleCheckPlatformsAsync(targetSelection, discovery.targets, {
-        deviceInventory: await deviceInventoryForSelectionAsync(discovery.targets, targetSelection),
+        deviceInventory: await deviceInventoryForSelectionAsync(
+          discovery.targets,
+          targetSelection,
+          null
+        ),
         fallback: options.platform,
       });
 
@@ -142,7 +146,7 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
       // Scoped when the caller named a native platform: `--require-app --platform android` used to
       // be satisfied by the iOS simulator attached to the same dev server (F51).
       targetSelection,
-      deviceInventory: await deviceInventoryForSelectionAsync(targets, targetSelection),
+      deviceInventory: await deviceInventoryForSelectionAsync(targets, targetSelection, null),
       inventoryTargets: targets,
     });
     appsConnected = attached.appsConnected;

@@ -50,6 +50,7 @@ import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
+import { describeSkippedApps, type SkippedApp } from '../runtime/targetSelection';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
 import type { SmokeProgress } from './progress';
 import { coldWaitMs, type SmokeOptions } from './resolveOptions';
@@ -439,6 +440,7 @@ export interface SmokeRun {
   /** What this run found on the machine, what it started, and what it put back. */
   environment: SmokeEnvironmentJson;
   appsConnected: number | null;
+  skippedApps: SkippedApp[];
   bundle: BundleCheckResult | null;
   route: string | null;
   routeCheck: RouteCheckJson | null;
@@ -934,6 +936,7 @@ async function runPhasesAsync(
     started: false,
     environment,
     appsConnected: null,
+    skippedApps: [],
     bundle: null,
     route: options.route,
     routeCheck: null,
@@ -1588,12 +1591,12 @@ async function runPhasesAsync(
     chargeToBootstrap();
   }
 
-  const appsConnected = connection.appsConnected;
-  const withApp = { ...base, bundle, appsConnected };
+  const { appsConnected, skippedApps } = connection;
+  const withApp = { ...base, bundle, appsConnected, skippedApps };
 
   if (appsConnected === 0) {
     const appPhase = phases[phases.length - 1]!;
-
+    if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
     // @ref ./phases §SmokeDeps.explainSilentApp
     //
     // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is
@@ -1613,8 +1616,7 @@ async function runPhasesAsync(
       // Appended rather than substituted: "the link was opened and nothing attached" is what the
       // phase measured, and the device fact is why. A reader needs both — the second without the
       // first would not say that the open itself succeeded.
-      appPhase.reason =
-        appPhase.reason == null ? silent.mismatch : `${appPhase.reason} · ${silent.mismatch}`;
+      appendReason(appPhase, silent.mismatch);
     }
 
     // No app, so no runtime and no window — but there may still be a device, and a picture of
@@ -1675,8 +1677,7 @@ async function runPhasesAsync(
       // Appended rather than substituted. The sentence already there says how the app got where it
       // is — "opened … to connect one" — which is the fact the row exists for, and a note that
       // replaced it would trade a finding for a finding.
-      appPhase.reason =
-        appPhase.reason == null ? appFit.note : `${appPhase.reason} · ${appFit.note}`;
+      appendReason(appPhase, appFit.note);
     }
   }
 
@@ -2063,6 +2064,11 @@ async function captureIfPossible(
   // [observed — live cloud, 2026-08-27]. The device a run used is a fact of the run, whichever phase
   // found it.
   return { screenshot: result, deviceId: device, deviceBackend: backend };
+}
+
+/** Add a finding to a phase's sentence, after the one already there. */
+function appendReason(phase: SmokePhase, finding: string): void {
+  phase.reason = phase.reason == null ? finding : `${phase.reason} · ${finding}`;
 }
 
 /** What an `ok` screenshot says it captured, or null when it is the app itself. */

@@ -3,9 +3,29 @@
 // they all print when there is not.
 
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
+import { SIMCTL_TIMEOUT_MS } from '../../device/simulators';
+import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { APP_RECONNECT_GRACE_MS } from '../devServer';
-import { preflightRuntimeAsync, reachTheAppLadder } from '../preflight';
+import { preflightRuntimeAsync } from '../preflight';
+import { reachTheAppLadder } from '../scopeRefusal';
 import { makeDeviceInventory } from './targetSelectionFixtures';
+
+vi.mock('../../log');
+// `xcrun simctl list devices booted -j` answers with these; every other tool fails to run.
+let bootedSimulators: { udid: string; name: string }[] = [];
+vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
+beforeEach(() => {
+  bootedSimulators = [];
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (bin: string) =>
+    bin === 'xcrun'
+      ? {
+          stdout: JSON.stringify({ devices: { 'iOS-26-0': bootedSimulators } }),
+          stderr: '',
+          exitCode: 0,
+        }
+      : { stdout: '', stderr: '', exitCode: 1 }
+  );
+});
 
 const TARGET = {
   id: '1',
@@ -342,6 +362,51 @@ describe(reachTheAppLadder, () => {
 // @ref ./targetPlatform — friction run 6, F51. With an iOS simulator and an Android emulator on
 // one dev server, a command told `--android` used to be handed whichever target came first.
 describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
+  it("does not call an excluded local app another worktree's build in a cloud scope", async () => {
+    mockDevServer([TARGET]);
+    bootedSimulators = [{ udid: 'LOCAL', name: TARGET.deviceName }];
+    const error = await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      platform: 'ios',
+      cloud: true,
+    }).catch((e) => e);
+    expect(error.code).toBe('NO_APP_CONNECTED');
+    expect(error.message).toContain('is not the device this run reads');
+    expect(error.message).not.toContain("the other worktree's build");
+  });
+
+  it("does not say no app of this worktree is connected when the app is this worktree's own simulator", async () => {
+    mockDevServer([TARGET]);
+    bootedSimulators = [{ udid: 'LOCAL', name: TARGET.deviceName }];
+    const error = await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      platform: 'ios',
+      cloud: true,
+    }).catch((e) => e);
+    expect(error.code).toBe('NO_APP_CONNECTED');
+    expect(error.message.split('\n')[0]).toContain("No app on this run's device is connected");
+    expect(error.message).toContain(`"${TARGET.deviceName}" is not the device this run reads`);
+    expect(error.message).not.toContain('No app of this worktree');
+    expect(error.message).not.toContain('not the app on this worktree');
+  });
+
+  it('bounds the device-tool read a cloud scope triggers', async () => {
+    mockDevServer([TARGET]);
+    await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      platform: 'ios',
+      cloud: true,
+    }).catch(() => null);
+    const simctlCalls = vi.mocked(spawnCaptureAsync).mock.calls.filter(([bin]) => bin === 'xcrun');
+    expect(simctlCalls.length).toBeGreaterThan(0);
+    for (const [, , options] of simctlCalls) {
+      expect(options?.timeoutMs).toBe(SIMCTL_TIMEOUT_MS);
+    }
+  });
+
   it(`should name the platform the connected app is actually on`, async () => {
     mockDevServer([TARGET]);
 
