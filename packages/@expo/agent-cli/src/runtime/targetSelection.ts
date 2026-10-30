@@ -447,17 +447,20 @@ export async function refreshDeviceInventoryAsync(
   return { ...inventory, androidReverse };
 }
 
-/** Whether a device tool these targets needed did not answer, where `before` had its answer. */
+/**
+ * Whether a device tool these targets needed did not answer, where `before` had its answer. A tool
+ * that was already silent in `before` loses nothing: what it held was undetermined then too.
+ */
 export function deviceFactsLost(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
   targetSelection: TargetSelection,
   before: DeviceInventory,
   after: DeviceInventory
 ): boolean {
+  const silent = silentTool(targetSelection, after);
   return (
     toolsCanPlace(targets, targetSelection, after) &&
-    ((after.bootedStatus === 'unknown' && before.bootedStatus === 'observed') ||
-      (after.androidDevices == null && before.androidDevices != null) ||
+    ((silent != null && silent !== silentTool(targetSelection, before)) ||
       (after.androidReverse == null &&
         before.androidReverse != null &&
         androidModelTwins(targetSelection, after) != null))
