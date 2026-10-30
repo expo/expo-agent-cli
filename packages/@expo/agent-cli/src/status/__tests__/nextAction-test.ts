@@ -2,15 +2,17 @@ import type { LastDevRequest } from '../../dev/lastRequest';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import type { BindingSummary } from '../../deviceBinding/summary';
 import { decideStartPlan } from '../../plan/decide';
+import { PROGRAM_PREFIX } from '../../programName';
 import type { ProjectState, StartPlan } from '../../project/types';
 import {
   chooseNextAction,
+  cloudBindings,
   resolveNextTarget,
   type NextActionFacts,
   type NextActionHost,
   type NextTargetFacts,
 } from '../nextAction';
-import type { DevServerStatus } from '../types';
+import type { DevServerStatus, LocalDeviceStatus } from '../types';
 
 const state: ProjectState = {
   projectRoot: '/project',
@@ -49,6 +51,15 @@ const stopped = server({
 });
 const noApp = server({ appsConnected: 0, appsListed: 0 });
 const foreign = server({ appsConnected: 0, appsListed: 0, projectRootMatched: false });
+/** A booted simulator names the smoke platform; with no device, the host's platform would. */
+const bootedIos: LocalDeviceStatus = {
+  state: 'present',
+  platform: 'ios',
+  deviceId: 'SIM-1',
+  name: 'iPhone 17',
+  devices: [{ platform: 'ios', deviceId: 'SIM-1', name: 'iPhone 17' }],
+  reason: null,
+};
 
 function binding(overrides: Partial<BindingSummary>): BindingSummary {
   return {
@@ -73,14 +84,17 @@ const androidRequest: LastDevRequest = {
   buildBackend: 'local',
   runTarget: 'dev-build',
 };
-const dev = 'npx @expo/agent-cli dev';
+const dev = `${PROGRAM_PREFIX} dev`;
 const easWhy = (platform: string, phase: 'is starting' | 'is not bound yet') =>
   `The dev server's EAS Simulator session for ${platform} ${phase}. This command waits for it, or reopens the app on the running Metro. No restart is needed.`;
 const unbound = (platform: string) => `No ${platform} device is bound to this worktree.`;
 const restart = (platform: string) =>
   `${unbound(platform)} The running dev server must restart to bind one.`;
 
-type Facts = Omit<NextTargetFacts & NextActionFacts, 'host' | 'bindings' | 'recoveryPort'> & {
+type Facts = Omit<
+  NextTargetFacts & NextActionFacts,
+  'host' | 'bindings' | 'sessions' | 'recoveryPort'
+> & {
   bindings: BindingSummary[] | null;
 };
 
@@ -242,7 +256,7 @@ describe(chooseNextAction, () => {
         ownServer: easLock('android'),
         bindings: [binding({ platform: 'android', backend: 'cloud', id: 'sess-live' })],
       },
-      command: 'npx @expo/agent-cli smoke --android --eas',
+      command: `${PROGRAM_PREFIX} smoke --android --eas`,
       why: expect.stringContaining('an EAS Simulator session is on record'),
     },
     {
@@ -324,8 +338,12 @@ describe(chooseNextAction, () => {
     })),
     {
       name: "keeps the plan's next while an app is connected to this project's dev server",
-      facts: { devServer: server(), bindings: [binding({ state: 'gone', expiresAt: expired })] },
-      command: 'npx @expo/agent-cli smoke --ios',
+      facts: {
+        devServer: server(),
+        device: bootedIos,
+        bindings: [binding({ state: 'gone', expiresAt: expired })],
+      },
+      command: `${PROGRAM_PREFIX} smoke --ios`,
       why: expect.stringContaining('instead of starting a second server'),
     },
     {
@@ -377,6 +395,63 @@ describe(chooseNextAction, () => {
       why: null,
     },
     {
+      name: "binds a device beside another project's server that has an app connected",
+      facts: { devServer: server({ projectRootMatched: false }) },
+      command: `${dev} --ios --detach --wait-ready`,
+      why: unbound('ios'),
+    },
+    {
+      name: "keeps a saved port that differs from the port of another project's server",
+      facts: {
+        platform: undefined,
+        request: androidRequest,
+        devServerUrl: null,
+        devServer: foreign,
+      },
+      command: `${dev} --android --local --dev-client --port 19082 --device emulator-5556 --detach --wait-ready`,
+      why: unbound('android'),
+    },
+    {
+      name: 'names no saved device in the re-run of a saved EAS request',
+      facts: {
+        platform: undefined,
+        devServerUrl: null,
+        request: {
+          platform: 'ios',
+          port: 19083,
+          device: 'SIM-1',
+          buildBackend: 'eas',
+          runTarget: null,
+        },
+        deviceBackend: 'eas',
+      },
+      command: `${dev} --ios --eas --port 19083 --detach --wait-ready`,
+      why: null,
+    },
+    {
+      name: 'gates on the session of the platform it names when two sessions are live',
+      facts: {
+        devServer: server(),
+        bindings: [
+          binding({ platform: 'android', backend: 'cloud', id: 'sess-android' }),
+          binding({ platform: 'ios', backend: 'cloud', id: 'sess-ios' }),
+        ],
+      },
+      command: `${PROGRAM_PREFIX} smoke --ios --eas`,
+      why: expect.stringContaining('an EAS Simulator session is on record'),
+    },
+    {
+      name: 'says nothing of an expired session while a session of the other platform is live',
+      facts: {
+        bindings: [
+          binding({ platform: 'android', backend: 'cloud', id: 'sess-android' }),
+          binding({ backend: 'cloud', id: 'sess-old', state: 'gone', expiresAt: expired }),
+        ],
+      },
+      command: `${dev} --ios --port 8081 --detach --wait-ready`,
+      why: null,
+    },
+    {
       name: 'removes an unreadable binding file before the dev command that would refuse on it',
       host: { unreadableBindingFile: () => '/bindings/local-ios.json' },
       command: `rm -f '/bindings/local-ios.json' && ${dev} --ios --port 8081 --detach --wait-ready`,
@@ -394,6 +469,7 @@ describe(chooseNextAction, () => {
       ...input,
       platform,
       recoveryPort,
+      sessions: cloudBindings(input.bindings ?? []),
       plan: editPlan ? editPlan(plan) : plan,
       host: { ...host, ...hostOverrides },
     });

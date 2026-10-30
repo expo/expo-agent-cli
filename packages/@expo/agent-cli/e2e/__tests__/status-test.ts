@@ -10,7 +10,13 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
-import { BOOTED_SIMULATOR, installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
+import {
+  androidBindingFixture,
+  BOOTED_SIMULATOR,
+  bindingFixture,
+  installStubAdbAsync,
+  installStubXcrunAsync,
+} from './installedAppStubs';
 
 import {
   installStubEasAsync as installSharedStubEasAsync,
@@ -36,6 +42,7 @@ import {
   readStubFingerprintInvocations,
   linkFixtureToEasAsync,
   setupFixtureAsync,
+  type DevLockInfo,
   startStubDevServerAsync,
   writeAgentSelectionAsync,
 } from '../utils';
@@ -546,6 +553,123 @@ describe('@expo/agent-cli status', () => {
       );
     });
 
+    // @ref llp/0021-honest-reports.rfc.md §How they show up
+    // One run per fact `status` reads for the `next` line on a host that binds devices.
+    describe('the next line on a host that binds devices', () => {
+      const platform = process.platform === 'darwin' ? 'ios' : 'android';
+      const other = platform === 'ios' ? 'android' : 'ios';
+      const dev = `npx @expo/agent-cli dev --${platform}`;
+      const unbound = `No ${platform} device is bound to this worktree.`;
+      const lockOf = (projectRoot: string, url: string): DevLockInfo => ({
+        url,
+        port: Number(new URL(url).port),
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        projectRoot,
+      });
+
+      it.each<{
+        name: string;
+        /** Returns the lock's release, or the file that the row's `next` names. */
+        setup: (
+          projectRoot: string,
+          url: string
+        ) => Promise<{ release?: () => void; file?: string }>;
+        next: (port: string, file?: string) => { command: unknown; why: unknown };
+      }>([
+        {
+          name: 'stops an own dev server that must restart to bind a device',
+          setup: async (projectRoot, url) => ({
+            release: await holdDevLockAsync(projectRoot, lockOf(projectRoot, url)),
+          }),
+          next: (port) => ({
+            command: `npx @expo/agent-cli dev:stop && ${dev} --port ${port} --detach --wait-ready`,
+            why: `${unbound} The running dev server must restart to bind one.`,
+          }),
+        },
+        {
+          name: 'says the EAS session is starting while the detached child starts it',
+          setup: async (projectRoot, url) => {
+            const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+            await fs.promises.mkdir(logDir, { recursive: true });
+            await fs.promises.writeFile(
+              path.join(logDir, 'dev-detached.log'),
+              `Detached dev run, pid ${process.pid}.\n`
+            );
+            return {
+              release: await holdDevLockAsync(projectRoot, {
+                ...lockOf(projectRoot, url),
+                easPlatform: platform,
+              }),
+            };
+          },
+          next: () => ({
+            command: `${dev} --eas --detach --wait-ready`,
+            why: `The dev server's EAS Simulator session for ${platform} is starting. This command waits for it, or reopens the app on the running Metro. No restart is needed.`,
+          }),
+        },
+        {
+          name: 'asks for no local device when the config puts the device on EAS',
+          setup: async (projectRoot) => {
+            const file = path.join(projectRoot, 'package.json');
+            const manifest = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+            manifest.expo = { ...manifest.expo, 'agent-cli': { deviceBackend: 'eas' } };
+            await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
+            return {};
+          },
+          next: () => ({ command: expect.stringMatching(new RegExp(`^${dev} `)), why: null }),
+        },
+        {
+          name: 'removes a binding file that does not parse',
+          setup: async (projectRoot) => {
+            const file =
+              platform === 'ios'
+                ? await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid)
+                : await androidBindingFixture(projectRoot, 'emulator-5554');
+            await fs.promises.writeFile(file, '{');
+            return { file };
+          },
+          next: (port, file) => ({
+            command: `rm -f '${file}' && ${dev} --port ${port} --detach --wait-ready`,
+            why: `The binding file ${file} does not parse; a newer CLI may have written it.`,
+          }),
+        },
+        {
+          name: 'takes the platform of a sole binding',
+          setup: async (projectRoot) => {
+            await (other === 'ios'
+              ? bindingFixture(projectRoot, BOOTED_SIMULATOR.udid)
+              : androidBindingFixture(projectRoot, 'emulator-5554'));
+            return {};
+          },
+          next: () => ({
+            command: expect.stringMatching(new RegExp(`^npx @expo/agent-cli dev --${other} `)),
+            why: null,
+          }),
+        },
+      ])('$name', async ({ setup, next }) => {
+        const projectRoot = await setupAsync('go-app');
+        const env = await stubUnboundDeviceAsync(projectRoot);
+        const url = await getUnusedDevServerUrlAsync();
+        const { release, file } = await setup(projectRoot, url);
+        try {
+          const result = await executeAgentCliAsync(
+            projectRoot,
+            ['status', '--json', '--dev-server-url', url],
+            { env }
+          );
+
+          expect(result.exitCode).toBe(0);
+          const report: StatusReport = JSON.parse(result.stdout);
+          expect({ command: report.next?.command, why: report.next?.why }).toEqual(
+            next(new URL(url).port, file)
+          );
+        } finally {
+          release?.();
+        }
+      });
+    });
+
     it('reports every section in the JSON report', async () => {
       const report = await reportAsync('go-app');
 
@@ -644,7 +768,6 @@ describe('@expo/agent-cli status', () => {
       expect(report.skills).toBeNull();
       expect(Object.keys(report.errors)).toEqual(['skills']);
       expect(report.project?.name).toBe('go-app');
-      expect(report.devServer).not.toBeNull();
       expect(statusEvent(eventsFile)).toMatchObject({ sectionErrors: ['skills'] });
     });
 
@@ -717,9 +840,30 @@ describe('@expo/agent-cli status', () => {
         skillsLinked: 0,
         sectionErrors: [],
       });
-      expect(status).toHaveProperty('localDevice');
-      expect(status).toHaveProperty('fingerprintSource');
-      expect(status).toHaveProperty('fingerprintRevalidatedAgainst');
+
+      // Beside a dev server, with a fingerprint tool, on a host that reads devices.
+      await installEnvFingerprintStubAsync(projectRoot);
+      const devServer = await startDevServerDoubleAsync([]);
+      try {
+        const env = await stubUnboundDeviceAsync(projectRoot);
+        const served = path.join(projectRoot, 'events-served.jsonl');
+        const report = await reportInAsync(projectRoot, ['--dev-server-url', devServer.url], {
+          ...env,
+          LOG_EVENTS: served,
+        });
+
+        expect(report.devServer!.openUrls[0]!.url).toMatch(/^exp:\/\//);
+        expect(statusEvent(served)).toMatchObject({
+          devServerRunning: true,
+          openUrl: report.devServer!.openUrls[0]!.url,
+          localDevice: 'absent',
+          installed: 'unknown',
+          fingerprintSource: 'computed',
+          fingerprintRevalidatedAgainst: null,
+        });
+      } finally {
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
     });
 
     // @ref llp/0009-smart-followups.rfc.md §Examples per command — status keeps its own `next`
@@ -1564,7 +1708,11 @@ describe('@expo/agent-cli status', () => {
     expect(report.orphanSessions).toEqual([
       { platform: 'ios', id: 'sess-orphan', projectRoot: gone, command },
     ]);
-    expect(report.next?.command).not.toBe(command);
+    expect(report.next?.command).toMatch(
+      new RegExp(
+        `^npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --port \\d+ --detach --wait-ready$`
+      )
+    );
     expect(report.followups[0]).toMatchObject({ command });
 
     // Plain `dev:stop` would also stop this worktree's own dev server.

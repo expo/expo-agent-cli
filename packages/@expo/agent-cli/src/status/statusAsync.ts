@@ -281,6 +281,7 @@ export async function collectStatusReportAsync(
     }),
   ]);
 
+  const bindings = 'value' in binding ? binding.value : [];
   const errors: Partial<Record<StatusSectionName, string>> = {};
   const report: StatusReport = {
     project: null,
@@ -290,7 +291,7 @@ export async function collectStatusReportAsync(
     builds: null,
     devServer: null,
     device: null,
-    binding: 'value' in binding ? binding.value : [],
+    binding: bindings,
     orphanSessions: [],
     skills: null,
     auth: null,
@@ -309,7 +310,7 @@ export async function collectStatusReportAsync(
     errors.binding ??= error instanceof Error ? error.message : String(error);
   }
   // The device line alone keeps `gone` rows.
-  const { cloud, expiredCloud } = cloudBindings(report.binding ?? []);
+  const sessions = cloudBindings(bindings);
 
   // One EAS lookup per run, shared by the plan below and the builds section, so the plan gets the
   // section's record, auth gate and link gate instead of a lookup of its own on every run.
@@ -392,7 +393,7 @@ export async function collectStatusReportAsync(
       devServerUrl: options.devServerUrl,
       ownServer,
       request,
-      bindings: report.binding ?? [],
+      bindings,
       devServer: report.devServer,
       state,
     });
@@ -417,6 +418,7 @@ export async function collectStatusReportAsync(
       device: report.device,
       devBuildScheme,
       bindings: 'value' in binding ? binding.value : null,
+      sessions,
       ownServer,
       request,
       deviceBackend,
@@ -483,7 +485,10 @@ export async function collectStatusReportAsync(
   ]);
 
   if (installed && 'value' in installed) {
-    report.installed = withCloudSessions(installed.value, [...cloud, ...expiredCloud]);
+    report.installed = withCloudSessions(installed.value, [
+      ...sessions.cloud,
+      ...sessions.expiredCloud,
+    ]);
   } else if (installed) {
     errors.installed = installed.error;
   }
