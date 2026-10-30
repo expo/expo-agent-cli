@@ -1,12 +1,12 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §EAS session binding
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
-import { quoteArgument } from '../../src/utils/consent';
+import { PROGRAM_PREFIX } from '../../src/programName';
 import path from 'node:path';
 import { guardedCloudArgs } from '../../src/device/cloudCommand';
 import type { Binding } from '../../src/deviceBinding/types';
 import { easCliArgs, resolveEasCli } from '../../src/utils/easCli';
-import { spawnSubprocessAsync } from '../../src/utils/subprocess';
+import { findExecutableOnPath, spawnSubprocessAsync } from '../../src/utils/subprocess';
 import {
   cloudBindingFile,
   installStubEasAsync,
@@ -22,6 +22,7 @@ import {
   waitForExitAsync,
   getTemporaryPath,
   installStubFingerprintAsync,
+  installStubBinAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
@@ -44,7 +45,7 @@ afterEach(async () => {
     });
   }
 });
-function envFor(root: string) {
+function envFor(root: string): Record<string, string> {
   return {
     ...stubExpoEnv(root),
     AGENT_CLI_NO_DEVICE: '0',
@@ -336,7 +337,7 @@ it('round-trips guarded cloud target argv', async () => {
   const sessionId = 'argv-session';
   await writeCloudSessionFileAsync(root, sessionId);
   const env = envFor(root);
-  const easCli = resolveEasCli(root, { env });
+  const easCli = resolveEasCli(root, { env, pathEnv: env.PATH });
   expect(easCli).not.toBeNull();
 
   const targetArgs = [
@@ -354,10 +355,14 @@ it('round-trips guarded cloud target argv', async () => {
     'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
     ...targetArgs,
   ];
+  // This calls the transport in-process: resolve against the fixture PATH before Windows
+  // selects a .cmd shim from the test runner's own environment.
+  const runner = findExecutableOnPath(easCli!.command, { pathEnv: env.PATH });
+  expect(runner).not.toBeNull();
   const accepted = await spawnSubprocessAsync(
-    easCli!.command,
+    runner!,
     easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
-    { cwd: root, env }
+    { cwd: root, env, timeoutMs: 15_000 }
   );
   expect(accepted.exitCode, accepted.stderr).toBe(0);
   expect(JSON.parse(accepted.stdout)).toEqual(targetArgs);
@@ -419,18 +424,13 @@ it('a failed start records the billed session, and dev:stop --eas stops it', asy
 });
 // Keep the emitted arguments and shell operators intact; substitute only the local CLI executable.
 async function follow(root: string, command: string, env: Record<string, string>) {
-  const child = spawn(
-    command.replaceAll(
-      'npx @expo/agent-cli',
-      `${quoteArgument(process.execPath)} ${quoteArgument(bin)}`
-    ),
-    {
-      cwd: root,
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CI: '1', EXPO_NO_TELEMETRY: '1', AGENT_CLI_NO_DOCS_SYNC: '1', ...env },
-    }
-  );
+  await installStubBinAsync(path.join(root, '.stub-bin'), 'agent-cli-under-test', bin);
+  const child = spawn(command.replaceAll(PROGRAM_PREFIX, 'agent-cli-under-test'), {
+    cwd: root,
+    shell: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, CI: '1', EXPO_NO_TELEMETRY: '1', AGENT_CLI_NO_DOCS_SYNC: '1', ...env },
+  });
   return waitForExitAsync(child, collectOutput(child));
 }
 
