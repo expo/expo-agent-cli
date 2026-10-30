@@ -7,7 +7,6 @@ const longFiles = {
   'src/dev/devAsync.ts': 980,
   'src/runtime/reload/reloadAsync.ts': 860,
   'src/smoke/phases.ts': 1081,
-  'src/status/statusAsync.ts': 806,
 };
 
 // Known debt: files that hold a function over the 100-line limit and have room under 800. The

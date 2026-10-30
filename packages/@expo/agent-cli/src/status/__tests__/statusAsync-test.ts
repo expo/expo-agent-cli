@@ -12,6 +12,7 @@ import { resetSettingsCache } from '../../settings';
 import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
 import * as deviceBinding from '../../deviceBinding';
+import { clearInspectCache } from '../../deviceBinding/inspect';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import * as summary from '../../deviceBinding/summary';
@@ -1377,6 +1378,45 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       );
       expect(report.next?.why).toContain('sess-old expired');
       expect(report.next?.why).not.toContain('is starting');
+    });
+  });
+
+  describe('a dev server whose run ended', () => {
+    const live = { expiresAt: '2999-01-01T00:00:00.000Z' };
+
+    // The inspection cache keys on the binding path: keep an earlier lease out, and this one in.
+    beforeEach(clearInspectCache);
+    afterEach(clearInspectCache);
+
+    it('says the CLI process ended and makes next dev:stop --eas, beside a started session', async () => {
+      writeCloudBinding(projectRoot, 'ios', 'sess-7', live);
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.devServer?.ownerEnded).toBe(true);
+      expect(report.next?.command).toBe('npx @expo/agent-cli dev:stop --eas');
+      expect(report.next?.why).toBe(
+        'the run that started this dev server and EAS session sess-7 ended; this stops both'
+      );
+      const text = stripVTControlCharacters(formatStatusReport(report));
+      expect(text).toContain('its CLI process ended, so nothing owns it');
+    });
+
+    it('changes nothing for a tracked server', async () => {
+      writeCloudBinding(projectRoot, 'ios', 'sess-7', live);
+      vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(lockInfo());
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.devServer?.ownerEnded).toBeUndefined();
+      expect(report.next?.command).not.toContain('dev:stop');
+    });
+
+    it('changes nothing without a started cloud binding', async () => {
+      writeCloudBinding(projectRoot, 'ios', 'sess-7', { ...live, origin: 'dotenv' });
+      const withDotenv = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(withDotenv.devServer?.ownerEnded).toBeUndefined();
+      expect(withDotenv.next?.command).not.toContain('dev:stop');
+      vol.reset();
+      vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'my-app' }) });
+      const none = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(none.devServer?.ownerEnded).toBeUndefined();
     });
   });
 
