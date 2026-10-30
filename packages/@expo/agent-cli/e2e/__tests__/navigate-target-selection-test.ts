@@ -548,16 +548,20 @@ describe('--print-url beside an unreadable binding file', () => {
     }
   });
 
-  it('refuses with NO_BOUND_DEVICE once the dev server lists an app', async () => {
-    const { root, env, close } = await setupAsync([
-      makeTarget({ id: 'go', appId: 'host.exp.Exponent', deviceName: BOOTED_SIMULATOR.name }),
-    ]);
-    try {
-      const result = await executeAgentCliAsync(root, PRINT_URL, { reject: false, env });
-      expect(result.exitCode, result.all).toBe(7);
-      expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
-    } finally {
-      await close();
+  // Only macOS reads a local iOS binding, so only there can an unreadable one refuse.
+  it.skipIf(process.platform !== 'darwin')(
+    'refuses with NO_BOUND_DEVICE once the dev server lists an app',
+    async () => {
+      const { root, env, close } = await setupAsync([
+        makeTarget({ id: 'go', appId: 'host.exp.Exponent', deviceName: BOOTED_SIMULATOR.name }),
+      ]);
+      try {
+        const result = await executeAgentCliAsync(root, PRINT_URL, { reject: false, env });
+        expect(result.exitCode, result.all).toBe(7);
+        expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+      } finally {
+        await close();
+      }
     }
-  });
+  );
 });
