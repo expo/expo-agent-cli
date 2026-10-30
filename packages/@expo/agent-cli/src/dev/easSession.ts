@@ -488,10 +488,11 @@ async function ensureSessionAsync(
     timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
   };
   let result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), spawnOptions);
+  // eas-cli prints oclif's refusal on stdout (`Log.error`) and only a summary line on stderr.
   if (
     result.exitCode !== 0 &&
     !readSessionId(`${result.stdout}\n${result.stderr}`) &&
-    /Nonexistent flags?:[^\n]*--max-idle-time-minutes\b/i.test(result.stderr)
+    /Nonexistent flags?:[^\n]*--max-idle-time-minutes\b/i.test(`${result.stdout}\n${result.stderr}`)
   ) {
     event('open_app_eas_flag_unsupported', { flag: '--max-idle-time-minutes' });
     const index = args.indexOf('--max-idle-time-minutes');
