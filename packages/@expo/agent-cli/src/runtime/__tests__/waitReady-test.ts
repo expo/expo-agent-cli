@@ -14,7 +14,11 @@ import {
   waitForFreshAppConnectionAsync,
 } from '../waitReady';
 import { matchProjectRoot } from '../projectRootHeader';
-import { EVERY_TARGET_CLIENT, makeDeviceInventory } from './targetSelectionFixtures';
+import {
+  EVERY_TARGET_CLIENT,
+  makeDeviceInventory,
+  makeTargetSelection,
+} from './targetSelectionFixtures';
 
 // A target nothing places makes the attachment wait ask the device tools; they answer nothing here.
 vi.mock('../../utils/spawnCapture', () => ({
@@ -472,7 +476,7 @@ describe(`${waitForAppConnectionAsync.name} device facts`, () => {
     const url = await startServerAsync(() => ({ body: JSON.stringify([developmentBuild]) }));
 
     const result = await waitForAppConnectionAsync(url, {
-      targetSelection: { platform: { value: 'ios', by: 'flag' }, device: null },
+      targetSelection: makeTargetSelection({ platform: { value: 'ios', by: 'flag' } }),
       deviceInventory: makeDeviceInventory({ booted: [{ name: 'iPhone 15', udid: 'U1' }] }),
       inventoryTargets: [],
       timeoutMs: 300,
