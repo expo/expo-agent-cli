@@ -11,6 +11,7 @@ import path from 'path';
 
 import { resetInvokerCache } from '../invoker';
 import {
+  lockfileInstall,
   packageRunnerLabel,
   resetPackageRunnerCache,
   resolvePackageRunner,
@@ -81,5 +82,55 @@ describe(packageRunnerLabel, () => {
   it(`should name the runner rather than the path it resolved to`, () => {
     expect(packageRunnerLabel({ runner: 'bunx', command: bunxPath })).toBe('bunx');
     expect(packageRunnerLabel({ runner: 'npx', command: 'npx' })).toBe('npx');
+  });
+});
+
+describe(lockfileInstall, () => {
+  const workspace = path.resolve('/workspace');
+  const app = path.join(workspace, 'apps', 'mobile');
+
+  it(`should prefer bun over npm in one directory`, () => {
+    vol.fromJSON({
+      [path.join(workspace, 'bun.lock')]: '',
+      [path.join(workspace, 'package-lock.json')]: '{}',
+    });
+
+    expect(lockfileInstall(workspace)).toMatchObject({
+      manager: 'bun',
+      cwd: workspace,
+      argv: ['bun', 'install', '--frozen-lockfile'],
+    });
+  });
+
+  it(`should use the workspace root's lockfile for a package of it`, () => {
+    vol.fromJSON({
+      [path.join(workspace, 'package-lock.json')]: '{}',
+      [path.join(app, 'package.json')]: '{}',
+    });
+
+    expect(lockfileInstall(app)).toMatchObject({
+      manager: 'npm',
+      cwd: workspace,
+      argv: ['npm', 'ci'],
+    });
+  });
+
+  it.each([
+    ['pnpm-lock.yaml', ['pnpm', 'install', '--frozen-lockfile']],
+    ['yarn.lock', ['yarn', 'install']],
+  ])(`should read %s`, (file, argv) => {
+    vol.fromJSON({ [path.join(workspace, file)]: '' });
+
+    expect(lockfileInstall(workspace).argv).toEqual(argv);
+  });
+
+  it(`should run npm install in the project when there is no lockfile`, () => {
+    vol.fromJSON({ [path.join(app, 'package.json')]: '{}' });
+
+    expect(lockfileInstall(app)).toMatchObject({
+      manager: 'npm',
+      cwd: app,
+      argv: ['npm', 'install'],
+    });
   });
 });

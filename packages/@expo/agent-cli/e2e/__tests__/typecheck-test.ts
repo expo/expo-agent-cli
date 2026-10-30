@@ -262,6 +262,22 @@ describe('@expo/agent-cli typecheck', () => {
     expect(error.message).not.toContain('nothing to type-check');
   });
 
+  it(`should suggest the bare install when package.json declares typescript and node_modules is empty`, async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    await fs.promises.writeFile(path.join(projectRoot, 'tsconfig.json'), '{}');
+    const manifestPath = path.join(projectRoot, 'package.json');
+    const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+    manifest.devDependencies = { ...manifest.devDependencies, typescript: '~5.9.0' };
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest));
+
+    const result = await executeAgentCliAsync(projectRoot, ['typecheck', '--json'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.suggestedCommand).toBe('npx @expo/agent-cli install');
+  });
+
   // A compiler that failed without reporting a diagnostic has not answered the question, so it is
   // the tool failing and not a verdict on the code — exit 1, with the envelope.
   it(`should exit 1 when the compiler failed without reporting anything`, async () => {
