@@ -84,7 +84,11 @@ export function resolveNextTarget({
   bindings,
   devServer,
   state,
-}: NextTargetFacts): { platform: PlanPlatform; recoveryPort: number | null } {
+}: NextTargetFacts): {
+  platform: PlanPlatform;
+  requestedPort: number | null;
+  recoveryPort: number | null;
+} {
   const ownServer = servingLock(ownLock);
   const boundPlatforms = [...new Set(bindings.map((entry) => entry.platform))];
   const platform =
@@ -101,7 +105,7 @@ export function resolveNextTarget({
     devServer?.projectRootMatched === false && requestedPort === loopbackPortOfUrl(devServer.url)
       ? null
       : requestedPort;
-  return { platform, recoveryPort };
+  return { platform, requestedPort, recoveryPort };
 }
 
 /** What the next line reads from the machine, kept out of the choice so the choice stays pure. */
@@ -117,6 +121,7 @@ export interface NextActionFacts {
   state: ProjectState;
   record: LastBuildRecord;
   platform: PlanPlatform;
+  requestedPort: number | null;
   recoveryPort: number | null;
   devServer: DevServerStatus | null;
   device: LocalDeviceStatus | null;
@@ -136,6 +141,7 @@ export function chooseNextAction({
   state,
   record,
   platform,
+  requestedPort,
   recoveryPort,
   devServer,
   device,
@@ -195,7 +201,8 @@ export function chooseNextAction({
     recoveryPort,
     devNext,
     ownServer,
-    expiredSession
+    expiredSession,
+    requestedPort
   );
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
@@ -309,14 +316,15 @@ function devRerun(
   recoveryPort: number | null,
   devNext: NextActionStatus,
   ownServer: DevServerLockInfo | null,
-  expiredSession: BindingSummary | undefined
+  expiredSession: BindingSummary | undefined,
+  requestedPort: number | null
 ): { backend: string | null; devArgs: string[]; devCommand: string } {
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
   const backend =
     easServer || expiredSession
       ? 'eas'
       : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-  const port = ownServer?.port ?? recoveryPort;
+  const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
   const devArgs = [
     ...(backend ? [`--${backend}`] : []),
     ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),

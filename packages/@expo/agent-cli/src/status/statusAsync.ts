@@ -393,7 +393,7 @@ export async function collectStatusReportAsync(
     // (K7(c)).
     const devBuildScheme = devBuildSchemeSync(projectRoot);
     applyOpenUrls(report.devServer, state, devBuildScheme);
-    const { platform, recoveryPort } = resolveNextTarget({
+    const { platform, requestedPort, recoveryPort } = resolveNextTarget({
       platform: options.platform,
       devServerUrl: options.devServerUrl,
       ownLock,
@@ -421,6 +421,7 @@ export async function collectStatusReportAsync(
       state,
       record,
       platform,
+      requestedPort,
       recoveryPort,
       devServer: report.devServer,
       device: report.device,
