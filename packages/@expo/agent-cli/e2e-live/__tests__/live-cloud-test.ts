@@ -68,9 +68,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { startCloudSessionAsync } from '../cloudSession';
+import {
+  bindingPathFor,
+  readBindingFile,
+  writeBindingFile,
+} from '../../src/deviceBinding/registry';
+import { readDetachedLogSync } from '../../src/dev/logFile';
+import { quoteArgument } from '../../src/utils/consent';
+import { PROGRAM_PREFIX } from '../../src/programName';
 
 import {
   allOf,
+  assertEasEnabled,
+  bin,
   builtBinGate,
   cloudOptInGate,
   describeLive,
@@ -265,7 +275,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
    * command that reads it (the dev server start) and the commands that merely inherit it are not
    * worth telling apart here.
    */
-  function suiteEnv() {
+  function suiteEnv(): Record<string, string> {
     return PROXY_ORIGIN ? { EXPO_PACKAGER_PROXY_URL: origin } : { EXPO_UNSTABLE_TUNNEL_V2: '1' };
   }
 
@@ -678,12 +688,8 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     if (result.exitCode !== 0) {
       // EAS does not upload these artifacts, so a path alone hides the cause of a CI failure.
       console.error(result.all);
-      const devLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
-      if (fs.existsSync(devLog)) {
-        console.error(
-          `Dev server log (last 12000 characters):\n${fs.readFileSync(devLog, 'utf8').slice(-12_000)}`
-        );
-      }
+      const devLog = readDetachedLogSync(projectRoot, 200);
+      if (devLog) console.error(`Dev server log:\n${devLog.lines.join('\n')}`);
     }
     expectExit(result, 0);
     const report = parseJson(result);
@@ -851,5 +857,107 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     }
     expect(result.exitCode).not.toBe(0);
     expect(JSON.stringify(report)).toMatch(/platform/i);
+  });
+
+  it('owned EAS startup refuses contenders and recovers the same session with the printed port and target', async () => {
+    // Reuse this job's billed session; always stop any session the owned child binds, even on failure.
+    run.onCleanup('owned EAS startup', () =>
+      runLiveEasAsync(run, projectRoot, ['dev:stop', '--eas', '--json'], {
+        label: 'cleanup-owned-eas',
+      }).then(() => {})
+    );
+    expectExit(
+      await runLiveEasAsync(run, projectRoot, ['dev:stop', '--json'], {
+        label: 'owned-stop-old-metro',
+        env: suiteEnv(),
+      }),
+      0
+    );
+    const target = CLOUD_MODE === 'expo-go' ? '--go' : '--dev-client';
+    const argv = [
+      'dev',
+      `--${CLOUD_PLATFORM}`,
+      '--eas',
+      target,
+      '--port',
+      String(port),
+      '--detach',
+      '--wait-ready',
+      '--json',
+    ];
+    const started = await runLiveEasAsync(run, projectRoot, argv, {
+      label: 'owned-eas-start',
+      env: suiteEnv(),
+    });
+    expectExit(started, 0);
+    expect(parseJson(started).eas.sessionId).toBe(sessionId);
+    const contender = await runLiveEasAsync(run, projectRoot, argv, {
+      label: 'owned-eas-contender',
+      env: suiteEnv(),
+    });
+    expectExit(contender, 20);
+    expect(parseJson(contender).error.code).toBe('DEV_SERVER_RUNNING');
+
+    const file = bindingPathFor(projectRoot, CLOUD_PLATFORM, 'cloud');
+    const binding = readBindingFile(file);
+    if (binding.kind !== 'binding') throw new Error(`No owned cloud binding at ${file}`);
+    writeBindingFile(file, { ...binding.binding, expiresAt: new Date(0).toISOString() });
+    const status = await runLiveEasAsync(run, projectRoot, ['status', '--json'], {
+      label: 'owned-expired-status',
+      env: suiteEnv(),
+    });
+    expectExit(status, 0);
+    const command: string = parseJson(status).next.command;
+    expect(command).toContain('dev:stop &&');
+    expect(command).toContain(`--${CLOUD_PLATFORM}`);
+    expect(command).toContain(`--port ${port}`);
+    expect(command).toContain(target);
+    // Execute the actual advice, substituting only the local CLI executable.
+    assertEasEnabled(command);
+    const recovered = await execAsync(
+      '/bin/sh',
+      [
+        '-c',
+        command.replaceAll(
+          PROGRAM_PREFIX,
+          `${quoteArgument(process.execPath)} ${quoteArgument(bin)}`
+        ),
+      ],
+      { cwd: projectRoot, env: suiteEnv() }
+    );
+    run.writeArtifact('owned-expired-recovery.txt', `${command}\n${JSON.stringify(recovered)}`);
+    expect(recovered.exitCode, recovered.stdout + recovered.stderr).toBe(0);
+    expect(readBindingFile(file)).toMatchObject({ binding: { device: { id: sessionId } } });
+    const after = await runLiveEasAsync(run, projectRoot, ['status', '--json'], {
+      label: 'owned-recovered-status',
+      env: suiteEnv(),
+    });
+    expect(parseJson(after).devServer.url).toContain(`:${port}`);
+
+    // Ending the existing session proves the reader's advice without billing a replacement.
+    expect(
+      (
+        await easAsync('owned-end-session', [
+          'simulator:stop',
+          '--id',
+          sessionId!,
+          '--non-interactive',
+        ])
+      ).exitCode
+    ).toBe(0);
+    const ended = await runLiveEasAsync(
+      run,
+      projectRoot,
+      ['navigate', '/', '--eas', `--${CLOUD_PLATFORM}`, '--json'],
+      {
+        label: 'owned-ended-advice',
+        env: suiteEnv(),
+      }
+    );
+    expectExit(ended, 20);
+    const advice = parseJson(ended).error.suggestedCommand;
+    expect(advice).toContain('dev:stop &&');
+    expect(advice).toContain(`--port ${port}`);
+    expect(advice).toContain(target);
   });
 });
