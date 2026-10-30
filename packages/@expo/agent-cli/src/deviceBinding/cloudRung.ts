@@ -2,11 +2,6 @@
 // The cloud rung of the read verbs' ladder: this worktree's cloud bindings, checked against what the
 // EAS service lists. One snapshot of the registry, one probe, one verdict.
 
-import { readDevServerLockAsync } from '../devLock';
-import { readLastDevRequest } from '../dev/lastRequest';
-import { childStartsSessionSync } from '../dev/detachEasProgress';
-import { rerunDevCommand } from '../plan/rerun';
-import { PROGRAM_PREFIX } from '../programName';
 import { cloudPlatformMismatchError, cloudPlatformUnknownError } from '../device/cloudErrors';
 import {
   probeCloudSessionAsync,
@@ -55,7 +50,7 @@ export type CloudRung<P extends CloudSessionProbe = NoDeviceProbe> =
 export type CloudVerdict<P extends CloudSessionProbe = NoDeviceProbe> =
   /** `extend` is the binding that names the session; null when only the dotenv names it. */
   | { kind: 'device'; device: CloudRungDevice; extend: CloudBinding | null }
-  | { kind: 'refuse'; error: CommandError; recoveryPlatform?: CloudPlatform }
+  | { kind: 'refuse'; error: CommandError }
   | { kind: 'none'; probe: P };
 
 /**
@@ -98,14 +93,7 @@ export async function cloudRungAsync(
     boundIds: boundIdsFor(snapshot.bindings, platform, now),
   });
   const verdict = cloudVerdict(snapshot.bindings, probe, platform, now, use);
-  if (verdict.kind === 'refuse') {
-    if (verdict.recoveryPlatform) {
-      const command = await recoveryCommandAsync(projectRoot, verdict.recoveryPlatform);
-      verdict.error.suggestedCommand = command;
-      verdict.error.message = `${verdict.error.message.split('\n')[0]}\nHow: run "${command}". Plain stop preserves sessions; the next start binds a usable session.`;
-    }
-    throw verdict.error;
-  }
+  if (verdict.kind === 'refuse') throw verdict.error;
   if (verdict.kind === 'none') return verdict;
   const binding = verdict.extend;
   if (binding) {
@@ -222,25 +210,5 @@ function notUsableHere(probe: LiveCloudSessionProbe, platform: CloudPlatform | n
 }
 
 function refuse(binding: CloudBinding, fault: 'expired' | 'ended'): CloudVerdict<never> {
-  return {
-    kind: 'refuse',
-    error: cloudBindingError(binding.device.platform, fault),
-    recoveryPlatform: binding.device.platform,
-  };
-}
-
-/** A known-ended session must not be handed back to status as an apparently live lease. */
-async function recoveryCommandAsync(root: string, platform: CloudPlatform): Promise<string> {
-  const server = await readDevServerLockAsync(root);
-  // Status handles pre-publication ownership; unfinished session startup is observation only.
-  if (!server) return `${PROGRAM_PREFIX} status`;
-  if (childStartsSessionSync(root, server, platform)) return `${PROGRAM_PREFIX} dev:logs`;
-  const request = readLastDevRequest(root);
-  const args = [
-    '--eas',
-    '--port',
-    String(server.port),
-    ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-  ];
-  return `${PROGRAM_PREFIX} dev:stop && ${rerunDevCommand(platform, args)}`;
+  return { kind: 'refuse', error: cloudBindingError(binding.device.platform, fault) };
 }

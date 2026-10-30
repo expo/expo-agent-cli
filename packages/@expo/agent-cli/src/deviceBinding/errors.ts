@@ -202,18 +202,27 @@ export function cloudBindingError(
   platform: DevicePlatform,
   fault: CloudBindingFault
 ): CommandError {
-  const command = deviceCommand(platform, { eas: true });
-  const error = new CommandError(
-    'NO_BOUND_DEVICE',
-    [
-      `The bound ${platform} EAS session is ${fault}.`,
-      `How: run "${command}" to bind a session again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop"; plain stop preserves its sessions.`,
-    ].join('\n')
-  );
-  error.exitCode = EXIT_OUTCOME_FAILED;
-  error.data = { reason: 'gone' };
-  error.suggestedCommand = `${PROGRAM_PREFIX} status`;
-  return error;
+  return new CloudBindingError(platform, fault);
+}
+
+/** A lost cloud binding; command callers add recovery using their server context. */
+export class CloudBindingError extends CommandError {
+  constructor(
+    readonly platform: DevicePlatform,
+    fault: CloudBindingFault
+  ) {
+    const command = deviceCommand(platform, { eas: true });
+    super(
+      'NO_BOUND_DEVICE',
+      [
+        `The bound ${platform} EAS session is ${fault}.`,
+        `How: run "${command}" to bind a session again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop"; plain stop preserves its sessions.`,
+      ].join('\n')
+    );
+    this.exitCode = EXIT_OUTCOME_FAILED;
+    this.data = { reason: 'gone' };
+    this.suggestedCommand = `${PROGRAM_PREFIX} status`;
+  }
 }
 
 /** The EAS session this worktree drives is listed and pending. The platform is null when unknown. */
