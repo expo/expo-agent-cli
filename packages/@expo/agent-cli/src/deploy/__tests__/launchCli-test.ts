@@ -5,13 +5,9 @@ import { EXIT_NEEDS_HUMAN } from '../../exitCodes';
 import { CommandError } from '../../utils/errors';
 import * as subprocess from '../../utils/subprocess';
 import { buildCreateLaunchArgs, resolveCreateLaunchCli, runCreateLaunchAsync } from '../launchCli';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const projectRoot = path.resolve('/project');
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 /** Answer the one subprocess run of a launch. */
 function mockRun(result: Partial<subprocess.SubprocessResult>) {
@@ -25,7 +21,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vi.restoreAllMocks();
   vol.reset();
 });

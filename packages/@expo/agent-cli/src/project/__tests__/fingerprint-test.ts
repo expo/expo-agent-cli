@@ -12,9 +12,9 @@ import {
   parseFingerprint,
   resolveFingerprintCli,
 } from '../fingerprint';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const projectRoot = path.resolve('/project');
-const realPlatform = process.platform;
 
 /**
  * The path of a bin the project installed, spelled the way the running platform spells it.
@@ -23,10 +23,6 @@ const realPlatform = process.platform;
  * hold on posix. Building it the same way keeps the assertion about *which* bin was chosen.
  */
 const projectBin = (name: string) => path.join(projectRoot, 'node_modules', '.bin', name);
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 interface FakeChild extends EventEmitter {
   stdout: EventEmitter;
@@ -53,10 +49,6 @@ beforeEach(() => {
   // One fingerprint per key per *process*, and a test file is one process: without this, the second
   // test to ask for the same key would be answered by the first test's memo and spawn nothing.
   clearFingerprintMemo();
-});
-
-afterEach(() => {
-  mockPlatform(realPlatform);
 });
 
 describe(resolveFingerprintCli, () => {

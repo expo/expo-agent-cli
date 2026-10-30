@@ -8,12 +8,7 @@ import { bindingPathFor } from '../../deviceBinding/registry';
 import type { Binding } from '../../deviceBinding';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { resolveDeviceAsync } from '../device';
-
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 /** Answer every `spawn` call with the queued stdout and exit code. */
 function mockSpawnQueue(answers: { stdout?: string; exitCode?: number | null }[]) {
@@ -102,10 +97,6 @@ function bindEmulator(serial = 'emulator-5554'): void {
 beforeEach(() => {
   vol.reset();
   vol.fromJSON({ '/project/package.json': '{}' });
-});
-
-afterEach(() => {
-  mockPlatform(realPlatform);
 });
 
 describe(parseBootedIosSimulators, () => {

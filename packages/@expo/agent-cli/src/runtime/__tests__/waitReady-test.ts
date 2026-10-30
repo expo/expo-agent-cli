@@ -20,6 +20,7 @@ import {
   makeDeviceInventory,
   makeTargetSelection,
 } from './targetSelectionFixtures';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 // A target nothing places makes the attachment wait ask the device tools; they answer nothing here.
 vi.mock('../../utils/spawnCapture', () => ({
@@ -473,9 +474,7 @@ describe(waitForAppConnectionAsync, () => {
 
 describe(`${waitForAppConnectionAsync.name} device facts`, () => {
   // simctl answers only on macOS; elsewhere the iOS facts are unsupported, not unknown.
-  const realPlatform = process.platform;
-  beforeEach(() => Object.defineProperty(process, 'platform', { value: 'darwin' }));
-  afterEach(() => Object.defineProperty(process, 'platform', { value: realPlatform }));
+  beforeEach(() => mockPlatform('darwin'));
 
   it('keeps the facts that placed the last list when a device tool gives no answer', async () => {
     const developmentBuild = { id: '1', appId: 'com.example.dev', deviceName: 'iPhone 15' };

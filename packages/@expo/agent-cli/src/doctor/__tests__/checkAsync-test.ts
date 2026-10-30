@@ -4,15 +4,11 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { resolveExpoDoctorCli } from '../checkAsync';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const projectRoot = path.resolve('/project');
 const workspace = path.resolve('/workspace');
 const app = path.join(workspace, 'apps', 'mobile');
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 beforeEach(() => {
   mockPlatform('darwin');
@@ -20,7 +16,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vol.reset();
 });
 

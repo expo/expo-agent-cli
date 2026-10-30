@@ -11,6 +11,7 @@ import {
 } from '../errors';
 import { setJsonRequested } from '../jsonMode';
 import type { MockInstance } from 'vitest';
+import { mockPlatform } from './mockPlatform';
 
 const emitted: { name: string; payload: any }[] = [];
 
@@ -276,7 +277,6 @@ describe(formatNeedsHumanBlock, () => {
 // cannot recover from, with none of the three things that code promises.
 describe(handleUncaughtException, () => {
   let exitSpy: MockInstance;
-  const realPlatform = process.platform;
 
   beforeEach(() => {
     emitted.length = 0;
@@ -290,12 +290,7 @@ describe(handleUncaughtException, () => {
     exitSpy.mockRestore();
     setJsonRequested(false);
     stdoutHasContent = false;
-    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
   });
-
-  function onPlatform(platform: string): void {
-    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-  }
 
   /** The crash the live tier meets: undici throwing out of a `fetch` this process cannot await. */
   function undiciCrash(): NodeJS.ErrnoException {
@@ -387,7 +382,7 @@ describe(handleUncaughtException, () => {
   // The EMFILE special case is the reason this handler exists, and it keeps its own path: the two
   // watchman commands, the advice, and exit 1.
   it('keeps the macOS EMFILE recovery', () => {
-    onPlatform('darwin');
+    mockPlatform('darwin');
     const emfile: NodeJS.ErrnoException = new Error('EMFILE: too many open files');
     emfile.code = 'EMFILE';
 
@@ -404,7 +399,7 @@ describe(handleUncaughtException, () => {
   });
 
   it('treats an EMFILE off macOS as the ordinary crash it is', () => {
-    onPlatform('linux');
+    mockPlatform('linux');
     const emfile: NodeJS.ErrnoException = new Error('EMFILE: too many open files');
     emfile.code = 'EMFILE';
 
