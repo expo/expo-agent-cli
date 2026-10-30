@@ -469,7 +469,8 @@ export async function collectStatusReportAsync(
       easServer || expiredSession
         ? 'eas'
         : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-    const port = ownServer?.port ?? recoveryPort;
+    const port =
+      ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
     const devArgs = [
       ...(backend ? [`--${backend}`] : []),
       ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
