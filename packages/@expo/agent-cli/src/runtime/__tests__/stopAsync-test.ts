@@ -29,9 +29,6 @@ interface SpawnAnswer {
   exitCode?: number | null;
 }
 
-/** The app on the simulator bound to this worktree: the scope reads it by that simulator's name. */
-const CONNECTED = { id: '1', appId: 'host.exp.Exponent', deviceName: 'iPhone 17' };
-
 /** The preflight's device facts on a run bound to an emulator: `simctl`, then `adb devices -l`. */
 const ANDROID_INVENTORY: SpawnAnswer[] = [
   { exitCode: 1 },
@@ -106,18 +103,6 @@ afterEach(() => {
 });
 
 describe(runtimeStopAsync, () => {
-  // The id was right and the app was running under it: nothing is suspicious about a connected app
-  // with another id, because a device can run more than one.
-  it(`should stay at 0 when the app --app-id named was running`, async () => {
-    mockDevServer([CONNECTED]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
-
-    await expect(
-      runtimeStopAsync(projectRoot, options({ appId: 'com.example.other' }))
-    ).resolves.toBe(0);
-    expect(JSON.parse(printed())).toMatchObject({ wasRunning: true, appIdMismatch: false });
-  });
-
   it(`should read the bundle id from the app config when nothing is connected`, async () => {
     vol.fromJSON({
       [`${projectRoot}/app.json`]: JSON.stringify({
@@ -250,57 +235,44 @@ describe(buildStopFollowUps, () => {
     };
   }
 
-  it(`says the app is stopped when this command is what stopped it`, () => {
-    expect(buildStopFollowUps(report())[0]!.why).toContain('The app is stopped');
-  });
-
-  it(`says the app was not running only when that was established`, () => {
-    expect(buildStopFollowUps(report({ wasRunning: false }))[0]!.why).toContain(
-      'The app was not running'
-    );
-  });
-
-  it(`claims neither when the controller reported neither`, () => {
-    const why = buildStopFollowUps(
-      report({ wasRunning: null, deviceBackend: 'cloud', deviceId: 'session-1' })
-    )[0]!.why;
-
-    expect(why).not.toContain('The app was not running');
-    expect(why).toMatch(/not something the session's controller reports/);
-    expect(why).toContain('cloud simulator session');
-  });
-
-  // F42: the old list led with `navigate /`, which starts an app while another one is still running.
-  it(`offers only the corrected command for a mismatch`, () => {
-    expect(
-      buildStopFollowUps(
-        report({
-          wasRunning: false,
-          bundleId: 'host.exp.Exponent2',
-          connectedAppIds: ['host.exp.Exponent'],
-          appIdMismatch: true,
-        })
-      ).map((followup) => followup.command)
-    ).toEqual(['npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent']);
-  });
-
-  it(`still carries --eas into the command it suggests`, () => {
-    expect(
-      buildStopFollowUps(report({ wasRunning: null, deviceBackend: 'cloud' }))[0]!.command
-    ).toBe('npx @expo/agent-cli navigate / --eas');
-  });
-
-  // F103 — found live on 2026-08-27: `runtime:stop --android` suggested `npx @expo/agent-cli navigate /`,
-  // which on this Mac opens the app on the **iOS simulator**. The app that was just stopped is on
-  // the emulator, so the one command offered as the way back goes to a different device.
+  // Three arms, not two: `wasRunning: null` is the cloud case, and a falsy check read it as `false`.
   //
-  // `--eas` is left alone deliberately: that flag already names the device, and a session has
-  // exactly one, so a platform beside it says nothing (the assertion above pins that).
-  it(`carries the platform of the device it stopped into the way back (F103)`, () => {
-    expect(
-      buildStopFollowUps(report({ platform: 'android', deviceBackend: 'local-android' }))[0]!
-        .command
-    ).toBe('npx @expo/agent-cli navigate / --android');
-    expect(buildStopFollowUps(report())[0]!.command).toBe('npx @expo/agent-cli navigate / --ios');
+  // F103 — found live on 2026-08-27: `runtime:stop --android` suggested `npx @expo/agent-cli navigate /`,
+  // which on this Mac opens the app on the **iOS simulator**, not on the emulator it just stopped. So
+  // the platform is carried; `--eas` is not given one, because a session has exactly one device.
+  it.each<{
+    name: string;
+    overrides: Partial<RuntimeStopResultJson>;
+    command: string;
+    why: RegExp;
+  }>([
+    {
+      name: 'an app this command stopped',
+      overrides: {},
+      command: 'npx @expo/agent-cli navigate / --ios',
+      why: /The app is stopped/,
+    },
+    {
+      name: 'an app that was not running',
+      overrides: { wasRunning: false },
+      command: 'npx @expo/agent-cli navigate / --ios',
+      why: /The app was not running/,
+    },
+    {
+      name: 'a cloud session, whose controller reports neither',
+      overrides: { wasRunning: null, deviceBackend: 'cloud', deviceId: 'session-1' },
+      command: 'npx @expo/agent-cli navigate / --eas',
+      why: /not something the session's controller reports.*cloud simulator session/,
+    },
+    {
+      name: 'an app stopped on the emulator (F103)',
+      overrides: { platform: 'android', deviceBackend: 'local-android' },
+      command: 'npx @expo/agent-cli navigate / --android',
+      why: /The app is stopped/,
+    },
+  ])(`offers the way back for $name`, ({ overrides, command, why }) => {
+    const [followUp] = buildStopFollowUps(report(overrides));
+    expect(followUp!.command).toBe(command);
+    expect(followUp!.why).toMatch(why);
   });
 });

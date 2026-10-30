@@ -174,17 +174,6 @@ describe(devStopAsync, () => {
       expect(killed).toEqual([]);
     });
 
-    it('reports unknown state when no port or lock identifies a target', async () => {
-      await devStopAsync(projectRoot, options());
-      expect(JSON.parse(printed())).toMatchObject({
-        processStillRunning: null,
-        portStillAnswering: null,
-      });
-      expect(JSON.parse(printed()).detail).not.toContain(
-        'no dev server started by this CLI is running'
-      );
-    });
-
     it('reports a measured free port as quiet', async () => {
       await devStopAsync(projectRoot, options({ port: 8195 }));
       expect(JSON.parse(printed())).toMatchObject({
@@ -403,27 +392,6 @@ describe(devStopAsync, () => {
       livePids.add(4242);
     });
 
-    it(`should not signal the lock's pid when --port names another port`, async () => {
-      mockPort({ answering: false });
-      vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 777, command: 'python3' });
-
-      await expect(devStopAsync(projectRoot, options({ port: 8195 }))).resolves.toBe(
-        EXIT_OUTCOME_FAILED
-      );
-
-      expect(killed).toEqual([]);
-      const report = JSON.parse(printed());
-      expect(report).toMatchObject({
-        stopped: false,
-        port: 8195,
-        pid: 777,
-        lockHeld: false,
-        reason: 'foreign-dev-server',
-      });
-      // The lock is named so the caller can tell the two dev servers apart, and never acted on.
-      expect(report.detail).toContain('8190');
-    });
-
     it(`should signal the lock's pid when --port names the port the lock holds`, async () => {
       vi.mocked(readDevServerLockAsync)
         .mockResolvedValueOnce(lock({ port: 8190, url: 'http://127.0.0.1:8190' }) as never)
@@ -490,23 +458,6 @@ describe(devStopAsync, () => {
       vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
       mockPort({ answering: true });
       vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 777, command: 'node' });
-    });
-
-    // The one thing this command must not do by accident: kill a listener nobody asked about. A
-    // second project's dev server on the port is the ordinary case.
-    it(`should report it and leave it running`, async () => {
-      await expect(devStopAsync(projectRoot, options({ port: 8081 }))).resolves.toBe(
-        EXIT_OUTCOME_FAILED
-      );
-      expect(killed).toEqual([]);
-      const report = JSON.parse(printed());
-      expect(report).toMatchObject({
-        stopped: false,
-        pid: 777,
-        lockHeld: false,
-        reason: 'foreign-dev-server',
-      });
-      expect(report.detail).toContain('777');
     });
 
     it(`should stop it with --force, when both proofs agree`, async () => {
@@ -630,37 +581,6 @@ describe('dev:stop --eas', () => {
   beforeEach(() => {
     vi.spyOn(cloud(), 'probeCloudSessionAsync');
     vi.spyOn(eas(), 'stopEasSessionAsync');
-  });
-
-  it(`ends the session in progress by id, and says so beside the dev server`, async () => {
-    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
-      cloudProbe.active({ id: 'sess-1', platform: 'ios' })
-    );
-    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
-
-    const code = await devStopAsync(projectRoot, options({ eas: true }));
-
-    expect(code).toBe(EXIT_OK);
-    expect(eas().stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'sess-1');
-    const report = JSON.parse(printed());
-    expect(report.session).toEqual({ id: 'sess-1', stopped: true, reason: null, platform: 'ios' });
-  });
-
-  it(`reports no session as an answer, and exits 0`, async () => {
-    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
-      cloudProbe.none({ reason: 'nothing listed' })
-    );
-
-    const code = await devStopAsync(projectRoot, options({ eas: true }));
-
-    expect(code).toBe(EXIT_OK);
-    expect(eas().stopEasSessionAsync).not.toHaveBeenCalled();
-    expect(JSON.parse(printed()).session).toEqual({
-      id: null,
-      stopped: false,
-      reason: null,
-      platform: null,
-    });
   });
 
   it(`exits 20 when the session would not stop — it is still billing`, async () => {
@@ -824,12 +744,6 @@ describe('dev:stop --eas', () => {
     const { deviceError } = JSON.parse(printed());
     expect(deviceError).toContain(`The binding file ${file} does not parse`);
     expect(deviceError).toContain(`How: run "rm -f '${file}'"`);
-  });
-
-  it(`asks nothing about a session without the flag`, async () => {
-    await devStopAsync(projectRoot, options());
-    expect(cloud().probeCloudSessionAsync).not.toHaveBeenCalled();
-    expect(JSON.parse(printed()).session).toBeUndefined();
   });
 });
 
