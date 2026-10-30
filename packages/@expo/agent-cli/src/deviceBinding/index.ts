@@ -64,13 +64,11 @@ export function acquireLine({ device, action }: AcquireResult): string {
 }
 
 export interface AcquireDeviceOptions {
-  /** Any choice but a reuse is refused `not-reusable`. */
-  reuseOnly?: boolean;
   tools?: DeviceTools;
   explicit?: ExplicitRequest;
 }
 
-type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: ExplicitRequest };
+type SectionOptions = { tools: DeviceTools; explicit?: ExplicitRequest };
 
 /**
  * Bind this worktree's device and boot it.
@@ -84,12 +82,12 @@ type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: Expli
 export async function acquireDeviceAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  { reuseOnly = false, tools = defaultTools(), explicit }: AcquireDeviceOptions = {}
+  { tools = defaultTools(), explicit }: AcquireDeviceOptions = {}
 ): Promise<AcquireResult> {
   const section =
     platform === 'ios'
-      ? await acquireIosAsync(projectRoot, { reuseOnly, tools, explicit })
-      : await acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit });
+      ? await acquireIosAsync(projectRoot, { tools, explicit })
+      : await acquireAndroidAsync(projectRoot, { tools, explicit });
   clearInspectCache();
   const { binding, action, boot } = section;
   const result = await boot();
@@ -109,10 +107,9 @@ interface Acquired {
 
 async function acquireIosAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: SectionOptions
+  { tools, explicit }: SectionOptions
 ): Promise<Acquired> {
   const { binding, wasBooted, action } = await bindIosAsync(projectRoot, {
-    reuseOnly,
     tools,
     explicit,
   });
@@ -127,7 +124,7 @@ async function acquireIosAsync(
 
 async function acquireAndroidAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: SectionOptions,
+  { tools, explicit }: SectionOptions,
   forceAvds = false
 ): Promise<Acquired> {
   const { inventory, isCurrent } = await readAndroidBindingInventoryAsync(
@@ -139,7 +136,7 @@ async function acquireAndroidAsync(
   const section = await acquireSectionAsync(projectRoot, tools, async (actions) => {
     if (explicit === undefined) {
       if (!isCurrent()) return null;
-      return bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+      return bindAndroidSectionAsync(projectRoot, { inventory, tools });
     }
     const candidates = inventory.runningSerials.map((serial) => ({
       backend: 'local-android' as const,
@@ -153,7 +150,6 @@ async function acquireAndroidAsync(
         'android',
         candidates,
         explicit,
-        reuseOnly,
         tools,
         actions,
         inventory.unready
@@ -162,8 +158,7 @@ async function acquireAndroidAsync(
     };
   });
   // Refresh the full inventory outside the lock, at most once.
-  if (section === null)
-    return acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit }, true);
+  if (section === null) return acquireAndroidAsync(projectRoot, { tools, explicit }, true);
   const { binding, action, handle } = section;
   const serial = deviceIdOf(binding.device);
   return {
@@ -199,7 +194,7 @@ function instanceWatcher(
 }
 
 /** Each inventory belongs to the binding identity observed before the device list was read. */
-async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }: SectionOptions) {
+async function bindIosAsync(projectRoot: string, { tools, explicit }: SectionOptions) {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = readBindingFile(file);
@@ -213,8 +208,7 @@ async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }:
           throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
         }
         if (bindingIdentity(read) !== bindingIdentity(before)) return null;
-        if (explicit === undefined)
-          return bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+        if (explicit === undefined) return bindIosSectionAsync(projectRoot, { inventory, tools });
         const candidates = inventory.simulators
           .filter((sim) => sim.isAvailable)
           .map((sim) => ({
@@ -229,7 +223,6 @@ async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }:
           'ios',
           candidates,
           explicit,
-          reuseOnly,
           tools,
           actions
         );

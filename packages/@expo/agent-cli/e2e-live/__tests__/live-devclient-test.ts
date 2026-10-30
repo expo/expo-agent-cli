@@ -103,8 +103,7 @@ describeDevClient('live-devclient: the loop on a real Android development build'
 
     // The project is somebody's, not this run's, so it may already have a dev server — and one
     // detached server per project is the rule (llp/0004 §Daemonization), so a second `dev --detach`
-    // reports the first back with `alreadyRunning: true`, `ready: null` and a port this suite did
-    // not choose. Every other suite in this tier owns a directory nobody else has touched and never
+    // refuses beside the first server, whose port this suite did not choose. Every other suite in this tier owns a directory nobody else has touched and never
     // meets this. Stopping first is what makes the start below this suite's own.
     await runLiveAsync(run, projectRoot, ['dev:stop', '--json'], { label: 'dev-stop-before' });
 

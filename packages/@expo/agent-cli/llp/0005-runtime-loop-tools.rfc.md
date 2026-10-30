@@ -132,13 +132,13 @@ Device-facing URLs prefer a current tunnel host over the listen address [confirm
 
 `src/dev/advertisedUrl.ts` reads the `Waiting on <url>` line the dev server prints. That URL is the tunnel origin whenever an `AsyncWsTunnel` is running. A detached run captures it in `.expo/dev/logs/dev-detached.log`. A dev server started attached writes that line to a terminal, so it is reported as unknown rather than guessed at.
 
-The log has to belong to the dev server that is up. `dev --detach` truncates the log per run. The comparison is the log's mtime against the lock's `startedAt`. This document owns which URL `@expo/agent-cli` prints. A tunnel whose transport has died still advertises the tunnel host.
+The log has to belong to the dev server that is up. `dev --detach` gives each candidate a private log; only its owner publishes the current-log pointer. The comparison is the log's mtime against the lock's `startedAt`. This document owns which URL `@expo/agent-cli` prints. A tunnel whose transport has died still advertises the tunnel host.
 
 `--wait-ready` returning is not the tunnel being up. The bundler answers `/status` first. `dev --detach` waits for the host when the run asked for a tunnel, for up to 20 s, and reports it (`tunnelUrl` in `--json` and on `cli:dev_detach`). A run with no `--tunnel` waits for nothing.
 
 `hostType` describes the URL that was printed, classified from that URL. A `127.0.0.1` URL under `tunnel` is an instruction to open a local address on a device somewhere else.
 
-A cloud run against a `localhost` or `lan` URL is refused before anything opens, naming `dev --detach --tunnel`. Opening it would land the app on an error screen with the device tool reporting success. A development build's `<scheme>://<route>` carries no host (`hostType: null`) and is allowed: it reaches whatever dev server the app was launched against.
+A cloud run against a `localhost` or `lan` URL is refused before anything opens, naming explicit `dev:stop` followed by `dev --detach --tunnel`. Opening it would land the app on an error screen with the device tool reporting success. A development build's `<scheme>://<route>` carries no host (`hostType: null`) and is allowed: it reaches whatever dev server the app was launched against.
 
 ### adb reverse
 

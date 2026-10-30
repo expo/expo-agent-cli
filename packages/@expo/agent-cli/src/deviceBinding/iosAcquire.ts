@@ -26,9 +26,9 @@ export async function bindIosSectionAsync(
   projectRoot: string,
   {
     inventory,
-    reuseOnly,
+
     tools,
-  }: { inventory: IosInventory; reuseOnly: boolean; tools: DeviceTools }
+  }: { inventory: IosInventory; tools: DeviceTools }
 ): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction }> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const read = readBindingFile(file);
@@ -36,7 +36,7 @@ export async function bindIosSectionAsync(
     throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
   }
   const own = read.kind === 'binding' ? read.binding : null;
-  const choice = chooseIosDevice({ own, inventory, reuseOnly, digest: digestForRoot(projectRoot) });
+  const choice = chooseIosDevice({ own, inventory, digest: digestForRoot(projectRoot) });
   if (own != null && choice.kind !== 'reuse') {
     removeBindingFile(file);
   }

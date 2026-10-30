@@ -50,15 +50,7 @@ export function knownSessionIdSync(projectRoot: string, platform: NativePlatform
   return binding?.device.id ?? null;
 }
 
-/**
- * Whether the detached child that holds this lock is still starting its session, so a re-run
- * follows it instead of reopening: its lock names the platform and does not say that its EAS open
- * finished, line 1 of the log names its pid, it is alive and inside its start window, and no
- * binding of the platform is live or made since its lock. A finished open, bound or failed, ends
- * the start, also when its binding file is gone: the reopen binds the session again. A binding
- * that the child made ends the start, also when its lease expired: the reopen renews it. The lock
- * of an older child names no flag, so the other checks decide.
- */
+/** Whether status should observe this child's pending EAS open rather than suggest restart. */
 export function childStartsSessionSync(
   projectRoot: string,
   lock: DevServerLockInfo,

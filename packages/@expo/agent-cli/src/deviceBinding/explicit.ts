@@ -6,7 +6,7 @@ import { CommandError } from '../utils/errors';
 import { PROGRAM_PREFIX } from '../programName';
 import type { AndroidInventory } from './choose';
 import type { Cleanup } from './cleanup';
-import { deviceUnavailableError, notReusableError } from './errors';
+import { deviceUnavailableError } from './errors';
 import { instanceGone } from './emulator';
 import { isStale, leaseFrom } from './lease';
 import {
@@ -46,7 +46,6 @@ export function chooseExplicitDevice(
   candidates: ExplicitCandidate[],
   { query, rerun }: ExplicitRequest,
   platform: DevicePlatform,
-  reuseOnly: boolean,
   unready: Unready = []
 ): Choice {
   const matches = candidates.filter(
@@ -88,11 +87,6 @@ export function chooseExplicitDevice(
     holders.length === 0
   )
     throw explicitError('explicit-not-found', query, platform, { rerun });
-  if (reuseOnly)
-    throw notReusableError(
-      platform,
-      own ? { bound: deviceNameOf(own.device), named: deviceNameOf(device) } : undefined
-    );
   if (own?.device.backend === 'local-android' && own.device.origin.kind === 'spawned')
     throw explicitError('own-explicit-over-owned', own.device.serial, platform, { rerun });
   return { device, reused: false, transfer: holders.map(({ file }) => file) };
@@ -104,7 +98,6 @@ export function readExplicitChoice(
   platform: DevicePlatform,
   candidates: ExplicitCandidate[],
   explicit: ExplicitRequest,
-  reuseOnly: boolean,
   tools: DeviceTools,
   unready: Unready = []
 ) {
@@ -132,7 +125,7 @@ export function readExplicitChoice(
   return {
     file,
     own,
-    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, reuseOnly, unready),
+    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, unready),
   };
 }
 
@@ -148,7 +141,6 @@ export function bindExplicitSection(
   platform: DevicePlatform,
   candidates: ExplicitCandidate[],
   explicit: ExplicitRequest,
-  reuseOnly: boolean,
   tools: DeviceTools,
   actions: Cleanup[],
   unready: Unready = []
@@ -158,7 +150,6 @@ export function bindExplicitSection(
     platform,
     candidates,
     explicit,
-    reuseOnly,
     tools,
     unready
   );

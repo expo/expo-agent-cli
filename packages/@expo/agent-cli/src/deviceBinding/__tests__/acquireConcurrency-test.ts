@@ -104,12 +104,10 @@ it.each(['unbound', 'missing', 'unavailable'] as const)(
   }
 );
 
-it('refreshes a stale snapshot for reuseOnly without creating another simulator', async () => {
+it('refreshes a stale snapshot without creating another simulator', async () => {
   const tools = fakeTools();
   const gate = pauseSnapshots(tools, 1);
-  const waiting = acquireDeviceAsync(root, 'ios', { tools, reuseOnly: true }).catch(
-    (error) => error
-  );
+  const waiting = acquireDeviceAsync(root, 'ios', { tools }).catch((error) => error);
   await gate.ready;
   await acquireDeviceAsync(root, 'ios', { tools });
   gate.resume();

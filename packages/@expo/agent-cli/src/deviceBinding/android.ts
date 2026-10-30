@@ -86,9 +86,9 @@ export async function bindAndroidSectionAsync(
   projectRoot: string,
   {
     inventory,
-    reuseOnly,
+
     tools,
-  }: { inventory: AndroidInventory; reuseOnly: boolean; tools: DeviceTools }
+  }: { inventory: AndroidInventory; tools: DeviceTools }
 ): Promise<AndroidSection> {
   const file = bindingPathFor(projectRoot, 'android', 'local-android');
   const read = readBindingFile(file);
@@ -107,7 +107,7 @@ export async function bindAndroidSectionAsync(
     own,
     ownPresent,
     inventory,
-    reuseOnly,
+
     busyPorts: busy,
     boundBy,
   });
