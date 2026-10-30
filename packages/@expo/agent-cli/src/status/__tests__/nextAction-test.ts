@@ -91,7 +91,10 @@ const unbound = (platform: string) => `No ${platform} device is bound to this wo
 const restart = (platform: string) =>
   `${unbound(platform)} The running dev server must restart to bind one.`;
 
-type Facts = Omit<NextTargetFacts & NextActionFacts, 'host' | 'bindings' | 'recoveryPort'> & {
+type Facts = Omit<
+  NextTargetFacts & NextActionFacts,
+  'host' | 'bindings' | 'requestedPort' | 'recoveryPort'
+> & {
   bindings: BindingSummary[] | null;
 };
 
@@ -469,7 +472,7 @@ describe(chooseNextAction, () => {
     },
   ])('$name', ({ facts, host: hostOverrides, plan: editPlan, command, why, stepsPort }) => {
     const input = { ...defaults, ...facts };
-    const { platform, recoveryPort } = resolveNextTarget({
+    const { platform, requestedPort, recoveryPort } = resolveNextTarget({
       ...input,
       bindings: input.bindings ?? [],
     });
@@ -478,6 +481,7 @@ describe(chooseNextAction, () => {
     const next = chooseNextAction({
       ...input,
       platform,
+      requestedPort,
       recoveryPort,
       plan: editPlan ? editPlan(plan) : plan,
       host: { ...host, ...hostOverrides },

@@ -82,7 +82,11 @@ export function resolveNextTarget({
   bindings,
   devServer,
   state,
-}: NextTargetFacts): { platform: PlanPlatform; recoveryPort: number | null } {
+}: NextTargetFacts): {
+  platform: PlanPlatform;
+  requestedPort: number | null;
+  recoveryPort: number | null;
+} {
   const boundPlatforms = [...new Set(bindings.map((entry) => entry.platform))];
   const platform =
     named ??
@@ -98,7 +102,7 @@ export function resolveNextTarget({
     devServer?.projectRootMatched === false && requestedPort === loopbackPortOfUrl(devServer.url)
       ? null
       : requestedPort;
-  return { platform, recoveryPort };
+  return { platform, requestedPort, recoveryPort };
 }
 
 /** What the next line reads from the machine, kept out of the choice so the choice stays pure. */
@@ -114,6 +118,7 @@ export interface NextActionFacts {
   state: ProjectState;
   record: LastBuildRecord;
   platform: PlanPlatform;
+  requestedPort: number | null;
   recoveryPort: number | null;
   devServer: DevServerStatus | null;
   device: LocalDeviceStatus | null;
@@ -132,6 +137,7 @@ export function chooseNextAction({
   state,
   record,
   platform,
+  requestedPort,
   recoveryPort,
   devServer,
   device,
@@ -191,7 +197,7 @@ export function chooseNextAction({
     easServer || expiredSession
       ? 'eas'
       : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-  const port = ownServer?.port ?? recoveryPort;
+  const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
   const devArgs = [
     ...(backend ? [`--${backend}`] : []),
     ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
