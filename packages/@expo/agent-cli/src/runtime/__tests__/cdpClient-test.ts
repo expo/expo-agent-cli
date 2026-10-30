@@ -153,6 +153,26 @@ describe('CdpClient.evaluateAsync', () => {
     );
   });
 
+  it(`should name the caller's budget when the socket opened late`, async () => {
+    class SlowOpenSocket extends MockWebSocket {
+      emit(event: string | symbol, ...args: any[]): boolean {
+        if (event !== 'open') return super.emit(event, ...args);
+        setTimeout(() => super.emit('open'), 15);
+        return true;
+      }
+    }
+    const client = new CdpClient({
+      ...EVERY_TARGET_CLIENT,
+      metroUrl: 'http://localhost:8081',
+      targetSelector: async () => TARGET,
+      createWebSocket: (url) => new SlowOpenSocket(url, () => {}) as unknown as WebSocketImpl,
+    });
+
+    await expect(client.evaluateAsync('1', { timeoutMs: 40 })).rejects.toThrow(
+      /did not answer the Runtime.evaluate request within 40ms/
+    );
+  });
+
   it(`should reject when the app rejects the request`, async () => {
     const client = createClient((request, socket) => {
       socket.emit(
