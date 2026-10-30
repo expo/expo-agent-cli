@@ -306,7 +306,8 @@ function listKey(targets: readonly Pick<CdpTarget, 'id'>[]): string {
  * An unchanged list keeps its facts, so a target nothing places costs one tool read, not one per
  * poll. A changed list, such as a first app after an empty one, is read again within the budget, and
  * so is a tool answer that is unknown, at most once every {@link INVENTORY_RETRY_MS}; the
- * caller's inventory counts as the first read.
+ * caller's inventory counts as the first read. A read that loses a tool's answer keeps the facts
+ * that placed the last list, and leaves the list to be read again.
  */
 export function scopedListClassifier(
   targetSelection: TargetSelection,
@@ -315,22 +316,28 @@ export function scopedListClassifier(
   inventoryTargets: readonly Pick<CdpTarget, 'id'>[]
 ): (targets: CdpTarget[]) => Promise<ClassifiedTargets> {
   let inventoryListKey = listKey(inventoryTargets);
+  let attemptedKey = inventoryListKey;
   let readAt = Date.now();
   return async (targets) => {
     const key = listKey(targets);
+    const due = Date.now() - readAt >= INVENTORY_RETRY_MS;
     const unknown = scopeToolsUnknown(targetSelection, deviceInventory);
     if (
-      (key !== inventoryListKey || (unknown && Date.now() - readAt >= INVENTORY_RETRY_MS)) &&
+      ((key !== inventoryListKey && (key !== attemptedKey || due)) || (unknown && due)) &&
       Date.now() < deadline
     ) {
-      inventoryListKey = key;
+      attemptedKey = key;
       readAt = Date.now();
-      deviceInventory = await refreshDeviceInventoryAsync(
+      const fresh = await refreshDeviceInventoryAsync(
         targets,
         targetSelection,
         deviceInventory,
         Math.max(1, deadline - Date.now())
       );
+      if (!scopeToolsUnknown(targetSelection, fresh) || unknown) {
+        deviceInventory = fresh;
+        inventoryListKey = key;
+      }
     }
     return classifyTargets(targets, targetSelection, deviceInventory);
   };

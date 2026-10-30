@@ -205,10 +205,7 @@ function toolsCanPlace(
   );
 }
 
-/**
- * Ask the device tools again for a new list, when their answer can change where it falls. A tool
- * that gives no answer keeps the facts it gave before.
- */
+/** Ask the device tools again for a new list, when their answer can change where it falls. */
 export async function refreshDeviceInventoryAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
   targetSelection: TargetSelection,
@@ -221,11 +218,9 @@ export async function refreshDeviceInventoryAsync(
   const tools = await readDeviceInventoryAsync(timeoutMs);
   return {
     ...previous,
-    ...(tools.bootedStatus !== 'unknown' && {
-      booted: tools.booted,
-      bootedStatus: tools.bootedStatus,
-    }),
-    ...(tools.androidModels != null && { androidModels: tools.androidModels }),
+    booted: tools.booted,
+    bootedStatus: tools.bootedStatus,
+    androidModels: tools.androidModels,
   };
 }
 

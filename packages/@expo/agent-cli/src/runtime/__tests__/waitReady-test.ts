@@ -14,6 +14,7 @@ import {
   waitForFreshAppConnectionAsync,
 } from '../waitReady';
 import { matchProjectRoot } from '../projectRootHeader';
+import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import {
   EVERY_TARGET_CLIENT,
   makeDeviceInventory,
@@ -480,6 +481,28 @@ describe(`${waitForAppConnectionAsync.name} device facts`, () => {
       deviceInventory: makeDeviceInventory({ booted: [{ name: 'iPhone 15', udid: 'U1' }] }),
       inventoryTargets: [],
       timeoutMs: 300,
+      intervalMs: 20,
+    });
+
+    expect(result).toMatchObject({ appsConnected: 1, timedOut: false });
+  });
+
+  it('reads a changed list again after a device tool gave no answer on it', async () => {
+    vi.mocked(spawnCaptureAsync)
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: '' } as never)
+      .mockResolvedValue({
+        exitCode: 0,
+        stdout: JSON.stringify({ devices: { ios: [{ udid: 'U1', name: 'iPhone 17' }] } }),
+        stderr: '',
+      } as never);
+    const developmentBuild = { id: '1', appId: 'com.acme.app', deviceName: 'iPhone 17' };
+    const url = await startServerAsync(() => ({ body: JSON.stringify([developmentBuild]) }));
+
+    const result = await waitForAppConnectionAsync(url, {
+      targetSelection: makeTargetSelection({ platform: { value: 'ios', by: 'flag' } }),
+      deviceInventory: makeDeviceInventory(),
+      inventoryTargets: [],
+      timeoutMs: 3000,
       intervalMs: 20,
     });
 
