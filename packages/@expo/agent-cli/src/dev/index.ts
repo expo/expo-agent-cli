@@ -113,6 +113,13 @@ export const agentCliDev: Command = async (argv) => {
 
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — before the
+    // probe, which reads expo-dev-client and the fingerprint from the node_modules that is missing.
+    const { dependenciesInstalledSync, dependenciesNotInstalledError } =
+      require('../project/dependencies') as typeof import('../project/dependencies');
+    if (!dependenciesInstalledSync(projectRoot)) {
+      throw dependenciesNotInstalledError();
+    }
     const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
     const options = resolveDevOptions(argv ?? [], readAgentCliSettings(projectRoot).settings);
 

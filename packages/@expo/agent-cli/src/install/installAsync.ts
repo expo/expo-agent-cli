@@ -9,7 +9,7 @@ import {
   listSkillPackagesAsync,
   printSkillsForAgentAsync,
 } from '../skills/skillsAsync';
-import { resolvePackageRootSync } from '../project/nodeModules';
+import { dependenciesInstalledSync } from '../project/dependencies';
 import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import { runInheritedAsync } from '../utils/inheritedRun';
@@ -32,9 +32,7 @@ import type { InstallReport } from './types';
  */
 export async function installAsync(projectRoot: string, plan: InstallPlan): Promise<number> {
   const dependenciesMissing =
-    !plan.check &&
-    !plan.expoArgs.includes('--fix') &&
-    resolvePackageRootSync(projectRoot, 'expo') == null;
+    !plan.check && !plan.expoArgs.includes('--fix') && !dependenciesInstalledSync(projectRoot);
   if (dependenciesMissing && plan.packages.length > 0) {
     throw dependenciesNotInstalledError();
   }
