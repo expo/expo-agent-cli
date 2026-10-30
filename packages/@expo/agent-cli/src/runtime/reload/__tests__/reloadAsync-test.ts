@@ -23,6 +23,7 @@ import { lockInfo } from '../../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../../utils/__tests__/mockPlatform';
 import { printed } from '../../../utils/__tests__/printed';
 import { mockSpawnQueue } from '../../../utils/__tests__/fakeSpawn';
+import { mockDevServer } from '../../__tests__/fakeDevServer';
 
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>();
@@ -91,80 +92,6 @@ function fakeSocket(reads: (MessageSocketPeers | null)[], onBroadcast?: () => vo
 function mockConnect(socket: any) {
   vi.mocked(connectMessageSocketAsync).mockResolvedValue(socket);
 }
-
-/**
- * Answer `GET /json/list` with the given targets, or make the dev server unreachable.
- *
- * The list is mutable through the returned handle, so a test can say what the dev server reports
- * *after* the app acted on the reload — which is the only thing a reload may be believed on.
- */
-function mockDevServer(
-  targets: unknown[] | null,
-  {
-    bundle = 'compiles',
-    manifestOrigin = 'http://127.0.0.1:8081',
-  }: {
-    bundle?: 'compiles' | 'broken' | 'no-manifest';
-    /**
-     * Origin of the manifest's `launchAsset.url`, which is where the tunnel host comes from.
-     *
-     * The dev server builds it from `getDevServerUrl()`, so a tunnelled run advertises the tunnel
-     * origin here and nowhere else a detached run can read (`src/dev/advertisedUrl.ts`, S3).
-     */
-    manifestOrigin?: string;
-  } = {}
-): { listing: (next: unknown[]) => void } {
-  let now = targets;
-  globalThis.fetch = (async (input: unknown) => {
-    if (now == null) {
-      throw new Error('fetch failed');
-    }
-    const url = String(input);
-    if (url.endsWith('/json/list')) {
-      return { ok: true, json: async () => now };
-    }
-    // The entry bundle. A broken one answers the way Metro answers a failed build: 500 with a
-    // small JSON body rather than megabytes of JavaScript.
-    if (url.includes('entry.bundle')) {
-      if (bundle === 'broken') {
-        return {
-          ok: false,
-          status: 500,
-          statusText: 'Internal Server Error',
-          headers: {
-            get: (name: string) =>
-              name.toLowerCase() === 'content-type' ? 'application/json' : null,
-          },
-          text: async () => JSON.stringify(TRANSFORM_ERROR),
-        };
-      }
-      return { ok: true, status: 200, text: async () => '' };
-    }
-    // The manifest: `GET /` with an `expo-platform` header, whose `launchAsset.url` is the entry
-    // bundle. `no-manifest` is the dev server that answers nothing this check understands.
-    if (bundle === 'no-manifest') {
-      return { ok: false, status: 404, statusText: 'Not Found' };
-    }
-    return {
-      ok: true,
-      status: 200,
-      headers: {
-        get: (name: string) => (name.toLowerCase() === 'content-type' ? 'application/json' : null),
-      },
-      json: async () => ({ launchAsset: { url: `${manifestOrigin}/entry.bundle?dev=true` } }),
-    };
-  }) as unknown as typeof fetch;
-  return { listing: (next) => (now = next) };
-}
-
-/** What Metro answers a failed build with, cut to the fields this CLI reads. */
-const TRANSFORM_ERROR = {
-  type: 'TransformError',
-  lineNumber: 76,
-  column: 4,
-  filename: 'src/app/notes.tsx',
-  message: 'SyntaxError: /project/src/app/notes.tsx: Unexpected token (76:4)',
-};
 
 /**
  * A dev server whose app reloads when it is told to: the page id changes on the broadcast.

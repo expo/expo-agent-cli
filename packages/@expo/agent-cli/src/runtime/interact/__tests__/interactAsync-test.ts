@@ -15,6 +15,7 @@ import {
 import { DEFAULT_MAX_NODES } from '../resolveOptions';
 import type { Mock } from 'vitest';
 import { printed } from '../../../utils/__tests__/printed';
+import { mockDevServer } from '../../__tests__/fakeDevServer';
 
 vi.mock('../../cdpClient', async () => ({
   ...(await vi.importActual('../../cdpClient')),
@@ -25,14 +26,6 @@ const devServerUrl = 'http://127.0.0.1:8081';
 const TARGET = { id: '1', appId: 'host.exp.Exponent', webSocketDebuggerUrl: 'ws://debugger' };
 
 let originalFetch: typeof fetch | undefined;
-
-/** Answer `GET /json/list` with one connected app. */
-function mockDevServer(): void {
-  globalThis.fetch = (async () => ({
-    ok: true,
-    json: async () => [TARGET],
-  })) as unknown as typeof fetch;
-}
 
 /** Answer every `Runtime.evaluate` with the next value in the queue. */
 function mockEvaluate(...values: unknown[]) {
@@ -71,7 +64,7 @@ function stderr(): string {
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
-  mockDevServer();
+  mockDevServer([TARGET]);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});

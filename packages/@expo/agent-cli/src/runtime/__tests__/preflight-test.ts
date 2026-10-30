@@ -9,6 +9,7 @@ import { APP_RECONNECT_GRACE_MS } from '../devServer';
 import { preflightRuntimeAsync } from '../preflight';
 import { reachTheAppLadder } from '../scopeRefusal';
 import { makeDeviceInventory } from './targetSelectionFixtures';
+import { mockDevServer } from './fakeDevServer';
 
 vi.mock('../../log');
 // `xcrun simctl list devices` answers with these booted simulators, none by default, and
@@ -52,21 +53,6 @@ const ANDROID_TARGET = {
 const devServerUrl = 'http://127.0.0.1:8081';
 
 let originalFetch: typeof fetch | undefined;
-/** Every URL the preflight asked for, which is how "one probe" is a testable claim. */
-let requested: string[] = [];
-
-/** Answer `GET /json/list` with these targets, or make the dev server unreachable with null. */
-function mockDevServer(targets: unknown[] | null) {
-  requested = [];
-  globalThis.fetch = (async (url: string) => {
-    requested.push(String(url));
-    if (targets == null) {
-      throw new Error('fetch failed');
-    }
-    return { ok: true, json: async () => targets };
-  }) as unknown as typeof fetch;
-}
-
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   mockDevServer([TARGET]);
@@ -96,9 +82,11 @@ describe(preflightRuntimeAsync, () => {
   // opened a socket — once to find the dev server, once for the device index, once to require an
   // app — and each read could answer differently about which app was connected.
   it(`should read the debugger target list once`, async () => {
+    const server = mockDevServer([TARGET]);
+
     await preflightRuntimeAsync({ need: 'debugger-target', devServerUrl, platform: 'ios' });
 
-    expect(requested).toEqual([`${devServerUrl}/json/list`]);
+    expect(server.requested).toEqual([`${devServerUrl}/json/list`]);
   });
 
   it(`should scope the targets to the platform the caller named`, async () => {
@@ -169,7 +157,7 @@ describe(`${preflightRuntimeAsync.name} with no dev server`, () => {
   });
 
   it(`should not retry a dev server that does not answer`, async () => {
-    mockDevServer(null);
+    const server = mockDevServer(null);
 
     const error = await preflightRuntimeAsync({
       need: 'debugger-target',
@@ -178,7 +166,7 @@ describe(`${preflightRuntimeAsync.name} with no dev server`, () => {
     }).catch((e) => e);
 
     expect(error.code).toBe('NO_DEV_SERVER');
-    expect(requested).toHaveLength(1);
+    expect(server.requested).toHaveLength(1);
   });
 
   // `runtime:stop` stops an app on a device, and an app can be running with no dev server behind
