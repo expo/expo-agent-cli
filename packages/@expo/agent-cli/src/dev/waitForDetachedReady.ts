@@ -71,6 +71,11 @@ export async function waitForDetachedReadyAsync(
       if (current && current.pid !== initialLock.pid) {
         return failed('The dev-server lock changed owners while waiting for readiness.');
       }
+      if (current?.phase === 'finishing') {
+        return failed(
+          'The dev server exited; the process holding its lock is finishing its EAS session start.'
+        );
+      }
       if (current && current.url !== lock.url) {
         probe.controller.abort();
         await probe.promise;

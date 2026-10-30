@@ -259,6 +259,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
     });
 

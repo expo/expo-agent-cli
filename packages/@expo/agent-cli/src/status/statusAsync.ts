@@ -269,7 +269,7 @@ export async function collectStatusReportAsync(
   const saved = readLastDevRequest(projectRoot);
   const request =
     saved && (!options.platform || options.platform === saved.platform) ? saved : null;
-  const [project, devServer, device, skills, auth, binding, ownServer] = await Promise.all([
+  const [project, devServer, device, skills, auth, binding, ownLock] = await Promise.all([
     projectRead,
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
@@ -284,6 +284,9 @@ export async function collectStatusReportAsync(
   ]);
 
   const bindings = 'value' in binding ? binding.value : [];
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run that builds or
+  // finishes holds the lock and has no dev server to restart or to reuse.
+  const ownServer = ownLock?.phase === 'serving' ? ownLock : null;
   const errors: Partial<Record<StatusSectionName, string>> = {};
   const report: StatusReport = {
     project: null,
@@ -421,6 +424,7 @@ export async function collectStatusReportAsync(
       devBuildScheme,
       bindings: 'value' in binding ? bindings : null,
       ownServer,
+      unservedRun: ownLock?.phase === 'serving' ? null : ownLock,
       request,
       deviceBackend,
       plan,

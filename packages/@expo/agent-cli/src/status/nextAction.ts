@@ -119,6 +119,8 @@ export interface NextActionFacts {
   /** Null when the binding registry could not be read. */
   bindings: BindingSummary[] | null;
   ownServer: DevServerLockInfo | null;
+  /** This project's dev run when its lock says `building` or `finishing`, else null. */
+  unservedRun: DevServerLockInfo | null;
   request: LastDevRequest | null;
   deviceBackend: DeviceBackend;
   /** The plan `@expo/agent-cli dev` would make here, or null when it could not be made. */
@@ -136,6 +138,7 @@ export function chooseNextAction({
   devBuildScheme,
   bindings,
   ownServer,
+  unservedRun,
   request,
   deviceBackend,
   plan,
@@ -241,7 +244,24 @@ export function chooseNextAction({
             : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
     };
   }
-  return next;
+  return (unservedRun && unservedRunNext(unservedRun, devNext)) ?? next;
+}
+
+/**
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run with no dev server
+ * outranks every step above: each of them runs `dev`, which this run's lock refuses.
+ */
+function unservedRunNext(
+  run: DevServerLockInfo,
+  devNext: NextActionStatus
+): NextActionStatus | null {
+  if (run.phase === 'finishing')
+    return {
+      ...devNext,
+      command: `${PROGRAM_PREFIX} dev:stop --eas`,
+      why: `The last dev run (pid ${run.pid}) has no dev server any more and is finishing its EAS Simulator session start. This waits for that start and stops the session; the run also exits by itself, and a later dev --eas reuses the session.`,
+    };
+  return null;
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */

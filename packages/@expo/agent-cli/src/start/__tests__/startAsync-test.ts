@@ -3,6 +3,7 @@ import os from 'os';
 
 import { holdDevServerLockAsync } from '../../devLock';
 import type { DevServerLockHandle } from '../../devLock';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import * as Log from '../../log';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
 import { autoSyncSkillsAsync } from '../../skills/skillsAsync';
@@ -76,6 +77,7 @@ function mockHeldLock(): DevServerLockHandle {
   const lock: DevServerLockHandle = {
     address: '/project/.expo/agent-cli-dev-server.sock',
     replacedStale: false,
+    info: lockInfo(),
     release: vi.fn(),
     update: vi.fn(),
   };

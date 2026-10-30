@@ -1,7 +1,7 @@
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { holdDevServerLockAsync } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
-import type { DevServerLockInfo } from '../devLock/types';
+import type { DevServerLockHandle, DevServerLockInfo } from '../devLock/types';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { autoSyncSkillsAsync } from '../skills/skillsAsync';
@@ -66,8 +66,9 @@ export async function startAsync(projectRoot: string, options: StartOptions): Pr
  * cancelled when the dev server exits first, so a failed start syncs nothing.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Status — the dev-server lock of
- * `src/devLock/` is taken here, because this is the one place that knows a dev server is starting
- * and can wait for the port it ends up on. It is held for exactly as long as the subprocess runs.
+ * `src/devLock/` is published here, because this is the one place that knows a dev server is
+ * starting and can wait for the port it ends up on. `start` holds it for as long as the subprocess
+ * runs; a `dev` run passes its own lock and releases it itself.
  *
  * @param args Arguments for the `expo` CLI, starting with the command name.
  * @returns the exit code of the subprocess.
@@ -81,6 +82,7 @@ export async function runDevServerAsync(
     onDevServer,
     easPlatform = null,
     easOpenFinished,
+    runLock,
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
@@ -88,6 +90,12 @@ export async function runDevServerAsync(
     easPlatform?: DevServerLockInfo['easPlatform'];
     /** Settles when the run's EAS open returns, so the lock says that the open finished. */
     easOpenFinished?: Promise<unknown>;
+    /**
+     * The lock of the `dev` run this step belongs to. The step answers on it, or takes it into
+     * it, and leaves the release to the run (llp/0004 §Dev-server lock). Without it, the step
+     * takes its own lock and releases it when the dev server exits.
+     */
+    runLock?: { lock: DevServerLockHandle | null };
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -131,6 +139,7 @@ export async function runDevServerAsync(
     isRunning: () => running,
     easPlatform,
     easOpenFinished,
+    held: runLock?.lock,
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(
@@ -172,7 +181,8 @@ export async function runDevServerAsync(
     return { ...result, port };
   } finally {
     clearTimeout(timer);
-    (await lock)?.release();
+    if (runLock) runLock.lock = await lock;
+    else (await lock)?.release();
   }
 }
 
