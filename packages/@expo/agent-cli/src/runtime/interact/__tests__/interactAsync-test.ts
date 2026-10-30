@@ -14,6 +14,7 @@ import {
 } from '../interactAsync';
 import { DEFAULT_MAX_NODES } from '../resolveOptions';
 import type { Mock } from 'vitest';
+import { printed } from '../../../utils/__tests__/printed';
 
 vi.mock('../../cdpClient', async () => ({
   ...(await vi.importActual('../../cdpClient')),
@@ -54,10 +55,6 @@ function mockEvaluateThrowing(error: unknown) {
     return { evaluateAsync } as any;
   });
   return evaluateAsync;
-}
-
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
 }
 
 function json(): any {

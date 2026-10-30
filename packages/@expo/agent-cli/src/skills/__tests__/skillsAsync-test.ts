@@ -20,6 +20,7 @@ import {
   syncSkillsAsync,
 } from '../skillsAsync';
 import type { DiscoveredSkill, SkillsAgent } from '../types';
+import { printedLog } from '../../utils/__tests__/printed';
 
 vi.mock('../../log');
 vi.mock('../../utils/agent', () => ({
@@ -61,11 +62,6 @@ const testSkill: DiscoveredSkill = {
   packageName: '@acme/tool',
   linkName: 'my-skill',
 };
-
-/** Everything a command printed, joined into one string. */
-function printed(): string {
-  return vi.mocked(Log.log).mock.calls.flat().join('\n');
-}
 
 beforeEach(() => {
   // The sync refreshes the gitignore block for every known agent directory.
@@ -228,7 +224,7 @@ describe('syncSkillsAsync', () => {
     expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [], ['.claude/skills'], {
       dryRun: false,
     });
-    expect(JSON.parse(printed()).removed).toEqual(['.claude/skills/stale']);
+    expect(JSON.parse(printedLog()).removed).toEqual(['.claude/skills/stale']);
     expect(persistAgentSelectionAsync).not.toHaveBeenCalled();
   });
 
@@ -253,8 +249,8 @@ describe('syncSkillsAsync', () => {
 
       await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
-      expect(printed()).toContain('Suggested next:');
-      expect(printed()).toContain('npx @expo/agent-cli skills:list');
+      expect(printedLog()).toContain('Suggested next:');
+      expect(printedLog()).toContain('npx @expo/agent-cli skills:list');
     });
 
     it('should note that a detected agent loads the linked skills by itself', async () => {
@@ -267,8 +263,8 @@ describe('syncSkillsAsync', () => {
 
       await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
-      expect(printed()).toContain('npx @expo/agent-cli skills:show @acme/tool');
-      expect(printed()).toContain('claude-code');
+      expect(printedLog()).toContain('npx @expo/agent-cli skills:show @acme/tool');
+      expect(printedLog()).toContain('claude-code');
     });
 
     it('should not name a skill when no agent is driving the CLI', async () => {
@@ -276,7 +272,7 @@ describe('syncSkillsAsync', () => {
 
       await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
-      expect(printed()).not.toContain('skills:show');
+      expect(printedLog()).not.toContain('skills:show');
     });
 
     it('should print nothing with --no-followups', async () => {
@@ -284,7 +280,7 @@ describe('syncSkillsAsync', () => {
 
       await syncSkillsAsync('/root', { agents: [], dryRun: false, followups: false });
 
-      expect(printed()).not.toContain('Suggested next:');
+      expect(printedLog()).not.toContain('Suggested next:');
     });
 
     it('should offer nothing when there was nothing to sync', async () => {
@@ -293,7 +289,7 @@ describe('syncSkillsAsync', () => {
 
       await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
-      expect(printed()).not.toContain('Suggested next:');
+      expect(printedLog()).not.toContain('Suggested next:');
     });
   });
 });
@@ -715,7 +711,7 @@ describe('printSkillsForAgentAsync', () => {
 
     await printSkillsForAgentAsync('/root', { packages: ['@acme/tool@~1.2.0'] });
 
-    const output = vi.mocked(Log.log).mock.calls.flat().join('\n');
+    const output = printedLog();
     // The skill directory is shown so relative `references/*` links in SKILL.md resolve.
     expect(output).toContain(testSkill.path);
     expect(output).toContain('# Skill body');

@@ -11,6 +11,7 @@ import { runtimeErrorsAsync, runtimeEvalAsync } from '../runtimeAsync';
 import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
 import { UNTRUSTED_OUTPUT_BEGIN } from '../untrusted';
 import { EVERY_TARGET_CLIENT } from './targetSelectionFixtures';
+import { printed } from '../../utils/__tests__/printed';
 
 // The real error class and the real code are kept: the command branches on both.
 vi.mock('../cdpClient', async () => ({
@@ -47,10 +48,6 @@ function mockCollect(implementation: () => Promise<any>) {
     return { collectAsync } as any;
   });
   return collectAsync;
-}
-
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
 }
 
 let originalFetch: typeof fetch | undefined;

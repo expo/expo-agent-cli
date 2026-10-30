@@ -15,6 +15,7 @@ import {
   startAsync,
   STATUS_POLL_INTERVAL_MS,
 } from '../startAsync';
+import { printedLog } from '../../utils/__tests__/printed';
 
 vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
@@ -50,11 +51,6 @@ const foreign = { answering: true, projectRootMatched: false, reportedProjectRoo
  */
 async function settleFollowUps(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
-}
-
-/** Everything the wrapper printed before handing the terminal to `expo start`. */
-function printed(): string {
-  return vi.mocked(Log.log).mock.calls.flat().join('\n');
 }
 
 /** Pin this host's LAN address, so the real-device follow-up does not depend on the machine. */
@@ -158,11 +154,11 @@ describe(startAsync, () => {
 
     // Printed synchronously, before the subprocess exists: nothing printed after Metro starts
     // streaming survives in a terminal a person or an agent reads.
-    expect(printed()).toContain('Suggested next:');
+    expect(printedLog()).toContain('Suggested next:');
     // The step nothing else does: a dev server serves a bundle and opens no app.
-    expect(printed()).toContain('npx @expo/agent-cli navigate /');
-    expect(printed()).toContain('exp://192.168.1.5:8081');
-    expect(printed()).toContain('npx @expo/agent-cli runtime:errors');
+    expect(printedLog()).toContain('npx @expo/agent-cli navigate /');
+    expect(printedLog()).toContain('exp://192.168.1.5:8081');
+    expect(printedLog()).toContain('npx @expo/agent-cli runtime:errors');
 
     end(0);
     await promise;
@@ -173,8 +169,8 @@ describe(startAsync, () => {
     const promise = startAsync(projectRoot, resolveStartOptions(['--dev-client']));
     await settleFollowUps();
 
-    expect(printed()).toContain('npx @expo/agent-cli start --tunnel');
-    expect(printed()).not.toContain('exp://');
+    expect(printedLog()).toContain('npx @expo/agent-cli start --tunnel');
+    expect(printedLog()).not.toContain('exp://');
 
     end(0);
     await promise;
@@ -191,8 +187,8 @@ describe(startAsync, () => {
     const promise = startAsync(projectRoot, resolveStartOptions([]));
     await settleFollowUps();
 
-    expect(printed()).toContain('npx @expo/agent-cli start --tunnel');
-    expect(printed()).not.toContain('exp://');
+    expect(printedLog()).toContain('npx @expo/agent-cli start --tunnel');
+    expect(printedLog()).not.toContain('exp://');
 
     end(0);
     await promise;
@@ -206,10 +202,10 @@ describe(startAsync, () => {
     const promise = startAsync(projectRoot, resolveStartOptions(['--web', '--port', '8134']));
     await settleFollowUps();
 
-    expect(printed()).toContain('http://localhost:8134');
-    expect(printed()).toContain('npx @expo/agent-cli typecheck');
-    expect(printed()).toContain('npx @expo/agent-cli deploy --web');
-    expect(printed()).not.toContain('npx --yes eas-cli build');
+    expect(printedLog()).toContain('http://localhost:8134');
+    expect(printedLog()).toContain('npx @expo/agent-cli typecheck');
+    expect(printedLog()).toContain('npx @expo/agent-cli deploy --web');
+    expect(printedLog()).not.toContain('npx --yes eas-cli build');
 
     end(0);
     await promise;
@@ -220,9 +216,9 @@ describe(startAsync, () => {
     const promise = startAsync(projectRoot, resolveStartOptions(['--web']));
     await settleFollowUps();
 
-    expect(printed()).toContain('Suggested next:');
-    expect(printed()).not.toContain('exp://');
-    expect(printed()).not.toContain('--tunnel');
+    expect(printedLog()).toContain('Suggested next:');
+    expect(printedLog()).not.toContain('exp://');
+    expect(printedLog()).not.toContain('--tunnel');
 
     end(0);
     await promise;
