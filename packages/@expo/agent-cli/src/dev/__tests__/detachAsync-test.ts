@@ -23,7 +23,7 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
-import { pinDetachedLog } from '../logFile';
+import { publishDetachedLog } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
@@ -89,7 +89,8 @@ function readiness(ready = true): BundlerReadyResult {
 }
 
 beforeEach(() => {
-  pinDetachedLog(projectRoot, logFile);
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  publishDetachedLog(projectRoot, logFile);
   vi.useFakeTimers();
   vi.setSystemTime(0);
   vi.mocked(readDevServerLockAsync)

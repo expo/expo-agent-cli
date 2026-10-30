@@ -4,6 +4,7 @@
 // with, and the log file the output goes to. The spawn itself — `detached`, `unref`, the file
 // descriptors — is the e2e test's, because nothing about it is true until a real process runs.
 
+import fs from 'fs';
 import { vol } from 'memfs';
 
 import type { BundlerReadyResult } from '../../runtime/waitReady';
@@ -15,7 +16,12 @@ import {
   resolveDetachFailure,
 } from '../detachAsync';
 import type { DevDetachResultJson } from '../detachAsync';
-import { detachedLogPath, openDetachedLogSync, readDetachedLogSync } from '../logFile';
+import {
+  detachedLogPath,
+  openDetachedLogSync,
+  readDetachedLogSync,
+  readDetachedLogFileSync,
+} from '../logFile';
 import { resolveDevLogsOptions, DEFAULT_LOG_TAIL_LINES } from '../resolveLogsOptions';
 import { resolveDevOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
@@ -231,20 +237,12 @@ describe(readDetachedLogSync, () => {
     expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual(['Bundled 1200ms']);
   });
 
-  it(`opens a fresh private file for a new run`, () => {
-    vol.fromJSON({ [detachedLogPath(projectRoot)]: 'from the last run\n' });
-
-    const { logFile } = openDetachedLogSync(projectRoot);
-
-    expect(logFile).toBe(detachedLogPath(projectRoot));
-    expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual([]);
-  });
-
   it(`creates the log directory when the project has none`, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
 
-    expect(() => openDetachedLogSync(projectRoot)).not.toThrow();
-    expect(readDetachedLogSync(projectRoot, 10)).not.toBeNull();
+    const { logFile, fd } = openDetachedLogSync(projectRoot);
+    fs.closeSync(fd);
+    expect(readDetachedLogFileSync(logFile, 10)?.lines).toEqual([]);
   });
 });
 

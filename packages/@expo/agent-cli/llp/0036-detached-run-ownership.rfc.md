@@ -13,8 +13,8 @@ A parent-held guard cannot protect a child that survives its parent.
 ## Decision
 
 The child owns startup before probing or other work, through normal subprocess cleanup.
-Overlapping detached starts refuse with exit 20 and the owner PID/log; observer death or timeout never releases ownership.
-Observers report only their own child. Independent worktrees remain independent.
+Overlapping detached starts refuse with exit 20, the owner PID, and its private log path; observer death or timeout never releases ownership.
+Observers report only their own child. A startup observation timeout exits 22 without stopping it. Independent worktrees remain independent.
 
 | Ownership evidence                                                           | Contender behavior                 |
 | ---------------------------------------------------------------------------- | ---------------------------------- |
@@ -23,7 +23,7 @@ Observers report only their own child. Independent worktrees remain independent.
 | Dead owner that may have begun work, unreadable claim, or uncertain liveness | Refuse automatic takeover          |
 
 Recovery removes only the old owner's evidence, never a replacement owner's. Age is not death.
-Each candidate has private output; only the owner selects the current log. Observers pin it.
+Each candidate has private output; only the owner selects the current log. Observers retain the selected file independently of that pointer.
 The process E2E `dev-detach-concurrency-test.ts` enforces one start, refusal metadata and owner logs,
 and compatibility with existing status/stop discovery. Fixed-name logs remain readable.
 
