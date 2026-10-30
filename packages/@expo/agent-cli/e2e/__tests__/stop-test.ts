@@ -542,6 +542,11 @@ describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground d
         port: orphan.port,
         lockHeld: false,
         forced: false,
+        untracked: true,
+        reason: null,
+        detail: null,
+        processStillRunning: false,
+        portStillAnswering: false,
       });
       expect(result.exitCode).toBe(0);
       expect(await answersStatusAsync(orphan.port)).toBe(false);
