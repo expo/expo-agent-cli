@@ -184,6 +184,10 @@ export async function smokeAsync(projectRoot: string, options: SmokeOptions): Pr
     await assertEasProjectConfiguredAsync(projectRoot);
   }
   const run = await runSmokePhasesAsync(buildSmokeDeps(projectRoot, options), options);
+  // Once per run, from the connection the verdict rests on, not once per wait.
+  if (run.appsConnected != null && run.appsConnected > 0 && run.skippedApps.length > 0) {
+    Log.progress(describeSkippedApps(run.skippedApps));
+  }
 
   event('smoke', {
     outcome: run.outcome,
@@ -735,16 +739,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     waitForAppConnection: async (devServerUrl, timeoutMs) => {
       const { targetSelection, deviceInventory, targets } =
         await targetSelectionAsync(devServerUrl);
-      const connection = await waitForAppConnectionAsync(devServerUrl, {
+      return await waitForAppConnectionAsync(devServerUrl, {
         timeoutMs,
         targetSelection,
         deviceInventory,
         inventoryTargets: targets,
       });
-      if (connection.appsConnected > 0 && connection.skippedApps?.length) {
-        Log.progress(describeSkippedApps(connection.skippedApps));
-      }
-      return connection;
     },
 
     // The same ladder `navigate` walks, through the same function — local device first, then this

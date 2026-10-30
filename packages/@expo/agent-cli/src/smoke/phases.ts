@@ -440,7 +440,7 @@ export interface SmokeRun {
   /** What this run found on the machine, what it started, and what it put back. */
   environment: SmokeEnvironmentJson;
   appsConnected: number | null;
-  skippedApps?: SkippedApp[];
+  skippedApps: SkippedApp[];
   bundle: BundleCheckResult | null;
   route: string | null;
   routeCheck: RouteCheckJson | null;
@@ -936,6 +936,7 @@ async function runPhasesAsync(
     started: false,
     environment,
     appsConnected: null,
+    skippedApps: [],
     bundle: null,
     route: options.route,
     routeCheck: null,
@@ -1590,7 +1591,7 @@ async function runPhasesAsync(
     chargeToBootstrap();
   }
 
-  const { appsConnected, skippedApps = [] } = connection;
+  const { appsConnected, skippedApps } = connection;
   const withApp = { ...base, bundle, appsConnected, skippedApps };
 
   if (appsConnected === 0) {

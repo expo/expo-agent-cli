@@ -5,6 +5,8 @@ import { makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
 // Smoke binds and releases only its own platform through the registry.
 import { vol } from 'memfs';
 
+import * as Log from '../../log';
+
 import {
   acquireDeviceAsync,
   deviceIdOf,
@@ -426,5 +428,36 @@ describe('evaluate beside an app of another worktree', () => {
         { deviceName: CLONE, group: 'other-worktree', projectRoots: ['/wt/legend'] },
       ])
     );
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+  it('waitForAppConnection reports the skipped apps and prints nothing, however many waits a run makes', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}', '/wt/legend/package.json': '{}' });
+    seedIosBinding('/wt/legend', 'SIM-LEGEND', CLONE);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: JSON.stringify({
+        devices: {
+          'iOS-26-0': [
+            { udid: 'SIM-LEGEND', name: CLONE, state: 'Booted' },
+            { udid: 'SIM-OWN', name: 'iPhone 17 Pro', state: 'Booted' },
+          ],
+        },
+      }),
+      stderr: '',
+      exitCode: 0,
+    });
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => [ON_CLONE, { ...ON_CLONE, id: '2', deviceName: 'iPhone 17 Pro' }],
+    })) as unknown as typeof fetch;
+    const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
+
+    const first = await deps.waitForAppConnection('http://127.0.0.1:8081', 300);
+    const second = await deps.waitForAppConnection('http://127.0.0.1:8081', 300);
+
+    expect(second.skippedApps).toEqual(first.skippedApps);
+    expect(first.skippedApps).toHaveLength(1);
+    expect(vi.mocked(Log.progress)).not.toHaveBeenCalled();
   });
 });
