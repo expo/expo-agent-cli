@@ -75,6 +75,12 @@
 //   `--json` the dotenv names the billed id, which the real command writes right after the create
 //   mutation (`commands/simulator/index.js` 276-281) and leaves after a failed wait; the session is
 //   remembered as stopped
+// - STUB_SIM_START_STDOUT: what a failed start prints on stdout before it exits, where eas-cli's
+//   `Log.error` writes the reason (`build/log.js`)
+// - STUB_SIM_START_REJECT_FLAG: a flag this eas-cli does not know. A start that names it is refused
+//   at flag parsing, before it creates a session: `Nonexistent flag: <flag>` and `See more help
+//   with --help` on stdout, `Error: simulator command failed.` on stderr, exit 1 [observed —
+//   eas-cli 25.0.0, a misspelled flag, 2026-10-30]
 // - STUB_SIM_START_ID: the id of the session it creates (default `sess-e2e-started`). A ready
 //   session writes the full dotenv, `--json` or not (index.js 354-358); `--json` prints the object
 //   the real command prints. A started session is **remembered** in `stub-eas-sessions.json` under
@@ -455,6 +461,11 @@ if (command === 'simulator' || command === 'simulator:start') {
   const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);
   const id = process.env.STUB_SIM_START_ID || 'sess-e2e-started';
   const json = has('--json');
+  const rejectedFlag = process.env.STUB_SIM_START_REJECT_FLAG;
+  if (rejectedFlag && has(rejectedFlag)) {
+    process.stdout.write(`Nonexistent flag: ${rejectedFlag}\nSee more help with --help\n`);
+    exitWith(process.stderr, '    Error: simulator command failed.', 1);
+  }
   // Only the id-only write right after the create mutation is gated on `--json` (index.js 276).
   const saved = json ? '' : ', saved to .env.eas-simulator';
   if (exitCode !== 0) {
@@ -463,6 +474,8 @@ if (command === 'simulator' || command === 'simulator:start') {
     if (!json) writeSessionEnv({ EAS_SIMULATOR_SESSION_ID: id });
     rememberSession(id, 'STOPPED');
     process.stderr.write(`Simulator session created (id: ${id}${saved})\n`);
+    if (process.env.STUB_SIM_START_STDOUT)
+      process.stdout.write(`${process.env.STUB_SIM_START_STDOUT}\n`);
     exitWith(
       process.stderr,
       process.env.STUB_SIM_START_STDERR ||

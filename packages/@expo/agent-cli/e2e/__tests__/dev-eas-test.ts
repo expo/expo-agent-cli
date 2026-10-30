@@ -594,7 +594,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   it('cleans up its EAS session when the dev server exits normally', async () => {
     const projectRoot = await setupAsync('go-app');
-    await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
       env: easRunEnv(projectRoot, 8589),
     });
     expect(easInvocationArgs(projectRoot)).toContainEqual([
@@ -604,6 +604,12 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       '--non-interactive',
     ]);
     expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
+    expect(result.stderr).toContain(
+      'Opened the app on EAS Simulator session sess-e2e-started, started by this run. Watch it at ' +
+        'https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/sess-e2e-started.'
+    );
+    expect(result.stderr).toContain('This run stops the session when the dev server exits');
+    expect(result.stderr).toContain('Stopped EAS Simulator session sess-e2e-started');
   });
 
   it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
@@ -697,8 +703,9 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
-        // The stub's default session: `sess-e2e`, iOS, in progress. The tunnel comes up well after
-        // Metro answers, so an open that does not wait for it names the loopback.
+        // The stub's default session: `sess-e2e`, iOS, in progress. This case passes with the
+        // tunnel wait replaced by a fixed host, so the unit row `gives up when the dev server
+        // advertises no tunnel inside the wait` is the proof of the wait.
         {
           env: {
             ...easRunEnv(projectRoot, 8533),

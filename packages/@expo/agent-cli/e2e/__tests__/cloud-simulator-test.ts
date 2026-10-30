@@ -1013,6 +1013,9 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
       const phase = report.phases.find((entry: { id: string }) => entry.id === 'start-session');
       expect(phase).toMatchObject({ status: 'ok' });
       expect(phase.reason).toContain('started EAS Simulator session sess-e2e-started for this run');
+      // A smoke run stops its own session, so it never tells the caller to.
+      expect(result.stderr).toContain('This run will stop the session afterwards');
+      expect(result.stderr).not.toContain('bills until');
 
       const invocations = easInvocations(projectRoot);
       const start = invocations.find((argv) => argv[0] === 'simulator')!;
