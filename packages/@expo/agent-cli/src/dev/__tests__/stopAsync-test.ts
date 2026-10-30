@@ -1,6 +1,6 @@
 import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
-import { discoverDevServerAsync } from '../../runtime/devServer';
+import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
 import { probeBundlerAsync } from '../../runtime/bundlerStatus';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
@@ -30,8 +30,8 @@ vi.mock('../../devLock', () => {
     ),
   };
 });
-vi.mock('../../runtime/devServer', async (importActual) => ({
-  ...(await importActual<typeof import('../../runtime/devServer')>()),
+vi.mock('../../runtime/discoverDevServer', async (importActual) => ({
+  ...(await importActual<typeof import('../../runtime/discoverDevServer')>()),
   discoverDevServerAsync: vi.fn(),
 }));
 vi.mock('../../runtime/bundlerStatus', () => ({

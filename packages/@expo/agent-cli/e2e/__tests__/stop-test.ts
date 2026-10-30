@@ -12,6 +12,7 @@ import path from 'node:path';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
+  killAsync,
   readDevLockAsync,
   setupFixtureAsync,
   spawnAgentCli,
@@ -469,6 +470,15 @@ async function freePortAsync(): Promise<number> {
   return port;
 }
 
+/** The pid listening on `port`, by `lsof`. */
+function findPortListenerPid(port: number): number {
+  const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+  const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {
+    encoding: 'utf8',
+  });
+  return Number(out.trim().split('\n')[0]);
+}
+
 async function answersStatusAsync(port: number): Promise<boolean> {
   try {
     return (await fetch(`http://127.0.0.1:${port}/status`)).ok;
@@ -517,8 +527,8 @@ async function startOrphanedDevServerAsync(
 }
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-describe.skipIf(process.platform === 'win32')('@expo/agent-cli dev:stop after a SIGKILL of dev', () => {
-  it('stops the dev server the killed run left with no lock, without --force', async () => {
+describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground dev', () => {
+  it('dev:stop stops the dev server it left with no lock, without --force', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const orphan = await startOrphanedDevServerAsync(projectRoot);
 
@@ -536,6 +546,26 @@ describe.skipIf(process.platform === 'win32')('@expo/agent-cli dev:stop after a 
       expect(result.exitCode).toBe(0);
       expect(await answersStatusAsync(orphan.port)).toBe(false);
     } finally {
+      orphan.cleanup();
+    }
+  }, 60_000);
+
+  it('the next dev stops that server and takes its port, with no second dev server', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const orphan = await startOrphanedDevServerAsync(projectRoot);
+    const orphanPid = findPortListenerPid(orphan.port);
+    const rerun = spawnAgentCli(projectRoot, ['dev', '--ios'], {
+      env: { STUB_EXPO_LISTEN: '1', STUB_EXPO_DELAY_MS: '120000' },
+    });
+
+    try {
+      expect(await waitForDevLockAsync(projectRoot, 30_000)).toMatchObject({
+        port: orphan.port,
+        pid: rerun.pid,
+      });
+      expect(() => process.kill(orphanPid, 0)).toThrow();
+    } finally {
+      await killAsync(rerun);
       orphan.cleanup();
     }
   }, 60_000);

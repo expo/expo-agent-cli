@@ -795,25 +795,6 @@ describe(devAsync, () => {
   describe("this project's dev server with no lock", () => {
     const untracked = { port: 8081, url: 'http://127.0.0.1:8081', pid: 777 };
 
-    it(`should stop it and take its port`, async () => {
-      mockStaleDevClientState();
-      vi.mocked(findUntrackedDevServerAsync).mockResolvedValue(untracked);
-
-      await devAsync(projectRoot, resolveDevOptions(['--ios']));
-
-      expect(devStopAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ port: 8081, force: false, eas: false }),
-        expect.objectContaining({ print: false })
-      );
-      expect(vi.mocked(devStopAsync).mock.invocationCallOrder[0]).toBeLessThan(
-        vi.mocked(resolvePlannedPortAsync).mock.invocationCallOrder[0]!
-      );
-      expect(Log.warn).toHaveBeenCalledWith(
-        "This project's dev server on port 8081 (pid 777) has no lock: its CLI process ended. It was stopped, and this run takes port 8081."
-      );
-    });
-
     it(`should say under --plan that the run stops it and takes its port`, async () => {
       mockStaleDevClientState();
       vi.mocked(findUntrackedDevServerAsync).mockResolvedValue(untracked);

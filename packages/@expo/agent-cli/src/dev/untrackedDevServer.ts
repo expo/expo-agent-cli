@@ -3,7 +3,7 @@
 // Metro running. `status`, `dev:stop` and `dev` decide "this project's" by one check.
 
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
-import { discoverDevServerAsync } from '../runtime/devServer';
+import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { readLastDevRequest } from './lastRequest';
 import { findPortListenerAsync } from './portListener';
 

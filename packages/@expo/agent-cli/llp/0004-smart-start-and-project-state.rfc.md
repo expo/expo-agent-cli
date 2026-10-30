@@ -464,7 +464,8 @@ server without `--force`, by the same two proofs `--force` needs about the port 
 process, and reports `untracked: true`. `--port <n>` with no lock reads the same check
 for that port. A server that names another project's root, or none, still needs
 `--force`. When the process cannot be named or is not a dev server's, nothing is
-signalled, the reason is `untracked-dev-server`, and the exit is 20.
+signalled, the reason is `untracked-dev-server`, and the exit is 20. The e2e cases "after a SIGKILL of a foreground dev" in
+`e2e/__tests__/stop-test.ts` enforce the stop, and the port the next `dev` takes.
 
 The captured log of an untracked server may be an earlier run's, so `status` does not
 take its tunnel from the log. It asks the manifest of the server that answered

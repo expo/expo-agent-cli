@@ -362,6 +362,15 @@ async function stopLockedDevServerAsync(
   return { report: base, finishing: false };
 }
 
+/** Why this project's dev server with no lock was left running: its process is not a dev server's. */
+function untrackedRefusalDetail(port: number, listener: PortListener | null): string {
+  const holder =
+    listener != null
+      ? `but pid ${listener.pid} (${listener.command}) does not look like a dev server`
+      : 'but this machine would not name the process holding the port';
+  return `port ${port} answers as this project's dev server with no lock (its CLI process ended), ${holder}, so nothing was signalled`;
+}
+
 /**
  * No lock answered *for the target*. A listener may still exist, and its `/status` decides whose it is:
  * this project's root, which `status` matches too, is stopped as a lock's would be.
@@ -410,8 +419,7 @@ async function stopUnlockedDevServerAsync(
         'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
       return base;
     }
-    port = untracked.port;
-    base.port = port;
+    base.port = port = untracked.port;
   }
 
   const listener = await findPortListenerAsync(port);
@@ -466,12 +474,7 @@ async function stopUnlockedDevServerAsync(
 
   if (base.untracked) {
     base.reason = 'untracked-dev-server';
-    base.forceRefusedBy = null;
-    base.detail = `port ${port} answers as this project's dev server with no lock (its CLI process ended), ${
-      listener != null
-        ? `but pid ${listener.pid} (${listener.command}) does not look like a dev server`
-        : 'but this machine would not name the process holding the port'
-    }, so nothing was signalled`;
+    base.detail = untrackedRefusalDetail(port, listener);
     base.waitedMs = Date.now() - startedAt;
     return base;
   }
