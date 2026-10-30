@@ -112,50 +112,6 @@ afterEach(() => {
   vol.reset();
 });
 
-// @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
-describe('--eas on the other platform', () => {
-  const detach = () =>
-    devDetachAsync(projectRoot, resolveDevOptions(['--android', '--eas', '--detach']), {
-      print: false,
-      reuseBoundDevice: true,
-    });
-
-  it('refuses with the dev --detach reuse command, since no server runs yet', async () => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({
-      platform: 'ios',
-      sessionId: 'sess-ios',
-    });
-
-    await expect(detach()).rejects.toMatchObject({
-      code: 'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
-      message: expect.stringContaining('dev --ios --eas --detach'),
-    });
-  });
-
-  it('spawns the child when nothing points at another platform', async () => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
-
-    const result = detach();
-    await vi.runAllTimersAsync();
-    await expect(result).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).toHaveBeenCalledWith(projectRoot, 'android');
-    expect(spawn).toHaveBeenCalledTimes(1);
-  });
-
-  it('asks nothing for a run that opens no app', async () => {
-    const result = devDetachAsync(
-      projectRoot,
-      resolveDevOptions(['--android', '--eas', '--detach', '--no-open']),
-      { print: false }
-    );
-    await vi.runAllTimersAsync();
-    await expect(result).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
-  });
-});
-
 function run() {
   return devDetachAsync(
     projectRoot,
@@ -402,29 +358,6 @@ it('does not wait for a verdict when the child is alive but the bundler stopped 
   expect(Date.now()).toBe(0);
 });
 
-// The child publishes its lock at the spawn of a step that names a port, before Metro binds it. A
-// retry that moves the dev server republishes, and the report names the port Metro logged.
-it('reports the port Metro logged, not the one the lock named before a retry', async () => {
-  const { event: cliEvent } = await import('../../events');
-  const lock = {
-    ...lockInfo(),
-    pid: 4242,
-    projectRoot,
-    startedAt: new Date(0).toISOString(),
-  };
-  vi.mocked(readDevServerLockAsync)
-    .mockReset()
-    .mockResolvedValueOnce(null)
-    .mockResolvedValueOnce({ ...lock, url: 'http://127.0.0.1:8180', port: 8180 })
-    .mockResolvedValue({ ...lock, url: 'http://127.0.0.1:8393', port: 8393 });
-
-  const result = run();
-  await vi.advanceTimersByTimeAsync(5000);
-  await expect(result).resolves.toBe(0);
-
-  expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ port: 8393 }));
-});
-
 describe('readiness belongs to this worktree', () => {
   const initialLock = {
     ...lockInfo(),
@@ -434,7 +367,6 @@ describe('readiness belongs to this worktree', () => {
     projectRoot,
     startedAt: new Date(0).toISOString(),
   };
-  const movedLock = { ...initialLock, url: 'http://127.0.0.1:8394', port: 8394 };
   const foreign = {
     ...readiness(),
     projectRootMatched: false,
@@ -451,50 +383,6 @@ describe('readiness belongs to this worktree', () => {
       { print: false }
     );
   }
-
-  it('waits past a foreign ready server and reports the port the child moves to', async () => {
-    const { event: cliEvent } = await import('../../events');
-    vi.mocked(waitForBundlerReadyAsync).mockImplementation(async (url) =>
-      url === initialLock.url ? foreign : readiness()
-    );
-    setTimeout(() => {
-      vi.mocked(readDevServerLockAsync).mockResolvedValue(movedLock);
-    }, 1000);
-
-    const result = start();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
-    await vi.runAllTimersAsync();
-
-    await expect(result).resolves.toBe(0);
-    expect(cliEvent).toHaveBeenCalledWith(
-      'dev_detach',
-      expect.objectContaining({ port: 8394, url: movedLock.url, ready: true })
-    );
-  });
-
-  it('cancels a pending status request when the lock moves', async () => {
-    let oldSignal: AbortSignal | undefined;
-    vi.mocked(waitForBundlerReadyAsync).mockImplementation(async (url, { signal }) => {
-      if (url !== initialLock.url) return readiness();
-      oldSignal = signal;
-      await new Promise<void>((resolve) => signal!.addEventListener('abort', () => resolve()));
-      return readiness(false);
-    });
-    setTimeout(() => {
-      vi.mocked(readDevServerLockAsync).mockResolvedValue(movedLock);
-    }, 1000);
-
-    const result = start();
-    await vi.advanceTimersByTimeAsync(3000);
-
-    expect(oldSignal?.aborted).toBe(true);
-    await expect(result).resolves.toBe(0);
-    expect(waitForBundlerReadyAsync).toHaveBeenCalledWith(
-      movedLock.url,
-      expect.objectContaining({ timeoutMs: expect.any(Number), projectRoot })
-    );
-  });
 
   it('fails within the original budget when only a foreign server answers', async () => {
     vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(foreign);
@@ -727,6 +615,10 @@ describe('the bound device', () => {
       'dev_detach',
       expect.objectContaining({ alreadyRunning: true })
     );
+    expect(Log.progress).toHaveBeenCalledWith(acquireLine(reused));
+    expect(vi.mocked(Log.progress).mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(cliEvent).mock.invocationCallOrder.at(-1)!
+    );
     const printed = vi
       .mocked(Log.log)
       .mock.calls.map(([text]) => String(text))
@@ -774,27 +666,23 @@ describe('the bound device', () => {
     }
   );
 
-  it('binds nothing when devices are disabled', async () => {
-    vi.mocked(devicesDisabled).mockReturnValue(true);
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-    expect(acquireDeviceAsync).not.toHaveBeenCalled();
-  });
-
   // smoke-never-reaches-already-running-reuse
   it.each([
-    ['without reuseBoundDevice', ['--ios', '--detach', '--local'], {}],
+    ['without reuseBoundDevice', ['--ios', '--detach', '--local'], {}, () => {}],
     [
       'for --android on a host without Android tools',
       ['--android', '--detach', '--local'],
       { reuseBoundDevice: true },
+      () => {},
     ],
-  ])('binds nothing on a running server %s', async (_case, argv, extra) => {
+    [
+      'while devices are disabled',
+      ['--ios', '--detach', '--local'],
+      { reuseBoundDevice: true },
+      () => vi.mocked(devicesDisabled).mockReturnValue(true),
+    ],
+  ])('binds nothing on a running server %s', async (_case, argv, extra, setup) => {
+    setup();
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
 
     await expect(
@@ -825,93 +713,6 @@ describe('the bound device', () => {
       expect(reopenEasAsync).not.toHaveBeenCalled();
     }
   );
-
-  it('leaves the question to the reopen and passes it the running tunnel', async () => {
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue({
-      url: 'https://abc.tunnel.example',
-      host: 'abc.tunnel.example',
-      hostType: 'tunnel',
-    });
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--eas']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
-    expect(reopenEasAsync).toHaveBeenCalledTimes(1);
-    expect(reopenEasAsync).toHaveBeenCalledWith(
-      projectRoot,
-      expect.objectContaining({ deviceBackend: 'eas' }),
-      running.url,
-      'https://abc.tunnel.example'
-    );
-  });
-
-  describe('human report of a reuse beside a running dev server', () => {
-    const humanReport = () =>
-      vi
-        .mocked(Log.log)
-        .mock.calls.map(([text]) => String(text))
-        .find((text) => text.includes('Dev server'))!;
-
-    it('says which EAS session the reuse bound instead of "nothing was started"', async () => {
-      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-      vi.mocked(reopenEasAsync).mockResolvedValue('sess-1');
-
-      await expect(
-        devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--eas']), {
-          print: true,
-          reuseBoundDevice: true,
-        })
-      ).resolves.toBe(0);
-
-      const text = humanReport();
-      expect(text).toContain(
-        'This project already had a dev server; this run bound EAS Simulator session sess-1.'
-      );
-      expect(text).not.toContain('nothing was started');
-    });
-
-    it('keeps "nothing was started" when no session was bound', async () => {
-      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-
-      await expect(
-        devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach']), {
-          print: true,
-          reuseBoundDevice: true,
-        })
-      ).resolves.toBe(0);
-
-      expect(humanReport()).toContain('so nothing was started');
-    });
-  });
-
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it('names the bound EAS session in the dev:stop --eas follow-up of a fresh start', async () => {
-    writeCloudBinding(projectRoot, 'ios', 'sess-bound', {
-      boundAt: new Date(0).toISOString(),
-      expiresAt: new Date(3_600_000).toISOString(),
-    });
-
-    const result = devDetachAsync(
-      projectRoot,
-      resolveDevOptions(['--ios', '--detach', '--eas', '--json']),
-      { print: true }
-    );
-    await vi.runAllTimersAsync();
-    await expect(result).resolves.toBe(0);
-
-    const printed = vi
-      .mocked(Log.log)
-      .mock.calls.map(([text]) => String(text))
-      .find((text) => text.includes('"followups"'))!;
-    const last = JSON.parse(printed).followups.at(-1);
-    expect(last.why).toContain('sess-bound');
-  });
 
   it('names dev:stop --eas when the bundler of an EAS run never answers', async () => {
     vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(readiness(false));
@@ -951,20 +752,6 @@ describe('the bound device', () => {
 
     expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'android', { reuseOnly: true });
     expect(Log.progress).toHaveBeenCalledWith(acquireLine(reusedAndroid));
-  });
-
-  it('does not reuse an iOS simulator when this host cannot run one', async () => {
-    vi.mocked(hostBindsPlatform).mockReturnValue(false);
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-
-    expect(acquireDeviceAsync).not.toHaveBeenCalled();
   });
 
   // detached-device-error-relayed
@@ -1047,46 +834,6 @@ function childLogOf(error: CommandError): string[] {
     ...vi.mocked(Log.warn).mock.calls.map((args) => args.join(' ')),
   ];
 }
-
-describe('the acquire line', () => {
-  it('is printed before the already-running report', async () => {
-    mockPlatform('darwin');
-    const running = {
-      ...lockInfo(),
-      url: 'http://127.0.0.1:8393',
-      port: 8393,
-      pid: 4242,
-      projectRoot,
-      startedAt: new Date(0).toISOString(),
-    };
-    const reused = {
-      device: {
-        backend: 'local-ios' as const,
-        platform: 'ios' as const,
-        udid: 'SIM-1',
-        name: 'agent-cli 0000',
-        origin: 'created' as const,
-      },
-      justBooted: true,
-      action: 'reused' as const,
-    };
-    vi.mocked(devicesDisabled).mockReturnValue(false);
-    vi.mocked(hostBindsPlatform).mockReturnValue(true);
-    vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    const { event: cliEvent } = await import('../../events');
-
-    await devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-      print: false,
-      reuseBoundDevice: true,
-    });
-
-    expect(Log.progress).toHaveBeenCalledWith(acquireLine(reused));
-    const printedAt = vi.mocked(Log.progress).mock.invocationCallOrder[0]!;
-    const reportedAt = vi.mocked(cliEvent).mock.invocationCallOrder.at(-1)!;
-    expect(printedAt).toBeLessThan(reportedAt);
-  });
-});
 
 /** The log of a detached `dev --eas` child: its pid on line 1, then its plan. */
 function easChildLog(pid: number, ...after: string[]): string {

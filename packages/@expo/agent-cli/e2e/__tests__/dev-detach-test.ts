@@ -561,6 +561,11 @@ describe('@expo/agent-cli dev --detach', () => {
         pid: firstPid,
         port: 8397,
       });
+
+      const human = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach'], {
+        env: detachEnv(projectRoot, 8396),
+      });
+      expect(human.stdout).toContain('so nothing was started');
     } finally {
       await cleanUpAsync(projectRoot);
     }

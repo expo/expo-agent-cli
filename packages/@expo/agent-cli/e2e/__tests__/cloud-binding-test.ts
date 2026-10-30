@@ -195,7 +195,9 @@ it.each(['ios', 'android'] as const)(
       reject: false,
     });
     expect(restarted.exitCode, restarted.stderr).toBe(0);
-    expect(JSON.parse(restarted.stdout).followups.at(-1).command).toContain('dev:stop --eas');
+    const lastFollowup = JSON.parse(restarted.stdout).followups.at(-1);
+    expect(lastFollowup.command).toContain('dev:stop --eas');
+    expect(lastFollowup.why).toContain('preserved-session');
     await waitForAsync(
       () => readStubEasInvocations(root).filter((i) => i.executedSessionId).length === 2,
       15000
@@ -323,8 +325,28 @@ it('a start for the other platform beside a bound session refuses and spawns not
   const { error } = JSON.parse(result.stdout);
   expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
   expect(error.suggestedCommand).toContain('dev:stop --eas');
+  // No dev server runs yet, so the way to reuse the session is a detached start for its platform.
+  expect(error.message).toContain('session s-ios is an iOS session');
+  expect(error.message).toContain('dev --ios --eas --detach');
   expect(stubEasArgs(root).map((args) => args[0])).not.toContain('simulator');
   expect(readStubExpoInvocations(root).map((i) => i.args[0])).not.toContain('start');
+
+  // A run that opens no app drives no session, so the one beside it is no reason to refuse.
+  const noOpen = await executeAgentCliAsync(
+    root,
+    ['dev', '--android', '--eas', '--detach', '--no-open', '--json'],
+    {
+      env: {
+        ...envFor(root),
+        STUB_EXPO_DEV_SERVER_PORT: '8764',
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: '90000',
+      },
+      reject: false,
+    }
+  );
+  expect(noOpen.exitCode, noOpen.stderr).toBe(0);
+  expect(readStubExpoInvocations(root).map((i) => i.args[0])).toContain('start');
 });
 it('round-trips guarded cloud target argv', async () => {
   const root = await project();
@@ -383,6 +405,11 @@ it('an explicit stop failure keeps the binding for retry', async () => {
     reject: false,
   });
   expect(result.exitCode).not.toBe(0);
+  expect(JSON.parse(result.stdout).session).toMatchObject({
+    id: 'A',
+    stopped: false,
+    reason: expect.stringContaining('exited 1: Stop refused'),
+  });
   expect(readBinding(root).device).toMatchObject({ id: 'A' });
 });
 it('a failed start records the billed session, and dev:stop --eas stops it', async () => {
@@ -414,8 +441,8 @@ it('a failed start records the billed session, and dev:stop --eas stops it', asy
 });
 it('a re-run beside a child whose open finished reopens when the binding is gone', async () => {
   const root = await project();
-  const run = () =>
-    executeAgentCliAsync(root, ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'], {
+  const run = (...flags: string[]) =>
+    executeAgentCliAsync(root, ['dev', '--ios', '--eas', '--detach', '--wait-ready', ...flags], {
       env: {
         ...envFor(root),
         STUB_EXPO_DEV_SERVER_PORT: '8763',
@@ -428,7 +455,7 @@ it('a re-run beside a child whose open finished reopens when the binding is gone
     });
   const opens = () =>
     readStubEasInvocations(root).filter((i) => i.executedSessionId && i.args.includes('open'));
-  const first = await run();
+  const first = await run('--json');
   expect(first.exitCode, first.stderr).toBe(0);
   await waitForAsync(() => fs.existsSync(bindingFile(root)), 15000);
   const id = 'sess-e2e-started';
@@ -440,6 +467,42 @@ it('a re-run beside a child whose open finished reopens when the binding is gone
   const second = await run();
   expect(second.exitCode, second.stderr).toBe(0);
   expect(second.stderr).not.toMatch(/Waiting up to .* for the EAS Simulator session/);
+  expect(second.stdout).toContain(
+    `This project already had a dev server; this run bound EAS Simulator session ${id}.`
+  );
+  expect(second.stdout).not.toContain('nothing was started');
   expect(readBinding(root).device).toMatchObject({ id });
   expect(opens().map((i) => i.executedSessionId)).toEqual([id]);
+});
+it('a dev run renews the expired binding of a session that is still listed, and opens the app on it', async () => {
+  const root = await project();
+  await writeCloudBindingAsync(expoHome, root, { id: 'A', expiresAt: '2000-01-01T00:00:00.000Z' });
+  list([{ id: 'A' }]);
+  await writeCloudSessionFileAsync(root, 'A');
+  const result = await executeAgentCliAsync(
+    root,
+    ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+    {
+      env: {
+        ...envFor(root),
+        STUB_EXPO_DEV_SERVER_PORT: '8765',
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: '90000',
+        STUB_EXPO_TUNNEL_HOST: 'cloud.tunnel.example',
+        STUB_EXPO_TUNNEL_DELAY_MS: '100',
+      },
+      reject: false,
+    }
+  );
+  expect(result.exitCode, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout).eas).toMatchObject({ sessionId: 'A' });
+  await waitForAsync(() => readStubEasInvocations(root).some((i) => i.executedSessionId), 15000);
+  expect(
+    readStubEasInvocations(root)
+      .filter((i) => i.executedSessionId)
+      .map((i) => i.executedSessionId)
+  ).toEqual(['A']);
+  expect(stubEasArgs(root).map((args) => args[0])).not.toContain('simulator');
+  expect(readBinding(root).device).toMatchObject({ id: 'A' });
+  expect(Date.parse(readBinding(root).expiresAt)).toBeGreaterThan(Date.now());
 });

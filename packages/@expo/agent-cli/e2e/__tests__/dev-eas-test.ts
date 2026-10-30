@@ -594,7 +594,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   it('cleans up its EAS session when the dev server exits normally', async () => {
     const projectRoot = await setupAsync('go-app');
-    await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
       env: easRunEnv(projectRoot, 8589),
     });
     expect(easInvocationArgs(projectRoot)).toContainEqual([
@@ -604,6 +604,178 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       '--non-interactive',
     ]);
     expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
+    expect(result.stderr).toContain(
+      'Opened the app on EAS Simulator session sess-e2e-started, started by this run. Watch it at ' +
+        'https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/sess-e2e-started.'
+    );
+    expect(result.stderr).toContain('This run stops the session when the dev server exits');
+    expect(result.stderr).toContain('Stopped EAS Simulator session sess-e2e-started');
+  });
+
+  /** One foreground run that ends once the open has said what it did. */
+  async function foregroundOpenAsync(
+    projectRoot: string,
+    port: number,
+    { args = ['--ios'], env = {} }: { args?: string[]; env?: Record<string, string> } = {}
+  ) {
+    const result = await executeAgentCliAsync(projectRoot, ['dev', ...args, '--eas'], {
+      env: {
+        ...easRunEnv(projectRoot, port),
+        STUB_EXPO_DELAY_MS: '5000',
+        STUB_EXPO_TUNNEL_DELAY_MS: '50',
+        ...env,
+      },
+      reject: false,
+    });
+    const verbs = easInvocationArgs(projectRoot).map((args) => args[0]);
+    return { ...result, verbs };
+  }
+
+  // The open runs in the same process as the dev server, so what it could not do is said on stderr
+  // and the server stays up. Each row is one way the open ends without the app on a session.
+  it.each<{
+    port: number;
+    name: string;
+    args: string[];
+    env: Record<string, string>;
+    said: string[];
+    started: boolean;
+    bound?: boolean;
+  }>([
+    {
+      port: 8540,
+      name: 'a session of the other platform, which a second one would be refused beside',
+      args: ['--android'],
+      env: { STUB_SIM_SESSIONS: '1' },
+      said: [
+        'session sess-e2e is an iOS session',
+        'navigate / --eas --ios',
+        'dev --android --eas --detach',
+        'dev:stop --eas',
+      ],
+      started: false,
+    },
+    {
+      port: 8541,
+      name: 'a session of the other platform that is still queued',
+      args: ['--android'],
+      env: { STUB_SIM_SESSIONS: '1', STUB_SIM_STATUS: 'QUEUED' },
+      said: ['session sess-e2e is an iOS session'],
+      started: false,
+    },
+    {
+      port: 8542,
+      name: 'a session of this platform that is not up yet',
+      args: ['--ios'],
+      env: { STUB_SIM_SESSIONS: '1', STUB_SIM_STATUS: 'QUEUED' },
+      said: ['session sess-e2e is not up yet (status QUEUED); run this again in a minute'],
+      started: false,
+      // The session stays this worktree's, so a later run finds it instead of starting a second.
+      bound: true,
+    },
+    {
+      port: 8543,
+      name: 'a session list that cannot be read',
+      args: ['--ios'],
+      env: { STUB_SIM_GET_EXIT: '1', STUB_SIM_STDERR: 'Session not found' },
+      said: ['The app was not opened on an EAS Simulator session'],
+      started: false,
+    },
+    {
+      port: 8544,
+      name: 'a start that fails after the session was created, which bills until it is stopped',
+      args: ['--ios'],
+      env: { STUB_SIM_SESSIONS: '0', STUB_SIM_START_EXIT: '1', STUB_SIM_START_ID: 'billed' },
+      said: ['exited 1', 'simulator:stop --id billed'],
+      started: true,
+    },
+  ])(
+    'says why the app was not opened on $name',
+    async ({ port, args, env, said, started, bound = false }) => {
+      const projectRoot = await setupAsync('go-app');
+      if (env.STUB_SIM_SESSIONS === '1') await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+      const result = await foregroundOpenAsync(projectRoot, port, { args, env });
+
+      for (const text of said) {
+        expect(result.stderr).toContain(text);
+      }
+      expect(result.stderr).not.toContain('Opened the app on EAS Simulator session');
+      expect(result.verbs.filter((verb) => verb === 'simulator')).toHaveLength(started ? 1 : 0);
+      expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(bound);
+    }
+  );
+
+  // `--max-idle-time-minutes` is the one flag an older eas-cli may not know. Only a refusal before
+  // the session exists is retried: once the receipt is printed, a second start would bill again.
+  it.each<{
+    port: number;
+    name: string;
+    env: Record<string, string>;
+    starts: number;
+    opened: boolean;
+  }>([
+    {
+      port: 8545,
+      name: 'before a session was created, retries without it',
+      env: { STUB_SIM_START_REJECT_FLAG: '--max-idle-time-minutes' },
+      starts: 2,
+      opened: true,
+    },
+    {
+      port: 8546,
+      name: 'after a session was created, starts nothing more',
+      env: {
+        STUB_SIM_START_EXIT: '2',
+        STUB_SIM_START_STDERR: 'Nonexistent flag: --max-idle-time-minutes',
+      },
+      starts: 1,
+      opened: false,
+    },
+  ])('a start refused for the idle flag $name', async ({ port, env, starts, opened }) => {
+    const projectRoot = await setupAsync('go-app');
+    const result = await foregroundOpenAsync(projectRoot, port, { env });
+
+    const sent = easInvocationArgs(projectRoot).filter((args) => args[0] === 'simulator');
+    expect(sent).toHaveLength(starts);
+    expect(sent[0]).toContain('--max-idle-time-minutes');
+    if (starts === 2) expect(sent[1]).not.toContain('--max-idle-time-minutes');
+    expect(result.stderr.includes('Opened the app on EAS Simulator session')).toBe(opened);
+  });
+
+  it('starts and lists nothing when the binding of this worktree cannot be read', async () => {
+    const projectRoot = await setupAsync('go-app');
+    const file = sessionBindingFile(projectRoot);
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    await fs.promises.writeFile(file, 'garbage');
+
+    const result = await foregroundOpenAsync(projectRoot, 8547);
+
+    expect(result.stderr).toContain('cannot be read');
+    expect(result.verbs).not.toContain('simulator');
+    expect(result.verbs).not.toContain('simulator:list');
+  });
+
+  it('names the command that ends the session, and keeps its binding, when the stop fails', async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    const result = await foregroundOpenAsync(projectRoot, 8548, {
+      env: { STUB_SIM_STOP_EXIT: '1' },
+    });
+
+    expect(result.stderr).toContain('Could not stop EAS Simulator session sess-e2e-started: ');
+    expect(result.stderr).toContain('simulator:stop --id sess-e2e-started" ends it.');
+    expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(true);
+  });
+
+  it('starts and stops no session for a run that opens no app', async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    const result = await foregroundOpenAsync(projectRoot, 8549, { args: ['--ios', '--no-open'] });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.verbs).not.toContain('simulator');
+    expect(result.verbs).not.toContain('simulator:stop');
+    expect(result.stderr).not.toContain('Finishing EAS session work');
   });
 
   it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
