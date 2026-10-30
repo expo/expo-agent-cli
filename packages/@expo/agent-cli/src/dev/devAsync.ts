@@ -11,6 +11,7 @@ import {
   type DevicePlatform,
 } from '../deviceBinding';
 import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
+import { otherPlatformSessionError } from '../device/cloudErrors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { readDevServerLockAsync } from '../devLock/client';
 import type { DevServerLockInfo } from '../devLock/types';
@@ -49,7 +50,8 @@ import { executeDevPlanAsync, type ExecutedDevPlan } from './executeDevPlanAsync
 import { isDevServerStep, withDevice, withForwardedExpoArgs } from './forwardedArgs';
 import { recordLastDevRequest } from './lastRequest';
 import { resolvePlannedPortAsync } from './portCollision';
-import { type DevOptions } from './resolveOptions';
+import { otherPlatformSessionAsync } from './openAppEas';
+import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { devServerRunningStopAsync } from './runningDevServer';
 
@@ -110,6 +112,15 @@ async function devInRunAsync(
   if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
     await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
     owned?.signal.throwIfAborted();
+    const platform = easOpenPlatform(options);
+    const other = platform ? await otherPlatformSessionAsync(projectRoot, platform) : null;
+    owned?.signal.throwIfAborted();
+    if (platform && other)
+      throw otherPlatformSessionError(other.platform, {
+        wanted: platform,
+        sessionId: other.sessionId,
+        devServerRunning: false,
+      });
   }
   recordLastDevRequest(projectRoot, options, owned?.request);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.

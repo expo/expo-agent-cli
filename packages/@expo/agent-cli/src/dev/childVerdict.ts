@@ -149,6 +149,9 @@ export function isRelayedChildCode(code: string | null): code is string {
       'DEV_START_UNCERTAIN',
       'DEV_SERVER_RUNNING',
       'PORT_IN_USE',
+      'EAS_PROJECT_NOT_LINKED',
+      'EAS_PROJECT_CONFIG_UNREADABLE',
+      'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
     ].includes(code) ||
       code.startsWith('DEVICE_'))
   );
