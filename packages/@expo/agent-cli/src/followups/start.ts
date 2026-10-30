@@ -327,23 +327,29 @@ export function buildStartPlanFollowUps(
         ? requestedPlatform
         : defaultSmokePlatform(state.nativeDirs);
     return [
-      phase === 'finishing'
+      phase === 'building'
         ? {
             id: 'dev-server-running',
-            command: `${PROGRAM_PREFIX} dev:stop --eas`,
-            why: `This project's last dev run is finishing its EAS session start, so the plan has no steps. This waits for that start and stops the session.`,
+            command: `${PROGRAM_PREFIX} dev:logs`,
+            why: `This project's dev run is building before it serves on port ${port}, so the plan has no steps. This shows the build; "${PROGRAM_PREFIX} dev:stop" stops it.`,
           }
-        : phase === 'serving'
+        : phase === 'finishing'
           ? {
               id: 'dev-server-running',
-              command: `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`,
-              why: `This project's dev server is already running on port ${port}, so the plan has no steps. This checks its bundle and its app; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+              command: `${PROGRAM_PREFIX} dev:stop --eas`,
+              why: `This project's last dev run is finishing its EAS session start, so the plan has no steps. This waits for that start and stops the session.`,
             }
-          : {
-              id: 'dev-server-running',
-              command: `${PROGRAM_PREFIX} status`,
-              why: `This project's dev server is starting on port ${port}, so the plan has no steps. This says when it answers; "${PROGRAM_PREFIX} dev:stop" stops it.`,
-            },
+          : phase === 'serving'
+            ? {
+                id: 'dev-server-running',
+                command: `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`,
+                why: `This project's dev server is already running on port ${port}, so the plan has no steps. This checks its bundle and its app; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+              }
+            : {
+                id: 'dev-server-running',
+                command: `${PROGRAM_PREFIX} status`,
+                why: `This project's dev server is starting on port ${port}, so the plan has no steps. This says when it answers; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+              },
     ];
   }
 

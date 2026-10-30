@@ -132,6 +132,8 @@ function devServerPortState(devServerPort: DevServerPort): string {
         ? ', already running'
         : devServerPort.phase === 'finishing'
           ? ', finishing its EAS session start'
-          : ', still starting';
+          : devServerPort.phase === 'building'
+            ? ', building before it serves'
+            : ', still starting';
   }
 }

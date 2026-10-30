@@ -9,8 +9,9 @@ import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
-import type { DevServerLockHandle, DevServerLockInfo } from '../devLock/types';
+import type { DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
+import { interruptedError, takeBuildingLockAsync, type RunLock } from './runLock';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -621,9 +622,6 @@ interface PlanRun {
   serving: { index: number; args: string[] } | null;
 }
 
-/** The run's dev-server lock, once a step took it. */
-type RunLock = { lock: DevServerLockHandle | null };
-
 /**
  * Run the plan's steps under one dev-server lock, and release it when the run ends.
  *
@@ -637,10 +635,22 @@ async function executePlanAsync(
   options: DevOptions,
   acquired: AcquireResult | null
 ): Promise<PlanRun> {
-  const runLock: RunLock = { lock: null };
+  const runLock: RunLock = { lock: await takeBuildingLockAsync(projectRoot, plan) };
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
+  // reaches, and the run starts no later step.
+  let signal: NodeJS.Signals | null = null;
+  const onSignal = (received: NodeJS.Signals) => {
+    signal ??= received;
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
   try {
-    return await runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock);
+    return await runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, () => {
+      if (signal) throw interruptedError(signal);
+    });
   } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
     runLock.lock?.release();
   }
 }
@@ -652,7 +662,8 @@ async function runPlanStepsAsync(
   state: ProjectState,
   options: DevOptions,
   acquired: AcquireResult | null,
-  runLock: RunLock
+  runLock: RunLock,
+  assertNotInterrupted: () => void
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
@@ -674,6 +685,7 @@ async function runPlanStepsAsync(
   let serving: PlanRun['serving'] = null;
 
   for (const [index, step] of plan.steps.entries()) {
+    assertNotInterrupted();
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
     planEvent('start_plan_step', {
       id: step.id,

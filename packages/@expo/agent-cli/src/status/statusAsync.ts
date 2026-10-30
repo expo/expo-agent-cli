@@ -543,7 +543,13 @@ export async function collectStatusReportAsync(
               : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
       };
     }
-    if (ownLock?.phase === 'finishing') {
+    if (ownLock?.phase === 'building') {
+      report.next = {
+        ...devNext,
+        command: `${PROGRAM_PREFIX} dev:logs`,
+        why: `This project's dev run (pid ${ownLock.pid}) is building before it serves on port ${ownLock.port}. This shows the build; "${PROGRAM_PREFIX} dev:stop" stops the run.`,
+      };
+    } else if (ownLock?.phase === 'finishing') {
       report.next = {
         ...devNext,
         command: `${PROGRAM_PREFIX} dev:stop --eas`,
