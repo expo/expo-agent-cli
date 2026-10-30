@@ -628,7 +628,7 @@ async function reloadOwnTargetAsync(
       return { ...identity, outcome: 'context-replaced', reason: null };
     }
     if (provedOne.signal.aborted) {
-      return { ...identity, outcome: 'not-needed', reason: NOT_NEEDED };
+      return { ...identity, outcome: 'stopped', reason: STOPPED };
     }
     return {
       ...identity,
@@ -637,7 +637,7 @@ async function reloadOwnTargetAsync(
     };
   } catch (error: unknown) {
     return provedOne.signal.aborted
-      ? { ...identity, outcome: 'not-needed', reason: NOT_NEEDED }
+      ? { ...identity, outcome: 'stopped', reason: STOPPED }
       : {
           ...identity,
           outcome: 'not-delivered',
@@ -656,4 +656,4 @@ const UNPROVED = {
   TargetReloadOutcome['outcome']
 >;
 
-const NOT_NEEDED = 'another app of this worktree proved the reload first, so this check stopped';
+const STOPPED = 'another app of this worktree proved the reload first, so this check stopped';

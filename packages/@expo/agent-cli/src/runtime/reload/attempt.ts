@@ -11,7 +11,7 @@ export interface TargetReloadOutcome {
     | 'delivered-unproved'
     | 'context-replaced'
     /** The check stopped because another own target proved the reload first. */
-    | 'not-needed';
+    | 'stopped';
   reason: string | null;
 }
 

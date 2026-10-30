@@ -99,8 +99,8 @@ it('sends Page.reload to every own target at once, and the first proof stops the
     method: 'page-reload',
     outcomes: [
       { targetId: 'a', outcome: 'context-replaced' },
-      { targetId: 'b', outcome: 'not-needed' },
-      { targetId: 'c', outcome: 'not-needed' },
+      { targetId: 'b', outcome: 'stopped' },
+      { targetId: 'c', outcome: 'stopped' },
     ],
   });
   expect(outcome.attempt.reason).toMatch(/^"a" answered from a new JavaScript context/);
