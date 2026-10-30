@@ -90,7 +90,7 @@ export function parseSimulators(stdout: string): SimulatorEntry[] {
  * An entry without a udid or a name is skipped, so one bad entry does not hide the valid ones.
  */
 export function parseBootedIosSimulators(stdout: string): { udid: string; name: string }[] {
-  return parseBooted(stdout, (runtime) => runtime.includes('.iOS-'), true) ?? [];
+  return parseBooted(stdout, (runtime) => runtime.includes('.iOS-'))?.simulators ?? [];
 }
 
 /**
@@ -102,14 +102,15 @@ export function parseBootedIosSimulators(stdout: string): { udid: string; name: 
  * callers must not infer absence from it.
  */
 export function parseBootedSimulators(stdout: string): { udid: string; name: string }[] | null {
-  return parseBooted(stdout, () => true, false);
+  const listing = parseBooted(stdout, () => true);
+  return listing?.complete ? listing.simulators : null;
 }
 
+/** The valid entries, and whether every entry was valid; null for a listing that does not parse. */
 function parseBooted(
   stdout: string,
-  keepRuntime: (runtime: string) => boolean,
-  skipBadEntries: boolean
-): { udid: string; name: string }[] | null {
+  keepRuntime: (runtime: string) => boolean
+): { simulators: { udid: string; name: string }[]; complete: boolean } | null {
   let parsed: { devices?: Record<string, { udid?: string; name?: string }[]> };
   try {
     parsed = JSON.parse(stdout);
@@ -127,6 +128,7 @@ function parseBooted(
   }
 
   const simulators: { udid: string; name: string }[] = [];
+  let complete = true;
   for (const [runtime, devices] of Object.entries(parsed.devices)) {
     if (!keepRuntime(runtime)) continue;
     if (!Array.isArray(devices)) return null;
@@ -137,13 +139,13 @@ function parseBooted(
         typeof device.name !== 'string' ||
         !device.name
       ) {
-        if (skipBadEntries) continue;
-        return null;
+        complete = false;
+        continue;
       }
       simulators.push({ udid: device.udid, name: device.name });
     }
   }
-  return simulators;
+  return { simulators, complete };
 }
 
 /**
