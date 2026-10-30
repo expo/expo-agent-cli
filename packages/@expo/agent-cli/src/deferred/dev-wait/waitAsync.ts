@@ -103,7 +103,11 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   const { platforms: bundlePlatforms, source: bundlePlatformSource } = options.platformExplicit
     ? { platforms: [options.platform], source: 'flag' as const }
     : await resolveBundleCheckPlatformsAsync(targetSelection, discovery.targets, {
-        deviceInventory: await deviceInventoryForSelectionAsync(discovery.targets, targetSelection),
+        deviceInventory: await deviceInventoryForSelectionAsync(
+          discovery.targets,
+          targetSelection,
+          null
+        ),
         fallback: options.platform,
       });
 
