@@ -496,15 +496,6 @@ const REPORT_KEYS = [
   'followups',
 ];
 
-/** The events a run wrote to its `LOG_EVENTS` file; `_e` names each one. */
-function readEvents(eventsFile: string): Record<string, unknown>[] {
-  return fs
-    .readFileSync(eventsFile, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-}
-
 function statusEvent(eventsFile: string): Record<string, unknown> | undefined {
   return readEvents(eventsFile).find((entry) => entry._e === 'cli:status');
 }
@@ -2129,7 +2120,7 @@ describe('@expo/agent-cli status', () => {
     ])('looks at no files %s', async (_case, runEnv, dropRecord) => {
       const projectRoot = await setupCommittedAsync();
       if (dropRecord) {
-        await fs.promises.rm(path.join(projectRoot, '.expo', 'agent-cli-last-build.json'));
+        await fs.promises.rm(lastBuildFilePath(projectRoot));
       }
       await fs.promises.writeFile(
         path.join(projectRoot, 'metro.config.js'),
