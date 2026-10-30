@@ -13,7 +13,7 @@ export interface IosInventory {
 export type IosChoice =
   | { kind: 'reuse'; binding: Binding; listed: SimulatorEntry }
   | { kind: 'ios-create'; runtime: string; deviceType: string; name: string }
-  | { kind: 'refuse'; reason: 'no-ios-runtime' | 'not-reusable' };
+  | { kind: 'refuse'; reason: 'no-ios-runtime' };
 
 /** The name of a created simulator, so a leaked one shows whose it was. Never identity. */
 export function createdSimulatorName(digest: string): string {
@@ -30,12 +30,11 @@ export function createdSimulatorName(digest: string): string {
 export function chooseIosDevice({
   own,
   inventory,
-  reuseOnly,
+
   digest,
 }: {
   own: Binding | null;
   inventory: IosInventory;
-  reuseOnly: boolean;
   digest: string;
 }): IosChoice {
   const ownUdid = own?.device.backend === 'local-ios' ? own.device.udid : null;
@@ -44,9 +43,6 @@ export function chooseIosDevice({
   const listed = inventory.simulators.find((entry) => entry.udid === ownUdid && entry.isAvailable);
   if (own != null && listed != null) {
     return { kind: 'reuse', binding: own, listed };
-  }
-  if (reuseOnly) {
-    return { kind: 'refuse', reason: 'not-reusable' };
   }
   const runtime = inventory.newestIosRuntime;
   if (runtime == null) {
@@ -80,7 +76,7 @@ export interface BoundSerial {
 export type AndroidChoice =
   | { kind: 'reuse'; binding: Binding }
   | { kind: 'android-spawn'; port: number; avd: string }
-  | { kind: 'refuse'; reason: 'no-avd' | 'no-free-port' | 'not-reusable'; boundBy?: BoundSerial[] };
+  | { kind: 'refuse'; reason: 'no-avd' | 'no-free-port'; boundBy?: BoundSerial[] };
 
 /** Console ports of emulator instances: even, 5554 first, 5584 last. */
 export const FIRST_CONSOLE_PORT = 5554;
@@ -103,22 +99,18 @@ export function chooseAndroidDevice({
   own,
   ownPresent,
   inventory,
-  reuseOnly,
+
   busyPorts,
   boundBy,
 }: {
   own: Binding | null;
   ownPresent: boolean;
   inventory: AndroidInventory;
-  reuseOnly: boolean;
   busyPorts: Set<number>;
   boundBy: BoundSerial[];
 }): AndroidChoice {
   if (own != null && ownPresent) {
     return { kind: 'reuse', binding: own };
-  }
-  if (reuseOnly) {
-    return { kind: 'refuse', reason: 'not-reusable' };
   }
   if (inventory.avd == null) {
     return { kind: 'refuse', reason: 'no-avd' };
