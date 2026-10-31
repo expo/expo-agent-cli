@@ -10,6 +10,8 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
+import { detachedPidLine } from '../../src/dev/childVerdict';
+
 import {
   androidBindingFixture,
   BOOTED_SIMULATOR,
@@ -585,7 +587,7 @@ describe('@expo/agent-cli status', () => {
             await fs.promises.mkdir(logDir, { recursive: true });
             await fs.promises.writeFile(
               path.join(logDir, 'dev-detached.log'),
-              `Detached dev run, pid ${process.pid}.\n`
+              `${detachedPidLine(process.pid)}\n`
             );
             return {
               release: await holdDevLockAsync(projectRoot, {
@@ -608,7 +610,7 @@ describe('@expo/agent-cli status', () => {
             await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
             return {};
           },
-          next: () => ({ command: expect.stringMatching(new RegExp(`^${dev} `)), why: null }),
+          next: (port) => ({ command: `${dev} --port ${port} --detach --wait-ready`, why: null }),
         },
         {
           name: 'removes a binding file that does not parse',
@@ -633,8 +635,8 @@ describe('@expo/agent-cli status', () => {
               : androidBindingFixture(projectRoot, 'emulator-5554'));
             return {};
           },
-          next: () => ({
-            command: expect.stringMatching(new RegExp(`^npx @expo/agent-cli dev --${other} `)),
+          next: (port) => ({
+            command: `npx @expo/agent-cli dev --${other} --port ${port} --detach --wait-ready`,
             why: null,
           }),
         },
