@@ -374,18 +374,29 @@ describe('@expo/agent-cli runtime:reload', () => {
           targets: [EXPO_GO_TARGET],
           reloadTargets,
         });
-        const releaseLock = await holdLockForAsync(projectRoot, stub);
 
         try {
+          // This table tests reload evidence; the stub's known URL avoids discovery's short
+          // probe deadline when the CI worker serving it is busy.
           const result = await executeAgentCliAsync(
             projectRoot,
-            ['runtime:reload', '--method', 'dev-server', '--timeout', '2s', '--json'],
+            [
+              'runtime:reload',
+              '--dev-server-url',
+              stub.url,
+              '--method',
+              'dev-server',
+              '--timeout',
+              '2s',
+              '--json',
+            ],
             { env: stubExpoEnv(projectRoot), reject: false }
           );
 
           const report = JSON.parse(result.stdout);
+          expect(result.exitCode, result.all).toBe(reloadTargets === 'reconnect' ? 0 : 22);
           // `reloaded` is exactly "a label was earned", so the two can never disagree.
-          expect(report.reloaded).toBe(report.verifiedBy != null);
+          expect(report.reloaded, result.all).toBe(report.verifiedBy != null);
           const evidence: Record<string, number> = {
             'message-socket-peers': report.commandSocketChurn.reconnected,
             'fresh-debugger-target': report.appsReconnected,
@@ -405,7 +416,6 @@ describe('@expo/agent-cli runtime:reload', () => {
             expect(report.appsReconnectedReason).toBeNull();
           }
         } finally {
-          releaseLock();
           await stub.close();
         }
       }
