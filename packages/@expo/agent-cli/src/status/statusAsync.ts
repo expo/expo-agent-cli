@@ -486,7 +486,10 @@ export async function collectStatusReportAsync(
         : undefined;
     // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
     const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    if (expiredSession) {
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+    // The bare install outranks every device next below: each of them runs `dev`, which stops first.
+    const installFirst = report.next.rule === 'dependencies-not-installed';
+    if (expiredSession && !installFirst) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
         ...devNext,
@@ -494,6 +497,7 @@ export async function collectStatusReportAsync(
         why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
       };
     } else if (
+      !installFirst &&
       state.isExpoApp &&
       platform !== 'web' &&
       'value' in binding &&

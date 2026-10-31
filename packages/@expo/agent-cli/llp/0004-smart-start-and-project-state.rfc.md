@@ -36,6 +36,7 @@ The project-state probe reads:
 | State                                                    | Plan                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------- |
 | Not an Expo app (no `expo` dependency)                   | nothing. no steps                                       |
+| `expo` declared, not installed                           | nothing. no steps. the bare `install` first             |
 | Expo Go compatible, Go installed                         | start Metro, then open in Expo Go                       |
 | Dev client installed, fingerprint matches last build     | start Metro, then open the dev client                   |
 | Fingerprint matches, and the device has not got the app  | install the built app, then start Metro                 |
@@ -216,9 +217,56 @@ Try: npx @expo/agent-cli new my-app
 `cd` is not a command this CLI can name. `npx @expo/agent-cli install expo` writes into
 a repository the caller most likely only walked past, so it stays in the `How:` prose.
 
-Pinned in `e2e/__tests__/project-shapes-test.ts`. The last row of that file is an app
-whose dependencies are not installed being planned for normally. A guard that read
-`node_modules` would refuse every freshly cloned Expo app.
+Pinned in `e2e/__tests__/project-shapes-test.ts`. An app whose dependencies are not
+installed is never refused as `NOT_EXPO_APP`. A guard that read `node_modules` would
+call every freshly cloned Expo app "not an Expo app". That app gets the next section's
+answer instead.
+
+## Dependencies not installed
+
+An Expo app whose `expo` package does not resolve, from the project root or any
+directory above it, has no installed dependencies. A fresh clone or a new git worktree
+is in this state.
+
+The plan reads its facts from `node_modules`. `usesDevClient` is an installed
+`expo-dev-client`, and the fingerprint needs `@expo/fingerprint`. Without them the
+table sees "no dev client" and "no fingerprint". It then plans
+`expo install expo-dev-client` and a new native build, which the project may not need.
+On `--eas` that build costs EAS time.
+
+The decision table reads this state from the probe: `sdkVersion` comes from the installed
+`expo`, so a declared `expo` with a null SDK is this state. Its row sits under
+`not-expo-app` and above every other row:
+
+```
+dependencies-not-installed → target: none, steps: [], buildLocation: null
+```
+
+| Command                | When the dependencies are not installed                                  |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `dev`, `dev --plan`    | stop with `DEPENDENCIES_NOT_INSTALLED`, exit 1, before the probe or plan |
+| `status`               | reports. The first line says so; `next` is the bare install              |
+| `install` (no package) | installs the lockfile (llp/0010 §Forwarded codes)                        |
+| `install <package>`    | stop with `DEPENDENCIES_NOT_INSTALLED`, Try line is the bare install     |
+
+The `Try:` line of each stop, and the `next` of `status`, is:
+
+```
+npx @expo/agent-cli install
+```
+
+`status` prints this first line, above the sections that it explains:
+
+```
+Dependencies are not installed: run `npx @expo/agent-cli install`
+```
+
+Its `next.rule` is `dependencies-not-installed`, with no steps and no build location. No
+device or EAS session `next` replaces it, because each of those runs `dev`. `install
+--help` shows the bare form in its usage line and its first example.
+
+Pinned in `e2e/__tests__/project-shapes-test.ts`, §an Expo app whose dependencies are not
+installed.
 
 ## Plan contract
 
