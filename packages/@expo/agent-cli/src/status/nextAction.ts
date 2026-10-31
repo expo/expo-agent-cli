@@ -88,8 +88,6 @@ export interface NextActionFacts {
   devBuildScheme: string | null;
   /** Null when the binding registry could not be read. */
   bindings: BindingSummary[] | null;
-  /** The cloud rows of `bindings`, split by {@link cloudBindings}. */
-  sessions: ReturnType<typeof cloudBindings>;
   ownServer: DevServerLockInfo | null;
   request: LastDevRequest | null;
   deviceBackend: DeviceBackend;
@@ -107,13 +105,13 @@ export function chooseNextAction({
   device,
   devBuildScheme,
   bindings,
-  sessions: { cloud, expiredCloud },
   ownServer,
   request,
   deviceBackend,
   plan,
   host,
 }: NextActionFacts): NextActionStatus {
+  const { cloud, expiredCloud } = cloudBindings(bindings ?? []);
   const cloudPlatform =
     (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null;
   const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;

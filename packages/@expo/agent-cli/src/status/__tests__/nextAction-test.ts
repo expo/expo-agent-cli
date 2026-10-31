@@ -6,7 +6,6 @@ import { PROGRAM_PREFIX } from '../../programName';
 import type { ProjectState, StartPlan } from '../../project/types';
 import {
   chooseNextAction,
-  cloudBindings,
   resolveNextTarget,
   type NextActionFacts,
   type NextActionHost,
@@ -91,10 +90,7 @@ const unbound = (platform: string) => `No ${platform} device is bound to this wo
 const restart = (platform: string) =>
   `${unbound(platform)} The running dev server must restart to bind one.`;
 
-type Facts = Omit<
-  NextTargetFacts & NextActionFacts,
-  'host' | 'bindings' | 'sessions' | 'recoveryPort'
-> & {
+type Facts = Omit<NextTargetFacts & NextActionFacts, 'host' | 'bindings' | 'recoveryPort'> & {
   bindings: BindingSummary[] | null;
 };
 
@@ -469,7 +465,6 @@ describe(chooseNextAction, () => {
       ...input,
       platform,
       recoveryPort,
-      sessions: cloudBindings(input.bindings ?? []),
       plan: editPlan ? editPlan(plan) : plan,
       host: { ...host, ...hostOverrides },
     });
