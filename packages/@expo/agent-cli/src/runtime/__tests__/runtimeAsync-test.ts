@@ -11,6 +11,8 @@ import { runtimeErrorsAsync, runtimeEvalAsync } from '../runtimeAsync';
 import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
 import { UNTRUSTED_OUTPUT_BEGIN } from '../untrusted';
 import { EVERY_TARGET_CLIENT } from './targetSelectionFixtures';
+import { printed } from '../../utils/__tests__/printed';
+import { mockDevServer } from './fakeDevServer';
 
 // The real error class and the real code are kept: the command branches on both.
 vi.mock('../cdpClient', async () => ({
@@ -22,16 +24,6 @@ vi.mock('../runtimeErrorCollector', () => ({ CdpRuntimeErrorCollector: vi.fn() }
 const devServerUrl = 'http://127.0.0.1:8081';
 
 const TARGET = { id: '1', appId: 'host.exp.Exponent', webSocketDebuggerUrl: 'ws://debugger' };
-
-/** Answer `GET /json/list` with the given targets, or make the dev server unreachable. */
-function mockDevServer(targets: unknown[] | null) {
-  globalThis.fetch = (async () => {
-    if (targets == null) {
-      throw new Error('fetch failed');
-    }
-    return { ok: true, json: async () => targets };
-  }) as unknown as typeof fetch;
-}
 
 function mockEvaluate(implementation: () => Promise<any>) {
   const evaluateAsync = vi.fn(implementation);
@@ -47,10 +39,6 @@ function mockCollect(implementation: () => Promise<any>) {
     return { collectAsync } as any;
   });
   return collectAsync;
-}
-
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
 }
 
 let originalFetch: typeof fetch | undefined;
@@ -564,7 +552,7 @@ describe(`${runtimeErrorsAsync.name} on a runtime with no debugger`, () => {
 
     await expect(runtimeErrorsAsync({ ...errorsOptions, failOnError: true })).resolves.toBe(22);
 
-    expect(complaints.mock.calls.flat().join('\n')).toContain('has nothing to judge');
+    expect(printed(complaints)).toContain('has nothing to judge');
   });
 
   it(`reports the runtime as unreadable in the machine shape`, async () => {

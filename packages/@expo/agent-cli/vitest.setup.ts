@@ -1,6 +1,6 @@
 import Module from 'node:module';
 import path from 'node:path';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 import { resetInvokerCache } from './src/utils/invoker';
 
@@ -27,6 +27,12 @@ delete process.env.npm_execpath;
 // Setup and `new` sync the Expo docs, and `fetch` is not mocked: no unit test may reach the network.
 process.env.AGENT_CLI_NO_DOCS_SYNC = '1';
 resetInvokerCache();
+
+// A test pins `process.platform` with `mockPlatform` or `Object.defineProperty`; it need not restore it.
+const realPlatform = process.platform;
+afterEach(() => {
+  Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+});
 
 vi.mock('fs', () => fsMock);
 vi.mock('node:fs', () => fsMock);

@@ -1,37 +1,8 @@
-import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
 import { buildStopAppCommand, looksLikeNotRunning, stopAppOnDeviceAsync } from '../appProcess';
-
-interface SpawnAnswer {
-  stdout?: string;
-  stderr?: string;
-  exitCode?: number;
-}
-
-/** Answer each `spawn` with the next answer in turn; the last one answers every later spawn. */
-function mockSpawn(...answers: SpawnAnswer[]) {
-  let call = 0;
-  vi.mocked(spawn).mockImplementation((() => {
-    const {
-      stdout = '',
-      stderr = '',
-      exitCode = 0,
-    } = answers[Math.min(call++, answers.length - 1)]!;
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (stdout) child.stdout.emit('data', stdout);
-      if (stderr) child.stderr.emit('data', stderr);
-      child.emit('close', exitCode, null);
-    });
-    return child as any;
-  }) as any);
-}
+import { mockSpawnAlways, mockSpawnQueue } from '../../utils/__tests__/fakeSpawn';
 
 describe(buildStopAppCommand, () => {
   it(`should terminate the app on an iOS simulator`, () => {
@@ -55,14 +26,14 @@ describe(stopAppOnDeviceAsync, () => {
   const params = { platform: 'ios' as const, deviceId: 'UDID', appId: 'host.exp.Exponent' };
 
   it(`should report the app stopped`, async () => {
-    mockSpawn({ exitCode: 0 });
+    mockSpawnAlways({ exitCode: 0 });
     await expect(stopAppOnDeviceAsync(params)).resolves.toMatchObject({ ok: true, reason: null });
   });
 
   // `simctl terminate` exits non-zero for an app that was not running, which is the state this
   // command exists to reach. Reading it as a failure would abandon a reload that had already won.
   it(`should treat "it was not running" as the state it was aiming for`, async () => {
-    mockSpawn({
+    mockSpawnAlways({
       exitCode: 4,
       stderr:
         'An error was encountered processing the command (domain=FBSOpenApplicationServiceErrorDomain, code=4):\nfound nothing to terminate',
@@ -71,7 +42,7 @@ describe(stopAppOnDeviceAsync, () => {
   });
 
   it(`should report a device tool that failed for another reason`, async () => {
-    mockSpawn({ exitCode: 1, stderr: 'Invalid device: NOPE' });
+    mockSpawnAlways({ exitCode: 1, stderr: 'Invalid device: NOPE' });
     await expect(stopAppOnDeviceAsync(params)).resolves.toMatchObject({
       ok: false,
       reason: 'Invalid device: NOPE',
@@ -98,53 +69,26 @@ describe('what an Android stop can establish about the app it stopped', () => {
     appId: 'host.exp.exponent',
   };
 
-  /** Answer successive `spawn` calls in order, and record the argv of each. */
-  function mockSpawnSequence(
-    answers: { stdout?: string; stderr?: string; exitCode?: number }[]
-  ): string[][] {
-    const calls: string[][] = [];
-    let next = 0;
-    vi.mocked(spawn).mockImplementation(((bin: string, args: string[]) => {
-      calls.push([bin, ...args]);
-      const { stdout = '', stderr = '', exitCode = 0 } = answers[next++] ?? {};
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => {
-        if (stdout) child.stdout.emit('data', stdout);
-        if (stderr) child.stderr.emit('data', stderr);
-        child.emit('close', exitCode, null);
-      });
-      return child as any;
-    }) as any);
-    return calls;
-  }
-
   it(`asks the device whether the app was running, and says it was`, async () => {
-    const calls = mockSpawnSequence([{ stdout: '3933\n', exitCode: 0 }, { exitCode: 0 }]);
+    const calls = mockSpawnQueue([{ stdout: '3933\n', exitCode: 0 }, { exitCode: 0 }]);
 
     await expect(stopAppOnDeviceAsync(android)).resolves.toMatchObject({
       ok: true,
       verified: true,
       wasAlreadyStopped: false,
     });
-    expect(calls[0]).toEqual([
-      process.platform === 'win32' ? 'adb.exe' : 'adb',
-      '-s',
-      'emulator-5554',
-      'shell',
-      'pidof',
-      `'host.exp.exponent'`,
-    ]);
-    expect(calls[1]).toContain('force-stop');
+    expect(calls[0]).toEqual({
+      command: process.platform === 'win32' ? 'adb.exe' : 'adb',
+      args: ['-s', 'emulator-5554', 'shell', 'pidof', `'host.exp.exponent'`],
+    });
+    expect(calls[1]!.args).toContain('force-stop');
   });
 
   // `pidof` exits 1 with nothing on stdout for a package that is not running — and for one that is
   // not installed, which is the state F101 produced. Both are "nothing was stopped", and reporting
   // them as a stop that happened is the claim this closes.
   it(`says the app was already stopped when nothing answered to that id`, async () => {
-    mockSpawnSequence([{ exitCode: 1 }, { exitCode: 0 }]);
+    mockSpawnQueue([{ exitCode: 1 }, { exitCode: 0 }]);
 
     await expect(stopAppOnDeviceAsync(android)).resolves.toMatchObject({
       ok: true,
@@ -154,7 +98,7 @@ describe('what an Android stop can establish about the app it stopped', () => {
   });
 
   it(`claims nothing when pidof itself could not run`, async () => {
-    mockSpawnSequence([
+    mockSpawnQueue([
       { exitCode: 127, stderr: '/system/bin/sh: pidof: inaccessible or not found' },
       { exitCode: 0 },
     ]);
@@ -211,7 +155,7 @@ describe('stopping the app on a cloud simulator session', () => {
 
   it(`reports the verb as having run when the controller closed the app`, async () => {
     cloudProject();
-    mockSpawn({
+    mockSpawnAlways({
       stdout: '{"success":true,"data":{"session":"default","message":"Closed: default"}}',
     });
 
@@ -227,7 +171,7 @@ describe('stopping the app on a cloud simulator session', () => {
   // as one.
   it(`never claims the answer was about this application id`, async () => {
     cloudProject();
-    mockSpawn({
+    mockSpawnAlways({
       stdout: '{"success":true,"data":{"session":"default","message":"Closed: default"}}',
     });
 
@@ -242,7 +186,7 @@ describe('stopping the app on a cloud simulator session', () => {
   // backend).
   it(`reports a failure with what the tool printed`, async () => {
     cloudProject();
-    mockSpawn({ exitCode: 1, stderr: 'Remote daemon is unavailable' });
+    mockSpawnAlways({ exitCode: 1, stderr: 'Remote daemon is unavailable' });
 
     await expect(stopAppOnDeviceAsync(cloudParams)).resolves.toMatchObject({
       ok: false,
@@ -254,7 +198,7 @@ describe('stopping the app on a cloud simulator session', () => {
   // The controller's own wording, which the live run gave: `Error (CODE): sentence`.
   it(`quotes the controller's own refusal when it gave one`, async () => {
     cloudProject();
-    mockSpawn({
+    mockSpawnAlways({
       exitCode: 1,
       stderr: 'Error (SESSION_NOT_FOUND): No active session. Run open first.',
     });
@@ -300,12 +244,12 @@ describe('stopping the app on a cloud simulator session', () => {
     `asks the controller once more only after a close timeout: %s`,
     async (_, answers, ok, closes) => {
       cloudProject();
-      mockSpawn(...answers);
+      const calls = mockSpawnQueue(answers);
 
       const result = await stopAppOnDeviceAsync({ ...cloudParams, platform: 'android' });
 
       expect(result.ok).toBe(ok);
-      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(closes);
+      expect(calls).toHaveLength(closes);
     }
   );
 
@@ -354,7 +298,7 @@ describe('Quoting the application id for the device shell', () => {
   });
 
   it('should quote the app id of the Android liveness probe', async () => {
-    mockSpawn({ stdout: '' });
+    const calls = mockSpawnAlways({ stdout: '' });
 
     await stopAppOnDeviceAsync({
       platform: 'android',
@@ -362,7 +306,12 @@ describe('Quoting the application id for the device shell', () => {
       appId: 'com.x;toybox id;#',
     });
 
-    const probe = vi.mocked(spawn).mock.calls[0]?.[1] as string[];
-    expect(probe).toEqual(['-s', 'emulator-5554', 'shell', 'pidof', `'com.x;toybox id;#'`]);
+    expect(calls[0]?.args).toEqual([
+      '-s',
+      'emulator-5554',
+      'shell',
+      'pidof',
+      `'com.x;toybox id;#'`,
+    ]);
   });
 });

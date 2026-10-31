@@ -1,33 +1,6 @@
-import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
-
 import type { AdbResolution } from '../../device/adb';
 import { buildReverseCommand, loopbackPortOfUrl, reverseLoopbackPortAsync } from '../adbReverse';
-
-/** Answer every `spawn` call with the queued stdout and exit code. */
-function mockSpawnQueue(answers: { stdout?: string; stderr?: string; exitCode?: number | null }[]) {
-  const calls: { command: string; args: string[] }[] = [];
-  let call = 0;
-  vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
-    calls.push({ command, args });
-    const answer = answers[call++] ?? {};
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (answer.stdout) {
-        child.stdout.emit('data', answer.stdout);
-      }
-      if (answer.stderr) {
-        child.stderr.emit('data', answer.stderr);
-      }
-      child.emit('close', answer.exitCode ?? 0, null);
-    });
-    return child as any;
-  }) as any);
-  return calls;
-}
+import { mockSpawnQueue } from '../../utils/__tests__/fakeSpawn';
 
 const ADB: AdbResolution = {
   bin: '/sdk/platform-tools/adb',

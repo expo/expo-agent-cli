@@ -9,14 +9,7 @@ import {
   withConfiguredDevice,
 } from '../resolveOptions';
 import { parseAgentCliSettings } from '../../settings/parse';
-
-const realPlatform = process.platform;
-
-afterEach(() => Object.defineProperty(process, 'platform', { value: realPlatform }));
-
-function onPlatform(platform: string) {
-  Object.defineProperty(process, 'platform', { value: platform });
-}
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 describe(resolveSmokeOptions, () => {
   it(`defaults to bootstrapping, watching for three seconds, and taking a picture`, () => {
@@ -119,8 +112,8 @@ describe(resolveSmokeOptions, () => {
 
   // And the host is not consulted on the way to that refusal, whichever host it is: the same
   // message on a Mac and on Linux.
-  it.each(['darwin', 'linux', 'win32'])(`refuses it on %s too`, (host) => {
-    onPlatform(host);
+  it.each(['darwin', 'linux', 'win32'] as const)(`refuses it on %s too`, (host) => {
+    mockPlatform(host);
     expect(() => resolveSmokeOptions([])).toThrow(/Missing platform/);
   });
 

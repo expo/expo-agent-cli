@@ -8,12 +8,12 @@ import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
 import { buildSmokeTargetSelection } from '../targetSelection';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 vi.mock('../../log');
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
 const servers: Server[] = [];
 
 function target(overrides: Partial<CdpTarget> = {}): CdpTarget {
@@ -42,14 +42,13 @@ async function serverAsync(targets: () => CdpTarget[]): Promise<string> {
 }
 
 beforeEach(() => {
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   vol.reset();
   vol.fromJSON({ '/project/package.json': '{"dependencies":{"expo":"57.0.0"}}' });
   vi.stubEnv('AGENT_CLI_NO_DEVICE', '');
 });
 
 afterEach(async () => {
-  Object.defineProperty(process, 'platform', { value: realPlatform });
   vi.unstubAllEnvs();
   vi.resetAllMocks();
   for (const server of servers.splice(0)) {

@@ -15,6 +15,7 @@ import {
   type DevServerReadiness,
 } from '../sections';
 import type { DevServerStatus, FreshnessStatus, LocalDeviceStatus, PlatformBuild } from '../types';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const projectRoot = '/project';
 
@@ -31,16 +32,6 @@ function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
     ...overrides,
   };
 }
-
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
-
-afterEach(() => {
-  mockPlatform(realPlatform);
-});
 
 describe(buildProjectStatus, () => {
   it(`should report the package name, the SDK version and a CNG project`, () => {
