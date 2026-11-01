@@ -3,6 +3,7 @@ import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
+import { hostPlatform } from '../../smoke/suggest';
 import {
   buildFollowUps,
   devStopAsync,
@@ -14,6 +15,7 @@ import { vol } from 'memfs';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { readCloudBindings } from '../../deviceBinding/cloud';
 import { bindingPathFor } from '../../deviceBinding/registry';
+import { localBackendOf } from '../../deviceBinding/types';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import type { DevServerLockInfo } from '../../devLock/types';
@@ -776,15 +778,32 @@ describe(buildFollowUps, () => {
     shutDown: false,
     reason: null,
   });
+  const local = (platform: 'ios' | 'android', released: boolean | null) => ({
+    backend: localBackendOf(platform),
+    platform,
+    id: 'dev-1',
+    name: 'dev-1',
+    released,
+    shutDown: false,
+    reason: null,
+  });
 
   it.each<[string, Partial<DevStopResultJson>, string[], string | null | undefined, boolean?]>([
     [
       'a kept cloud session, on its platform',
       { devices: [cloud(null)] },
       ['stop-session', 'dev'],
-      '--android',
+      '--android --eas',
     ],
-    ['a released cloud session', { devices: [cloud(true)] }, ['dev'], '--android'],
+    ['a released cloud session', { devices: [cloud(true)] }, ['dev'], '--android --eas'],
+    ['a kept local Android emulator', { devices: [local('android', null)] }, ['dev'], '--android'],
+    ['a released local iOS simulator', { devices: [local('ios', true)] }, ['dev'], '--ios'],
+    [
+      'local devices on both platforms',
+      { devices: [local('android', null), local('ios', null)] },
+      ['dev'],
+      `--${hostPlatform()}`,
+    ],
     [
       'nothing running and a kept cloud session',
       { stopped: false, reason: 'not-running', devices: [cloud(null)] },
@@ -807,7 +826,7 @@ describe(buildFollowUps, () => {
       "the probe's session stopped, on its platform",
       { devices: [], session: { id: 'A', stopped: true, reason: null, platform: 'android' } },
       ['dev'],
-      '--android',
+      '--android --eas',
     ],
     [
       'nothing running and this run stopped the session',
@@ -818,14 +837,14 @@ describe(buildFollowUps, () => {
         session: { id: 's', stopped: true, reason: null, platform: 'ios' },
       },
       ['dev'],
-      '--ios',
+      '--ios --eas',
     ],
     ['a live pid of a run with no EAS platform', { processStillRunning: true }, ['dev'], undefined],
     [
       'a finishing dev --eas process, on its EAS platform',
       { processStillRunning: true, easPlatform: 'android' },
       ['stop-session', 'dev'],
-      '--android',
+      '--android --eas',
       true,
     ],
     [
@@ -846,7 +865,7 @@ describe(buildFollowUps, () => {
     if (finishing && ids[0] === 'stop-session') expect(followups[0]!.why).toContain('pid 1234');
     if (platformFlag !== undefined) {
       expect(followups.find((f) => f.id === 'dev')?.command ?? null).toBe(
-        platformFlag && `${PROGRAM_PREFIX} dev ${platformFlag} --eas`
+        platformFlag && `${PROGRAM_PREFIX} dev ${platformFlag}`
       );
     }
   });
