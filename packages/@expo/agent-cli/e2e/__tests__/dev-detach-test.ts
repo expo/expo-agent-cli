@@ -440,7 +440,7 @@ describe('@expo/agent-cli dev --detach', () => {
           ['run:ios', '--port', String(report.port)],
         ]);
         // Said once, by the plan, and not again by the step it moved.
-        const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+        const log = await fs.promises.readFile(report.logFile, 'utf8');
         expect(log.split('Port 8081 is busy; the dev server uses').length).toBe(2);
       } finally {
         await cleanUpAsync(projectRoot);
