@@ -254,14 +254,6 @@ it('does not wait for a verdict when the child is alive but the bundler stopped 
 });
 
 describe('readiness belongs to this worktree', () => {
-  const initialLock = {
-    ...lockInfo(),
-    url: 'http://127.0.0.1:8393',
-    port: 8393,
-    pid: 4242,
-    projectRoot,
-    startedAt: new Date(0).toISOString(),
-  };
   const foreign = {
     ...readiness(),
     projectRootMatched: false,
@@ -678,7 +670,7 @@ describe('the EAS session under --wait-ready', () => {
     expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-kept' } });
   });
 
-  it('stops the wait when the open finished and no binding is live, and says the same command reopens', async () => {
+  it('stops the wait when the open finished and no binding is live, and requires a restart', async () => {
     setTimeout(
       () => vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...lock, easOpenFinished: true }),
       2_000
@@ -691,7 +683,7 @@ describe('the EAS session under --wait-ready', () => {
     expect(error).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING', exitCode: 22 });
     expect(Date.now()).toBeLessThan(10_000);
     expect(error.message).toContain('already returned without a session binding');
-    expect(error.message).toContain('reopens');
+    expect(error.message).toContain('dev:stop');
     expect(error.message).not.toContain('keeps going');
   });
 
@@ -705,7 +697,7 @@ describe('the EAS session under --wait-ready', () => {
       exitCode: 22,
       data: { pid: 4242, url: lock.url, tunnelUrl: tunnel.url, platform: 'ios' },
     });
-    expect(error.suggestedCommand).toMatch(/dev --ios .*--eas.*--wait-ready/);
+    expect(error.suggestedCommand).toContain('dev:logs');
     expect(error.message).toContain('dev:stop --eas');
     expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
     expect(Date.now()).toBeGreaterThanOrEqual(180_000);
@@ -721,7 +713,7 @@ describe('the EAS session under --wait-ready', () => {
     expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
   });
 
-  it('does not wait without --wait-ready, and the Session row says what waits for it', async () => {
+  it('does not wait without --wait-ready, and the Session row points to startup logs', async () => {
     const result = start(['--ios', '--eas', '--detach']);
     await vi.runAllTimersAsync();
 
@@ -732,6 +724,6 @@ describe('the EAS session under --wait-ready', () => {
       .mock.calls.map(([text]) => String(text))
       .join('\n');
     expect(printed).toMatch(/Session\s+not bound yet/);
-    expect(printed).toContain('dev --ios --eas --detach --wait-ready');
+    expect(printed).toContain('dev:logs');
   });
 });
