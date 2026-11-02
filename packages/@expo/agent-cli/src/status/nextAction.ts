@@ -249,23 +249,24 @@ export function chooseNextAction({
             : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`)),
     };
   }
-  // Any remaining bare start would be refused while this project holds its server lock,
-  // including a live device binding beside Metro that no longer answers.
-  if (ownServer && next.command.startsWith(`${PROGRAM_PREFIX} dev `)) {
-    next = pendingSession
-      ? {
-          ...next,
-          command: `${PROGRAM_PREFIX} dev:logs`,
-          steps: [],
-          why: 'The EAS session is still starting. Read its logs and check status again.',
-        }
-      : {
-          ...next,
-          command: `${stopFirst}${next.command}`,
-          why: `${next.why} Stop the owned dev-server process before starting another run.`,
-        };
-  }
-  return next;
+  return ownServer ? ownedServerNext(next, !!pendingSession) : next;
+}
+
+/** Bare starts are refused while an own lock exists, even with a live device binding. */
+function ownedServerNext(next: NextActionStatus, pendingSession: boolean): NextActionStatus {
+  if (!next.command.startsWith(`${PROGRAM_PREFIX} dev `)) return next;
+  return pendingSession
+    ? {
+        ...next,
+        command: `${PROGRAM_PREFIX} dev:logs`,
+        steps: [],
+        why: 'The EAS session is still starting. Read its logs and check status again.',
+      }
+    : {
+        ...next,
+        command: `${PROGRAM_PREFIX} dev:stop && ${next.command}`,
+        why: `${next.why} Stop the owned dev-server process before starting another run.`,
+      };
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */
