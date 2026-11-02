@@ -483,15 +483,15 @@ export async function killAsync(
 
 /** Poll a condition until it becomes true, or the timeout expires. Returns the last result. */
 export async function waitForAsync(
-  check: () => boolean,
+  check: () => boolean | Promise<boolean>,
   timeoutMs: number,
   intervalMs = 100
 ): Promise<boolean> {
   const endTime = Date.now() + timeoutMs;
-  while (!check() && Date.now() < endTime) {
+  while (!(await check()) && Date.now() < endTime) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  return check();
+  return await check();
 }
 
 /** Relative path of the file that caches the selected agents between runs. */
