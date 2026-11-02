@@ -196,13 +196,8 @@ export function chooseNextAction({
   const ownServer = servingLock(ownLock);
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
   const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
-  const { devArgs, devCommand } = devRerun(
-    platform,
-    request,
-    port,
-    devNext,
-    !!(easServer || expiredSession)
-  );
+  const eas = !!(easServer || expiredSession);
+  const { devArgs, devCommand } = devRerun(platform, request, port, devNext, eas);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
       platform === 'web'
