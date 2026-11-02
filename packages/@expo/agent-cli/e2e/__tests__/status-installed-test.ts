@@ -8,9 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { killProcessTree } from '../../src/utils/processGroup';
+import { writeCloudBindingAsync } from '../stubEas';
 import {
   collectOutput,
   executeAgentCliAsync,
+  expoHomeOf,
   installStubFingerprintAsync,
   lastBuildFilePath,
   setupFixtureAsync,
@@ -310,6 +312,35 @@ describe('@expo/agent-cli status, the installed section', () => {
     });
     expect(installedReads(adb.calls())).toEqual([]);
   });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding — the check reads local devices,
+  // so a platform whose app runs on a recorded EAS session was not checked; an expired lease names
+  // the command that binds a session again.
+  it.each([
+    ['a live', new Date(Date.now() + 3_600_000).toISOString(), []],
+    [
+      'an expired',
+      '2020-01-01T00:00:00.000Z',
+      ['npx @expo/agent-cli dev --android --eas --detach --wait-ready'],
+    ],
+  ])(
+    'marks no-device as not checked beside %s EAS session binding',
+    async (_case, expiresAt, commands) => {
+      await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
+        id: 'sess-1',
+        platform: 'android',
+        expiresAt,
+      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--json', '--device', 'Nobody'],
+        { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
+      );
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'android')).toMatchObject({ reason: 'cloud-session', commands });
+    }
+  );
 
   // The harness default, which every other status e2e runs under: a plain `status` on a developer's
   // Mac must not read that Mac's devices (llp/0002 §Tier 0).
