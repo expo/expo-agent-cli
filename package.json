@@ -8,10 +8,15 @@
     "packages/@expo/agent-cli/evals/fixtures/real-app"
   ],
   "scripts": {
+    "build": "bun run --filter @expo/agent-cli build",
     "bundle": "bun run --filter expo-agent-cli bundle",
+    "check": "bun run format:check && bun run --filter @expo/agent-cli typecheck && bun run --filter @expo/agent-cli lint && bun run test",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "bun test scripts packages/expo-agent-cli && bun run --filter @expo/agent-cli test"
+    "test": "bun run test:repo && bun run test:cli",
+    "test:repo": "bun test scripts packages/expo-agent-cli",
+    "test:cli": "bun run --filter @expo/agent-cli test",
+    "test:e2e": "bun run build && bun run --filter @expo/agent-cli test:e2e"
   },
   "devDependencies": {
     "oxfmt": "^0.66.0",

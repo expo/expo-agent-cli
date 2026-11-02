@@ -37,6 +37,12 @@ These rules apply to new code and new tests. Do not rewrite old code or old test
 - **Test both platforms.** When a change touches behavior that runs on iOS and Android, test it on both. A pass on one platform proves nothing about the other.
 - **Check the EAS path on EAS.** A change to the EAS path is proven only by a real EAS Simulator session; the stub `eas` of the e2e tier cannot prove it. A session bills credits from the moment it starts (`llp/0015` §Who may spend EAS credits), so start one only when the local or stub suites cannot answer the question, on the `expo-ci` login, through the opt-ins: `AGENT_CLI_LIVE_EAS=1 AGENT_CLI_LIVE_CLOUD=1 bun run test:live:cloud` from this package after `bun run build`, or a `dev --<platform> --eas` the person chose. CI bills four cloud sessions on every PR push (`.eas/workflows/agent-cli-cloud-e2e.yml`); read that run before you start another. Stop the session before you finish: `dev:stop --eas`, or the suite's `afterAll`. A start that failed still needs `eas simulator:stop --id`.
 - **Keep files small.** In new work, do not grow a file past about 1000 lines. A file that is already larger can stay as it is for now; do not split it as part of an unrelated change.
+- As you work, proactively suggest improvements that make the codebase easier for agents to
+  navigate and reason about, even when no feature or bug requires them. Look for unclear module
+  boundaries, hidden assumptions, names that suggest the wrong behavior or guarantees, scattered
+  knowledge, or unnecessary complexity. Include documentation and tooling improvements when they
+  reduce that friction. Explain what is hard to understand and the smallest useful improvement.
+  Keep suggestions brief and unrelated changes out of the current diff.
 
 ## Pull requests
 
@@ -49,4 +55,4 @@ These rules apply to new code and new tests. Do not rewrite old code or old test
 
 `oxfmt` owns the formatting of this repo, from `.oxfmtrc.json` at the root. Run `bun run format` before you commit; CI fails on `bun run format:check`. It covers the whole repo — code, JSON and Markdown — so run it from the root, not from a package.
 
-Key constraints (from `llp/0001`): invoke the Expo CLI family (`expo`, `eas-cli`, `expo-doctor`, `fingerprint`, `create-expo`) as subprocesses. Never import `@expo/cli` internals. Ship no model and no API keys (Shape 1). Testing first, per `llp/0002`. The kernel is `llp/foundation/`. Work in play is `llp/current/`.
+Key constraints (from `llp/0001`): invoke the Expo CLI family (`expo`, `eas-cli`, `expo-doctor`, `fingerprint`, `create-expo`) as subprocesses. Never import `@expo/cli` internals. Ship no model and no API keys (Shape 1). Testing first, per `llp/0002`. The kernel is `llp/foundation/`. Use the index and status headers to find work in play; `llp/current/` is optional.

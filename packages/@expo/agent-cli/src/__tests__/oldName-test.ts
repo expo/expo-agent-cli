@@ -27,6 +27,7 @@
 // deletion cannot quietly leave the allowlist pointing at nothing.
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -61,10 +62,15 @@ const PACKAGE_ROOT = path.resolve(__dirname, '../..');
  */
 const SKIPPED_DIRECTORIES = new Set(['build', '.artifacts']);
 
-/** Every file under `root`, relative to the package. */
-function filesUnder(root: string): string[] {
+/** Every file under `root`, relative to the package, without entering nested Git checkouts. */
+function filesUnder(root: string, packageRoot = PACKAGE_ROOT): string[] {
   const found: string[] = [];
   const walk = (directory: string): void => {
+    // Agent worktrees can live below src/. A .git file marks a worktree; a .git directory marks
+    // another repository. Neither belongs to this package, including its installed dependencies.
+    if (fs.existsSync(path.join(directory, '.git'))) {
+      return;
+    }
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) {
@@ -72,11 +78,11 @@ function filesUnder(root: string): string[] {
           walk(full);
         }
       } else if (entry.isFile()) {
-        found.push(path.relative(PACKAGE_ROOT, full));
+        found.push(path.relative(packageRoot, full));
       }
     }
   };
-  walk(path.join(PACKAGE_ROOT, root));
+  walk(path.join(packageRoot, root));
   return found.sort();
 }
 
@@ -115,6 +121,32 @@ function scan(roots: string[]): string[] {
 }
 
 describe('the old name', () => {
+  it('scans fixture dependencies but leaves nested repositories and worktrees alone', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-name-scan-'));
+    try {
+      const files = {
+        'src/command.ts': '',
+        'src/node_modules/stub/index.js': '',
+        'src/.claude/worktrees/task/.git': 'gitdir: /another/checkout',
+        'src/.claude/worktrees/task/src/command.ts': OLD_NAME,
+        'src/vendor/repo/.git/config': '',
+        'src/vendor/repo/src/command.ts': OLD_NAME,
+      };
+      for (const [file, text] of Object.entries(files)) {
+        const target = path.join(root, file);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, text);
+      }
+
+      expect(filesUnder('src', root)).toEqual([
+        path.join('src', 'command.ts'),
+        path.join('src', 'node_modules', 'stub', 'index.js'),
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // A grep that reads nothing reports nothing, and a walk that silently stops — a renamed
   // directory, a skip rule that grew too wide — would turn this whole suite green by accident.
   // Floors, not exact counts: they grow with the package and only a collapse is the failure.
