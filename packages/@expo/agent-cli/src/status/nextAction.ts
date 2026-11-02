@@ -193,20 +193,13 @@ export function chooseNextAction({
   const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > host.now);
   const expiredSession =
     cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
-  const backend =
-    easServer || expiredSession
-      ? 'eas'
-      : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
   const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
-  const devArgs = [
-    ...(backend ? [`--${backend}`] : []),
-    ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-    ...(port != null ? ['--port', String(port)] : []),
-  ];
-  const devCommand = rerunDevCommand(
+  const { devArgs, devCommand } = devRerun(
     platform,
-    devArgs,
-    backend === 'eas' ? undefined : request?.device
+    request,
+    port,
+    devNext,
+    !!(easServer || expiredSession)
   );
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
@@ -262,4 +255,28 @@ export function chooseNextAction({
     };
   }
   return next;
+}
+
+/** The `dev` re-run that keeps the saved request's flags and the recovery port. */
+function devRerun(
+  platform: PlanPlatform,
+  request: LastDevRequest | null,
+  recoveryPort: number | null,
+  devNext: NextActionStatus,
+  eas: boolean
+): { backend: string | null; devArgs: string[]; devCommand: string } {
+  const backend = eas
+    ? 'eas'
+    : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
+  const devArgs = [
+    ...(backend ? [`--${backend}`] : []),
+    ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
+    ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
+  ];
+  const devCommand = rerunDevCommand(
+    platform,
+    devArgs,
+    backend === 'eas' ? undefined : request?.device
+  );
+  return { backend, devArgs, devCommand };
 }
