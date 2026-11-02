@@ -3,9 +3,64 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
 import { detachedRunFixture } from '../detachedRunFixture';
-import { readDevLockAsync, waitForAsync } from '../utils';
+import { detachedBarrierFixture } from '../detachedBarrierFixture';
+import { executeAgentCliAsync, readDevLockAsync, waitForAsync } from '../utils';
 
 // @ref llp/0036-detached-run-ownership.rfc.md
+it('death after publication but before work requires explicit discard', async () => {
+  const f = await detachedBarrierFixture();
+  try {
+    const first = f.start({ DETACH_TEST_CLAIM_BARRIER: '1' });
+    expect(await waitForAsync(() => f.marks('claimed').length === 1, 15_000)).toBe(true);
+    process.kill(Number(f.marks('claimed')[0]!.slice('claimed-'.length)), 'SIGKILL');
+    await first.result;
+    const refused = await f.start().result;
+    expect(refused.exitCode, refused.all).toBe(20);
+    const error = JSON.parse(refused.stdout).error;
+    expect(error.code).toBe('DEV_START_UNCERTAIN');
+    expect(f.marks('blocked')).toHaveLength(0);
+    const args = error.suggestedCommand.split(' ').slice(2);
+    const discarded = await executeAgentCliAsync(f.root, [...args, '--json']);
+    expect(discarded.exitCode, discarded.all).toBe(0);
+    f.release();
+    const started = await f.start().result;
+    expect(started.exitCode, started.all).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it.skipIf(process.platform !== 'win32')(
+  'a failed Windows tree stop retains ownership',
+  async () => {
+    const f = await detachedRunFixture();
+    try {
+      const started = await f.start();
+      expect(started.exitCode, started.all).toBe(0);
+      const owner = JSON.parse(started.stdout);
+      const failed = await executeAgentCliAsync(
+        f.root,
+        ['dev:stop', '--timeout', '200ms', '--json'],
+        {
+          reject: false,
+          env: { SystemRoot: path.join(f.root, 'missing-system-root') },
+        }
+      );
+      expect(failed.exitCode, failed.all).toBe(20);
+      expect(JSON.parse(failed.stdout)).toMatchObject({
+        stopped: false,
+        processStillRunning: true,
+      });
+      const id = path.basename(owner.logFile).slice('dev-detached-'.length, -'.log'.length);
+      const discarded = await f.run(['dev:stop', '--discard-run', id, '--json']);
+      expect(discarded.exitCode, discarded.all).toBe(20);
+      expect(JSON.parse(discarded.stdout).error.code).toBe('DEV_START_BUSY');
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
 it.skipIf(process.platform === 'win32')(
   'a crashed detached run names an explicit discard command and can be restarted',
   async () => {
