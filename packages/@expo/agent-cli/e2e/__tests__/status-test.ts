@@ -600,8 +600,8 @@ describe('@expo/agent-cli status', () => {
             };
           },
           next: () => ({
-            command: `${dev} --eas --detach --wait-ready`,
-            why: `The dev server's EAS Simulator session for ${platform} is starting. This command waits for it, or reopens the app on the running Metro. No restart is needed.`,
+            command: `npx @expo/agent-cli dev:logs`,
+            why: `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`,
           }),
         },
         {
