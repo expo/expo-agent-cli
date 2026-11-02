@@ -25,7 +25,7 @@ The upstream Expo CLI (`npx expo <command>`) lives in the `expo/expo` repository
 
 - Documents live in `llp/`, named `NNNN-slug.type.md`. They keep that path for life. Status lives in the header, not in a folder.
 - `llp/foundation/` is the kernel: the smallest set from which the design could be recreated. Links only.
-- `llp/current/` is the work in play. Links only. Empty means the corpus is collapsed: every living document is the v1 design of record.
+- `llp/current/`, when present, links to work in play. Otherwise use each document's status header.
 - New documents start as `Draft`. They reach `Active` when the design ships and settles. Status values, and what each promises, are in §Status convention below.
 - Claims are tagged `[observed]`, `[confirmed]`, or `[inferred]`. An Active document should not carry `[inferred]`: confirm the claim or drop the brainstorm.
 - Code annotated with `@ref llp/NNNN-...` comments points back to its governing document.
@@ -66,6 +66,14 @@ What the CLI does:
 - [[0018-interaction-commands]]: driving the app by testID.
 - [[0023-fingerprint-caching]]: paying for one fingerprint instead of three.
 - [[0029-feedback]]: feedback submission with the standalone CLI's request contract.
+- [[0030-local-docs]]: local Expo documentation, SDK selection, and search.
+
+Development sessions and device ownership:
+
+- [[0025-dev-requires-platform]]: explicit platform selection and `--no-open`.
+- [[0026-dev-owns-the-open]]: opening the app after starting the development server.
+- [[0027-everything-on-eas]]: cloud builds, tunnels, simulator sessions, and cleanup.
+- [[0035-one-device-per-worktree]]: local and EAS device bindings, leases, and lifecycle.
 
 How every command behaves:
 
