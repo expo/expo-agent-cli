@@ -298,14 +298,14 @@ it.skipIf(process.platform !== 'darwin')(
   }
 );
 
-it.each(['live', 'dead-executing', 'unreadable', 'dead-claimed'])(
+it.each(['live', 'dead-during-work', 'unreadable', 'dead-before-work'])(
   'status respects pre-publication ownership: %s',
   async (state) => {
     const f = await fixture();
     try {
-      const recoverable = state === 'dead-claimed';
-      const first = f.start(recoverable ? { DETACH_TEST_CLAIM_BARRIER: '1' } : {});
-      const mark = recoverable ? 'claimed' : 'blocked';
+      const beforeWork = state === 'dead-before-work';
+      const first = f.start(beforeWork ? { DETACH_TEST_CLAIM_BARRIER: '1' } : {});
+      const mark = beforeWork ? 'claimed' : 'blocked';
       expect(await waitForAsync(() => f.marks(mark).length === 1, 15_000)).toBe(true);
       const pid = Number(f.marks(mark)[0]!.slice(mark.length + 1));
       if (state.startsWith('dead-')) {
@@ -318,8 +318,9 @@ it.each(['live', 'dead-executing', 'unreadable', 'dead-claimed'])(
       }
       const status = await executeAgentCliAsync(f.root, ['status', '--json']);
       const next = JSON.parse(status.stdout).next;
-      if (recoverable) {
-        expect(next.command).toContain(' dev --');
+      if (state.startsWith('dead-')) {
+        expect(next.command).toContain('dev:stop --discard-run ');
+        await executeAgentCliAsync(f.root, [...next.command.split(' ').slice(2), '--json']);
         f.release();
         expect((await f.start().result).exitCode).toBe(0);
       } else {
