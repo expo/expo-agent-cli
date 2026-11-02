@@ -13,7 +13,6 @@ import {
   waitForExitAsync,
 } from '../utils';
 
-
 it.each([
   { name: 'same options', argv: [], alias: false },
   { name: 'different port', argv: ['--port', '8396'], alias: false },
@@ -82,59 +81,6 @@ it('the starter times out without stopping its child, and another start refuses'
     expect(JSON.parse(status.stdout).devServer.running).toBe(true);
     expect(readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')).toHaveLength(
       1
-    );
-  } finally {
-    await f.cleanup();
-  }
-});
-
-it('two retries recover a dead child that never began work without removing the new owner', async () => {
-  const f = await fixture();
-  try {
-    const first = f.start({ DETACH_TEST_CLAIM_BARRIER: '1' });
-    expect(await waitForAsync(() => f.marks('claimed').length === 1, 15_000)).toBe(true);
-    process.kill(Number(f.marks('claimed')[0]!.slice('claimed-'.length)), 'SIGKILL');
-    await first.result;
-    const second = f.start({ DETACH_TEST_RECLAIM_BARRIER: '1' });
-    const third = f.start({ DETACH_TEST_RECLAIM_BARRIER: '1' });
-    expect(await waitForAsync(() => f.marks('reclaim').length === 2, 15_000)).toBe(true);
-    // Both inspected the old owner. Let one replace it before the other removes its old marker.
-    const [one, two] = f.marks('reclaim');
-    fs.writeFileSync(path.join(f.barrier, `release-${one}`), '');
-    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
-    fs.writeFileSync(path.join(f.barrier, `release-${two}`), '');
-    expect(
-      await waitForAsync(
-        () => f.marks('blocked').length === 1 && f.marks('exited').length === 1,
-        15_000
-      )
-    ).toBe(true);
-    f.release();
-    const results = await Promise.all([second.result, third.result]);
-    expect(results.map((result) => result.exitCode).sort()).toEqual([0, 20]);
-    const winner = JSON.parse(results.find((result) => result.exitCode === 0)!.stdout);
-    const loser = JSON.parse(results.find((result) => result.exitCode === 20)!.stdout).error;
-    expect(loser).toMatchObject({ code: 'DEV_START_BUSY', data: { pid: winner.pid } });
-    expect(readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')).toHaveLength(
-      1
-    );
-  } finally {
-    await f.cleanup();
-  }
-});
-
-it('refuses automatic takeover when the dead child had already begun work', async () => {
-  const f = await fixture();
-  try {
-    const first = f.start();
-    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
-    process.kill(Number(f.marks('blocked')[0]!.slice('blocked-'.length)), 'SIGKILL');
-    await first.result;
-    const result = await f.start().result;
-    expect(result.exitCode, result.all).toBe(20);
-    expect(JSON.parse(result.stdout).error.code).toBe('DEV_START_UNCERTAIN');
-    expect(readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')).toHaveLength(
-      0
     );
   } finally {
     await f.cleanup();

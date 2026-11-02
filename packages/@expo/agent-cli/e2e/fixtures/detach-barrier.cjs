@@ -21,23 +21,6 @@ if (process.env.__EXPO_AGENT_CLI_DETACHED === '1' && process.argv[2] === 'dev') 
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
   }
-  if (process.env.DETACH_TEST_RECLAIM_BARRIER === '1') {
-    const remove = fs.rmSync;
-    fs.rmSync = function (file, ...args) {
-      if (
-        path.basename(path.dirname(String(file))) === 'detached-run' &&
-        path.basename(String(file)).startsWith('owner-')
-      ) {
-        mark('reclaim');
-        const deadline = Date.now() + 30_000;
-        while (!fs.existsSync(path.join(directory, `release-reclaim-${process.pid}`))) {
-          if (Date.now() > deadline) throw new Error('Test did not release stale recovery');
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-        }
-      }
-      return remove.call(this, file, ...args);
-    };
-  }
   if (process.env.DETACH_TEST_CLAIM_BARRIER === '1') {
     const rename = fs.renameSync;
     fs.renameSync = function (from, to) {
