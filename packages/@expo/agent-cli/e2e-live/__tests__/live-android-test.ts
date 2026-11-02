@@ -506,7 +506,11 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
     // moving this run's log aside rather than by starting a second dev server, and restored after —
     // the file is the only difference between the two states, and `readDetachedLogSync` is what reads
     // it. @ref llp/0005 §runtime:errors.
-    const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+    const logs = await runLiveAsync(run, projectRoot, ['dev:logs', '--json'], {
+      label: 'selected-detached-log',
+    });
+    const logFile = parseJson(logs).logFile;
+    expect(typeof logFile).toBe('string');
     const parked = `${logFile}.parked`;
     fs.renameSync(logFile, parked);
     try {
