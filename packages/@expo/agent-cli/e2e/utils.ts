@@ -524,7 +524,7 @@ export type DevLockInfo = {
   startedAt: string;
   projectRoot: string;
   /** The platform of the EAS Simulator session a `dev --eas` server runs. */
-  easPlatform?: 'ios' | 'android';
+  easPlatform?: 'ios' | 'android' | null;
 };
 
 /**
