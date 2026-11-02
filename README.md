@@ -9,7 +9,7 @@ Monorepo for Expo's agent CLI.
 
 ## Development
 
-CI uses Bun 1.3.14 and Node.js 24. From the repository root:
+From the repository root:
 
 ```sh
 bun install --frozen-lockfile
