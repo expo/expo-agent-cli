@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { lockAddressFor } from '../devLock/address';
 import { canonicalizeExistingPath } from '../utils/dir';
-import type { CommandError } from '../utils/errors';
+import { CommandError } from '../utils/errors';
 import { exchangeAttemptAsync, listenAttemptAsync, type AttemptControl } from './detachedProtocol';
 import { classifyDetachedStart, detachedStartError, ownershipError } from './detachedStart';
 import type {
@@ -188,6 +188,31 @@ export async function cancelDetachedRunAsync(
 export async function readDetachedRunWarning(root: string): Promise<CommandError | null> {
   const refusal = classifyDetachedStart(await observeDetachedRunAsync(root));
   return refusal ? detachedStartError(refusal) : null;
+}
+
+export async function discardDetachedRunAsync(root: string, id: string): Promise<boolean> {
+  if (!ATTEMPT_ID.test(id)) throw new CommandError('BAD_ARGS', '--discard-run requires an attempt ID.');
+  const evidence = readEvidence(root);
+  if ('kind' in evidence) {
+    if (evidence.kind === 'none') return false;
+    throw ownershipError('The startup record cannot be verified; it was retained.');
+  }
+  if (evidence.attempt.id !== id) return false;
+  if (!evidence.endpoint) throw ownershipError('The recorded startup endpoint is unknown; its record was retained.');
+  const result = await exchangeAttemptAsync(evidence.endpoint, id);
+  if (result.connection !== 'absent') throw ownershipError(
+    `Attempt ${id} has a ${result.connection === 'live' ? 'live' : 'possibly live'} owner; its record was retained.`,
+    result.connection === 'live' ? 'DEV_START_BUSY' : 'DEV_START_UNCERTAIN'
+  );
+  removeAttempt(root, id);
+  return true;
+}
+
+export function captureDetachedRun(root: string, pid: number): { id: string; release: () => void } | null {
+  const evidence = readEvidence(root);
+  if ('kind' in evidence || !evidence.valid || evidence.attempt.pid !== pid) return null;
+  const id = evidence.attempt.id;
+  return { id, release: () => removeAttempt(root, id) };
 }
 
 export async function acquireDetachedRunAsync(

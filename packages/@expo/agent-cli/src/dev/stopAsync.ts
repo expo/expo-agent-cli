@@ -49,7 +49,12 @@ import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
 import { env } from '../utils/env';
 import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { debugEvent, event } from './events';
-import { prepareDetachedTreeStop } from './detachedRun';
+import {
+  captureDetachedRun,
+  discardDetachedRunAsync,
+  discardRunCommand,
+  readDetachedRunWarning,
+} from './detachedOwnership';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
 import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
@@ -76,6 +81,8 @@ import type { DevStopOptions } from './resolveStopOptions';
 export type DevStopSkipReason =
   /** Nothing was running: no lock answered and nothing listens on the port. */
   | 'not-running'
+  | 'ownership-retained'
+  | 'record-discarded'
   /** Something listens, but no lock proves this project's ownership of it. */
   | 'foreign-dev-server'
   /** The signal was sent and the dev server was still there when the wait ran out. */
@@ -108,6 +115,10 @@ export type DevStopForceRefusal =
  * every key always present, and a fact the run does not have is null.
  */
 export interface DevStopResultJson extends Partial<StoppedDevices> {
+  /** Explicit record discard, independent of process termination. */
+  discardedRun?: string | null;
+  /** Necessary recovery even when optional follow-ups are disabled. */
+  recoveryCommand?: string | null;
   /** A dev server was running and is not running now. */
   stopped: boolean;
   /** PID that was signalled, or the listener's PID when one was found but not signalled. */
@@ -183,7 +194,7 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   portStillAnswering: boolean | null;
   /** Why nothing was stopped. Null exactly when {@link stopped} is true. */
   reason: DevStopSkipReason | null;
-  /** One sentence of detail for {@link reason}. Null exactly when {@link stopped} is true. */
+  /** Detail for the outcome, including surviving-work warnings after force termination. */
   detail: string | null;
   /**
    * No lock answered, and the dev server is the one a killed run left: the run's record names the
@@ -228,6 +239,19 @@ export async function devStopAsync(
   { print = true, onReport }: DevStopReportOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
+  if (options.discardRun != null) {
+    const removed = await discardDetachedRunAsync(projectRoot, options.discardRun);
+    const report = unlockedReport(null, startedAt);
+    report.discardedRun = removed ? options.discardRun : null;
+    report.reason = removed ? 'record-discarded' : 'not-running';
+    report.detail = `${removed ? 'Discarded' : 'No record remains for'} attempt ${options.discardRun}. No processes were stopped and no EAS sessions or devices were released.`;
+    onReport?.(report);
+    if (print) {
+      if (options.json) Log.log(JSON.stringify(report, null, 2));
+      else Log.log(report.detail);
+    }
+    return EXIT_OK;
+  }
   const lock = await readDevServerLockAsync(projectRoot);
 
   // `--port` names the target, and a lock is only evidence about the port it holds.
@@ -252,6 +276,15 @@ export async function devStopAsync(
           report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
           finishing: false,
         };
+
+  if (!lock && report.reason === 'not-running') {
+    const warning = await readDetachedRunWarning(projectRoot);
+    if (warning) {
+      report.reason = 'ownership-retained';
+      report.detail = warning.message;
+      report.recoveryCommand = warning.suggestedCommand ?? null;
+    }
+  }
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
@@ -333,6 +366,8 @@ async function stopLockedDevServerAsync(
   startedAt: number
 ): Promise<{ report: DevStopResultJson; finishing: boolean }> {
   const base: DevStopResultJson = {
+    discardedRun: null,
+    recoveryCommand: null,
     stopped: false,
     pid: lock.pid,
     port: lock.port,
@@ -365,9 +400,7 @@ async function stopLockedDevServerAsync(
   // A signal that cannot be delivered is not a failure to stop: a lock answering for a pid that
   // is gone is the one case the socket cannot produce on its own, but a lock held by a *different*
   // user's process can, and `ESRCH` there means the thing is already not running.
-  // Windows kills the whole tree without running the child's finally block.
-  const releaseDetachedRun =
-    process.platform === 'win32' ? prepareDetachedTreeStop(lock.projectRoot, lock.pid) : () => {};
+  const capturedRun = captureDetachedRun(lock.projectRoot, lock.pid);
   const sent = await signalProcessAsync(lock.pid, options.signal);
   base.signal = sent.delivered ? options.signal : null;
   debugEvent('stop_signalled', { pid: lock.pid, signal: options.signal, ok: sent.delivered });
@@ -380,7 +413,14 @@ async function stopLockedDevServerAsync(
 
   // The two facts that are about the thing this command signalled. The port is not one of them.
   if (outcome.processGone && outcome.lockGone) {
-    if (sent.delivered) releaseDetachedRun();
+    if (sent.delivered && capturedRun) {
+      if (process.platform === 'win32') {
+        capturedRun.release();
+      } else if (options.signal === 'SIGKILL') {
+        base.detail = `Forced stop of pid ${lock.pid}; processes in other groups may still be running on port ${lock.port}. The ownership record was retained. Discard only that record with "${discardRunCommand(capturedRun.id)}".`;
+        base.recoveryCommand = discardRunCommand(capturedRun.id);
+      }
+    }
     base.stopped = true;
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a stop that ends the
     // holder without its cleanup (Windows `taskkill /F`) leaves its record; this stop ends it.
@@ -408,6 +448,8 @@ async function stopLockedDevServerAsync(
 /** A report of the unlocked path before anything was looked at: nothing ran, nothing was sent. */
 function unlockedReport(port: number | null, startedAt: number): DevStopResultJson {
   return {
+    discardedRun: null,
+    recoveryCommand: null,
     stopped: false,
     pid: null,
     port,
@@ -665,6 +707,14 @@ export function looksLikeDevServerProcess(listener: PortListener): boolean {
  * and it binds the session its start returns after this report.
  */
 export function buildFollowUps(report: DevStopResultJson, finishing = false): FollowUp[] {
+  if (report.recoveryCommand)
+    return [
+      {
+        id: 'discard-run',
+        command: report.recoveryCommand,
+        why: 'The interrupted record still blocks startup. Discarding it stops no processes or EAS sessions.',
+      },
+    ];
   const cloudRows = report.devices?.filter((d) => d.backend === 'cloud') ?? [];
   const kept = keptSessionFollowUp(report, cloudRows, finishing);
   const keptSession = kept ? [kept] : [];
@@ -825,6 +875,8 @@ function printHumanReport(report: DevStopResultJson, finishing: boolean): void {
 
 /** The what / why / how for a dev server that is still running. */
 function explainFailure(report: DevStopResultJson, options: DevStopOptions): string {
+  if (report.reason === 'ownership-retained')
+    return report.detail ?? 'Detached ownership was retained.';
   if (report.reason === 'foreign-dev-server') {
     // `url` is set on this path exactly when the port answered `packager-status:running`, which is
     // the difference between "someone else's dev server" and "not a dev server at all". They need

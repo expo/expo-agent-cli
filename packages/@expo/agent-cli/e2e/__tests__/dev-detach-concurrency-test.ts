@@ -13,7 +13,6 @@ import {
   waitForExitAsync,
 } from '../utils';
 
-
 it.each([
   { name: 'same options', argv: [], alias: false },
   { name: 'different port', argv: ['--port', '8396'], alias: false },
@@ -281,4 +280,3 @@ it('stopping and starting again selects a new log without changing the previous 
     await f.cleanup();
   }
 });
-

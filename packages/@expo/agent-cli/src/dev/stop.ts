@@ -10,6 +10,7 @@ export const devStopHelp: CommandHelp = {
   command: 'dev:stop',
   usage: `${PROGRAM_PREFIX} dev:stop`,
   options: [
+    `--discard-run <id>    Discard an interrupted run's record without stopping any processes`,
     `--release             Release this worktree’s devices after its dev server stops`,
     `--eas                 Also end this project's EAS Simulator session (bills until stopped)`,
     `--port <port>         Look at this port when no lock answers for the project`,
@@ -63,9 +64,12 @@ export const devStopHelp: CommandHelp = {
       'deviceError',
       'waitedMs',
       'followups',
+      'discardedRun',
+      'recoveryCommand',
     ],
   },
   notes: [
+    `--discard-run refuses a live or uncertain owner. Surviving processes and EAS sessions are left running.`,
     `Devices stay bound by default. --release parks created simulators and ends spawned emulators.`,
     `${PROGRAM_PREFIX} stop is this same command. It stops the DEV SERVER; stopping the app`,
     `on the device is "${PROGRAM_PREFIX} runtime:stop", which is a different thing to stop.`,
