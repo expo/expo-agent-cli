@@ -80,6 +80,7 @@ function readOwner(root: string): Owner | null {
         `Unreadable startup ownership for attempt ${id}. Explicitly discard its record with "${discardRunCommand(id)}"; no processes will be stopped.`
       ),
       {
+        attemptId: id,
         suggestedCommand: discardRunCommand(id),
       }
     );
@@ -112,7 +113,16 @@ export async function readDetachedRunWarning(root: string): Promise<CommandError
   try {
     owner = readOwner(root);
   } catch (error) {
-    return error as CommandError;
+    const warning = error as CommandError;
+    if (
+      typeof warning.attemptId === 'string' &&
+      (await probe(root, warning.attemptId)) !== 'absent'
+    ) {
+      return ownershipError(
+        `Startup ownership for attempt ${warning.attemptId} is unreadable and its owner may still be live. Read its log and check status again; the record was retained.`
+      );
+    }
+    return warning;
   }
   if (!owner) return null;
   const state = await probe(root, owner.id);
@@ -120,7 +130,7 @@ export async function readDetachedRunWarning(root: string): Promise<CommandError
   if (state === 'live')
     return Object.assign(
       ownershipError(
-        `${details} Another detached run owns startup. No new work was started. Read its log, then check status or stop it before starting again.`,
+        `${details} Another detached run holds startup ownership. No new work was started. Read its log, then check status or stop it before starting again.`,
         'DEV_START_BUSY'
       ),
       { data: { pid: owner.pid, logFile: owner.logFile } }
