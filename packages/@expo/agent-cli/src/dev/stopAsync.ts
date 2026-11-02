@@ -647,9 +647,16 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
     // session is reused by the next dev --eas.
     const easPlatform =
       report.easPlatform ?? report.session?.platform ?? cloudRows[0]?.platform ?? null;
+    // Else the platform of this worktree's local device, when it has devices on one platform only.
+    const localPlatforms = [
+      ...new Set(report.devices?.filter((d) => d.backend !== 'cloud').map((d) => d.platform)),
+    ];
+    const localPlatform = localPlatforms.length === 1 ? localPlatforms[0] : undefined;
     followups.push(...keptSession, {
       id: 'dev',
-      command: easPlatform ? devCommand(easPlatform, '--eas') : devCommand(hostPlatform()),
+      command: easPlatform
+        ? devCommand(easPlatform, '--eas')
+        : devCommand(localPlatform ?? hostPlatform()),
       why: 'The dev server is stopped, so this is what starts one again when the app is needed.',
     });
     return followups;
