@@ -3,7 +3,6 @@ import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
-import { hostPlatform } from '../../smoke/suggest';
 import {
   buildFollowUps,
   devStopAsync,
@@ -796,14 +795,6 @@ describe(buildFollowUps, () => {
       '--android --eas',
     ],
     ['a released cloud session', { devices: [cloud(true)] }, ['dev'], '--android --eas'],
-    ['a kept local Android emulator', { devices: [local('android', null)] }, ['dev'], '--android'],
-    ['a released local iOS simulator', { devices: [local('ios', true)] }, ['dev'], '--ios'],
-    [
-      'local devices on both platforms',
-      { devices: [local('android', null), local('ios', null)] },
-      ['dev'],
-      `--${hostPlatform()}`,
-    ],
     [
       'nothing running and a kept cloud session',
       { stopped: false, reason: 'not-running', devices: [cloud(null)] },
@@ -868,6 +859,30 @@ describe(buildFollowUps, () => {
         platformFlag && `${PROGRAM_PREFIX} dev ${platformFlag}`
       );
     }
+  });
+
+  // Each host's fallback is the other platform, so only a read of the device rows passes.
+  it.each<[string, ReturnType<typeof local>[], NodeJS.Platform, string]>([
+    ['a kept local Android emulator', [local('android', null)], 'darwin', '--android'],
+    ['a released local iOS simulator', [local('ios', true)], 'linux', '--ios'],
+    [
+      'local devices on both platforms, on macOS',
+      [local('ios', null), local('android', null)],
+      'darwin',
+      '--ios',
+    ],
+    [
+      'local devices on both platforms, on Linux',
+      [local('ios', null), local('android', null)],
+      'linux',
+      '--android',
+    ],
+  ])('restarts dev on the platform of %s', (_name, devices, host, platformFlag) => {
+    mockPlatform(host);
+
+    const followups = buildFollowUps(result({ devices }));
+
+    expect(followups.map((f) => f.command)).toEqual([`${PROGRAM_PREFIX} dev ${platformFlag}`]);
   });
 
   it(`does not say the dev server is stopped when no dev-server lock answered`, () => {
