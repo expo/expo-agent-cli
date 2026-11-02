@@ -90,3 +90,27 @@ Cross-environment observation and interrupted recovery are enforced by
 `another TMPDIR cannot discard a live %s owner, but can recover its interrupted run`.
 `an unknown ownership endpoint (%s) never grants discard authority` covers malformed
 endpoint evidence. Both are process tests in `dev-detach-endpoint-test.ts`.
+||||||| parent of e380652f4 (Specify interrupted-run discard and POSIX force-stop recovery)
+
+## Interrupted runs
+
+An unexplained death retains the record, even before startup work begins. Refusal and
+`dev:stop` name an attempt-specific `dev:stop --discard-run <attempt-id>` action.
+Discard removes that record, not processes or EAS sessions. It refuses a reachable or
+ambiguously reachable owner, and an outdated action cannot discard a replacement.
+Malformed records do not grant automatic admission. Explicit discard still checks the
+named attempt's endpoint independently of the record's contents.
+
+Windows stop force-terminates the tree. Only successful delivery and confirmed termination
+allow the stop command to clear the record captured before signalling. Failed or uncertain
+stops retain it. Normal POSIX shutdown lets the owner release after awaited cleanup.
+
+POSIX SIGKILL always retains the record: the CLI PID can die while Expo's process group
+survives. The report names the PID, port, possible surviving processes, and discard action.
+After discard, an answering server on that port still receives the existing unowned-server
+refusal. Preventing these survivors requires separate work and is outside this contract.
+
+| Contract                                                     | Enforcing process test in `dev-detach-recovery-test.ts`                                             |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Interrupted ownership has explicit recovery                  | `a crashed detached run names an explicit discard command and can be restarted`                     |
+| Force-stop reporting does not promise subprocess termination | `SIGKILL retains ownership and discard leaves a surviving server subject to foreign-server refusal` |
