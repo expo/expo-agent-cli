@@ -85,8 +85,8 @@ const androidRequest: LastDevRequest = {
   runTarget: 'dev-build',
 };
 const dev = `${PROGRAM_PREFIX} dev`;
-const easWhy = (platform: string, phase: 'is starting' | 'is not bound yet') =>
-  `The dev server's EAS Simulator session for ${platform} ${phase}. This command waits for it, or reopens the app on the running Metro. No restart is needed.`;
+const easWhy = (platform: string) =>
+  `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`;
 const unbound = (platform: string) => `No ${platform} device is bound to this worktree.`;
 const restart = (platform: string) =>
   `${unbound(platform)} The running dev server must restart to bind one.`;
@@ -236,30 +236,30 @@ describe(chooseNextAction, () => {
         stepsPort: '8081',
       },
       {
-        name: `waits for the ${platform} session of an own EAS server instead of a restart`,
+        name: `restarts the own EAS server to bind its ${platform} session`,
         facts: { platform, devServer: noApp, ownLock: easLock(platform) },
-        command: `${dev} --${platform} --eas --detach --wait-ready`,
-        why: easWhy(platform, 'is not bound yet'),
+        command: `${dev}:stop && ${dev} --${platform} --eas --port 8081 --detach --wait-ready`,
+        why: easWhy(platform),
       },
     ]),
     {
       name: 'says the session is starting while the detached child starts it',
       facts: { devServer: noApp, ownLock: easLock('ios') },
       host: { childStartsSession: () => true },
-      command: `${dev} --ios --eas --detach --wait-ready`,
-      why: easWhy('ios', 'is starting'),
+      command: `${dev}:logs`,
+      why: "The dev server's EAS Simulator session for ios is starting. Read its logs and check status again when startup finishes.",
     },
     {
       name: 'binds the session again, not smoke, for an app on an own EAS server',
       facts: { platform: 'android', devServer: server(), ownLock: easLock('android') },
-      command: `${dev} --android --eas --detach --wait-ready`,
-      why: easWhy('android', 'is not bound yet'),
+      command: `${dev}:stop && ${dev} --android --eas --port 8081 --detach --wait-ready`,
+      why: easWhy('android'),
     },
     {
       name: 'takes the platform of the EAS lock when nothing names one',
       facts: { platform: undefined, devServer: server(), ownLock: easLock('android') },
-      command: `${dev} --android --eas --detach --wait-ready`,
-      why: easWhy('android', 'is not bound yet'),
+      command: `${dev}:stop && ${dev} --android --eas --port 8081 --detach --wait-ready`,
+      why: easWhy('android'),
     },
     {
       name: 'stays smoke --eas for an app on an own EAS server with a live session binding',
@@ -292,34 +292,34 @@ describe(chooseNextAction, () => {
       why: expect.stringContaining('an EAS Simulator session is on record'),
     },
     {
-      name: 'never stops an EAS server for a remembered request of the other platform',
+      name: 'restarts the EAS lock platform despite a remembered request for the other platform',
       facts: {
         platform: undefined,
         devServer: noApp,
         ownLock: easLock('android'),
         request: { platform: 'ios', port: null, buildBackend: null, runTarget: null },
       },
-      command: `${dev} --android --eas --detach --wait-ready`,
-      why: easWhy('android', 'is not bound yet'),
+      command: `${dev}:stop && ${dev} --android --eas --port 8081 --detach --wait-ready`,
+      why: easWhy('android'),
     },
     {
-      name: 'never stops an EAS server for a caller who names the other platform',
+      name: 'restarts an EAS server for a caller who names the other platform',
       facts: { devServer: noApp, ownLock: easLock('android') },
-      command: `${dev} --ios --port 8081 --detach --wait-ready`,
-      why: unbound('ios'),
+      command: `${dev}:stop && ${dev} --ios --port 8081 --detach --wait-ready`,
+      why: restart('ios'),
     },
     {
       name: 'binds the session of the lock on a host that binds no device',
       facts: { devServer: noApp, ownLock: easLock('ios') },
       host: { devicesDisabled: true },
-      command: `${dev} --ios --eas --detach --wait-ready`,
-      why: easWhy('ios', 'is not bound yet'),
+      command: `${dev}:stop && ${dev} --ios --eas --port 8081 --detach --wait-ready`,
+      why: easWhy('ios'),
     },
     {
-      name: 'names no --port beside an EAS server for an explicit URL on another port',
+      name: "keeps the own EAS server's port when the explicit URL names another port",
       facts: { devServer: noApp, ownLock: easLock('ios'), devServerUrl: 'http://127.0.0.1:9000' },
-      command: `${dev} --ios --eas --detach --wait-ready`,
-      why: easWhy('ios', 'is not bound yet'),
+      command: `${dev}:stop && ${dev} --ios --eas --port 8081 --detach --wait-ready`,
+      why: easWhy('ios'),
     },
     {
       name: 'says nothing of an expired session row beside a live local binding',
@@ -341,7 +341,7 @@ describe(chooseNextAction, () => {
           binding({ backend: 'cloud', id: 'sess-old', state: 'gone', expiresAt: expired }),
         ],
       },
-      command: `${dev} --ios --eas --detach --wait-ready`,
+      command: `${dev}:stop && ${dev} --ios --eas --port 8081 --detach --wait-ready`,
       why: 'The lease on the bound ios EAS Simulator session sess-old expired. This command binds a session again.',
     })),
     {
@@ -363,10 +363,10 @@ describe(chooseNextAction, () => {
       why: unbound('ios'),
     },
     ...[null, own].map((ownLock): Row => ({
-      name: `reuses an expired binding (own server=${ownLock != null})`,
+      name: `rebinds an expired device (own server=${ownLock != null})`,
       facts: { ownLock, bindings: [binding({ state: 'gone', expiresAt: expired })] },
-      command: `${dev} --ios --port 8081 --detach --wait-ready`,
-      why: 'The lease on the bound ios device expired.',
+      command: `${ownLock ? `${dev}:stop && ` : ''}${dev} --ios --port 8081 --detach --wait-ready`,
+      why: `The lease on the bound ios device expired.${ownLock ? ' Stop the running dev server before rebinding it.' : ''}`,
     })),
     {
       name: "keeps the plan's next while an app is connected to this project's dev server",

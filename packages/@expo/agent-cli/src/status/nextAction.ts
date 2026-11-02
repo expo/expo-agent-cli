@@ -195,14 +195,13 @@ export function chooseNextAction({
   if (noRun) return noRun;
   const ownServer = servingLock(ownLock);
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-  const { backend, devArgs, devCommand } = devRerun(
+  const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
+  const { devArgs, devCommand } = devRerun(
     platform,
     request,
-    recoveryPort,
+    port,
     devNext,
-    ownServer,
-    expiredSession,
-    requestedPort
+    !!(easServer || expiredSession)
   );
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
@@ -315,20 +314,15 @@ function devRerun(
   request: LastDevRequest | null,
   recoveryPort: number | null,
   devNext: NextActionStatus,
-  ownServer: DevServerLockInfo | null,
-  expiredSession: BindingSummary | undefined,
-  requestedPort: number | null
+  eas: boolean
 ): { backend: string | null; devArgs: string[]; devCommand: string } {
-  const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-  const backend =
-    easServer || expiredSession
-      ? 'eas'
-      : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-  const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
+  const backend = eas
+    ? 'eas'
+    : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
   const devArgs = [
     ...(backend ? [`--${backend}`] : []),
     ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-    ...(port != null ? ['--port', String(port)] : []),
+    ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
   ];
   const devCommand = rerunDevCommand(
     platform,
