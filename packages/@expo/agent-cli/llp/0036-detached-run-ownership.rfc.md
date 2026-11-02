@@ -80,7 +80,7 @@ survives. The report names the PID, port, possible surviving processes, and disc
 After discard, an answering server on that port still receives the existing unowned-server
 refusal. Preventing these survivors requires separate work and is outside this contract.
 
-| Contract                                                     | Enforcing process test in `dev-detach-recovery-test.ts`                                             |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Interrupted ownership has explicit recovery                  | `a crashed detached run names an explicit discard command and can be restarted`                     |
-| Force-stop reporting does not promise subprocess termination | `SIGKILL retains ownership and discard leaves a surviving server subject to foreign-server refusal` |
+| Contract                                                     | Enforcing process test in `dev-detach-recovery-test.ts`                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Interrupted ownership has explicit recovery                  | `a crashed detached run names an explicit discard command and can be restarted` |
+| Force-stop reporting does not promise subprocess termination | `SIGKILL retains ownership independently of surviving work (server alive: %s)`  |
