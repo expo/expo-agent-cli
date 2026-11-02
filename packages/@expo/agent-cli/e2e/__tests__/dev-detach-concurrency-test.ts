@@ -281,4 +281,3 @@ it('stopping and starting again selects a new log without changing the previous 
     await f.cleanup();
   }
 });
-

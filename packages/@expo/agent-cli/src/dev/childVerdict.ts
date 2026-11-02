@@ -143,9 +143,13 @@ function parseData(json: string | undefined): Record<string, unknown> | null {
 export function isRelayedChildCode(code: string | null): code is string {
   return (
     code != null &&
-    (['NO_BOUND_DEVICE', 'DEV_START_BUSY', 'DEV_START_UNCERTAIN', 'DEV_SERVER_RUNNING'].includes(
-      code
-    ) ||
+    ([
+      'NO_BOUND_DEVICE',
+      'DEV_START_BUSY',
+      'DEV_START_UNCERTAIN',
+      'DEV_SERVER_RUNNING',
+      'PORT_IN_USE',
+    ].includes(code) ||
       code.startsWith('DEVICE_'))
   );
 }

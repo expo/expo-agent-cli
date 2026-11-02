@@ -164,6 +164,51 @@ export async function readDetachedRunWarning(root: string): Promise<CommandError
   );
 }
 
+export async function discardDetachedRunAsync(root: string, id: string): Promise<boolean> {
+  if (!ATTEMPT_ID.test(id))
+    throw new CommandError('BAD_ARGS', '--discard-run requires an attempt ID.');
+  // Publication follows listen. Capture an existing marker before probing, otherwise a caller
+  // could observe absence before listen and remove a live record published during that probe.
+  try {
+    fs.lstatSync(path.join(directoryOf(root), `owner-${id}.json`));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw ownershipError(
+      `Cannot read startup ownership for attempt ${id}; its record was retained.`
+    );
+  }
+  const state = await probe(root, id);
+  if (state !== 'absent')
+    throw ownershipError(
+      `Attempt ${id} has a ${state === 'live' ? 'live' : 'possibly live'} owner; its record was retained.`,
+      state === 'live' ? 'DEV_START_BUSY' : 'DEV_START_UNCERTAIN'
+    );
+  const removed = removeAttempt(root, id);
+  const endpoint = endpointOf(root, id);
+  if (endpoint.kind === 'unix') fs.rmSync(endpoint.address, { force: true });
+  return removed;
+}
+
+/** Capture only from a live lock's PID; the caller must confirm its Windows tree stop. */
+export function captureDetachedRun(
+  root: string,
+  pid: number
+): { id: string; release: () => void } | null {
+  try {
+    const owner = readOwner(root);
+    return owner?.pid === pid
+      ? {
+          id: owner.id,
+          release: () => {
+            removeAttempt(root, owner.id);
+          },
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function acquireDetachedRunAsync(root: string, owner: Owner): Promise<() => void> {
   const directory = directoryOf(root);
   fs.mkdirSync(path.dirname(directory), { recursive: true });

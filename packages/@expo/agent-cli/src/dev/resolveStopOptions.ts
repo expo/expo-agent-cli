@@ -5,6 +5,7 @@
 import { PROGRAM_PREFIX } from '../programName';
 import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../utils/args';
 import { CommandError } from '../utils/errors';
+import { ATTEMPT_ID } from './detachedOwnership';
 
 /** How long to wait for the dev server to go, when `--timeout` says nothing. */
 export const DEFAULT_DEV_STOP_TIMEOUT_MS = 10_000;
@@ -29,6 +30,8 @@ export interface DevStopOptions {
    */
   eas: boolean;
   release?: boolean;
+  /** Discard only this interrupted run's ownership record; never signal or release resources. */
+  discardRun?: string;
   /** Internal: smoke releases only the platform it used. */
   platform?: 'ios' | 'android';
   /**
@@ -54,6 +57,7 @@ export interface DevStopOptions {
 const DEV_STOP_ARGS = {
   '--eas': Boolean,
   '--release': Boolean,
+  '--discard-run': String,
   '--port': String,
   '--signal': String,
   '--force': Boolean,
@@ -80,6 +84,19 @@ export function resolveDevStopOptions(argv: string[]): DevStopOptions {
   }
 
   const signal = (args['--signal'] ?? 'SIGTERM') as NodeJS.Signals;
+  const discardRun = args['--discard-run'];
+  if (
+    discardRun != null &&
+    (!ATTEMPT_ID.test(discardRun) ||
+      ['--eas', '--release', '--force', '--signal', '--port', '--timeout'].some(
+        (flag) => args[flag] != null
+      ))
+  ) {
+    throw new CommandError(
+      'BAD_ARGS',
+      '--discard-run requires an attempt ID and cannot be combined with stop or resource-release options.'
+    );
+  }
   if (!DEV_STOP_SIGNALS.includes(signal)) {
     throw new CommandError(
       'BAD_ARGS',
@@ -88,6 +105,7 @@ export function resolveDevStopOptions(argv: string[]): DevStopOptions {
   }
 
   return {
+    ...(discardRun == null ? {} : { discardRun }),
     eas: !!args['--eas'],
     release: !!args['--release'],
     port: args['--port'] == null ? null : parsePort(args['--port']),
