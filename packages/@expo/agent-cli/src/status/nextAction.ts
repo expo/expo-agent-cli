@@ -249,6 +249,22 @@ export function chooseNextAction({
             : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`)),
     };
   }
+  // Any remaining bare start would be refused while this project holds its server lock,
+  // including a live device binding beside Metro that no longer answers.
+  if (ownServer && next.command.startsWith(`${PROGRAM_PREFIX} dev `)) {
+    next = pendingSession
+      ? {
+          ...next,
+          command: `${PROGRAM_PREFIX} dev:logs`,
+          steps: [],
+          why: 'The EAS session is still starting. Read its logs and check status again.',
+        }
+      : {
+          ...next,
+          command: `${stopFirst}${next.command}`,
+          why: `${next.why} Stop the owned dev-server process before starting another run.`,
+        };
+  }
   return next;
 }
 

@@ -11,7 +11,7 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
-import { readDetachedRunWarning } from '../dev/detachedRun';
+import { readDetachedRunWarning } from '../dev/detachedOwnership';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
@@ -442,11 +442,11 @@ export async function collectStatusReportAsync(
   }
 
   if (!ownServer && report.next) {
-    const why = readDetachedRunWarning(projectRoot);
-    if (why) {
-      report.next.command = `${PROGRAM_PREFIX} dev:logs`;
+    const warning = await readDetachedRunWarning(projectRoot);
+    if (warning) {
+      report.next.command = warning.suggestedCommand ?? `${PROGRAM_PREFIX} dev:logs`;
       report.next.steps = [];
-      report.next.why = why;
+      report.next.why = warning.message;
     }
   }
 
