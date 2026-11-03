@@ -28,6 +28,7 @@ function mockReport(overrides: Partial<StatusReport> = {}): StatusReport {
       root: '/project',
       name: 'my-app',
       isExpoApp: true,
+      dependenciesInstalled: true,
       sdkVersion: '54.0.0',
       native: 'cng',
       nativeDirs: { ios: false, android: false },
@@ -189,6 +190,16 @@ describe(formatStatusReport, () => {
     expect(line(mockReport(), 'project')).toContain('CNG');
     expect(line(mockReport(), 'project')).toContain('no dev client');
     expect(line(mockReport(), 'project')).toContain('web');
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  it.each([
+    [{ isExpoApp: false }, 'not an Expo app'],
+    [{ dependenciesInstalled: false }, 'dependencies not installed'],
+  ])(`should say %j on the project line`, (project, label) => {
+    const value = mockReport({ project: { ...mockReport().project!, ...project } });
+
+    expect(line(value, 'project')).toContain(label);
   });
 
   it(`should name the checked-in native directories of a bare project`, () => {

@@ -39,15 +39,6 @@ const ERROR_MAX_LENGTH = 100;
 /** Render the report as one line per section. */
 export function formatStatusReport(report: StatusReport): string {
   return [
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-    // First, because it is the cause of the lines below it that say "no dev client" or "stale".
-    ...(report.next?.rule === 'dependencies-not-installed'
-      ? [
-          chalk.yellow(
-            `Dependencies are not installed: run \`${renderForInvoker(report.next.command)}\``
-          ),
-        ]
-      : []),
     row('project', report.project, projectLine, report, 'project'),
     row('expo go', report.expoGo, expoGoLine, report, 'expoGo'),
     row('freshness', report.freshness, freshnessLine, report, 'freshness'),
@@ -468,10 +459,16 @@ function projectLine(project: ProjectStatus): string {
   // Second on the line and in yellow, because everything after it — the SDK, the native shape, the
   // dev client — describes a package this CLI has no business acting on, and a reader who misses
   // that reads five facts about the wrong repository.
-  const notAnApp = project.isExpoApp ? [] : [chalk.yellow('not an Expo app')];
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — the cause of
+  // the "SDK unknown" and "no dev client" beside it.
+  const appState = !project.isExpoApp
+    ? 'not an Expo app'
+    : project.dependenciesInstalled
+      ? null
+      : 'dependencies not installed';
   return [
     project.name ?? 'unnamed project',
-    ...notAnApp,
+    ...(appState ? [chalk.yellow(appState)] : []),
     `SDK ${project.sdkVersion ?? chalk.yellow('unknown')}`,
     project.native === 'bare' && dirs.length ? `bare (${dirs.join(', ')})` : 'CNG',
     project.usesDevClient ? 'dev client' : 'no dev client',

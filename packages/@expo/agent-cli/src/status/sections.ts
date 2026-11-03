@@ -14,7 +14,7 @@ import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../project/dependencies';
 import type { LastBuildRecord } from '../plan/lastBuild';
-import type { NativePlatform, PlanPlatform } from '../plan/types';
+import type { NativePlatform, PlanPlatform, StartPlanRule } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatform, devCommand, smokeCommand } from '../smoke/suggest';
 import { decidesAgainstExpoGo } from '../project/expoGo';
@@ -102,6 +102,7 @@ export function buildProjectStatus(state: ProjectState, packageName: string | nu
     root: state.projectRoot,
     name: name || null,
     isExpoApp: state.isExpoApp,
+    dependenciesInstalled: state.dependenciesInstalled,
     sdkVersion: state.sdkVersion,
     native: bare ? 'bare' : 'cng',
     nativeDirs: state.nativeDirs,
@@ -525,29 +526,12 @@ export function buildNextActionStatus(
 ): NextActionStatus {
   const plan = resolvedPlan ?? decideStartPlan(state, { platform, lastBuild });
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // Above the verify branch, because it outranks every reason to name a command at all: a
-  // directory that is not an Expo app has nothing to put on a device and nothing to verify, and
-  // `@expo/agent-cli dev` here is the very trap this report would otherwise send the reader into.
-  if (!state.isExpoApp) {
-    return {
-      command: NOT_AN_APP_COMMAND,
-      rule: plan.rule,
-      target: plan.target,
-      steps: [],
-      why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
-      buildLocation: null,
-    };
-  }
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  if (plan.rule === 'dependencies-not-installed') {
-    return {
-      command: INSTALL_DEPENDENCIES_COMMAND,
-      rule: plan.rule,
-      target: plan.target,
-      steps: [],
-      why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile, and status reads the project again after it',
-      buildLocation: null,
-    };
+  // Above the verify branch, because it outranks every reason to name a command at all: a plan that
+  // plans nothing has nothing to verify, and `@expo/agent-cli dev` there is the very trap this report
+  // would otherwise send the reader into.
+  const remedy = emptyPlanRemedy(plan.rule);
+  if (remedy) {
+    return { ...remedy, rule: plan.rule, target: plan.target, steps: [], buildLocation: null };
   }
   const verify = verifyAction(devServer, device, state, scheme, cloudSession);
   if (verify) {
@@ -577,6 +561,24 @@ export function buildNextActionStatus(
     why: null,
     buildLocation: plan.buildLocation,
   };
+}
+
+/** The one command that gives a plan that plans nothing an app to act on, or null for every other plan. */
+function emptyPlanRemedy(rule: StartPlanRule): { command: string; why: string } | null {
+  switch (rule) {
+    case 'not-expo-app':
+      return {
+        command: NOT_AN_APP_COMMAND,
+        why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
+      };
+    case 'dependencies-not-installed':
+      return {
+        command: INSTALL_DEPENDENCIES_COMMAND,
+        why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile, and status reads the project again after it',
+      };
+    default:
+      return null;
+  }
 }
 
 /** The command and the reason for a dev server this project can already use, or null. */

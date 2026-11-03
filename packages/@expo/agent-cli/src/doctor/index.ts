@@ -60,10 +60,14 @@ export const agentCliDoctorCheck: Command = async (argv) => {
   // directory that holds no app rather than planning work against whatever is there.
   const { findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  const { assertDependenciesInstalledSync } =
+    require('../project/dependencies') as typeof import('../project/dependencies');
   const { printDoctorCheckAsync } = require('./doctorAsync') as typeof import('./doctorAsync');
 
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
+    assertDependenciesInstalledSync(projectRoot);
     const exitCode = await printDoctorCheckAsync(projectRoot, {
       json: !!args['--json'],
       followups: !args['--no-followups'],

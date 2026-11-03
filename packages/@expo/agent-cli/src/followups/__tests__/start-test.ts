@@ -33,6 +33,7 @@ function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot: '/project',
     isExpoApp: true,
+    dependenciesInstalled: true,
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,
@@ -323,7 +324,7 @@ describe(buildStartPlanFollowUps, () => {
     );
   });
 
-  it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'])(
+  it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'] as const)(
     `should explain what makes the %s plan cheaper`,
     (rule) => {
       const followups = buildStartPlanFollowUps(mockPlan({ rule }), mockState());
@@ -335,7 +336,7 @@ describe(buildStartPlanFollowUps, () => {
     }
   );
 
-  it.each(['expo-go', 'web', 'dev-client-fresh', 'bare-fresh'])(
+  it.each(['expo-go', 'web', 'dev-client-fresh', 'bare-fresh'] as const)(
     `should not offer a freshness hint for the %s plan, which builds nothing`,
     (rule) => {
       const followups = buildStartPlanFollowUps(mockPlan({ rule }), mockState());

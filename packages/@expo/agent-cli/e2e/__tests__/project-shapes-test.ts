@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/dependencies';
+
 import {
   executeAgentCliAsync,
   installStubBinAsync,
@@ -552,33 +554,39 @@ describe('an Expo app whose dependencies are not installed', () => {
     return directory;
   }
 
-  it('refuses to plan, and names the bare install rather than a dev-client install', async () => {
+  // A command that acts on the app stops before it plans or spawns: each would otherwise fail inside
+  // an Expo tool that cannot read the SDK, and name a fix that does not install the dependencies.
+  it.each([
+    [['dev', '--android', '--plan']],
+    [['start', '--ios']],
+    [['smoke', '--ios']],
+    [['deploy', '--web']],
+    [['doctor']],
+  ])('%j stops and names the bare install', async (args) => {
     const directory = await uninstalledAppAsync();
 
-    const result = await executeAgentCliAsync(directory, ['dev', '--android', '--plan', '--json'], {
-      reject: false,
-    });
+    const result = await executeAgentCliAsync(directory, args, { reject: false });
 
     expect(result.exitCode).toBe(1);
-    expect(result.all).not.toContain('NOT_EXPO_APP');
-    expect(result.all).not.toContain('expo install expo-dev-client');
-    const report = JSON.parse(result.stdout);
-    expect(report.error.code).toBe('DEPENDENCIES_NOT_INSTALLED');
-    expect(report.error.suggestedCommand).toBe('npx @expo/agent-cli install');
+    expect(result.stderr).toContain(
+      "This project's dependencies are not installed, so nothing ran."
+    );
+    expect(result.stderr).toMatch(new RegExp(`^Try: ${INSTALL_DEPENDENCIES_COMMAND}$`, 'm'));
   });
 
-  it('lets status report, with the bare install as next', async () => {
+  it('lets status report, with the bare install as next and no follow-up', async () => {
     const directory = await uninstalledAppAsync();
 
-    const result = await executeAgentCliAsync(directory, ['status', '--json', '--no-followups'], {
+    const result = await executeAgentCliAsync(directory, ['status', '--json'], {
       reject: false,
     });
 
     const report = JSON.parse(result.stdout);
-    expect(report.project.isExpoApp).toBe(true);
+    expect(report.project).toMatchObject({ isExpoApp: true, dependenciesInstalled: false });
     expect(report.next).toMatchObject({
-      command: 'npx @expo/agent-cli install',
+      command: INSTALL_DEPENDENCIES_COMMAND,
       rule: 'dependencies-not-installed',
     });
+    expect(report.followups).toEqual([]);
   });
 });

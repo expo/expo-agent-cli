@@ -65,11 +65,15 @@ export const agentCliStart: Command = async (argv) => {
   // directory that holds no app rather than planning work against whatever is there.
   const { findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  const { assertDependenciesInstalledSync } =
+    require('../project/dependencies') as typeof import('../project/dependencies');
   const { resolveStartOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
 
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
     const options = resolveStartOptions(argv ?? []);
+    assertDependenciesInstalledSync(projectRoot);
 
     // @ref llp/0006-agent-native-cli-surface.rfc.md §The `@expo/agent-cli` launcher — a command that
     // shares a name with an `expo` command behaves like it. Neither the probe nor the plan engine

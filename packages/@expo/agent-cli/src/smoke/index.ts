@@ -116,6 +116,9 @@ export const agentCliSmoke: Command = async (argv) => {
   // directory that holds no app rather than planning work against whatever is there.
   const { findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  const { assertDependenciesInstalledSync } =
+    require('../project/dependencies') as typeof import('../project/dependencies');
   const { EXIT_OK, exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   const { resolveSmokeOptions, withConfiguredDevice } =
     require('./resolveOptions') as typeof import('./resolveOptions');
@@ -126,6 +129,7 @@ export const agentCliSmoke: Command = async (argv) => {
     // Asserting, unlike `dev:wait`: this command reads the project's routes and writes its
     // screenshot under the project's `.expo`, so there is no useful run outside one.
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
+    assertDependenciesInstalledSync(projectRoot);
     const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
 
     const { smokeAsync } = require('./smokeAsync') as typeof import('./smokeAsync');

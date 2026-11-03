@@ -23,10 +23,9 @@ export function planWithoutApp(state: ProjectState): StartPlan | null {
     ]);
   }
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  // `sdkVersion` is read from the installed `expo`, so null means node_modules has none. The rows
-  // below read expo-dev-client and the fingerprint from there too, and would plan a dev-client
-  // install and a first build for a project that may already declare and have both.
-  if (state.sdkVersion == null) {
+  // The rows below read expo-dev-client and the fingerprint from node_modules, and would plan a
+  // dev-client install and a first build for a project that may already declare and have both.
+  if (!state.dependenciesInstalled) {
     return emptyPlan('dependencies-not-installed', [
       `This project's dependencies are not installed: its package.json declares "expo", and no installed expo resolves from it.`,
       `Every other fact of the plan is read from node_modules, so nothing is planned until "${INSTALL_DEPENDENCIES_COMMAND}" installs the lockfile.`,

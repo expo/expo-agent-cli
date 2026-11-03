@@ -35,6 +35,12 @@ export interface ProjectStatus {
    */
   isExpoApp: boolean;
   /**
+   * `expo` resolves from this project, so its dependencies are installed. When false, the plan and
+   * `next` are the bare install (llp/0004-smart-start-and-project-state.rfc.md §Dependencies not
+   * installed).
+   */
+  dependenciesInstalled: boolean;
+  /**
    * The version of the **installed `expo` package**, e.g. `57.0.15`. Null when it is unresolvable.
    *
    * The code that is actually on disk, not the SDK line the app config names. `inspect:config-plugins`

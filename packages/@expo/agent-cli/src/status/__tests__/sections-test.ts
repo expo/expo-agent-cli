@@ -23,6 +23,7 @@ function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot,
     isExpoApp: true,
+    dependenciesInstalled: true,
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,
@@ -39,6 +40,7 @@ describe(buildProjectStatus, () => {
       root: projectRoot,
       name: 'my-app',
       isExpoApp: true,
+      dependenciesInstalled: true,
       sdkVersion: '54.0.0',
       native: 'cng',
       nativeDirs: { ios: false, android: false },

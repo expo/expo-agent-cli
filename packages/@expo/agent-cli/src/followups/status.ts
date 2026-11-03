@@ -26,6 +26,12 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
     ];
   }
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  // `next` names the bare install, and every rung below reads a fact from the missing node_modules.
+  if (report.project?.dependenciesInstalled === false) {
+    return [];
+  }
+
   const followups: FollowUp[] = [];
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup

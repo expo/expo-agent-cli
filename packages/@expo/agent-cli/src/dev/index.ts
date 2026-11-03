@@ -109,19 +109,16 @@ export const agentCliDev: Command = async (argv) => {
   // directory that holds no app rather than planning work against whatever is there.
   const { findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  const { assertDependenciesInstalledSync } =
+    require('../project/dependencies') as typeof import('../project/dependencies');
   const { resolveDevOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
 
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — before the
-    // probe, which reads expo-dev-client and the fingerprint from the node_modules that is missing.
-    const { dependenciesInstalledSync, dependenciesNotInstalledError } =
-      require('../project/dependencies') as typeof import('../project/dependencies');
-    if (!dependenciesInstalledSync(projectRoot)) {
-      throw dependenciesNotInstalledError();
-    }
     const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
     const options = resolveDevOptions(argv ?? [], readAgentCliSettings(projectRoot).settings);
+    assertDependenciesInstalledSync(projectRoot);
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — Renamed: the
     // plan-first engine is `@expo/agent-cli dev`, and `@expo/agent-cli start` is the plain `expo start` wrapper.

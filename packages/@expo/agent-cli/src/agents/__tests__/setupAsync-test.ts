@@ -49,6 +49,7 @@ function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
   const state: ProjectState = {
     projectRoot,
     isExpoApp: true,
+    dependenciesInstalled: true,
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,

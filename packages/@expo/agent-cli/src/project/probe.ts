@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Inputs
 // The project-state probe: one read of everything the decision table needs. Every field is
 // observable from the project itself, so a probe needs no device, no dev server and no network.
+import { dependenciesMissingSync } from './dependencies';
 import { checkExpoGoCompatibilityAsync } from './expoGo';
 import { generateFingerprintAsync } from './fingerprint';
 import { readProjectNativeDirsAsync } from './nativeCode';
@@ -53,6 +54,7 @@ export async function probeProjectStateAsync(
     // same answer `assertExpoAppSync` gives at the top of a command that acts on the app. The two
     // must never disagree: one refuses the directory and the other describes it.
     isExpoApp: dependencyNames.includes('expo'),
+    dependenciesInstalled: !dependenciesMissingSync(projectRoot),
     sdkVersion,
     nativeDirs,
     usesDevClient,

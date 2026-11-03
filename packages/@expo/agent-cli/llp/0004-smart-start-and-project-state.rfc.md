@@ -234,20 +234,23 @@ them the table sees "no dev client" and "no fingerprint". It then plans
 `expo install expo-dev-client` and a new native build, which the project may not need.
 On `--eas` that build costs EAS time.
 
-The decision table reads this state from the probe: the SDK version comes from the
-installed `expo`, so a declared `expo` with no installed SDK is this state. Its row sits
-under `not-expo-app` and above every other row:
+The probe reports this state as one fact, and the decision table reads it in its second
+row, under `not-expo-app` and above every other row:
 
 ```
 dependencies-not-installed → target: none, steps: [], buildLocation: null
 ```
 
-| Command                | When the dependencies are not installed                                  |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `dev`, `dev --plan`    | stop with `DEPENDENCIES_NOT_INSTALLED`, exit 1, before the probe or plan |
-| `status`               | reports. The first line says so; `next` is the bare install              |
-| `install` (no package) | installs the lockfile (llp/0010 §Forwarded codes)                        |
-| `install <package>`    | stop with `DEPENDENCIES_NOT_INSTALLED`, Try line is the bare install     |
+| Command                                                     | When the dependencies are not installed                                       |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `dev` (also `--plan`), `start`, `smoke`, `deploy`, `doctor` | stop with `DEPENDENCIES_NOT_INSTALLED`, exit 1, after flags, before any spawn |
+| `status`                                                    | reports. `next` is the bare install, and there are no follow-ups              |
+| `install` with no arguments                                 | installs the lockfile (llp/0010 §Forwarded codes)                             |
+| every other `install`                                       | stops with `DEPENDENCIES_NOT_INSTALLED`                                       |
+
+Each of the five commands would otherwise fail inside an Expo tool that cannot read the
+SDK, and name a fix that does not install the dependencies. `navigate` is not in the
+list: it needs a running dev server, and its own stop already says that there is none.
 
 The `Try:` line of each stop, and the `next` of `status`, is:
 
@@ -255,19 +258,15 @@ The `Try:` line of each stop, and the `next` of `status`, is:
 npx @expo/agent-cli install
 ```
 
-`status` prints this first line, above the sections that it explains:
-
-```
-Dependencies are not installed: run `npx @expo/agent-cli install`
-```
-
-Its `next.rule` is `dependencies-not-installed`, with no steps and no build location. No
-device or EAS session `next` replaces it, because each of those runs `dev`. `install
---help` shows the bare form in its usage line and its first example.
+The `status` project line says `dependencies not installed`, beside the "SDK unknown" and
+"no dev client" that it causes. Its `next.rule` is `dependencies-not-installed`, with no
+steps and no build location. No device or EAS session `next` replaces it, because each of
+those runs `dev`. `install --help` shows the bare form in its usage line and its first
+example.
 
 Pinned in `e2e/__tests__/project-shapes-test.ts`, §an Expo app whose dependencies are not
-installed, for `dev` and `status`, and in `e2e/__tests__/install-bootstrap-test.ts` for
-`install`.
+installed, for the five commands and `status`, and in
+`e2e/__tests__/install-bootstrap-test.ts` for `install`.
 
 ## Plan contract
 

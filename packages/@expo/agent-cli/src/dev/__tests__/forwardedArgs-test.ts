@@ -17,7 +17,7 @@ function step(id: string, argv: string[]): PlanStep {
 }
 
 function plan(...steps: PlanStep[]): StartPlan {
-  return { target: 'expo-go', steps, rule: 'test', reasons: [], buildLocation: null };
+  return { target: 'expo-go', steps, rule: 'expo-go', reasons: [], buildLocation: null };
 }
 
 describe(forwardedStepArgs, () => {

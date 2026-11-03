@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md
 // Shared contract for the project-state probe, the Expo Go compatibility check, the
 // post-install impact classifier, and the smart start plan engine. Pure data — no I/O here.
+import type { StartPlanRule } from '../plan/types';
 import type { RunsOn } from '../toolchain/runsOn';
 import type { PlanBuildLocation } from '../toolchain/types';
 import type { FingerprintResult, FingerprintSource } from './fingerprint';
@@ -49,6 +50,13 @@ export interface ProjectState {
    * @see llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
    */
   isExpoApp: boolean;
+  /**
+   * False only for an Expo app whose `expo` does not resolve from the project root or a directory
+   * above it: a fresh clone or a new git worktree, whose every installed fact below is then absent.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+   */
+  dependenciesInstalled: boolean;
   /** From the installed `expo` package, e.g. "54.0.0". Null when unresolvable. */
   sdkVersion: string | null;
   /**
@@ -115,7 +123,7 @@ export interface StartPlan {
   target: ProjectTarget;
   steps: PlanStep[];
   /** Decision-table row that produced this plan, for tests and debugging. */
-  rule: string;
+  rule: StartPlanRule;
   reasons: string[];
   /**
    * Where the build in this plan runs and what that place needs, or `null` when the plan builds

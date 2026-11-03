@@ -6,6 +6,7 @@ import { decideStartPlan } from '../decide';
 import type { LastBuildRecord } from '../lastBuild';
 import type { NativePlatform } from '../types';
 import type { RunTargetChoice } from '../runTarget';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/dependencies';
 
 /**
  * A recorded build that stored only a hash, which is what an older CLI wrote.
@@ -51,6 +52,7 @@ function createState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot: '/project',
     isExpoApp: true,
+    dependenciesInstalled: true,
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,
@@ -156,7 +158,7 @@ describe(decideStartPlan, () => {
       ['an EAS build', { platform: 'android' as const, buildBackend: backend('eas') }],
     ])(`should plan nothing but the bare install for %s`, (_, options) => {
       const plan = decideStartPlan(
-        createState({ sdkVersion: null, usesDevClient: false }),
+        createState({ dependenciesInstalled: false, sdkVersion: null, usesDevClient: false }),
         options
       );
 
@@ -166,7 +168,7 @@ describe(decideStartPlan, () => {
         steps: [],
         buildLocation: null,
       });
-      expect(plan.reasons.join(' ')).toContain('npx @expo/agent-cli install');
+      expect(plan.reasons.join(' ')).toContain(INSTALL_DEPENDENCIES_COMMAND);
     });
   });
 
@@ -789,6 +791,21 @@ describe(decideStartPlan, () => {
       });
 
       expect(plan.rule).toBe('needs-dev-client');
+    });
+
+    it(`should report an unknown SDK version as the reason it cannot use Expo Go`, () => {
+      const state = createState({
+        sdkVersion: null,
+        expoGo: {
+          compatible: false,
+          reasons: [{ kind: 'unknown-sdk', detail: 'Could not resolve the expo package version' }],
+        },
+      });
+      const plan = decideStartPlan(state, { platform: 'ios' });
+
+      expect(plan.rule).toBe('needs-dev-client');
+      expect(plan.reasons.join('\n')).toMatch(/Expo SDK version is unknown/);
+      expect(plan.reasons.join('\n')).toMatch(/Could not resolve the expo package version/);
     });
   });
 

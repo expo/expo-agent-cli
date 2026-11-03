@@ -41,6 +41,7 @@ function devClientState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot,
     isExpoApp: true,
+    dependenciesInstalled: true,
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: true,

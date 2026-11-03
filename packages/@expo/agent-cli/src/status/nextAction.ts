@@ -2,7 +2,6 @@
 // The `next` line of `status`: which platform it is for, which port a re-run keeps, and the command
 // that gets this worktree a device. Pure: `statusAsync` reads the facts, and this decides.
 
-import type { CloudPlatform } from '../device/cloudSimulator';
 import type { DevServerLockInfo } from '../devLock';
 import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
@@ -29,6 +28,36 @@ export function cloudBindings(bindings: BindingSummary[]): {
   return {
     cloud: bindings.filter((entry) => entry.backend === 'cloud' && entry.state === 'recorded'),
     expiredCloud: bindings.filter((entry) => entry.backend === 'cloud' && entry.state === 'gone'),
+  };
+}
+
+/** What the recorded bindings say about one platform's device. */
+function bindingsFor(
+  bindings: BindingSummary[],
+  platform: PlanPlatform,
+  now: number
+): {
+  cloud: BindingSummary[];
+  /** The platform of the cloud session `next` can verify against: this one's, else any. */
+  cloudPlatform: BindingSummary['platform'] | null;
+  bound: BindingSummary[];
+  liveBound: boolean;
+  /** This platform's EAS Simulator session whose lease expired, when nothing else is bound. */
+  expiredSession: BindingSummary | undefined;
+} {
+  const { cloud, expiredCloud } = cloudBindings(bindings);
+  const bound = bindings.filter((entry) => entry.platform === platform);
+  const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > now);
+  return {
+    cloud,
+    cloudPlatform:
+      (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null,
+    bound,
+    liveBound,
+    expiredSession:
+      cloud.length === 0 && !liveBound
+        ? expiredCloud.find((entry) => entry.platform === platform)
+        : undefined,
   };
 }
 
@@ -112,32 +141,51 @@ export function chooseNextAction({
   plan,
   host,
 }: NextActionFacts): NextActionStatus {
-  const { cloud, expiredCloud } = cloudBindings(bindings ?? []);
-  const cloudPlatform =
-    (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null;
-  const planned = planNextActions(
-    { state, record, platform, recoveryPort, devServer, device, devBuildScheme, plan },
-    cloudPlatform
+  const { cloud, cloudPlatform, bound, liveBound, expiredSession } = bindingsFor(
+    bindings ?? [],
+    platform,
+    host.now
   );
-  let next = planned.next;
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  // The bare install outranks every device next below: each of them runs `dev`, which stops first.
-  if (next.rule === 'dependencies-not-installed') {
+  const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;
+  let next = buildNextActionStatus(
+    state,
+    record,
+    platform,
+    devServer,
+    device,
+    // The scheme a development build of this project registers, read the same way the deep link
+    // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
+    // the app's own scheme (`src/navigate/connectUrl.ts`).
+    devBuildScheme,
+    cloudPlatform,
+    // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
+    // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
+    // toolchain probe folded in — rather than the one the project's state alone implies. The two
+    // differ on exactly the machines where it matters, and a `status` that reported
+    // "expo run:ios" on a Linux box would be the report disagreeing with the command.
+    recoveryPlan
+  );
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — a plan that plans
+  // nothing outranks every device next below: each of them runs `dev`, which stops first.
+  if (next.target === 'none') {
     return next;
   }
-  const { devNext } = planned;
+  const devNext = buildNextActionStatus(
+    state,
+    record,
+    platform,
+    null,
+    device,
+    devBuildScheme,
+    null,
+    recoveryPlan
+  );
   const { backend, devArgs, devCommand } = devRerun(platform, request, recoveryPort, devNext);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
       platform === 'web'
         ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
         : devCommand;
-  const bound = bindings ? bindings.filter((e) => e.platform === platform) : [];
-  const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > host.now);
-  const expiredSession =
-    cloud.length === 0 && !liveBound
-      ? expiredCloud.find((entry) => entry.platform === platform)
-      : undefined;
   // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
   if (expiredSession) {
@@ -148,7 +196,6 @@ export function chooseNextAction({
       why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
     };
   } else if (
-    state.isExpoApp &&
     platform !== 'web' &&
     bindings &&
     !liveBound &&
@@ -195,65 +242,6 @@ export function chooseNextAction({
     };
   }
   return next;
-}
-
-/**
- * The `next` the plan names, and the same plan's `next` with no dev server or cloud session to
- * verify against, which a device-binding `next` builds on.
- */
-function planNextActions(
-  {
-    state,
-    record,
-    platform,
-    recoveryPort,
-    devServer,
-    device,
-    devBuildScheme,
-    plan,
-  }: Pick<
-    NextActionFacts,
-    | 'state'
-    | 'record'
-    | 'platform'
-    | 'recoveryPort'
-    | 'devServer'
-    | 'device'
-    | 'devBuildScheme'
-    | 'plan'
-  >,
-  cloudPlatform: CloudPlatform | null
-): { next: NextActionStatus; devNext: NextActionStatus } {
-  const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;
-  const next = buildNextActionStatus(
-    state,
-    record,
-    platform,
-    devServer,
-    device,
-    // The scheme a development build of this project registers, read the same way the deep link
-    // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
-    // the app's own scheme (`src/navigate/connectUrl.ts`).
-    devBuildScheme,
-    cloudPlatform,
-    // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
-    // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
-    // toolchain probe folded in — rather than the one the project's state alone implies. The two
-    // differ on exactly the machines where it matters, and a `status` that reported
-    // "expo run:ios" on a Linux box would be the report disagreeing with the command.
-    recoveryPlan
-  );
-  const devNext = buildNextActionStatus(
-    state,
-    record,
-    platform,
-    null,
-    device,
-    devBuildScheme,
-    null,
-    recoveryPlan
-  );
-  return { next, devNext };
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */
