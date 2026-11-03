@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { detachedRunFixture } from '../detachedRunFixture';
 import { detachedBarrierFixture } from '../detachedBarrierFixture';
-import { executeAgentCliAsync, readDevLockAsync, waitForAsync } from '../utils';
+import { executeAgentCliAsync, fixturesDir, readDevLockAsync, waitForAsync } from '../utils';
 
 // @ref llp/0036-detached-run-ownership.rfc.md
 it('death after publication but before work requires explicit discard', async () => {
@@ -154,32 +154,62 @@ it.each([false, true])(
   }
 );
 
-it('concurrent discard and stale retries cannot remove replacement ownership', async () => {
-  const f = await detachedRunFixture();
-  try {
-    const id = randomUUID();
-    const directory = path.join(f.root, '.expo', 'dev', 'detached-run');
-    fs.mkdirSync(directory, { recursive: true });
-    // A draft checkout can leave unreadable evidence. Explicit discard names only its marker.
-    fs.writeFileSync(path.join(directory, `owner-${id}.json`), '{');
-    const discards = await Promise.all([
-      f.run(['dev:stop', '--discard-run', id, '--json']),
-      f.run(['dev:stop', '--discard-run', id, '--json']),
-    ]);
-    expect(discards.map((result) => result.exitCode)).toEqual([0, 0]);
-    const started = await f.start();
-    expect(started.exitCode, started.all).toBe(0);
-    const owner = JSON.parse(started.stdout);
-    const stale = await f.run(['dev:stop', '--discard-run', id, '--json']);
-    expect(stale.exitCode, stale.all).toBe(0);
-    expect(JSON.parse(stale.stdout)).toMatchObject({ discardedRun: null, stopped: false });
-    expect(await readDevLockAsync(f.root)).toMatchObject({ pid: owner.pid });
-    const retry = await f.start();
-    expect(retry.exitCode, retry.all).toBe(20);
-  } finally {
-    await f.cleanup();
+it.each(['discard', 'Windows stop'])(
+  'delayed %s cannot remove replacement ownership',
+  async (operation, context) => {
+    if (operation === 'Windows stop' && process.platform !== 'win32') context.skip();
+    const f = await detachedRunFixture();
+    const paused = path.join(f.root, 'removal-paused');
+    const release = path.join(f.root, 'release-removal');
+    let delayed: ReturnType<typeof executeAgentCliAsync> | undefined;
+    try {
+      let id: string = randomUUID();
+      const directory = path.join(f.root, '.expo', 'dev', 'detached-run');
+      if (operation === 'Windows stop') {
+        const started = await f.start();
+        expect(started.exitCode, started.all).toBe(0);
+        id = path
+          .basename(JSON.parse(started.stdout).logFile)
+          .slice('dev-detached-'.length, -'.log'.length);
+      } else {
+        fs.mkdirSync(directory, { recursive: true });
+        // Old draft evidence is unreadable, but its filename still bounds explicit discard.
+        fs.writeFileSync(path.join(directory, `owner-${id}.json`), '{');
+      }
+      delayed = executeAgentCliAsync(
+        f.root,
+        ['dev:stop', ...(operation === 'discard' ? ['--discard-run', id] : []), '--json'],
+        {
+          reject: false,
+          env: {
+            NODE_OPTIONS: `--require "${path.join(fixturesDir, 'ownership-remove-barrier.cjs').replaceAll('\\', '/')}"`,
+            OWNERSHIP_TEST_REMOVE: path.join(directory, `owner-${id}.json`),
+            OWNERSHIP_TEST_PAUSED: paused,
+            OWNERSHIP_TEST_RELEASE: release,
+          },
+        }
+      );
+      expect(await waitForAsync(() => fs.existsSync(paused), 15_000)).toBe(true);
+      const discarded = await f.run(['dev:stop', '--discard-run', id, '--json']);
+      expect(discarded.exitCode, discarded.all).toBe(0);
+      const started = await f.start();
+      expect(started.exitCode, started.all).toBe(0);
+      const owner = JSON.parse(started.stdout);
+      fs.writeFileSync(release, '');
+      const finished = await delayed;
+      expect(finished.exitCode, finished.all).toBe(0);
+      expect(JSON.parse(finished.stdout).stopped).toBe(operation === 'Windows stop');
+      expect(await readDevLockAsync(f.root)).toMatchObject({ pid: owner.pid });
+      const retry = await f.start();
+      expect(retry.exitCode, retry.all).toBe(20);
+      expect(JSON.parse(retry.stdout).error.data.pid).toBe(owner.pid);
+    } finally {
+      fs.writeFileSync(release, '');
+      await delayed;
+      await f.cleanup();
+    }
   }
-});
+);
 
 it.each([['--force'], ['--eas'], ['--release'], ['--signal', 'SIGKILL'], ['--port', '8081']])(
   'discard rejects side-effect options: %j',

@@ -80,7 +80,11 @@ survives. The report names the PID, port, possible surviving processes, and disc
 After discard, an answering server on that port still receives the existing unowned-server
 refusal. Preventing these survivors requires separate work and is outside this contract.
 
-| Contract                                                     | Enforcing process test in `dev-detach-recovery-test.ts`                         |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| Interrupted ownership has explicit recovery                  | `a crashed detached run names an explicit discard command and can be restarted` |
-| Force-stop reporting does not promise subprocess termination | `SIGKILL retains ownership independently of surviving work (server alive: %s)`  |
+| Contract                                                      | Enforcing process test in `dev-detach-recovery-test.ts`                         |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Interrupted ownership has explicit recovery                   | `a crashed detached run names an explicit discard command and can be restarted` |
+| Force-stop reporting does not promise subprocess termination  | `SIGKILL retains ownership independently of surviving work (server alive: %s)`  |
+| Delayed discard or confirmed stop cannot remove a replacement | `delayed %s cannot remove replacement ownership`                                |
+| Failed tree-stop delivery retains ownership                   | `a failed Windows tree stop retains ownership`                                  |
+| Discard checks liveness independently of record contents      | `discard refuses a live owner even with malformed contents (%s)`                |
+| Death before work still requires explicit recovery            | `death after publication but before work requires explicit discard`             |
