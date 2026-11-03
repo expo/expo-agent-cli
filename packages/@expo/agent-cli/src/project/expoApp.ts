@@ -106,3 +106,14 @@ export function dependenciesNotInstalledError(outcome: string): CommandError {
   error.suggestedCommand = INSTALL_DEPENDENCIES_COMMAND;
   return error;
 }
+
+/**
+ * Stop a command that acts on the app while its dependencies are not installed.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+ */
+export function assertDependenciesInstalledSync(projectRoot: string): void {
+  if (dependenciesMissingSync(projectRoot)) {
+    throw dependenciesNotInstalledError('nothing ran');
+  }
+}

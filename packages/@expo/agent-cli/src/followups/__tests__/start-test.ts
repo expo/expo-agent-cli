@@ -32,8 +32,7 @@ function ids(followups: { id: string }[]): string[] {
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot: '/project',
-    isExpoApp: true,
-    dependenciesInstalled: true,
+    app: 'ready',
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,

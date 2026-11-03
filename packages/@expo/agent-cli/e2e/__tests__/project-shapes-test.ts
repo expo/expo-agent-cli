@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/dependencies';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/expoApp';
 
 import {
   executeAgentCliAsync,
@@ -574,7 +574,17 @@ describe('an Expo app whose dependencies are not installed', () => {
     expect(result.stderr).toMatch(new RegExp(`^Try: ${INSTALL_DEPENDENCIES_COMMAND}$`, 'm'));
   });
 
-  it('lets status report, with the bare install as next and no follow-up', async () => {
+  // A bad flag is the caller's mistake on any machine, so it is named before the dependencies.
+  it.each([['dev'], ['smoke'], ['deploy']])('%s reports a bad flag first', async (command) => {
+    const directory = await uninstalledAppAsync();
+
+    const result = await executeAgentCliAsync(directory, [command, '--bogus'], { reject: false });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Unknown option --bogus');
+  });
+
+  it('lets status report, with the bare install as next and as the one follow-up', async () => {
     const directory = await uninstalledAppAsync();
 
     const result = await executeAgentCliAsync(directory, ['status', '--json'], {
@@ -587,6 +597,8 @@ describe('an Expo app whose dependencies are not installed', () => {
       command: INSTALL_DEPENDENCIES_COMMAND,
       rule: 'dependencies-not-installed',
     });
-    expect(report.followups).toEqual([]);
+    expect(report.followups.map((followup: { command: string }) => followup.command)).toEqual([
+      INSTALL_DEPENDENCIES_COMMAND,
+    ]);
   });
 });

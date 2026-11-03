@@ -36,8 +36,7 @@ describe(probeProjectStateAsync, () => {
 
     await expect(probeProjectStateAsync(projectRoot)).resolves.toEqual({
       projectRoot,
-      isExpoApp: true,
-      dependenciesInstalled: true,
+      app: 'ready',
       sdkVersion: '54.0.0',
       nativeDirs: { ios: false, android: false },
       usesDevClient: false,

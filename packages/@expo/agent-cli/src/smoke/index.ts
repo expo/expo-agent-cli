@@ -114,11 +114,8 @@ export const agentCliSmoke: Command = async (argv) => {
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
-  const { findUpExpoAppRootOrAssert } =
+  const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  const { assertDependenciesInstalledSync } =
-    require('../project/dependencies') as typeof import('../project/dependencies');
   const { EXIT_OK, exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   const { resolveSmokeOptions, withConfiguredDevice } =
     require('./resolveOptions') as typeof import('./resolveOptions');

@@ -244,7 +244,7 @@ dependencies-not-installed → target: none, steps: [], buildLocation: null
 | Command                                                     | When the dependencies are not installed                                       |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `dev` (also `--plan`), `start`, `smoke`, `deploy`, `doctor` | stop with `DEPENDENCIES_NOT_INSTALLED`, exit 1, after flags, before any spawn |
-| `status`                                                    | reports. `next` is the bare install, and there are no follow-ups              |
+| `status`                                                    | reports. `next` and the one follow-up are the bare install                    |
 | `install` with no arguments                                 | installs the lockfile (llp/0010 §Forwarded codes)                             |
 | every other `install`                                       | stops with `DEPENDENCIES_NOT_INSTALLED`                                       |
 

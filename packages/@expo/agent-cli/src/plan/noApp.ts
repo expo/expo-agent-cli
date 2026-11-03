@@ -5,10 +5,10 @@
 
 import type { FollowUp } from '../followups/types';
 import { PROGRAM_PREFIX } from '../programName';
-import { INSTALL_DEPENDENCIES_COMMAND } from '../project/dependencies';
-import type { ProjectState, StartPlan } from '../project/types';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../project/expoApp';
+import type { AppState, ProjectState, StartPlan } from '../project/types';
 
-export type NoAppRule = 'not-expo-app' | 'dependencies-not-installed';
+export type NoAppRule = Exclude<AppState, 'ready'>;
 
 interface NoAppState {
   /** The plan's reasons. */
@@ -18,7 +18,10 @@ interface NoAppState {
   why: string;
   /** Said on the `status` project line. */
   label: string;
-  /** The `status` follow-ups, which name only actions that `next` does not. */
+  /**
+   * The `status` follow-ups: the remedy alone, in place of every rung, since each rung reads the
+   * wrong directory or a node_modules that is not there.
+   */
   followUps: FollowUp[];
 }
 
@@ -57,19 +60,41 @@ export const NO_APP: Record<NoAppRule, NoAppState> = {
     command: INSTALL_DEPENDENCIES_COMMAND,
     why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile; run status again after it',
     label: 'dependencies not installed',
-    followUps: [],
+    followUps: [
+      {
+        id: 'dependencies-not-installed',
+        command: INSTALL_DEPENDENCIES_COMMAND,
+        why: "This app's dependencies are not installed, so every other action would read a node_modules that is not there: install the lockfile first.",
+      },
+    ],
   },
 };
 
-/** Which of the two states a project is in, or null when it is an app with its dependencies. */
-export function noAppRule({
-  isExpoApp,
-  dependenciesInstalled,
-}: Pick<ProjectState, 'isExpoApp' | 'dependenciesInstalled'>): NoAppRule | null {
+/** The two `status --json` project fields that carry an {@link AppState}. */
+export interface AppStateFields {
+  isExpoApp: boolean;
+  /** Null when this is not an Expo app, where the question has no answer. */
+  dependenciesInstalled: boolean | null;
+}
+
+export function appStateFields(app: AppState): AppStateFields {
+  return {
+    isExpoApp: app !== 'not-expo-app',
+    dependenciesInstalled: app === 'not-expo-app' ? null : app === 'ready',
+  };
+}
+
+/** The {@link AppState} that {@link appStateFields} wrote. */
+export function appStateOf({ isExpoApp, dependenciesInstalled }: AppStateFields): AppState {
   if (!isExpoApp) {
     return 'not-expo-app';
   }
-  return dependenciesInstalled ? null : 'dependencies-not-installed';
+  return dependenciesInstalled ? 'ready' : 'dependencies-not-installed';
+}
+
+/** Which of the two states a project is in, or null when there is an app to act on. */
+export function noAppRule(app: AppState): NoAppRule | null {
+  return app === 'ready' ? null : app;
 }
 
 /**
@@ -80,7 +105,7 @@ export function noAppRule({
  * directory print, so the engine and the guard never disagree.
  */
 export function planWithoutApp(state: ProjectState): StartPlan | null {
-  const rule = noAppRule(state);
+  const rule = noAppRule(state.app);
   return rule
     ? { target: 'none', rule, steps: [], reasons: NO_APP[rule].reasons, buildLocation: null }
     : null;

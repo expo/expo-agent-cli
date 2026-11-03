@@ -33,30 +33,27 @@ export interface ExpoGoCompatibility {
   reasons: ExpoGoIncompatibility[];
 }
 
+/** Whether there is an app to act on; see {@link ProjectState.app}. */
+export type AppState = 'ready' | 'not-expo-app' | 'dependencies-not-installed';
+
 /** Everything the decision table needs, gathered by the probe. All fields are observable
  * without a device: device/simulator install state is intentionally out of scope for v1. */
 export interface ProjectState {
   projectRoot: string;
   /**
-   * The project's `package.json` declares `expo` as a dependency — which is what makes a package
-   * an Expo app.
+   * Whether there is an app here to act on.
    *
-   * **Declared, not installed**, and deliberately so: a fresh clone with no `node_modules` is the
-   * most ordinary state a real project is ever in, and reading the installed package instead would
-   * call every one of them "not an Expo app". {@link sdkVersion} is the installed half, and the
-   * two answer different questions.
+   * - `not-expo-app`: the `package.json` declares no `expo`, which is what makes a package an Expo
+   *   app. **Declared, not installed**, and deliberately so: reading the installed package instead
+   *   would call every fresh clone "not an Expo app" (§Not an Expo app).
+   * - `dependencies-not-installed`: it declares `expo`, and no `expo` resolves from the project root
+   *   or a directory above it. A fresh clone or a new git worktree, whose every installed fact below
+   *   is then absent (§Dependencies not installed).
+   * - `ready`: an Expo app with its dependencies installed.
    *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
+   * @see llp/0004-smart-start-and-project-state.rfc.md
    */
-  isExpoApp: boolean;
-  /**
-   * Whether `expo` resolves from the project root or a directory above it. False for a fresh clone
-   * or a new git worktree, whose every installed fact below is then absent. Null when this is not an
-   * Expo app, where the question has no answer.
-   *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-   */
-  dependenciesInstalled: boolean | null;
+  app: AppState;
   /** From the installed `expo` package, e.g. "54.0.0". Null when unresolvable. */
   sdkVersion: string | null;
   /**

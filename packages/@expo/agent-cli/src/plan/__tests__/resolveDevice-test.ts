@@ -31,8 +31,7 @@ const ACQUIRED: AcquireResult = {
 function state(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot,
-    isExpoApp: true,
-    dependenciesInstalled: true,
+    app: 'ready',
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,

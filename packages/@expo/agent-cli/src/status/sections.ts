@@ -12,7 +12,7 @@ import { classifyAgainstRecordedBuild, type RecordedImpact } from '../impact/fro
 import { buildConnectUrls, openInPhrase, type ConnectUrl } from '../navigate/connectUrl';
 import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
-import { NO_APP, noAppRule } from '../plan/noApp';
+import { appStateFields, NO_APP, noAppRule } from '../plan/noApp';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -92,8 +92,7 @@ export function buildProjectStatus(state: ProjectState, packageName: string | nu
   return {
     root: state.projectRoot,
     name: name || null,
-    isExpoApp: state.isExpoApp,
-    dependenciesInstalled: state.dependenciesInstalled,
+    ...appStateFields(state.app),
     sdkVersion: state.sdkVersion,
     native: bare ? 'bare' : 'cng',
     nativeDirs: state.nativeDirs,
@@ -520,7 +519,7 @@ export function buildNextActionStatus(
   // Above the verify branch, because it outranks every reason to name a command at all: a plan that
   // plans nothing has nothing to verify, and `@expo/agent-cli dev` there is the very trap this report
   // would otherwise send the reader into.
-  const noApp = noAppRule(state);
+  const noApp = noAppRule(state.app);
   if (noApp) {
     const { command, why } = NO_APP[noApp];
     return { command, why, rule: plan.rule, target: plan.target, steps: [], buildLocation: null };

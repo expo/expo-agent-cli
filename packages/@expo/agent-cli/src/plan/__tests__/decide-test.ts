@@ -6,7 +6,7 @@ import { decideStartPlan } from '../decide';
 import type { LastBuildRecord } from '../lastBuild';
 import type { NativePlatform } from '../types';
 import type { RunTargetChoice } from '../runTarget';
-import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/dependencies';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/expoApp';
 
 /**
  * A recorded build that stored only a hash, which is what an older CLI wrote.
@@ -51,8 +51,7 @@ function recordedWithSources(
 function createState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot: '/project',
-    isExpoApp: true,
-    dependenciesInstalled: true,
+    app: 'ready',
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,
@@ -114,7 +113,7 @@ describe(decideStartPlan, () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
   describe('rule: not-expo-app', () => {
     it(`should plan nothing for a directory that declares no expo dependency`, () => {
-      const plan = decideStartPlan(createState({ isExpoApp: false }));
+      const plan = decideStartPlan(createState({ app: 'not-expo-app' }));
 
       expect(plan.rule).toBe('not-expo-app');
       expect(plan.target).toBe('none');
@@ -127,14 +126,14 @@ describe(decideStartPlan, () => {
     // client" and planned an install into whatever repository the caller was standing in.
     it(`should never plan an install into a directory that is not an Expo app`, () => {
       const plan = decideStartPlan(
-        createDevClientState({ isExpoApp: false, usesDevClient: false })
+        createDevClientState({ app: 'not-expo-app', usesDevClient: false })
       );
 
       expect(argvOf(plan.steps)).toEqual([]);
     });
 
     it(`should outrank the web short-circuit, which is also about an app that is not here`, () => {
-      const plan = decideStartPlan(createState({ isExpoApp: false }), { platform: 'web' });
+      const plan = decideStartPlan(createState({ app: 'not-expo-app' }), { platform: 'web' });
 
       expect(plan.rule).toBe('not-expo-app');
       expect(plan.steps).toEqual([]);
@@ -142,7 +141,7 @@ describe(decideStartPlan, () => {
 
     it(`should outrank checked-in native directories`, () => {
       const plan = decideStartPlan(
-        createState({ isExpoApp: false, nativeDirs: { ios: true, android: true } })
+        createState({ app: 'not-expo-app', nativeDirs: { ios: true, android: true } })
       );
 
       expect(plan.rule).toBe('not-expo-app');
@@ -158,7 +157,7 @@ describe(decideStartPlan, () => {
       ['an EAS build', { platform: 'android' as const, buildBackend: backend('eas') }],
     ])(`should plan nothing but the bare install for %s`, (_, options) => {
       const plan = decideStartPlan(
-        createState({ dependenciesInstalled: false, sdkVersion: null, usesDevClient: false }),
+        createState({ app: 'dependencies-not-installed', sdkVersion: null, usesDevClient: false }),
         options
       );
 

@@ -2,7 +2,7 @@
 // design (llp/0004), so these follow-ups are the actions that line does *not* name. They are
 // emitted as an event and embedded in `--json`; the text report keeps its single `next` line.
 
-import { NO_APP, noAppRule } from '../plan/noApp';
+import { appStateOf, NO_APP, noAppRule } from '../plan/noApp';
 import { PROGRAM_PREFIX } from '../programName';
 import { strongestClass } from '../status/assert';
 import type { StatusReport } from '../status/types';
@@ -16,7 +16,7 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
   // Before every rung below, and instead of them: with no app to act on, every rung is a fact about
   // the wrong directory or about a node_modules that is not there. The rung this replaces was
   // `npx @expo/agent-cli install expo-dev-client` — the trap, spelled as a follow-up.
-  const noApp = report.project ? noAppRule(report.project) : null;
+  const noApp = report.project ? noAppRule(appStateOf(report.project)) : null;
   if (noApp) {
     return NO_APP[noApp].followUps;
   }

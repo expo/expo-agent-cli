@@ -13,6 +13,7 @@ import { rerunDevCommand } from '../plan/rerun';
 import type { DeviceBackend, NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { ProjectState, StartPlan } from '../project/types';
+import { noAppRule } from '../plan/noApp';
 import { buildNextActionStatus, resolveDefaultPlatform } from './sections';
 import type { DevServerStatus, LocalDeviceStatus, NextActionStatus } from './types';
 
@@ -165,9 +166,9 @@ export function chooseNextAction({
     // "expo run:ios" on a Linux box would be the report disagreeing with the command.
     recoveryPlan
   );
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — a plan that plans
-  // nothing outranks every device next below: each of them runs `dev`, which stops first.
-  if (next.target === 'none') {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app, §Dependencies not installed
+  // — no app to act on outranks every device next below: each of them runs `dev`, which stops first.
+  if (noAppRule(state.app)) {
     return next;
   }
   const devNext = buildNextActionStatus(
