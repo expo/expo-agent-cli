@@ -3,7 +3,6 @@
 // happens here, so every row is exhaustively unit-testable without a project or a device.
 
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { INSTALL_DEPENDENCIES_COMMAND } from '../project/dependencies';
 import type { PlanStep, ProjectState, StartPlan } from '../project/types';
 import { easBuildLocation, localBuildLocation } from '../toolchain/planLocation';
 import {
@@ -18,6 +17,7 @@ import type { RunsOn } from '../toolchain/runsOn';
 import type { BuildBackendChoice } from '../toolchain/selectBackend';
 import { classifyAgainstRecordedBuild } from '../impact/fromRecord';
 import type { LastBuildRecord } from './lastBuild';
+import { planWithoutApp } from './noApp';
 import type { DecideStartPlanOptions, NativePlatform, StartPlanRule } from './types';
 import { easCommandPrefix } from '../utils/easCli';
 
@@ -46,39 +46,9 @@ export function decideStartPlan(
   state: ProjectState,
   options: DecideStartPlanOptions = {}
 ): StartPlan {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // The first row, above the web short-circuit, because it is not a fact about how the app runs —
-  // it is the fact that there is no app. Without it the table read "no `expo` dependency" as "lacks
-  // a dev client" and planned `expo install expo-dev-client` plus a native build for whatever
-  // repository the caller happened to be standing in. Every command that would *act* on the plan
-  // stops before reaching here; this row is what the commands that only *describe* the directory
-  // print, so the engine and the guard never disagree.
-  if (!state.isExpoApp) {
-    return plan(
-      'not-expo-app',
-      'none',
-      [],
-      [
-        `This directory is not an Expo app: its package.json declares no "expo" dependency.`,
-        `There is nothing here to get onto a device, so the plan is empty. The app is most likely one directory down, or "${PROGRAM_PREFIX} new my-app" would create one here.`,
-      ]
-    );
-  }
-
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  // `sdkVersion` is read from the installed `expo`, so null means node_modules has none. The rows
-  // below read expo-dev-client and the fingerprint from there too, and would plan a dev-client
-  // install and a first build for a project that may already declare and have both.
-  if (state.sdkVersion == null) {
-    return plan(
-      'dependencies-not-installed',
-      'none',
-      [],
-      [
-        `This project's dependencies are not installed: its package.json declares "expo", and no installed expo resolves from it.`,
-        `Every other fact of the plan is read from node_modules, so nothing is planned until "${INSTALL_DEPENDENCIES_COMMAND}" installs the lockfile.`,
-      ]
-    );
+  const withoutApp = planWithoutApp(state);
+  if (withoutApp) {
+    return withoutApp;
   }
 
   // Web needs no native app at all, so it short-circuits every native row. The web target is

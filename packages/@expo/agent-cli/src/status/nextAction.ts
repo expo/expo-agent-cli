@@ -2,6 +2,7 @@
 // The `next` line of `status`: which platform it is for, which port a re-run keeps, and the command
 // that gets this worktree a device. Pure: `statusAsync` reads the facts, and this decides.
 
+import type { CloudPlatform } from '../device/cloudSimulator';
 import type { DevServerLockInfo } from '../devLock';
 import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
@@ -96,7 +97,6 @@ export interface NextActionFacts {
   host: NextActionHost;
 }
 
-// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export function chooseNextAction({
   state,
   record,
@@ -115,40 +115,17 @@ export function chooseNextAction({
   const { cloud, expiredCloud } = cloudBindings(bindings ?? []);
   const cloudPlatform =
     (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null;
-  const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;
-  let next = buildNextActionStatus(
-    state,
-    record,
-    platform,
-    devServer,
-    device,
-    // The scheme a development build of this project registers, read the same way the deep link
-    // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
-    // the app's own scheme (`src/navigate/connectUrl.ts`).
-    devBuildScheme,
-    cloudPlatform,
-    // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
-    // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
-    // toolchain probe folded in — rather than the one the project's state alone implies. The two
-    // differ on exactly the machines where it matters, and a `status` that reported
-    // "expo run:ios" on a Linux box would be the report disagreeing with the command.
-    recoveryPlan
+  const planned = planNextActions(
+    { state, record, platform, recoveryPort, devServer, device, devBuildScheme, plan },
+    cloudPlatform
   );
+  let next = planned.next;
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
   // The bare install outranks every device next below: each of them runs `dev`, which stops first.
   if (next.rule === 'dependencies-not-installed') {
     return next;
   }
-  const devNext = buildNextActionStatus(
-    state,
-    record,
-    platform,
-    null,
-    device,
-    devBuildScheme,
-    null,
-    recoveryPlan
-  );
+  const { devNext } = planned;
   const { backend, devArgs, devCommand } = devRerun(platform, request, recoveryPort, devNext);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
@@ -218,6 +195,65 @@ export function chooseNextAction({
     };
   }
   return next;
+}
+
+/**
+ * The `next` the plan names, and the same plan's `next` with no dev server or cloud session to
+ * verify against, which a device-binding `next` builds on.
+ */
+function planNextActions(
+  {
+    state,
+    record,
+    platform,
+    recoveryPort,
+    devServer,
+    device,
+    devBuildScheme,
+    plan,
+  }: Pick<
+    NextActionFacts,
+    | 'state'
+    | 'record'
+    | 'platform'
+    | 'recoveryPort'
+    | 'devServer'
+    | 'device'
+    | 'devBuildScheme'
+    | 'plan'
+  >,
+  cloudPlatform: CloudPlatform | null
+): { next: NextActionStatus; devNext: NextActionStatus } {
+  const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;
+  const next = buildNextActionStatus(
+    state,
+    record,
+    platform,
+    devServer,
+    device,
+    // The scheme a development build of this project registers, read the same way the deep link
+    // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
+    // the app's own scheme (`src/navigate/connectUrl.ts`).
+    devBuildScheme,
+    cloudPlatform,
+    // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
+    // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
+    // toolchain probe folded in — rather than the one the project's state alone implies. The two
+    // differ on exactly the machines where it matters, and a `status` that reported
+    // "expo run:ios" on a Linux box would be the report disagreeing with the command.
+    recoveryPlan
+  );
+  const devNext = buildNextActionStatus(
+    state,
+    record,
+    platform,
+    null,
+    device,
+    devBuildScheme,
+    null,
+    recoveryPlan
+  );
+  return { next, devNext };
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */
