@@ -5,7 +5,8 @@ import path from 'node:path';
 
 import { lockAddressFor } from '../../src/devLock/address';
 import { detachedRunFixture } from '../detachedRunFixture';
-import { executeAgentCliAsync, fixturesDir } from '../utils';
+import { detachedBarrierFixture } from '../detachedBarrierFixture';
+import { executeAgentCliAsync, fixturesDir, waitForAsync } from '../utils';
 
 function publishEvidence(root: string, id: string) {
   const endpoint = lockAddressFor(root, { name: `detached-${id}` }).address;
@@ -19,6 +20,21 @@ function publishEvidence(root: string, id: string) {
 }
 
 // @ref llp/0036-detached-run-ownership.rfc.md
+it('death before publication leaves admission available', async () => {
+  const f = await detachedBarrierFixture();
+  try {
+    const first = f.start({ DETACH_TEST_BOOT_BARRIER: '1' });
+    expect(await waitForAsync(() => f.marks('child').length === 1, 15_000)).toBe(true);
+    process.kill(Number(f.marks('child')[0]!.slice('child-'.length)), 'SIGKILL');
+    expect((await first.result).exitCode).not.toBe(0);
+    f.release();
+    const replacement = await f.start().result;
+    expect(replacement.exitCode, replacement.all).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 it('simultaneous detached starts elect one owner and normal stop releases it', async () => {
   const f = await detachedRunFixture();
   try {
