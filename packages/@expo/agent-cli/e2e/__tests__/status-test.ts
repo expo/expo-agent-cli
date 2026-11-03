@@ -3353,9 +3353,11 @@ describe('@expo/agent-cli status', () => {
         const report: StatusReport = JSON.parse(result.stdout);
         expect(report.devServer?.projectRootMatched).toBe(false);
         expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev --${platform} --local --go --detach --wait-ready`
+          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --${platform} --local --go --detach --wait-ready`
         );
-        expect(report.next?.why).toBeNull();
+        expect(report.next?.why).toBe(
+          'Stop the owned dev-server process before starting another run.'
+        );
       } finally {
         releaseLock();
         await stub.close();
@@ -3501,7 +3503,7 @@ describe('@expo/agent-cli status', () => {
         const report: StatusReport = JSON.parse(result.stdout);
         expect(report.devServer).toMatchObject({ url: ownUrl, running: false, source: 'lock' });
         expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev --android --local --go --port ${ownPort} --detach --wait-ready`
+          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --local --go --port ${ownPort} --detach --wait-ready`
         );
       } finally {
         releaseLock();
