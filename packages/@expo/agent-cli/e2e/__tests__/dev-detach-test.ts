@@ -1,13 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-//
-// `@expo/agent-cli dev --detach` through the published bin. Everything worth pinning here is what a unit
-// test cannot see: the parent process **returns** while a dev server it started is still running,
-// that server survives the parent's exit, its output lands in a file, and `dev:stop` takes the
-// whole tree down again.
-//
-// The dev server is the stub `expo` bin, which holds the lock exactly as the real one does — the
-// wrapper is what takes the lock, and the wrapper is real here.
+// Real CLI processes exercise detached lifetime, logs and stop with an external Expo stub.
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
