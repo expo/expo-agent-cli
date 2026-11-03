@@ -502,7 +502,7 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
     }
   }, 120_000);
 
-  it('a gate with no window and no log exits 22, never 0', async () => {
+  it('a gate without a log succeeds only with a readable runtime', async () => {
     // The state of every project whose dev server was started in the foreground: there is no detached
     // log, so the fallback has nothing to read and the blind window is *no observation*. Reproduced by
     // moving this run's log aside rather than by starting a second dev server, and restored after —
@@ -522,14 +522,15 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
         ['runtime:errors', '--android', '--fail-on-error', '--duration', '2s', '--json'],
         { label: 'errors-inconclusive' }
       );
-      // 22 is llp/0010's "nothing was shown to be wrong and nothing was proved right". The exit-code
-      // table's rule that the `no-debugger` stub pins, now against the runtime it was written from.
-      expectExit(result, 22, 'a gate given no observation must not report health');
-      expect(result.exitCode).not.toBe(0);
       const report = parseJson(result);
-      expect(report.runtimeReadable).toBe(false);
+      // Expo Go 58 can answer CDP on Android. Removing its log must not erase that evidence;
+      // an older runtime without a debugger still owes the caller an inconclusive result.
+      expect(typeof report.runtimeReadable).toBe('boolean');
+      expectExit(result, report.runtimeReadable ? 0 : 22);
       expect(report.devServerLog.read).toBe(false);
-      expect(report.devServerLog.reason).toContain('--detach');
+      expect(report.devServerLog.reason).toContain(
+        report.runtimeReadable ? 'runtime answered the debugger' : '--detach'
+      );
     } finally {
       fs.renameSync(parked, logFile);
     }
