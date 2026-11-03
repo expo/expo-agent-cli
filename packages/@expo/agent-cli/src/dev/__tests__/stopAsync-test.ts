@@ -18,6 +18,8 @@ import { localBackendOf } from '../../deviceBinding/types';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import type { DevServerLockInfo } from '../../devLock/types';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { printed } from '../../utils/__tests__/printed';
 
 vi.mock('../../devLock', () => {
   const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
@@ -35,12 +37,6 @@ vi.mock('../portListener', () => ({
 }));
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
-
 function lock(overrides: Partial<DevServerLockInfo> = {}) {
   return lockInfo(overrides);
 }
@@ -66,15 +62,6 @@ function mockPort({ answering }: { answering: boolean }) {
     }
     return { ok: true, text: async () => 'packager-status:running' };
   }) as unknown as typeof fetch;
-}
-
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
-}
-
-/** What reached stderr: the what / why / how of a refusal, which is where the guard is named. */
-function printedErrors(): string {
-  return vi.mocked(console.error).mock.calls.flat().join('\n');
 }
 
 let originalFetch: typeof fetch | undefined;
@@ -126,7 +113,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
@@ -204,7 +190,7 @@ describe(devStopAsync, () => {
         reason: 'still-running',
         processStillRunning: true,
       });
-      expect(printedErrors()).toContain('SIGKILL');
+      expect(printed(console.error)).toContain('SIGKILL');
     });
 
     // The split-stack case, and every other "something else has that port number" case with it:
@@ -254,9 +240,9 @@ describe(devStopAsync, () => {
         processStillRunning: false,
       });
       // Named to be ruled out, never offered: the recovery is the other dev server.
-      expect(printedErrors()).toContain('SIGKILL has nothing left to signal');
-      expect(printedErrors()).not.toContain('which the process cannot decline');
-      expect(printedErrors()).toContain('npx @expo/agent-cli status --json');
+      expect(printed(console.error)).toContain('SIGKILL has nothing left to signal');
+      expect(printed(console.error)).not.toContain('which the process cannot decline');
+      expect(printed(console.error)).toContain('npx @expo/agent-cli status --json');
     });
 
     it(`should report a live pid as still running when it released its lock and the port is free`, async () => {
@@ -278,7 +264,7 @@ describe(devStopAsync, () => {
         easPlatform: null,
       });
       expect(report.followups).toEqual([]);
-      expect(printedErrors()).toContain('SIGKILL');
+      expect(printed(console.error)).toContain('SIGKILL');
     });
 
     it(`should not call a silent lock holder or a slow /status a finished dev --eas run`, async () => {
@@ -522,8 +508,8 @@ describe(devStopAsync, () => {
         await devStopAsync(projectRoot, options({ port: 8081, force: true }));
 
         expect(JSON.parse(printed()).forceRefusedBy).toBe('foreign-process');
-        expect(printedErrors()).toContain('nginx');
-        expect(printedErrors()).not.toContain('again with --force');
+        expect(printed(console.error)).toContain('nginx');
+        expect(printed(console.error)).not.toContain('again with --force');
       });
 
       it(`should report which proof failed when the port is not a dev server`, async () => {
@@ -535,8 +521,8 @@ describe(devStopAsync, () => {
         await devStopAsync(projectRoot, options({ port: 8081, force: true }));
 
         expect(JSON.parse(printed()).forceRefusedBy).toBe('not-a-dev-server');
-        expect(printedErrors()).toContain('packager-status:running');
-        expect(printedErrors()).not.toContain('again with --force');
+        expect(printed(console.error)).toContain('packager-status:running');
+        expect(printed(console.error)).not.toContain('again with --force');
       });
 
       it(`should report which proof failed when the machine names no process`, async () => {
@@ -545,7 +531,7 @@ describe(devStopAsync, () => {
         await devStopAsync(projectRoot, options({ port: 8081, force: true }));
 
         expect(JSON.parse(printed()).forceRefusedBy).toBe('unnamed-process');
-        expect(printedErrors()).not.toContain('again with --force');
+        expect(printed(console.error)).not.toContain('again with --force');
       });
 
       // Null when the flag was not passed: the field says which proof `--force` failed on, and
@@ -554,7 +540,7 @@ describe(devStopAsync, () => {
         await devStopAsync(projectRoot, options({ port: 8081 }));
 
         expect(JSON.parse(printed()).forceRefusedBy).toBeNull();
-        expect(printedErrors()).toContain('--force');
+        expect(printed(console.error)).toContain('--force');
       });
     });
   });
@@ -646,7 +632,7 @@ describe('dev:stop --eas', () => {
       expect(printed()).toContain(
         'Could not release sess-2: refused; "npx --yes eas-cli simulator:stop --id sess-2" ends it'
       );
-      expect(printedErrors()).toBe(
+      expect(printed(console.error)).toBe(
         'refused; "npx --yes eas-cli simulator:stop --id sess-2" ends it'
       );
     });

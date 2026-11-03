@@ -1,11 +1,14 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import type { RuntimeStopOptions } from '../resolveStopOptions';
 import { buildStopFollowUps, runtimeStopAsync, type RuntimeStopResultJson } from '../stopAsync';
+import { mockSpawnQueue, type SpawnAnswer } from '../../utils/__tests__/fakeSpawn';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { printed } from '../../utils/__tests__/printed';
+import { mockDevServer } from './fakeDevServer';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -13,7 +16,6 @@ vi.mock('../../devLock', () => ({
 }));
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
 
 const BOOTED_SIMULATOR = JSON.stringify({
   devices: {
@@ -23,47 +25,15 @@ const BOOTED_SIMULATOR = JSON.stringify({
   },
 });
 
-interface SpawnAnswer {
-  stdout?: string;
-  stderr?: string;
-  exitCode?: number | null;
-}
-
 /** The preflight's device facts on a run bound to an emulator: `simctl`, then `adb devices -l`. */
 const ANDROID_INVENTORY: SpawnAnswer[] = [
   { exitCode: 1 },
   { stdout: 'List of devices attached\nemulator-5554\tdevice model:sdk_gphone64_arm64\n' },
 ];
 
-function mockSpawnQueue(answers: SpawnAnswer[]) {
-  let call = 0;
-  vi.mocked(spawn).mockImplementation((() => {
-    const answer = answers[call++] ?? {};
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (answer.stdout) child.stdout.emit('data', answer.stdout);
-      if (answer.stderr) child.stderr.emit('data', answer.stderr);
-      child.emit('close', answer.exitCode ?? 0, null);
-    });
-    return child as any;
-  }) as any);
-}
-
 function spawnedArgv(index: number): string[] {
   const [bin, args] = vi.mocked(spawn).mock.calls[index] as unknown as [string, string[]];
   return [bin, ...args];
-}
-
-function mockDevServer(targets: unknown[] | null) {
-  globalThis.fetch = (async () => {
-    if (targets == null) {
-      throw new Error('fetch failed');
-    }
-    return { ok: true, json: async () => targets };
-  }) as unknown as typeof fetch;
 }
 
 function options(overrides: Partial<RuntimeStopOptions> = {}): RuntimeStopOptions {
@@ -77,17 +47,13 @@ function options(overrides: Partial<RuntimeStopOptions> = {}): RuntimeStopOption
   };
 }
 
-function printed(): string {
-  return vi.mocked(console.log).mock.calls.flat().join('\n');
-}
-
 let originalFetch: typeof fetch | undefined;
 
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -98,7 +64,6 @@ afterEach(() => {
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
-  Object.defineProperty(process, 'platform', { value: realPlatform });
   vol.reset();
 });
 
@@ -128,7 +93,7 @@ describe(runtimeStopAsync, () => {
     const report = JSON.parse(printed());
     expect(report).toMatchObject({ stopped: false, wasRunning: false });
     expect(report.reason).toBe('Invalid device: NOPE');
-    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain('--app-id');
+    expect(printed(console.error)).toContain('--app-id');
   });
 
   // The command reads the dev server for evidence, and an app can be running with no dev server
@@ -145,7 +110,7 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should force-stop the app on the bound emulator instance`, async () => {
-    Object.defineProperty(process, 'platform', { value: 'linux' });
+    mockPlatform('linux');
     seedAndroidBinding(projectRoot, 'emulator-5554');
     mockDevServer([]);
     mockSpawnQueue([
@@ -181,7 +146,7 @@ describe(runtimeStopAsync, () => {
   // now reads `classifiedTargets.read` — the platform-scoped list the preflight already builds for every other
   // command in the family — and the ids in its report are the ones on the device it acted on.
   it(`resolves the application id from the platform it is stopping, not the first one listed (F101)`, async () => {
-    Object.defineProperty(process, 'platform', { value: 'linux' });
+    mockPlatform('linux');
     mockDevServer([
       { id: 'ios-1', appId: 'host.exp.Exponent', deviceName: 'iPhone 17 Pro' },
       {

@@ -32,6 +32,7 @@ import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
 import { easRunLifecycle } from '../openAppEas';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -142,11 +143,6 @@ const projectRoot = '/project';
 function devServerRun(overrides: Partial<DevServerRun> = {}): DevServerRun {
   return { exitCode: 0, stdout: '', stderr: '', port: null, ...overrides };
 }
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 function mockProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
   const state: ProjectState = {
@@ -245,7 +241,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vi.restoreAllMocks();
 });
 
@@ -567,7 +562,6 @@ describe(devAsync, () => {
     });
 
     afterEach(() => {
-      mockPlatform(realPlatform);
       vi.mocked(devicesDisabled).mockReturnValue(true);
     });
 
@@ -577,11 +571,7 @@ describe(devAsync, () => {
       async (platform) => {
         mockStaleDevClientState();
         mockPlatform(platform);
-        try {
-          await devAsync(projectRoot, resolveDevOptions(['--ios', '--local']));
-        } finally {
-          mockPlatform(realPlatform);
-        }
+        await devAsync(projectRoot, resolveDevOptions(['--ios', '--local']));
         expect(acquireDeviceAsync).not.toHaveBeenCalled();
         for (const [, args] of vi.mocked(runDevServerAsync).mock.calls) {
           expect(args).not.toContain('--device');
