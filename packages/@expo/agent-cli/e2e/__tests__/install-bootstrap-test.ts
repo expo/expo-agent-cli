@@ -13,6 +13,7 @@ import {
   setupFixtureAsync,
   stubExpoEnv,
 } from '../utils';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/dependencies';
 
 const STUB_PACKAGE_MANAGER = `const fs = require('fs');
 fs.appendFileSync(process.env.STUB_PM_LOG, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + '\\n');
@@ -67,19 +68,22 @@ describe('@expo/agent-cli install with no installed dependencies', () => {
     expect(result.exitCode).toBe(3);
   });
 
-  it(`should refuse a named package and name the bare install`, async () => {
-    const { projectRoot, env, calls } = await setupUninstalledProjectAsync();
+  it.each([[['expo-sqlite']], [['--check']], [['--fix']], [['--', '--verbose']]])(
+    `should refuse %j, which needs expo install, and name the bare install`,
+    async (args) => {
+      const { projectRoot, env, calls } = await setupUninstalledProjectAsync();
 
-    const result = await executeAgentCliAsync(projectRoot, ['install', 'expo-sqlite', '--json'], {
-      env,
-      reject: false,
-    });
+      const result = await executeAgentCliAsync(projectRoot, ['install', '--json', ...args], {
+        env,
+        reject: false,
+      });
 
-    expect(result.exitCode).toBe(1);
-    expect(JSON.parse(result.stdout).error).toMatchObject({
-      code: 'DEPENDENCIES_NOT_INSTALLED',
-      suggestedCommand: 'npx @expo/agent-cli install',
-    });
-    expect(calls()).toEqual([]);
-  });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout).error).toMatchObject({
+        code: 'DEPENDENCIES_NOT_INSTALLED',
+        suggestedCommand: INSTALL_DEPENDENCIES_COMMAND,
+      });
+      expect(calls()).toEqual([]);
+    }
+  );
 });

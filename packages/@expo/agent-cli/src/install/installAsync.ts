@@ -2,18 +2,16 @@ import { refreshDocsAfterInstallAsync } from '../docs/autoSync';
 import { buildInstallFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
+import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/dependencies';
 import type { InstallImpactReport } from '../project/types';
-import { PROGRAM_PREFIX } from '../programName';
 import {
   autoSyncSkillsAsync,
   listSkillPackagesAsync,
   printSkillsForAgentAsync,
 } from '../skills/skillsAsync';
-import { resolvePackageRootSync } from '../project/nodeModules';
-import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import { runInheritedAsync } from '../utils/inheritedRun';
-import { lockfileInstall } from '../utils/packageRunner';
+import { lockfileInstall } from '../utils/lockfile';
 import { spawnSubprocessAsync } from '../utils/subprocess';
 import { diagnoseCheckedPackagesAsync, type InstallCheckReport } from './checkReport';
 import { reportInstallImpactAsync } from './impactReport';
@@ -31,15 +29,18 @@ import type { InstallReport } from './types';
  * @returns the exit code of the `expo install` subprocess.
  */
 export async function installAsync(projectRoot: string, plan: InstallPlan): Promise<number> {
-  const dependenciesMissing =
-    !plan.check &&
-    !plan.expoArgs.includes('--fix') &&
-    resolvePackageRootSync(projectRoot, 'expo') == null;
-  if (dependenciesMissing && plan.packages.length > 0) {
-    throw dependenciesNotInstalledError();
+  // @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception — only the bare
+  // form runs, because every other form is `expo install`, which cannot read the SDK yet.
+  const dependenciesMissing = dependenciesMissingSync(projectRoot);
+  if (dependenciesMissing && plan.expoArgs.length > 0) {
+    throw dependenciesNotInstalledError('nothing was installed or checked');
   }
   const { exitCode, checkPayload, checkOutput } = dependenciesMissing
-    ? await runLockfileInstallAsync(projectRoot, plan)
+    ? {
+        exitCode: await runLockfileInstallAsync(projectRoot, plan.json),
+        checkPayload: null,
+        checkOutput: null,
+      }
     : await runInstallAsync(projectRoot, plan);
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
@@ -89,21 +90,13 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
  *
  * @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception
  */
-async function runLockfileInstallAsync(
-  projectRoot: string,
-  plan: InstallPlan
-): Promise<{ exitCode: number; checkPayload: unknown; checkOutput: string | null }> {
-  const { lockfile, cwd, argv } = lockfileInstall(projectRoot);
-  const [command, ...args] = argv as [string, ...string[]];
-  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${argv.join(' ')}`;
+async function runLockfileInstallAsync(projectRoot: string, json: boolean): Promise<number> {
+  const { command, args, cwd, lockfile } = lockfileInstall(projectRoot);
+  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${[command, ...args].join(' ')}`;
 
-  if (!plan.json) {
+  if (!json) {
     Log.log(message);
-    return {
-      exitCode: await runInheritedAsync(command, args, { cwd }),
-      checkPayload: null,
-      checkOutput: null,
-    };
+    return runInheritedAsync(command, args, { cwd });
   }
   Log.error(message);
   const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
@@ -111,20 +104,7 @@ async function runLockfileInstallAsync(
   if (printed) {
     Log.error(printed);
   }
-  return { exitCode: result.exitCode ?? 1, checkPayload: null, checkOutput: null };
-}
-
-function dependenciesNotInstalledError(): CommandError {
-  const error = new CommandError(
-    'DEPENDENCIES_NOT_INSTALLED',
-    [
-      `This project has no installed dependencies, so no package was added.`,
-      `Why: the expo package does not resolve from this project or any directory above it, and "expo install" cannot read the SDK of a project with no node_modules.`,
-      `How: run "${PROGRAM_PREFIX} install" with no packages first. It installs the lockfile. Then add the package.`,
-    ].join('\n')
-  );
-  error.suggestedCommand = `${PROGRAM_PREFIX} install`;
-  return error;
+  return result.exitCode ?? 1;
 }
 
 /**
