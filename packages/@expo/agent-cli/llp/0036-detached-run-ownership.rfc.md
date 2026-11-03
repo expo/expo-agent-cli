@@ -48,4 +48,6 @@ out of scope. Socket liveness does not imply that Metro is ready.
 | Endpoint, not PID, establishes liveness | `a silent ownership endpoint prevents admission regardless of its diagnostic PID` |
 | Ambiguous connection retains evidence   | `an uncertain endpoint (%s) permits neither start nor discard`                    |
 
+| An unpublished attempt does not block admission | `death before publication leaves admission available` |
+
 These tests live in `e2e/__tests__/dev-detach-ownership-test.ts`.
