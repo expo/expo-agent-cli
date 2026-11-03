@@ -7,6 +7,7 @@ import { toPosixPath } from '../../utils/filePath';
 import { cleanSkillLinksAsync, syncSkillLinksAsync, updateGitIgnoreAsync } from '../linking';
 import type { DiscoveredSkill } from '../types';
 import type { MockInstance } from 'vitest';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../log');
 
@@ -24,12 +25,6 @@ const asPosix = (paths: string[]) => paths.map(toPosixPath);
 
 /** A path inside the project, spelled the way the running platform spells it. */
 const inProject = (...segments: string[]) => path.join(projectRoot, ...segments);
-
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 const uiSkill: DiscoveredSkill = {
   name: 'expo-ui',
@@ -70,7 +65,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  mockPlatform(realPlatform);
 });
 
 describe(syncSkillLinksAsync, () => {

@@ -12,6 +12,7 @@ import {
   TSC_ARGS,
 } from '../checkAsync';
 import type { MockedFunction } from 'vitest';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../utils/subprocess', () => ({ spawnSubprocessAsync: vi.fn() }));
 
@@ -20,11 +21,6 @@ const projectRoot = path.resolve('/project');
 /** A hoisted npm workspace: the app has no `node_modules` of its own (F113). */
 const workspaceRoot = path.resolve('/workspace');
 const hoistedProjectRoot = path.join(workspaceRoot, 'apps', 'mobile');
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 /** A project with a compiler and a config, i.e. one there is something to check in. */
 function typeScriptProject(): void {
@@ -44,7 +40,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vol.reset();
 });
 

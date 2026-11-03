@@ -1,30 +1,13 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
 
 import { findExecutableOnPath, spawnSubprocessAsync } from '../subprocess';
-import type { Mock } from 'vitest';
+import { mockSpawnChild } from './fakeSpawn';
 
 /** Build a `PATH` value the way the running platform writes it. */
 const pathOf = (...dirs: string[]) => dirs.join(path.delimiter);
-
-interface FakeChild extends EventEmitter {
-  stdout: EventEmitter | null;
-  stderr: EventEmitter | null;
-  kill: Mock;
-}
-
-function mockSpawn({ piped = true }: { piped?: boolean } = {}): FakeChild {
-  const child = Object.assign(new EventEmitter(), {
-    stdout: piped ? new EventEmitter() : null,
-    stderr: piped ? new EventEmitter() : null,
-    kill: vi.fn(),
-  });
-  vi.mocked(spawn).mockReturnValue(child as any);
-  return child;
-}
 
 afterEach(() => {
   vol.reset();
@@ -32,7 +15,7 @@ afterEach(() => {
 
 describe(spawnSubprocessAsync, () => {
   it(`should capture the output and never attach stdin`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('eas', ['deploy'], { output: 'capture' });
     child.stdout!.emit('data', 'Deployment URL: https://app--123.expo.app\n');
@@ -54,7 +37,7 @@ describe(spawnSubprocessAsync, () => {
   it(`should stream and capture at the same time in tee mode`, async () => {
     const stdoutWrite = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     const stderrWrite = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('eas', ['deploy'], { output: 'tee' });
     child.stdout!.emit('data', 'exporting\n');
@@ -74,7 +57,7 @@ describe(spawnSubprocessAsync, () => {
     // it is still captured because a failing tool says why on that same stream.
     const stdoutWrite = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     const stderrWrite = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('create-launch', ['--json'], {
       output: 'capture-stdout',
@@ -95,7 +78,7 @@ describe(spawnSubprocessAsync, () => {
   });
 
   it(`should hand the terminal to the child in inherit mode`, async () => {
-    const child = mockSpawn({ piped: false });
+    const child = mockSpawnChild({ piped: false });
 
     const promise = spawnSubprocessAsync('create-expo', ['my-app'], { output: 'inherit' });
     child.emit('close', 0, null);
@@ -109,7 +92,7 @@ describe(spawnSubprocessAsync, () => {
   });
 
   it(`should forward the exit code of a failed run`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('eas', ['build'], { output: 'capture' });
     child.stderr!.emit('data', 'Build failed\n');
@@ -119,7 +102,7 @@ describe(spawnSubprocessAsync, () => {
   });
 
   it(`should report a missing binary instead of rejecting`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('eas', ['deploy'], { output: 'capture' });
     const error: NodeJS.ErrnoException = new Error('spawn eas ENOENT');
@@ -130,7 +113,7 @@ describe(spawnSubprocessAsync, () => {
   });
 
   it(`should treat an interrupt as a clean stop, like the expo wrapper does`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('eas', ['build'], { output: 'capture' });
     child.emit('close', null, 'SIGINT');
@@ -141,7 +124,7 @@ describe(spawnSubprocessAsync, () => {
   // Layer 2 of the needs-human detection: a child is told that nobody can answer it, in the way
   // the tool understands (llp/0010 §Needs-human protocol).
   it(`should merge the given environment over this process' own`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('expo', ['export'], { env: { CI: '1' } });
     child.emit('close', 0, null);
@@ -155,7 +138,7 @@ describe(spawnSubprocessAsync, () => {
   });
 
   it(`should let the child inherit the environment when nothing is added`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
 
     const promise = spawnSubprocessAsync('expo', ['export']);
     child.emit('close', 0, null);
@@ -174,7 +157,7 @@ describe(spawnSubprocessAsync, () => {
     });
 
     it(`kills a child that went silent on a question, and quotes the line`, async () => {
-      const child = mockSpawn();
+      const child = mockSpawnChild();
 
       const promise = spawnSubprocessAsync('eas', ['deploy'], { promptGuard: true });
       child.stderr!.emit('data', 'Resolving the project\n? Select a platform\n');
@@ -189,7 +172,7 @@ describe(spawnSubprocessAsync, () => {
     });
 
     it(`leaves a child that is silent without asking anything alone`, async () => {
-      const child = mockSpawn();
+      const child = mockSpawnChild();
 
       const promise = spawnSubprocessAsync('eas', ['build'], { promptGuard: true });
       child.stderr!.emit('data', 'Compiling native code\n');
@@ -201,7 +184,7 @@ describe(spawnSubprocessAsync, () => {
     });
 
     it(`restarts the window every time the child writes something`, async () => {
-      const child = mockSpawn();
+      const child = mockSpawnChild();
 
       const promise = spawnSubprocessAsync('eas', ['deploy'], { promptGuard: true });
       child.stderr!.emit('data', '? Select a platform\n');
@@ -215,7 +198,7 @@ describe(spawnSubprocessAsync, () => {
     });
 
     it(`never runs in inherit mode, where a person can answer`, async () => {
-      const child = mockSpawn({ piped: false });
+      const child = mockSpawnChild({ piped: false });
 
       const promise = spawnSubprocessAsync('create-expo', ['my-app'], {
         output: 'inherit',
@@ -233,7 +216,7 @@ describe(spawnSubprocessAsync, () => {
     });
 
     it(`is off unless the caller asks for it`, async () => {
-      const child = mockSpawn();
+      const child = mockSpawnChild();
 
       const promise = spawnSubprocessAsync('eas', ['deploy']);
       child.stderr!.emit('data', '? Select a platform\n');
@@ -246,7 +229,7 @@ describe(spawnSubprocessAsync, () => {
   });
 
   it(`should forward terminal signals to the child while it runs`, async () => {
-    const child = mockSpawn();
+    const child = mockSpawnChild();
     const listenersBefore = process.listenerCount('SIGTERM');
 
     const promise = spawnSubprocessAsync('eas', ['build'], { output: 'capture' });

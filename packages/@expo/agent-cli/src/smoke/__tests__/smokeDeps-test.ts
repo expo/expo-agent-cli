@@ -38,6 +38,7 @@ import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../log');
 vi.mock('../../deviceBinding', async (importOriginal) => ({
@@ -397,7 +398,7 @@ describe('evaluate beside an app of another worktree', () => {
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
   it('waitForAppConnection reports the skipped apps and prints nothing, however many waits a run makes', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    mockPlatform('darwin');
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}', '/wt/legend/package.json': '{}' });
     seedIosBinding('/wt/legend', 'SIM-LEGEND', CLONE);
     vi.mocked(spawnCaptureAsync).mockResolvedValue({
@@ -438,6 +439,11 @@ describe('reloadApp beside a local simulator, on a bound EAS session', () => {
   const target = (id: string, deviceName: string) =>
     makeTarget({ id, appId: 'host.exp.Exponent', deviceName });
   const targets = [target('local', 'iPhone 16e'), target('session', 'iPhone 17')];
+
+  // A local simulator exists only on a Mac.
+  beforeEach(() => {
+    mockPlatform('darwin');
+  });
 
   afterEach(() => {
     globalThis.fetch = realFetch;

@@ -8,14 +8,13 @@ import {
 } from '../targetSelection';
 import { scopedListClassifier } from '../waitReady';
 import { makeDeviceInventory, makeTarget, makeTargetSelection } from './targetSelectionFixtures';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 
-const realPlatform = process.platform;
 const target = makeTarget();
 
 afterEach(() => {
-  Object.defineProperty(process, 'platform', { value: realPlatform });
   vi.resetAllMocks();
 });
 
@@ -31,7 +30,7 @@ it.each([
   { name: 'invalid runtime list', stdout: '{"devices":{"ios":null}}' },
   { name: 'incomplete device entry', stdout: '{"devices":{"ios":[{"udid":"LOCAL"}]}}' },
 ])('cloud attribution after $name', async ({ stdout = '', exitCode = 0, reject, readable }) => {
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   const tools = fakeTools();
   vi.mocked(spawnCaptureAsync).mockImplementation(async (command, args) => {
     if (command !== 'xcrun') return tools.adb(args);
@@ -49,7 +48,7 @@ it.each([
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — the device tools.
 it('does not ask simctl for an --android scope because another worktree holds an iOS lease', async () => {
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: '', stderr: '', exitCode: 1 });
   const selection = makeTargetSelection({ platform: { value: 'android', by: 'flag' } });
   const android = makeTarget({ appId: 'host.exp.exponent', deviceName: 'Pixel 9 - 15 - API 35' });
@@ -60,7 +59,7 @@ it('does not ask simctl for an --android scope because another worktree holds an
 });
 
 it('reads an Android session on a host with no adb and no simctl', async () => {
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   vi.mocked(spawnCaptureAsync).mockImplementation(async (command) => {
     if (command === 'xcrun') throw new Error('xcrun unavailable');
     return { stdout: '', stderr: '', exitCode: null, spawnError: new Error('spawn adb ENOENT') };
@@ -75,10 +74,10 @@ it('reads an Android session on a host with no adb and no simctl', async () => {
   expect(classifiedTargets.read).toEqual([session]);
 });
 
-it.each(['linux', 'win32'])(
+it.each(['linux', 'win32'] as const)(
   'allows cloud attribution without local iOS support on %s',
   async (platform) => {
-    Object.defineProperty(process, 'platform', { value: platform });
+    mockPlatform(platform);
     vi.mocked(spawnCaptureAsync).mockRejectedValue(new Error('tool unavailable'));
     const { classifiedTargets } = await resolveTargetSelectionAsync({
       projectRoot: null,
@@ -114,7 +113,7 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
   });
 
   async function classifyAsync(adbAnswers: boolean, targets: (typeof target)[]) {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    mockPlatform('darwin');
     vi.mocked(spawnCaptureAsync).mockImplementation(async (command) =>
       command === 'xcrun'
         ? { stdout: '{"devices":{}}', stderr: '', exitCode: 0 }
@@ -147,7 +146,7 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
 
   it('asks adb again on a later poll of a wait, and then reads the session app', async () => {
     let adbAnswers = false;
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    mockPlatform('darwin');
     vi.mocked(spawnCaptureAsync).mockImplementation(async (command) =>
       command === 'xcrun'
         ? { stdout: '{"devices":{}}', stderr: '', exitCode: 0 }
@@ -170,7 +169,7 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
 // A unit test: at this layer the stub `adb` cannot open an Android app, so no e2e wait can attach a
 // twin mid-run. The e2e row lives with the attach wait of `navigate`.
 it('a wait poll asks `adb reverse` again when a twin of the bound model attached', async () => {
-  Object.defineProperty(process, 'platform', { value: 'linux' });
+  mockPlatform('linux');
   let twinAttached = false;
   vi.mocked(spawnCaptureAsync).mockImplementation(async (command, args) => {
     if (command === 'xcrun') throw new Error('xcrun unavailable');

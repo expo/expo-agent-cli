@@ -30,9 +30,9 @@ import {
 import { CommandError } from '../errors';
 import { resetInvokerCache } from '../invoker';
 import { resetPackageRunnerCache } from '../packageRunner';
+import { mockPlatform } from './mockPlatform';
 
 const projectRoot = '/project';
-const realPlatform = process.platform;
 
 /** A `PATH` with a package runner on it and no `eas`, which is the machine this rung is for. */
 const PATH_WITH_RUNNER = '/usr/local/bin';
@@ -46,10 +46,6 @@ const BUNX_ENV = {
   npm_config_user_agent: 'bun/1.3.14 npm/? node/v24.3.0 darwin arm64',
   npm_execpath: '/opt/homebrew/Cellar/bun/1.3.14/bin/bun',
 };
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 /** A project manifest, with or without an `eas-cli` of its own, and a runner on `PATH`. */
 function project(manifest: Record<string, unknown>, extra: Record<string, string> = {}) {
@@ -67,7 +63,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vol.reset();
 });
 

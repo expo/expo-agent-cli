@@ -1,16 +1,7 @@
 import path from 'path';
 
 import { resolveSpawnTarget, windowsTaskkillCommand } from '../windowsShim';
-
-const realPlatform = process.platform;
-
-function mockPlatform(value: typeof process.platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
-
-afterEach(() => {
-  mockPlatform(realPlatform);
-});
+import { mockPlatform } from './mockPlatform';
 
 describe(resolveSpawnTarget, () => {
   describe('on posix', () => {

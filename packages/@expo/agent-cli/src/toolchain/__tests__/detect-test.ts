@@ -8,6 +8,7 @@ import { vol } from 'memfs';
 import { spawnCaptureAsync as spawnCaptureAsyncFn } from '../../utils/spawnCapture';
 import { findExecutableOnPath as findExecutableOnPathFn } from '../../utils/subprocess';
 import { detectToolchainAsync, resetToolchainCache } from '../detect';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 const spawnCaptureAsync = vi.mocked(spawnCaptureAsyncFn);
 const findExecutableOnPath = vi.mocked(findExecutableOnPathFn);
@@ -52,14 +53,9 @@ beforeEach(() => {
   resetToolchainCache();
   vi.clearAllMocks();
   findExecutableOnPath.mockReturnValue(null);
-  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  mockPlatform('darwin');
   delete process.env.ANDROID_HOME;
   delete process.env.ANDROID_SDK_ROOT;
-});
-
-const realPlatform = process.platform;
-afterAll(() => {
-  Object.defineProperty(process, 'platform', { value: realPlatform });
 });
 
 describe('detectToolchainAsync — ios', () => {
@@ -114,7 +110,7 @@ describe('detectToolchainAsync — ios', () => {
   });
 
   it('reports missing on a host that is not macOS, naming the reason', async () => {
-    Object.defineProperty(process, 'platform', { value: 'linux' });
+    mockPlatform('linux');
     machineWith({});
 
     const probe = await detectToolchainAsync('ios');

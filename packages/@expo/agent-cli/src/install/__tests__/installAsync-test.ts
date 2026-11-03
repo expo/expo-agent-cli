@@ -9,6 +9,7 @@ import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { reportInstallImpactAsync } from '../impactReport';
 import { installAsync } from '../installAsync';
 import { resolveInstallPlan } from '../resolveOptions';
+import { printed } from '../../utils/__tests__/printed';
 
 vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
@@ -30,11 +31,6 @@ function report(overrides: Partial<InstallImpactReport> = {}): InstallImpactRepo
     reasons: [],
     ...overrides,
   };
-}
-
-/** Everything the command printed, joined into one string. */
-function printed(): string {
-  return vi.mocked(Log.log).mock.calls.flat().join('\n');
 }
 
 beforeEach(() => {
@@ -138,9 +134,9 @@ describe(installAsync, () => {
     it(`should say a reload is enough after a JavaScript only install`, async () => {
       await installAsync(projectRoot, resolveInstallPlan(['expo-sqlite']));
 
-      expect(printed()).toContain('Suggested next:');
-      expect(printed()).toContain('npx @expo/agent-cli runtime:reload');
-      expect(printed()).toContain('reload');
+      expect(printed(Log.log)).toContain('Suggested next:');
+      expect(printed(Log.log)).toContain('npx @expo/agent-cli runtime:reload');
+      expect(printed(Log.log)).toContain('reload');
     });
 
     it(`should warn that the running app cannot load a new native module`, async () => {
@@ -154,8 +150,8 @@ describe(installAsync, () => {
 
       await installAsync(projectRoot, resolveInstallPlan(['react-native-fancy']));
 
-      expect(printed()).toContain('npx @expo/agent-cli dev');
-      expect(printed()).toContain('react-native-fancy');
+      expect(printed(Log.log)).toContain('npx @expo/agent-cli dev');
+      expect(printed(Log.log)).toContain('react-native-fancy');
     });
 
     it(`should point at the skill of a package that ships one`, async () => {
@@ -164,7 +160,7 @@ describe(installAsync, () => {
       await installAsync(projectRoot, resolveInstallPlan(['@expo/ui@~1.0.0']));
 
       expect(listSkillPackagesAsync).toHaveBeenCalledWith(projectRoot, ['@expo/ui@~1.0.0']);
-      expect(printed()).toContain('npx @expo/agent-cli skills:show @expo/ui');
+      expect(printed(Log.log)).toContain('npx @expo/agent-cli skills:show @expo/ui');
     });
 
     it(`should not look for skills when the skill sync is off`, async () => {
@@ -172,13 +168,13 @@ describe(installAsync, () => {
 
       expect(listSkillPackagesAsync).not.toHaveBeenCalled();
       // The impact report is independent of the skill flags, so it still drives a follow-up.
-      expect(printed()).toContain('Suggested next:');
+      expect(printed(Log.log)).toContain('Suggested next:');
     });
 
     it(`should print nothing with --no-followups`, async () => {
       await installAsync(projectRoot, resolveInstallPlan(['expo-sqlite', '--no-followups']));
 
-      expect(printed()).not.toContain('Suggested next:');
+      expect(printed(Log.log)).not.toContain('Suggested next:');
       expect(listSkillPackagesAsync).not.toHaveBeenCalled();
     });
 
@@ -187,7 +183,7 @@ describe(installAsync, () => {
 
       await installAsync(projectRoot, resolveInstallPlan(['--fix']));
 
-      expect(printed()).not.toContain('Suggested next:');
+      expect(printed(Log.log)).not.toContain('Suggested next:');
     });
 
     it(`should print nothing when the install itself failed`, async () => {
@@ -195,7 +191,7 @@ describe(installAsync, () => {
 
       await installAsync(projectRoot, resolveInstallPlan(['expo-sqlite']));
 
-      expect(printed()).not.toContain('Suggested next:');
+      expect(printed(Log.log)).not.toContain('Suggested next:');
     });
   });
 
@@ -240,7 +236,7 @@ describe(installAsync, () => {
         expect.objectContaining({ silent: true })
       );
       expect(printSkillsForAgentAsync).not.toHaveBeenCalled();
-      expect(printed()).not.toContain('Suggested next:');
+      expect(printed(Log.log)).not.toContain('Suggested next:');
     });
 
     it(`should capture the subprocess instead of letting it write into the object`, async () => {
@@ -256,7 +252,7 @@ describe(installAsync, () => {
         output: 'capture',
       });
       // What the tool printed is a person's answer, so it goes where nothing is parsing.
-      expect(vi.mocked(Log.error).mock.calls.flat().join('\n')).toContain('added 3 packages');
+      expect(printed(Log.error)).toContain('added 3 packages');
       expect(payload().installed).toBe(true);
     });
 
@@ -378,9 +374,7 @@ describe(installAsync, () => {
       );
       expect(check.notes[0]).toContain('npx @expo/agent-cli install');
       // The verdict is never only in a key the caller might not read.
-      expect(vi.mocked(Log.error).mock.calls.flat().join('\n')).toContain(
-        "doesn't seem to be installed"
-      );
+      expect(printed(Log.error)).toContain("doesn't seem to be installed");
     });
   });
 
@@ -392,9 +386,7 @@ describe(installAsync, () => {
       installAsync(projectRoot, resolveInstallPlan(['--check', 'expo-camera']))
     ).resolves.toBe(1);
 
-    expect(vi.mocked(Log.error).mock.calls.flat().join('\n')).toContain(
-      `"expo-camera" is not in this project's package.json`
-    );
+    expect(printed(Log.error)).toContain(`"expo-camera" is not in this project's package.json`);
   });
 
   it(`should stay quiet about a check that passed`, async () => {

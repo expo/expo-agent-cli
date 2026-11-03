@@ -28,6 +28,7 @@ import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../log');
@@ -54,11 +55,6 @@ vi.mock('../advertisedUrl', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../advertisedUrl')>()),
   fetchAdvertisedUrlAsync: vi.fn(),
 }));
-
-const realPlatform = process.platform;
-function mockPlatform(value: NodeJS.Platform) {
-  Object.defineProperty(process, 'platform', { value });
-}
 
 const projectRoot = '/project';
 const logFile = detachedLogPath(projectRoot);
@@ -106,7 +102,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  mockPlatform(realPlatform);
   vi.useRealTimers();
   vi.resetAllMocks();
   vol.reset();
@@ -540,8 +535,6 @@ describe('a lock whose port Metro has not logged', () => {
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
 describe('the bound device', () => {
-  const platform = process.platform;
-  afterEach(() => Object.defineProperty(process, 'platform', { value: platform }));
   const running = {
     ...lockInfo(),
     url: 'http://127.0.0.1:8393',
