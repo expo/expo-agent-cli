@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { executeAgentCliAsync, installStubBinAsync, setupFixtureAsync } from '../utils';
-import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/dependencies';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/expoApp';
 
 const STUB_LOG_NAME = 'stub-tsc-invocations.jsonl';
 

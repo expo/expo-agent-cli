@@ -2,7 +2,7 @@ import { refreshDocsAfterInstallAsync } from '../docs/autoSync';
 import { buildInstallFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
-import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/dependencies';
+import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/expoApp';
 import type { InstallImpactReport } from '../project/types';
 import {
   autoSyncSkillsAsync,
@@ -19,7 +19,7 @@ import { reportInstallImpactAsync } from './impactReport';
 import type { InstallPlan } from './resolveOptions';
 import type { InstallReport } from './types';
 
-/** What an install subprocess left: its code, and the `--check` report when there is one. */
+/** What an `expo install` subprocess left: its code, and the `--check` report when there is one. */
 interface InstallRun {
   exitCode: number;
   checkPayload: unknown;
@@ -44,8 +44,13 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
     throw dependenciesNotInstalledError('nothing was installed or checked');
   }
   const { exitCode, checkPayload, checkOutput } = dependenciesMissing
-    ? await runLockfileInstallAsync(projectRoot, plan.json)
+    ? { exitCode: await runLockfileInstallAsync(projectRoot, plan.json), ...NO_CHECK }
     : await runInstallAsync(projectRoot, plan);
+  // @ref llp/0021-honest-reports.rfc.md — a 0 exit is not the answer; an expo that resolves is. No
+  // Try: line, because running the bare install again would only repeat this.
+  if (dependenciesMissing && exitCode === 0 && dependenciesMissingSync(projectRoot)) {
+    throw stillUnresolvedError(projectRoot);
+  }
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
     // that asked for JSON still gets one object, the way a successful run does.
@@ -94,36 +99,37 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
  *
  * @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception
  */
-async function runLockfileInstallAsync(projectRoot: string, json: boolean): Promise<InstallRun> {
+async function runLockfileInstallAsync(projectRoot: string, json: boolean): Promise<number> {
   const { command, args, cwd, lockfile } = lockfileInstall(projectRoot);
-  const spelled = [command, ...args].join(' ');
-  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${spelled}`;
+  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${[command, ...args].join(' ')}`;
 
-  let exitCode: number;
-  if (json) {
-    Log.error(message);
-    const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
-    const printed = `${result.stdout}${result.stderr}`.trim();
-    if (printed) {
-      Log.error(printed);
-    }
-    exitCode = result.exitCode ?? 1;
-  } else {
+  if (!json) {
     Log.log(message);
-    exitCode = await runInheritedAsync(command, args, { cwd });
+    return runInheritedAsync(command, args, { cwd });
   }
-  // @ref llp/0021-honest-reports.rfc.md — a 0 exit is not the answer; an expo that resolves is.
-  if (exitCode === 0 && dependenciesMissingSync(projectRoot)) {
-    throw new CommandError(
-      'DEPENDENCIES_NOT_INSTALLED',
-      [
-        `"${spelled}" exited 0 in ${cwd}, but expo still does not resolve from this project, so its dependencies are not installed.`,
-        `Why: what ${lockfile ?? 'package.json'} installs does not include this project's expo, for example a lockfile written before expo was added, or a workspace that does not list this package.`,
-        `How: install this project with its package manager directly, and check that the lockfile lists expo.`,
-      ].join('\n')
-    );
+  Log.error(message);
+  const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
+  const printed = `${result.stdout}${result.stderr}`.trim();
+  if (printed) {
+    Log.error(printed);
   }
-  return { exitCode, checkPayload: null, checkOutput: null };
+  return result.exitCode ?? 1;
+}
+
+/** The lockfile path has no `--check` report: `installAsync` refuses `--check` before it. */
+const NO_CHECK = { checkPayload: null, checkOutput: null } as const;
+
+/** The stop of a lockfile install that exited 0 and still left `expo` unresolved. */
+function stillUnresolvedError(projectRoot: string): CommandError {
+  const { command, args, cwd, lockfile } = lockfileInstall(projectRoot);
+  return new CommandError(
+    'DEPENDENCIES_NOT_INSTALLED',
+    [
+      `"${[command, ...args].join(' ')}" exited 0 in ${cwd}, but expo still does not resolve from this project, so its dependencies are not installed.`,
+      `Why: what ${lockfile ?? 'package.json'} installs does not include this project's expo, for example a lockfile written before expo was added, or a workspace that does not list this package.`,
+      `How: install this project with its package manager directly, and check that the lockfile lists expo.`,
+    ].join('\n')
+  );
 }
 
 /**

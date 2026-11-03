@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { stripVTControlCharacters } from 'util';
 
-import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/dependencies';
+import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/expoApp';
 import { PROGRAM_PREFIX } from '../programName';
 import { fileExistsSync } from '../utils/dir';
 import { CommandError } from '../utils/errors';

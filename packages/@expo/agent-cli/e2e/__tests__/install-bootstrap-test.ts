@@ -13,7 +13,7 @@ import {
   setupFixtureAsync,
   stubExpoEnv,
 } from '../utils';
-import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/dependencies';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/expoApp';
 
 // Records each call, and on success installs an expo the way a real install does, unless told not to.
 const STUB_PACKAGE_MANAGER = `const fs = require('fs');
