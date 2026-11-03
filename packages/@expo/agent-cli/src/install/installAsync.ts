@@ -9,6 +9,7 @@ import {
   listSkillPackagesAsync,
   printSkillsForAgentAsync,
 } from '../skills/skillsAsync';
+import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import { runInheritedAsync } from '../utils/inheritedRun';
 import { lockfileInstall } from '../utils/lockfile';
@@ -18,15 +19,22 @@ import { reportInstallImpactAsync } from './impactReport';
 import type { InstallPlan } from './resolveOptions';
 import type { InstallReport } from './types';
 
+/** What an install subprocess left: its code, and the `--check` report when there is one. */
+interface InstallRun {
+  exitCode: number;
+  checkPayload: unknown;
+  checkOutput: string | null;
+}
+
 /**
- * Run `expo install` as a subprocess, then report what it changed and link the skills of what it
- * installed.
+ * Run `expo install` as a subprocess — or the lockfile's own install, for an app whose dependencies
+ * are not installed yet — then report what it changed and link the skills of what it installed.
  *
  * Both post-install steps run after the subprocess, never inside `@expo/cli`. They are
  * best-effort and never throw, so neither a skill problem nor an unclassifiable package can fail
  * a good install.
  *
- * @returns the exit code of the `expo install` subprocess.
+ * @returns the exit code of the install subprocess.
  */
 export async function installAsync(projectRoot: string, plan: InstallPlan): Promise<number> {
   // @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception — only the bare
@@ -36,11 +44,7 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
     throw dependenciesNotInstalledError('nothing was installed or checked');
   }
   const { exitCode, checkPayload, checkOutput } = dependenciesMissing
-    ? {
-        exitCode: await runLockfileInstallAsync(projectRoot, plan.json),
-        checkPayload: null,
-        checkOutput: null,
-      }
+    ? await runLockfileInstallAsync(projectRoot, plan.json)
     : await runInstallAsync(projectRoot, plan);
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
@@ -90,21 +94,36 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
  *
  * @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception
  */
-async function runLockfileInstallAsync(projectRoot: string, json: boolean): Promise<number> {
+async function runLockfileInstallAsync(projectRoot: string, json: boolean): Promise<InstallRun> {
   const { command, args, cwd, lockfile } = lockfileInstall(projectRoot);
-  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${[command, ...args].join(' ')}`;
+  const spelled = [command, ...args].join(' ');
+  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${spelled}`;
 
-  if (!json) {
+  let exitCode: number;
+  if (json) {
+    Log.error(message);
+    const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
+    const printed = `${result.stdout}${result.stderr}`.trim();
+    if (printed) {
+      Log.error(printed);
+    }
+    exitCode = result.exitCode ?? 1;
+  } else {
     Log.log(message);
-    return runInheritedAsync(command, args, { cwd });
+    exitCode = await runInheritedAsync(command, args, { cwd });
   }
-  Log.error(message);
-  const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
-  const printed = `${result.stdout}${result.stderr}`.trim();
-  if (printed) {
-    Log.error(printed);
+  // @ref llp/0021-honest-reports.rfc.md — a 0 exit is not the answer; an expo that resolves is.
+  if (exitCode === 0 && dependenciesMissingSync(projectRoot)) {
+    throw new CommandError(
+      'DEPENDENCIES_NOT_INSTALLED',
+      [
+        `"${spelled}" exited 0 in ${cwd}, but expo still does not resolve from this project, so its dependencies are not installed.`,
+        `Why: what ${lockfile ?? 'package.json'} installs does not include this project's expo, for example a lockfile written before expo was added, or a workspace that does not list this package.`,
+        `How: install this project with its package manager directly, and check that the lockfile lists expo.`,
+      ].join('\n')
+    );
   }
-  return result.exitCode ?? 1;
+  return { exitCode, checkPayload: null, checkOutput: null };
 }
 
 /**
@@ -115,10 +134,7 @@ async function runLockfileInstallAsync(projectRoot: string, json: boolean): Prom
  * command prints, and a package manager writing into the middle of it is exactly what makes such
  * output unparseable.
  */
-async function runInstallAsync(
-  projectRoot: string,
-  plan: InstallPlan
-): Promise<{ exitCode: number; checkPayload: unknown; checkOutput: string | null }> {
+async function runInstallAsync(projectRoot: string, plan: InstallPlan): Promise<InstallRun> {
   const args = ['install', ...plan.expoArgs];
 
   if (!plan.json) {

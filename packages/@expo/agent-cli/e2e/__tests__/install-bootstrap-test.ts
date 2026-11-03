@@ -15,9 +15,16 @@ import {
 } from '../utils';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/dependencies';
 
+// Records each call, and on success installs an expo the way a real install does, unless told not to.
 const STUB_PACKAGE_MANAGER = `const fs = require('fs');
+const path = require('path');
 fs.appendFileSync(process.env.STUB_PM_LOG, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + '\\n');
-process.exit(Number(process.env.STUB_PM_EXIT_CODE ?? 0));
+const code = Number(process.env.STUB_PM_EXIT_CODE ?? 0);
+if (code === 0 && !process.env.STUB_PM_SKIP_EXPO) {
+  fs.mkdirSync(path.join('node_modules', 'expo'), { recursive: true });
+  fs.writeFileSync(path.join('node_modules', 'expo', 'package.json'), '{"name":"expo","version":"54.0.0"}');
+}
+process.exit(code);
 `;
 
 /** A go-app copy with an npm lockfile, no installed `expo`, and a stub `npm` that records each call. */
@@ -66,6 +73,21 @@ describe('@expo/agent-cli install with no installed dependencies', () => {
     });
 
     expect(result.exitCode).toBe(3);
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md — a 0 exit that left expo unresolved is not an install.
+  it(`should fail when the install exits 0 and expo still does not resolve`, async () => {
+    const { projectRoot, env } = await setupUninstalledProjectAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['install', '--json'], {
+      env: { ...env, STUB_PM_SKIP_EXPO: '1' },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    const { error } = JSON.parse(result.stdout);
+    expect(error.code).toBe('DEPENDENCIES_NOT_INSTALLED');
+    expect(error.message).toContain('"npm ci" exited 0');
   });
 
   it.each([[['expo-sqlite']], [['--check']], [['--fix']], [['--', '--verbose']]])(

@@ -264,7 +264,7 @@ describe('@expo/agent-cli typecheck', () => {
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §The fourth: `typecheck`
-  it(`should suggest the bare install when the app's dependencies are not installed`, async () => {
+  it(`should stop and name the bare install when the app's dependencies are not installed`, async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     await fs.promises.writeFile(path.join(projectRoot, 'tsconfig.json'), '{}');
     await fs.promises.rm(path.join(projectRoot, 'node_modules', 'expo'), { recursive: true });
@@ -274,7 +274,10 @@ describe('@expo/agent-cli typecheck', () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(JSON.parse(result.stdout).error.suggestedCommand).toBe(INSTALL_DEPENDENCIES_COMMAND);
+    expect(JSON.parse(result.stdout).error).toMatchObject({
+      code: 'DEPENDENCIES_NOT_INSTALLED',
+      suggestedCommand: INSTALL_DEPENDENCIES_COMMAND,
+    });
   });
 
   // A compiler that failed without reporting a diagnostic has not answered the question, so it is

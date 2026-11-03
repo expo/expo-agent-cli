@@ -1,5 +1,6 @@
 // The lockfile that governs a project, and the command that installs exactly what it records.
 
+import fs from 'fs';
 import path from 'path';
 
 import { fileExistsSync } from './dir';
@@ -79,10 +80,29 @@ const FROZEN_INSTALL: Record<PackageManager, Pick<DependencyInstall, 'command' |
 /**
  * What installs this project's dependencies exactly as its lockfile records them. A project with no
  * lockfile gets `npm install`, because `npm ci` refuses to run without one.
+ *
+ * A lockfile above the project counts only at a workspace root. {@link findLockfile} takes the
+ * nearest one, which is right for choosing a runner and wrong for an install: `npm ci` in an
+ * unrelated parent deletes that directory's node_modules and installs nothing here.
  */
 export function lockfileInstall(projectRoot: string): DependencyInstall {
-  const found = findLockfile(projectRoot);
+  const root = path.resolve(projectRoot);
+  const nearest = findLockfile(root);
+  const found = nearest && (nearest.dir === root || isWorkspaceRoot(nearest.dir)) ? nearest : null;
   return found
     ? { ...FROZEN_INSTALL[found.manager], cwd: found.dir, lockfile: found.file }
-    : { command: 'npm', args: ['install'], cwd: path.resolve(projectRoot), lockfile: null };
+    : { command: 'npm', args: ['install'], cwd: root, lockfile: null };
+}
+
+/** A `package.json` with `workspaces` (npm, yarn, bun) or a `pnpm-workspace.yaml` marks one. */
+function isWorkspaceRoot(dir: string): boolean {
+  if (fileExistsSync(path.join(dir, 'pnpm-workspace.yaml'))) {
+    return true;
+  }
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    return manifest?.workspaces != null;
+  } catch {
+    return false;
+  }
 }
