@@ -61,7 +61,7 @@ describe('@expo/agent-cli install with no installed dependencies', () => {
 
     await executeAgentCliAsync(projectRoot, ['install'], { env });
 
-    expect(calls()).toEqual([{ args: ['ci'], cwd: fs.realpathSync(projectRoot) }]);
+    expect(calls()).toEqual([{ args: ['ci'], cwd: fs.realpathSync.native(projectRoot) }]);
   });
 
   it(`should exit with the package manager's code when its install fails`, async () => {
