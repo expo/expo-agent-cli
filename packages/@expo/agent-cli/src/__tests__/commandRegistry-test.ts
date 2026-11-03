@@ -1,25 +1,28 @@
 import {
-  commandAliases,
-  commandGroups,
   flagsWithoutActionMessage,
   flagsWithoutActionSuggestion,
-  forwardedCommands,
-  formatGroupHelp,
-  formatTopLevelHelp,
-  commandSummary,
-  helpSections,
-  isUnstableCommand,
-  resolveCommand,
   suggestCommandNames,
-  topLevelCommands,
   unknownCommandMessage,
   unknownCommandSuggestion,
-  oneTimeSetup,
+} from '../commandErrors';
+import {
+  commandAliases,
+  commandGroups,
+  commandSummary,
+  forwardedCommands,
+  resolveCommand,
+  topLevelCommands,
   withAction,
-  workflow,
 } from '../commandRegistry';
+import {
+  formatGroupHelp,
+  formatTopLevelHelp,
+  helpSections,
+  isUnstableCommand,
+} from '../help/listing';
 import { ON_RAMP_POINTER } from '../help/onRamp';
 import type { CommandHelp } from '../help/types';
+import { oneTimeSetup, workflow } from '../help/workflow';
 import type { Command } from '../types';
 
 /**

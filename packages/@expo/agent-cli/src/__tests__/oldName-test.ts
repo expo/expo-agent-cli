@@ -30,12 +30,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import {
-  commandGroups,
-  formatGroupHelp,
-  formatTopLevelHelp,
-  topLevelCommands,
-} from '../commandRegistry';
+import { commandGroups, topLevelCommands } from '../commandRegistry';
+import { formatGroupHelp, formatTopLevelHelp } from '../help/listing';
 import { renderCommandHelp } from '../help/format';
 import type { CommandHelp } from '../help/types';
 import { formatWorkflowTopic } from '../help/workflow';
