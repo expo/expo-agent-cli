@@ -611,7 +611,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   afterAll(async () => {
     await run.cleanUpAsync();
     console.log(run.costLine());
-  });
+  }, BOUND_MS);
 
   it('the session this suite started is the one the CLI finds', async () => {
     expect(sessionId).toBeTruthy();
