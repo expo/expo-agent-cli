@@ -267,7 +267,7 @@ function ownedServerNext(next: NextActionStatus, pendingSession: boolean): NextA
     : {
         ...next,
         command: `${PROGRAM_PREFIX} dev:stop && ${next.command}`,
-        why: `${next.why} Stop the owned dev-server process before starting another run.`,
+        why: `${next.why ? `${next.why} ` : ''}Stop the owned dev-server process before starting another run.`,
       };
 }
 
