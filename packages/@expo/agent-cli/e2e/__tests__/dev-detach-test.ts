@@ -817,9 +817,6 @@ describe('@expo/agent-cli dev --detach', () => {
       }
     });
 
-    // The other half, and the one that keeps the grace honest: a `--ios` run whose dev server stays
-    // up still reports ready and still exits 0. A check that failed both would only have moved the
-    // dishonesty to the other side.
     it('still reports ready for a child that stays up', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
 
