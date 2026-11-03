@@ -245,6 +245,7 @@ export async function devStopAsync(
     report.discardedRun = removed ? options.discardRun : null;
     report.reason = removed ? 'record-discarded' : 'not-running';
     report.detail = `${removed ? 'Discarded' : 'No record remains for'} attempt ${options.discardRun}. No processes were stopped and no EAS sessions or devices were released.`;
+    Object.assign(report, { devices: [], reaped: [], deviceError: null });
     onReport?.(report);
     if (print) {
       if (options.json) Log.log(JSON.stringify(report, null, 2));
