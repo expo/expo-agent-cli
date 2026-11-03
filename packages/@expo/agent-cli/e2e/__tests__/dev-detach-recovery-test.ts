@@ -99,7 +99,12 @@ it.skipIf(process.platform === 'win32').each([true, false])(
       expect(started.exitCode, started.all).toBe(0);
       const owner = JSON.parse(started.stdout);
       const id = path.basename(owner.logFile).slice('dev-detached-'.length, -'.log'.length);
-      const stopped = await f.run(['dev:stop', '--signal', 'SIGKILL', '--json']);
+      const stopped = await f.run([
+        'dev:stop',
+        '--signal',
+        'SIGKILL',
+        survives ? '--json' : '--no-followups',
+      ]);
       expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
       expect(() => process.kill(f.serverPid(), 0)).not.toThrow();
       if (!survives) await f.stopServer();
