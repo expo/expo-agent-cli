@@ -392,6 +392,10 @@ export function expectExit(result: LiveResult, code: number, why?: string): void
           'code is 1 for a defect rather than an answer about the project. The stack in the artifact is ' +
           'the real failure.'
         : '';
+    // EAS does not upload the artifacts, so the end of the output is what a CI failure keeps.
+    console.error(
+      `"@expo/agent-cli ${result.argv.join(' ')}" output (last 4000 characters):\n${result.all.slice(-4000)}`
+    );
     throw new Error(
       `"@expo/agent-cli ${result.argv.join(' ')}" exited ${result.exitCode}, expected ${code}` +
         `${why ? ` (${why})` : ''}.${crashed} Full output: ${result.artifact}`

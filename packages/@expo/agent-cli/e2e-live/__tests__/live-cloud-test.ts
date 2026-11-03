@@ -675,9 +675,13 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       ['runtime:reload', '--eas', '--timeout', RELOAD_TIMEOUT, '--json'],
       { label: 'reload-cloud', env: suiteEnv() }
     );
-    if (result.exitCode !== 0) {
-      // EAS does not upload these artifacts, so a path alone hides the cause of a CI failure.
-      console.error(result.all);
+    // EAS does not upload these artifacts, so a path alone hides the cause of a CI failure.
+    // `expectExit` prints the output of a wrong exit; an exit 0 with no bundle answer is printed here.
+    const report = result.exitCode === 0 ? parseJson(result) : null;
+    if (report && report.bundle.ok !== true) {
+      console.error(`bundle.ok is ${report.bundle.ok}: ${report.bundle.reason}\n${result.all}`);
+    }
+    if (result.exitCode !== 0 || report.bundle.ok !== true) {
       const devLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
       if (fs.existsSync(devLog)) {
         console.error(
@@ -686,7 +690,6 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       }
     }
     expectExit(result, 0);
-    const report = parseJson(result);
 
     expect(report.reloaded).toBe(true);
     // Never a bare success: `reloaded` is `verifiedBy != null` by construction, and this asserts the
