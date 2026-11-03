@@ -228,15 +228,15 @@ An Expo app whose `expo` package does not resolve, from the project root or any
 directory above it, has no installed dependencies. A fresh clone or a new git worktree
 is in this state.
 
-The plan reads its facts from `node_modules`. `usesDevClient` is an installed
-`expo-dev-client`, and the fingerprint needs `@expo/fingerprint`. Without them the
-table sees "no dev client" and "no fingerprint". It then plans
+The plan reads its facts from `node_modules`. The dev client counts only when
+`expo-dev-client` is installed, and the fingerprint needs `@expo/fingerprint`. Without
+them the table sees "no dev client" and "no fingerprint". It then plans
 `expo install expo-dev-client` and a new native build, which the project may not need.
 On `--eas` that build costs EAS time.
 
-The decision table reads this state from the probe: `sdkVersion` comes from the installed
-`expo`, so a declared `expo` with a null SDK is this state. Its row sits under
-`not-expo-app` and above every other row:
+The decision table reads this state from the probe: the SDK version comes from the
+installed `expo`, so a declared `expo` with no installed SDK is this state. Its row sits
+under `not-expo-app` and above every other row:
 
 ```
 dependencies-not-installed → target: none, steps: [], buildLocation: null
@@ -266,7 +266,8 @@ device or EAS session `next` replaces it, because each of those runs `dev`. `ins
 --help` shows the bare form in its usage line and its first example.
 
 Pinned in `e2e/__tests__/project-shapes-test.ts`, §an Expo app whose dependencies are not
-installed.
+installed, for `dev` and `status`, and in `e2e/__tests__/install-bootstrap-test.ts` for
+`install`.
 
 ## Plan contract
 
