@@ -2,6 +2,7 @@
 // design (llp/0004), so these follow-ups are the actions that line does *not* name. They are
 // emitted as an event and embedded in `--json`; the text report keeps its single `next` line.
 
+import { NO_APP, noAppRule } from '../plan/noApp';
 import { PROGRAM_PREFIX } from '../programName';
 import { strongestClass } from '../status/assert';
 import type { StatusReport } from '../status/types';
@@ -12,24 +13,12 @@ import { capFollowUps, type FollowUp } from './types';
 /** The actions the status report proves are available, in the order they are worth taking. */
 export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // Before every rung below, and instead of them: this directory is not this CLI's subject, so the
-  // only honest action is to go and find the one that is. The rung this replaces was
-  // `npx @expo/agent-cli install expo-dev-client` — the trap, spelled as a follow-up, aimed at whatever
-  // repository the caller was standing in.
-  if (report.project?.isExpoApp === false) {
-    return [
-      {
-        id: 'not-expo-app',
-        command: `${PROGRAM_PREFIX} new my-app`,
-        why: 'This package declares no "expo" dependency, so it is not an Expo app: change to the app\'s own directory, or create one here.',
-      },
-    ];
-  }
-
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  // `next` names the bare install, and every rung below reads a fact from the missing node_modules.
-  if (report.project?.dependenciesInstalled === false) {
-    return [];
+  // Before every rung below, and instead of them: with no app to act on, every rung is a fact about
+  // the wrong directory or about a node_modules that is not there. The rung this replaces was
+  // `npx @expo/agent-cli install expo-dev-client` — the trap, spelled as a follow-up.
+  const noApp = report.project ? noAppRule(report.project) : null;
+  if (noApp) {
+    return NO_APP[noApp].followUps;
   }
 
   const followups: FollowUp[] = [];

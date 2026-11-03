@@ -279,7 +279,7 @@ describe(buildStatusFollowUps, () => {
           root: '/project',
           name: 'plain',
           isExpoApp: false,
-          dependenciesInstalled: true,
+          dependenciesInstalled: null,
           sdkVersion: null,
           native: 'cng',
           nativeDirs: { ios: false, android: false },

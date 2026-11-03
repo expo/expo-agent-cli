@@ -193,13 +193,12 @@ describe(formatStatusReport, () => {
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  it.each([
-    [{ isExpoApp: false }, 'not an Expo app'],
-    [{ dependenciesInstalled: false }, 'dependencies not installed'],
-  ])(`should say %j on the project line`, (project, label) => {
-    const value = mockReport({ project: { ...mockReport().project!, ...project } });
+  it(`should say on the project line that the dependencies are not installed`, () => {
+    const value = mockReport({
+      project: { ...mockReport().project!, dependenciesInstalled: false },
+    });
 
-    expect(line(value, 'project')).toContain(label);
+    expect(line(value, 'project')).toContain('dependencies not installed');
   });
 
   it(`should name the checked-in native directories of a bare project`, () => {

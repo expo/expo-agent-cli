@@ -324,7 +324,7 @@ describe(buildStartPlanFollowUps, () => {
     );
   });
 
-  it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'] as const)(
+  it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'])(
     `should explain what makes the %s plan cheaper`,
     (rule) => {
       const followups = buildStartPlanFollowUps(mockPlan({ rule }), mockState());
@@ -336,7 +336,7 @@ describe(buildStartPlanFollowUps, () => {
     }
   );
 
-  it.each(['expo-go', 'web', 'dev-client-fresh', 'bare-fresh'] as const)(
+  it.each(['expo-go', 'web', 'dev-client-fresh', 'bare-fresh'])(
     `should not offer a freshness hint for the %s plan, which builds nothing`,
     (rule) => {
       const followups = buildStartPlanFollowUps(mockPlan({ rule }), mockState());

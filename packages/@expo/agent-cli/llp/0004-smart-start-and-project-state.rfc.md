@@ -261,8 +261,8 @@ npx @expo/agent-cli install
 The `status` project line says `dependencies not installed`, beside the "SDK unknown" and
 "no dev client" that it causes. Its `next.rule` is `dependencies-not-installed`, with no
 steps and no build location. No device or EAS session `next` replaces it, because each of
-those runs `dev`. `install --help` shows the bare form in its usage line and its first
-example.
+those runs `dev`. A directory that is not an Expo app reports `dependenciesInstalled: null`,
+because the question has no answer there.
 
 Pinned in `e2e/__tests__/project-shapes-test.ts`, §an Expo app whose dependencies are not
 installed, for the five commands and `status`, and in

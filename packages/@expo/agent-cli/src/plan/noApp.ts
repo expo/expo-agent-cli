@@ -1,39 +1,87 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
-// The two rows above the table: no app to plan for, or no installed app to read the facts from.
-// Both plan nothing, so no row below can plan an install or a build here.
+// The two states with no app to act on: no app here, or an app with nothing installed to read the
+// facts from. Each plans nothing, and every reader of the plan says the same thing about it, so
+// what each state says lives in one table.
 
+import type { FollowUp } from '../followups/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../project/dependencies';
 import type { ProjectState, StartPlan } from '../project/types';
-import type { StartPlanRule } from './types';
 
-/** The empty plan of a directory with no app to act on, or null when the table decides. */
-export function planWithoutApp(state: ProjectState): StartPlan | null {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // The first row, above the web short-circuit, because it is not a fact about how the app runs —
-  // it is the fact that there is no app. Without it the table read "no `expo` dependency" as "lacks
-  // a dev client" and planned `expo install expo-dev-client` plus a native build for whatever
-  // repository the caller happened to be standing in. Every command that would *act* on the plan
-  // stops before reaching here; this row is what the commands that only *describe* the directory
-  // print, so the engine and the guard never disagree.
-  if (!state.isExpoApp) {
-    return emptyPlan('not-expo-app', [
-      `This directory is not an Expo app: its package.json declares no "expo" dependency.`,
-      `There is nothing here to get onto a device, so the plan is empty. The app is most likely one directory down, or "${PROGRAM_PREFIX} new my-app" would create one here.`,
-    ]);
-  }
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  // The rows below read expo-dev-client and the fingerprint from node_modules, and would plan a
-  // dev-client install and a first build for a project that may already declare and have both.
-  if (!state.dependenciesInstalled) {
-    return emptyPlan('dependencies-not-installed', [
-      `This project's dependencies are not installed: its package.json declares "expo", and no installed expo resolves from it.`,
-      `Every other fact of the plan is read from node_modules, so nothing is planned until "${INSTALL_DEPENDENCIES_COMMAND}" installs the lockfile.`,
-    ]);
-  }
-  return null;
+export type NoAppRule = 'not-expo-app' | 'dependencies-not-installed';
+
+interface NoAppState {
+  /** The plan's reasons. */
+  reasons: string[];
+  /** The `next` of `status`: the one command that gives this directory an app to act on. */
+  command: string;
+  why: string;
+  /** Said on the `status` project line. */
+  label: string;
+  /** The `status` follow-ups, which name only actions that `next` does not. */
+  followUps: FollowUp[];
 }
 
-function emptyPlan(rule: StartPlanRule, reasons: string[]): StartPlan {
-  return { target: 'none', rule, steps: [], reasons, buildLocation: null };
+export const NO_APP: Record<NoAppRule, NoAppState> = {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
+  // Not a fact about how the app runs, but the fact that there is no app. Without it the table
+  // read "no `expo` dependency" as "lacks a dev client" and planned `expo install expo-dev-client`
+  // plus a native build for whatever repository the caller happened to be standing in.
+  'not-expo-app': {
+    reasons: [
+      `This directory is not an Expo app: its package.json declares no "expo" dependency.`,
+      `There is nothing here to get onto a device, so the plan is empty. The app is most likely one directory down, or "${PROGRAM_PREFIX} new my-app" would create one here.`,
+    ],
+    // The safe one of the three recoveries `NOT_EXPO_APP` spells out: creating an app changes
+    // nothing that is already here, where adding Expo to this package would write into a repository
+    // the caller most likely only walked past.
+    command: `${PROGRAM_PREFIX} new my-app`,
+    why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
+    label: 'not an Expo app',
+    followUps: [
+      {
+        id: 'not-expo-app',
+        command: `${PROGRAM_PREFIX} new my-app`,
+        why: 'This package declares no "expo" dependency, so it is not an Expo app: change to the app\'s own directory, or create one here.',
+      },
+    ],
+  },
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  // Every other row reads expo-dev-client and the fingerprint from node_modules, and would plan a
+  // dev-client install and a first build for a project that may already declare and have both.
+  'dependencies-not-installed': {
+    reasons: [
+      `This project's dependencies are not installed: its package.json declares "expo", and no installed expo resolves from it.`,
+      `Every other fact of the plan is read from node_modules, so nothing is planned until "${INSTALL_DEPENDENCIES_COMMAND}" installs the lockfile.`,
+    ],
+    command: INSTALL_DEPENDENCIES_COMMAND,
+    why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile; run status again after it',
+    label: 'dependencies not installed',
+    followUps: [],
+  },
+};
+
+/** Which of the two states a project is in, or null when it is an app with its dependencies. */
+export function noAppRule({
+  isExpoApp,
+  dependenciesInstalled,
+}: Pick<ProjectState, 'isExpoApp' | 'dependenciesInstalled'>): NoAppRule | null {
+  if (!isExpoApp) {
+    return 'not-expo-app';
+  }
+  return dependenciesInstalled ? null : 'dependencies-not-installed';
+}
+
+/**
+ * The empty plan of a directory with no app to act on, or null when the table decides.
+ *
+ * Above every row of the table, the web short-circuit included. Every command that would *act* on
+ * the plan stops before reaching here; this is what the commands that only *describe* the
+ * directory print, so the engine and the guard never disagree.
+ */
+export function planWithoutApp(state: ProjectState): StartPlan | null {
+  const rule = noAppRule(state);
+  return rule
+    ? { target: 'none', rule, steps: [], reasons: NO_APP[rule].reasons, buildLocation: null }
+    : null;
 }

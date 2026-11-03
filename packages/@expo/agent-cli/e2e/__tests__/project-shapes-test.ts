@@ -441,7 +441,7 @@ describe('a package.json that is not an Expo app', () => {
 
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
-    expect(report.project.isExpoApp).toBe(false);
+    expect(report.project).toMatchObject({ isExpoApp: false, dependenciesInstalled: null });
     expect(report.next.rule).toBe('not-expo-app');
     expect(report.next.command).not.toBe('npx @expo/agent-cli dev');
     expect(report.next.steps).toEqual([]);

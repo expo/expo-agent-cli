@@ -12,9 +12,9 @@ import { classifyAgainstRecordedBuild, type RecordedImpact } from '../impact/fro
 import { buildConnectUrls, openInPhrase, type ConnectUrl } from '../navigate/connectUrl';
 import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
-import { INSTALL_DEPENDENCIES_COMMAND } from '../project/dependencies';
+import { NO_APP, noAppRule } from '../plan/noApp';
 import type { LastBuildRecord } from '../plan/lastBuild';
-import type { NativePlatform, PlanPlatform, StartPlanRule } from '../plan/types';
+import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatform, devCommand, smokeCommand } from '../smoke/suggest';
 import { decidesAgainstExpoGo } from '../project/expoGo';
@@ -40,15 +40,6 @@ const PLATFORMS: NativePlatform[] = ['ios', 'android'];
 
 /** How many characters of a fingerprint hash are shown, as in the plan engine. */
 const HASH_DISPLAY_LENGTH = 8;
-
-/**
- * The command the next action names when this directory is not an Expo app.
- *
- * The safe one of the three recoveries `NOT_EXPO_APP` spells out: creating an app changes nothing
- * that is already here, where adding Expo to this package would write into a repository the caller
- * most likely only walked past (llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app).
- */
-const NOT_AN_APP_COMMAND = `${PROGRAM_PREFIX} new my-app`;
 
 /**
  * The gate to put in front of anything that reads the app, once a dev server is up, with the
@@ -529,9 +520,10 @@ export function buildNextActionStatus(
   // Above the verify branch, because it outranks every reason to name a command at all: a plan that
   // plans nothing has nothing to verify, and `@expo/agent-cli dev` there is the very trap this report
   // would otherwise send the reader into.
-  const remedy = emptyPlanRemedy(plan.rule);
-  if (remedy) {
-    return { ...remedy, rule: plan.rule, target: plan.target, steps: [], buildLocation: null };
+  const noApp = noAppRule(state);
+  if (noApp) {
+    const { command, why } = NO_APP[noApp];
+    return { command, why, rule: plan.rule, target: plan.target, steps: [], buildLocation: null };
   }
   const verify = verifyAction(devServer, device, state, scheme, cloudSession);
   if (verify) {
@@ -561,24 +553,6 @@ export function buildNextActionStatus(
     why: null,
     buildLocation: plan.buildLocation,
   };
-}
-
-/** The one command that gives a plan that plans nothing an app to act on, or null for every other plan. */
-function emptyPlanRemedy(rule: StartPlanRule): { command: string; why: string } | null {
-  switch (rule) {
-    case 'not-expo-app':
-      return {
-        command: NOT_AN_APP_COMMAND,
-        why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
-      };
-    case 'dependencies-not-installed':
-      return {
-        command: INSTALL_DEPENDENCIES_COMMAND,
-        why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile, and status reads the project again after it',
-      };
-    default:
-      return null;
-  }
 }
 
 /** The command and the reason for a dev server this project can already use, or null. */
