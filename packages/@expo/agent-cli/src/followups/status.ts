@@ -1,8 +1,10 @@
 // @ref llp/0009-smart-followups.rfc.md §Examples per command — `status` already carries "next" by
-// design (llp/0004), so these follow-ups are the actions that line does *not* name. They are
+// design (llp/0004), so these follow-ups are the actions that line does *not* name — except with no
+// app to act on, where the remedy replaces every rung. They are
 // emitted as an event and embedded in `--json`; the text report keeps its single `next` line.
 
-import { appStateOf, NO_APP, noAppRule } from '../plan/noApp';
+import { NO_APP } from '../plan/noApp';
+import { appStateOf } from '../status/appState';
 import { PROGRAM_PREFIX } from '../programName';
 import { strongestClass } from '../status/assert';
 import type { StatusReport } from '../status/types';
@@ -12,15 +14,6 @@ import { capFollowUps, type FollowUp } from './types';
 
 /** The actions the status report proves are available, in the order they are worth taking. */
 export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // Before every rung below, and instead of them: with no app to act on, every rung is a fact about
-  // the wrong directory or about a node_modules that is not there. The rung this replaces was
-  // `npx @expo/agent-cli install expo-dev-client` — the trap, spelled as a follow-up.
-  const noApp = report.project ? noAppRule(appStateOf(report.project)) : null;
-  if (noApp) {
-    return NO_APP[noApp].followUps;
-  }
-
   const followups: FollowUp[] = [];
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
@@ -34,6 +27,16 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
       command: [...new Set(orphans.map(({ command }) => command))].join(' && '),
       why: `The ${manyRoots ? 'worktrees' : 'worktree'} that bound EAS ${manyIds ? 'sessions' : 'session'} ${orphans.map(({ id }) => id).join(', ')} ${manyRoots ? 'no longer exist' : 'no longer exists'}, so no command run there can stop ${manyIds ? 'them' : 'it'}.`,
     });
+  }
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
+  // After the billing orphan and instead of every other rung: with no app to act on, each of them is
+  // a fact about the wrong directory or about a node_modules that is not there. The rung this
+  // replaces was `npx @expo/agent-cli install expo-dev-client` — the trap, spelled as a follow-up.
+  const app = report.project ? appStateOf(report.project) : 'ready';
+  if (app !== 'ready') {
+    const { command, followUpWhy } = NO_APP[app];
+    return [...followups, { id: app, command, why: followUpWhy }];
   }
 
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup

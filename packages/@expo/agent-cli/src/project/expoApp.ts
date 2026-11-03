@@ -4,7 +4,7 @@
 // because it runs at the top of a command — before the probe, before the plan, before anything is
 // spawned — and a command that must not act on this directory must not do work here first.
 //
-// @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
 // The third: an app whose dependencies are not installed, which nothing can act on until they are.
 import fs from 'fs';
 import path from 'path';
@@ -13,6 +13,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { findUpProjectRootOrAssert } from '../utils/findUp';
 import { resolvePackageRootSync } from './nodeModules';
+import type { AppState } from './types';
 
 /** The command that creates an app, named on the `Try:` line and in the `How:` sentence. */
 const NEW_APP_COMMAND = `${PROGRAM_PREFIX} new my-app`;
@@ -20,7 +21,7 @@ const NEW_APP_COMMAND = `${PROGRAM_PREFIX} new my-app`;
 /**
  * Whether the package at this root declares `expo` as a dependency.
  *
- * Declared, not installed. See `ProjectState.isExpoApp` for why: a fresh clone has no
+ * Declared, not installed. See `ProjectState.app` for why: a fresh clone has no
  * `node_modules` and is still an Expo app, and the two questions have two fields.
  *
  * An unreadable or malformed `package.json` answers `false` — nothing there declares `expo`, and
@@ -86,7 +87,18 @@ export const INSTALL_DEPENDENCIES_COMMAND = `${PROGRAM_PREFIX} install`;
  * hoists it. A fresh clone or a new git worktree is in this state.
  */
 export function dependenciesMissingSync(projectRoot: string): boolean {
-  return declaresExpoSync(projectRoot) && resolvePackageRootSync(projectRoot, 'expo') == null;
+  return readAppStateSync(projectRoot) === 'dependencies-not-installed';
+}
+
+/**
+ * Whether there is an app here to act on, read the way the stops above read it, so the probe that
+ * describes a directory and the stop that refuses it cannot disagree.
+ */
+export function readAppStateSync(projectRoot: string): AppState {
+  if (!declaresExpoSync(projectRoot)) {
+    return 'not-expo-app';
+  }
+  return resolvePackageRootSync(projectRoot, 'expo') ? 'ready' : 'dependencies-not-installed';
 }
 
 /**

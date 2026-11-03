@@ -195,7 +195,7 @@ describe(formatStatusReport, () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
   it(`should say on the project line that the dependencies are not installed`, () => {
     const value = mockReport({
-      project: { ...mockReport().project!, dependenciesInstalled: false },
+      project: { ...mockReport().project!, isExpoApp: true, dependenciesInstalled: false },
     });
 
     expect(line(value, 'project')).toContain('dependencies not installed');

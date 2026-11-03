@@ -5,6 +5,7 @@ import { buildNavigateFollowUps } from '../navigate';
 import { buildRuntimeErrorsFollowUps } from '../runtime';
 import { buildSkillsSyncFollowUps } from '../skills';
 import { buildStatusFollowUps } from '../status';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/expoApp';
 /**
  * A fingerprint this run measured, which is what every case here assumes unless it says otherwise.
  *
@@ -291,6 +292,28 @@ describe(buildStatusFollowUps, () => {
 
     expect(ids(followups)).toEqual(['not-expo-app']);
     expect(followups[0]!.command).toBe('npx @expo/agent-cli new my-app');
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  // A new worktree is this state, and the one its deleted sibling left a billing session in.
+  it(`should keep the orphan session's stop first, then the bare install, in an app with nothing installed`, () => {
+    const followups = buildStatusFollowUps(
+      mockReport({
+        expoGo: { compatible: false, reasonCount: 1 },
+        project: { ...mockReport().project!, isExpoApp: true, dependenciesInstalled: false },
+        orphanSessions: [
+          {
+            platform: 'ios',
+            id: 'A',
+            projectRoot: '/gone/a',
+            command: 'npx @expo/agent-cli dev:stop',
+          },
+        ],
+      })
+    );
+
+    expect(ids(followups)).toEqual(['stop-orphan-session', 'dependencies-not-installed']);
+    expect(followups[1]!.command).toBe(INSTALL_DEPENDENCIES_COMMAND);
   });
 
   // The reasons themselves are in `status --json` now, so the follow-up is the action they imply

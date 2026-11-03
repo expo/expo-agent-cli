@@ -12,7 +12,8 @@ import { classifyAgainstRecordedBuild, type RecordedImpact } from '../impact/fro
 import { buildConnectUrls, openInPhrase, type ConnectUrl } from '../navigate/connectUrl';
 import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
-import { appStateFields, NO_APP, noAppRule } from '../plan/noApp';
+import { NO_APP } from '../plan/noApp';
+import { appStateFields } from './appState';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -519,9 +520,8 @@ export function buildNextActionStatus(
   // Above the verify branch, because it outranks every reason to name a command at all: a plan that
   // plans nothing has nothing to verify, and `@expo/agent-cli dev` there is the very trap this report
   // would otherwise send the reader into.
-  const noApp = noAppRule(state.app);
-  if (noApp) {
-    const { command, why } = NO_APP[noApp];
+  if (state.app !== 'ready') {
+    const { command, why } = NO_APP[state.app];
     return { command, why, rule: plan.rule, target: plan.target, steps: [], buildLocation: null };
   }
   const verify = verifyAction(devServer, device, state, scheme, cloudSession);

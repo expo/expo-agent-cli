@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Inputs
 // The project-state probe: one read of everything the decision table needs. Every field is
 // observable from the project itself, so a probe needs no device, no dev server and no network.
+import { readAppStateSync } from './expoApp';
 import { checkExpoGoCompatibilityAsync } from './expoGo';
 import { generateFingerprintAsync } from './fingerprint';
 import { readProjectNativeDirsAsync } from './nativeCode';
@@ -9,7 +10,6 @@ import {
   listDependencyNames,
   readProjectPackageJsonAsync,
   readSdkVersionAsync,
-  resolvePackageRootAsync,
 } from './nodeModules';
 import type { ProjectState } from './types';
 
@@ -39,27 +39,20 @@ export async function probeProjectStateAsync(
   const packageJson = await readProjectPackageJsonAsync(projectRoot);
   const dependencyNames = listDependencyNames(packageJson);
 
-  const [expoRoot, sdkVersion, nativeDirs, usesDevClient, hasWeb, expoGo, fingerprint] =
-    await Promise.all([
-      resolvePackageRootAsync(projectRoot, 'expo'),
-      readSdkVersionAsync(projectRoot),
-      readProjectNativeDirsAsync(projectRoot),
-      isInstalledDependencyAsync(projectRoot, dependencyNames, 'expo-dev-client'),
-      isInstalledDependencyAsync(projectRoot, dependencyNames, 'react-native-web'),
-      checkExpoGoCompatibilityAsync(projectRoot),
-      generateFingerprintAsync(projectRoot, { cache: options.fingerprintCache }),
-    ]);
+  const [sdkVersion, nativeDirs, usesDevClient, hasWeb, expoGo, fingerprint] = await Promise.all([
+    readSdkVersionAsync(projectRoot),
+    readProjectNativeDirsAsync(projectRoot),
+    isInstalledDependencyAsync(projectRoot, dependencyNames, 'expo-dev-client'),
+    isInstalledDependencyAsync(projectRoot, dependencyNames, 'react-native-web'),
+    checkExpoGoCompatibilityAsync(projectRoot),
+    generateFingerprintAsync(projectRoot, { cache: options.fingerprintCache }),
+  ]);
 
   return {
     projectRoot,
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — the same answers
-    // `assertExpoAppSync` and `assertDependenciesInstalledSync` give at the top of a command that
-    // acts on the app. They must never disagree: one refuses the directory and the other describes it.
-    app: !dependencyNames.includes('expo')
-      ? 'not-expo-app'
-      : expoRoot
-        ? 'ready'
-        : 'dependencies-not-installed',
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — the same read as the
+    // stops at the top of a command that acts on the app, which refuse what this describes.
+    app: readAppStateSync(projectRoot),
     sdkVersion,
     nativeDirs,
     usesDevClient,

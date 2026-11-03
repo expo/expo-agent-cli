@@ -153,7 +153,7 @@ export const agentCliSkills: Command = async (argv) => {
   // Three of the four actions discover the skills the installed Expo packages ship, so they
   // act on the app. Without `expo` they used to fail on module resolution and print a raw
   // Node stack. `clean` is the exception below.
-  const { assertExpoAppSync } =
+  const { assertDependenciesInstalledSync, assertExpoAppSync } =
     require('../project/expoApp') as typeof import('../project/expoApp');
   const skillsAsync = require('./skillsAsync') as typeof import('./skillsAsync');
 
@@ -185,6 +185,7 @@ export const agentCliSkills: Command = async (argv) => {
     // needs the installed `expo` package to discover anything at all.
     if (action !== 'clean') {
       assertExpoAppSync(projectRoot);
+      assertDependenciesInstalledSync(projectRoot);
     }
 
     switch (action) {

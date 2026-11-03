@@ -562,6 +562,7 @@ describe('an Expo app whose dependencies are not installed', () => {
     [['smoke', '--ios']],
     [['deploy', '--web']],
     [['doctor']],
+    [['skills', 'list']],
   ])('%j stops and names the bare install', async (args) => {
     const directory = await uninstalledAppAsync();
 
@@ -575,14 +576,17 @@ describe('an Expo app whose dependencies are not installed', () => {
   });
 
   // A bad flag is the caller's mistake on any machine, so it is named before the dependencies.
-  it.each([['dev'], ['smoke'], ['deploy']])('%s reports a bad flag first', async (command) => {
-    const directory = await uninstalledAppAsync();
+  it.each([['dev'], ['smoke'], ['deploy'], ['doctor']])(
+    '%s reports a bad flag first',
+    async (command) => {
+      const directory = await uninstalledAppAsync();
 
-    const result = await executeAgentCliAsync(directory, [command, '--bogus'], { reject: false });
+      const result = await executeAgentCliAsync(directory, [command, '--bogus'], { reject: false });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('Unknown option --bogus');
-  });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Unknown option --bogus');
+    }
+  );
 
   it('lets status report, with the bare install as next and as the one follow-up', async () => {
     const directory = await uninstalledAppAsync();

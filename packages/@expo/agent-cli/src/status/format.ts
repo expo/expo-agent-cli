@@ -26,7 +26,8 @@ import type {
   StatusSectionName,
 } from './types';
 import { easCommandPrefix } from '../utils/easCli';
-import { appStateOf, NO_APP, noAppRule } from '../plan/noApp';
+import { NO_APP } from '../plan/noApp';
+import { appStateOf } from './appState';
 
 /** Width of the label column, matching the other commands. */
 const LABEL_WIDTH = 12;
@@ -462,10 +463,10 @@ function projectLine(project: ProjectStatus): string {
   // that reads five facts about the wrong repository.
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — the cause of
   // the "SDK unknown" and "no dev client" beside it.
-  const noApp = noAppRule(appStateOf(project));
+  const app = appStateOf(project);
   return [
     project.name ?? 'unnamed project',
-    ...(noApp ? [chalk.yellow(NO_APP[noApp].label)] : []),
+    ...(app === 'ready' ? [] : [chalk.yellow(NO_APP[app].label)]),
     `SDK ${project.sdkVersion ?? chalk.yellow('unknown')}`,
     project.native === 'bare' && dirs.length ? `bare (${dirs.join(', ')})` : 'CNG',
     project.usesDevClient ? 'dev client' : 'no dev client',

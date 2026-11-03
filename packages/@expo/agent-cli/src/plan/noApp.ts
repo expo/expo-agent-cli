@@ -3,7 +3,6 @@
 // facts from. Each plans nothing, and every reader of the plan says the same thing about it, so
 // what each state says lives in one table.
 
-import type { FollowUp } from '../followups/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../project/expoApp';
 import type { AppState, ProjectState, StartPlan } from '../project/types';
@@ -18,11 +17,8 @@ interface NoAppState {
   why: string;
   /** Said on the `status` project line. */
   label: string;
-  /**
-   * The `status` follow-ups: the remedy alone, in place of every rung, since each rung reads the
-   * wrong directory or a node_modules that is not there.
-   */
-  followUps: FollowUp[];
+  /** The `why` of the one `status` follow-up, which names {@link command} in place of every rung. */
+  followUpWhy: string;
 }
 
 export const NO_APP: Record<NoAppRule, NoAppState> = {
@@ -41,13 +37,8 @@ export const NO_APP: Record<NoAppRule, NoAppState> = {
     command: `${PROGRAM_PREFIX} new my-app`,
     why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
     label: 'not an Expo app',
-    followUps: [
-      {
-        id: 'not-expo-app',
-        command: `${PROGRAM_PREFIX} new my-app`,
-        why: 'This package declares no "expo" dependency, so it is not an Expo app: change to the app\'s own directory, or create one here.',
-      },
-    ],
+    followUpWhy:
+      'This package declares no "expo" dependency, so it is not an Expo app: change to the app\'s own directory, or create one here.',
   },
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
   // Every other row reads expo-dev-client and the fingerprint from node_modules, and would plan a
@@ -60,42 +51,10 @@ export const NO_APP: Record<NoAppRule, NoAppState> = {
     command: INSTALL_DEPENDENCIES_COMMAND,
     why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile; run status again after it',
     label: 'dependencies not installed',
-    followUps: [
-      {
-        id: 'dependencies-not-installed',
-        command: INSTALL_DEPENDENCIES_COMMAND,
-        why: "This app's dependencies are not installed, so every other action would read a node_modules that is not there: install the lockfile first.",
-      },
-    ],
+    followUpWhy:
+      "This app's dependencies are not installed, so every other action would read a node_modules that is not there: install the lockfile first.",
   },
 };
-
-/** The two `status --json` project fields that carry an {@link AppState}. */
-export interface AppStateFields {
-  isExpoApp: boolean;
-  /** Null when this is not an Expo app, where the question has no answer. */
-  dependenciesInstalled: boolean | null;
-}
-
-export function appStateFields(app: AppState): AppStateFields {
-  return {
-    isExpoApp: app !== 'not-expo-app',
-    dependenciesInstalled: app === 'not-expo-app' ? null : app === 'ready',
-  };
-}
-
-/** The {@link AppState} that {@link appStateFields} wrote. */
-export function appStateOf({ isExpoApp, dependenciesInstalled }: AppStateFields): AppState {
-  if (!isExpoApp) {
-    return 'not-expo-app';
-  }
-  return dependenciesInstalled ? 'ready' : 'dependencies-not-installed';
-}
-
-/** Which of the two states a project is in, or null when there is an app to act on. */
-export function noAppRule(app: AppState): NoAppRule | null {
-  return app === 'ready' ? null : app;
-}
 
 /**
  * The empty plan of a directory with no app to act on, or null when the table decides.
@@ -105,8 +64,8 @@ export function noAppRule(app: AppState): NoAppRule | null {
  * directory print, so the engine and the guard never disagree.
  */
 export function planWithoutApp(state: ProjectState): StartPlan | null {
-  const rule = noAppRule(state.app);
-  return rule
-    ? { target: 'none', rule, steps: [], reasons: NO_APP[rule].reasons, buildLocation: null }
-    : null;
+  const { app } = state;
+  return app === 'ready'
+    ? null
+    : { target: 'none', rule: app, steps: [], reasons: NO_APP[app].reasons, buildLocation: null };
 }
