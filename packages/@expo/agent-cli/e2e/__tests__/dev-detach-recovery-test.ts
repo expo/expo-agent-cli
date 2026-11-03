@@ -154,7 +154,7 @@ it.each([false, true])(
   }
 );
 
-it.each(['discard', 'Windows stop'])(
+it.for(['discard', 'Windows stop'])(
   'delayed %s cannot remove replacement ownership',
   async (operation, context) => {
     if (operation === 'Windows stop' && process.platform !== 'win32') context.skip();
@@ -164,7 +164,7 @@ it.each(['discard', 'Windows stop'])(
     let delayed: ReturnType<typeof executeAgentCliAsync> | undefined;
     try {
       let id: string = randomUUID();
-      const directory = path.join(f.root, '.expo', 'dev', 'detached-run');
+      const directory = path.join(fs.realpathSync(f.root), '.expo', 'dev', 'detached-run');
       if (operation === 'Windows stop') {
         const started = await f.start();
         expect(started.exitCode, started.all).toBe(0);
