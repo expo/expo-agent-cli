@@ -4,7 +4,21 @@ Agent-native CLI on top of the Expo CLI family. Coding agents (and humans) use i
 
 Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs in this package.
 
-## Start here
+## One-time setup
+
+Run this once, before you use the other commands:
+
+```sh
+npx @expo/agent-cli agents:setup
+```
+
+It installs Expo plugins and skills for your coding agents into your user home. Add `--project` to install into the current app instead. Run it inside an Expo app or before you create one. Then start a new agent session. Details are in [Set up a coding agent](#set-up-a-coding-agent).
+
+No app yet? Create one with `npx @expo/agent-cli new my-app`.
+
+## Usage
+
+After the one-time setup, use this loop:
 
 | Step                         | Command                                   | Gets you                                       |
 | ---------------------------- | ----------------------------------------- | ---------------------------------------------- |
@@ -14,12 +28,10 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | 3. Edit and reload           | `npx @expo/agent-cli runtime:reload`      | after your edit, the app runs the code on disk |
 |                              | `npx @expo/agent-cli runtime:errors`      | what it threw, over a time window              |
 |                              | `npx @expo/agent-cli runtime:tree`        | what is on screen, and its testIDs             |
+|                              | `npx @expo/agent-cli install expo-sqlite` | add a package at the version this SDK wants    |
 | 4. Verify before you're done | `npx @expo/agent-cli smoke --ios`         | the app on the code on disk, and one exit code |
 |                              | `npx @expo/agent-cli typecheck`           | the type errors neither of those can see       |
 | 5. Release                   | `npx @expo/agent-cli deploy`              | the web app to EAS Hosting                     |
-| One-time setup               | `npx @expo/agent-cli new my-app`          | create a project                               |
-|                              | `npx @expo/agent-cli install expo-sqlite` | add a package at the version this SDK wants    |
-|                              | `npx @expo/agent-cli agents:setup`        | confirm agent setup for a project or user home |
 
 `npx @expo/agent-cli help workflow` is this loop in one screen, plus exit codes, `--json`, and what to do when a command fails.
 
