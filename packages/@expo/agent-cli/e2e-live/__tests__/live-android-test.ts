@@ -288,6 +288,8 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
       [
         'dev',
         '--android',
+        '--device',
+        SERIAL,
         '--no-open',
         '--detach',
         '--wait-ready',
