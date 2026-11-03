@@ -125,6 +125,7 @@ describe('@expo/agent-cli dev:stop', () => {
       'detail',
       'deviceError',
       'devices',
+      'discardedRun',
       // The EAS platform the stopped run's lock named, null otherwise (llp/0035 §Preserved sessions).
       'easPlatform',
       'followups',
@@ -141,6 +142,7 @@ describe('@expo/agent-cli dev:stop', () => {
       'processStillRunning',
       'reaped',
       'reason',
+      'recoveryCommand',
       'signal',
       'stopped',
       'untracked',
