@@ -2,6 +2,10 @@
 
 Monorepo for Expo's agent CLI.
 
+**One-time setup:** run `npx @expo/agent-cli agents:setup` so your coding agent uses agent-cli and Expo skills for Expo work.
+
+**Usage:** see the [`@expo/agent-cli` README](packages/@expo/agent-cli/README.md).
+
 ## Packages
 
 - [`@expo/agent-cli`](./packages/@expo/agent-cli) — the agent-native CLI
