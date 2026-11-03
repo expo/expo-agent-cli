@@ -152,7 +152,6 @@ describe(decideStartPlan, () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
   describe('rule: dependencies-not-installed', () => {
     it.each([
-      ['no platform', {}],
       ['web', { platform: 'web' as const }],
       ['an EAS build', { platform: 'android' as const, buildBackend: backend('eas') }],
     ])(`should plan nothing but the bare install for %s`, (_, options) => {

@@ -192,15 +192,6 @@ describe(formatStatusReport, () => {
     expect(line(mockReport(), 'project')).toContain('web');
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
-  it(`should say on the project line that the dependencies are not installed`, () => {
-    const value = mockReport({
-      project: { ...mockReport().project!, isExpoApp: true, dependenciesInstalled: false },
-    });
-
-    expect(line(value, 'project')).toContain('dependencies not installed');
-  });
-
   it(`should name the checked-in native directories of a bare project`, () => {
     const report = mockReport({
       project: {

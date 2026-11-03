@@ -604,5 +604,8 @@ describe('an Expo app whose dependencies are not installed', () => {
     expect(report.followups.map((followup: { command: string }) => followup.command)).toEqual([
       INSTALL_DEPENDENCIES_COMMAND,
     ]);
+
+    const text = await executeAgentCliAsync(directory, ['status'], { reject: false });
+    expect(text.stdout).toMatch(/^project .*dependencies not installed/m);
   });
 });
