@@ -8,6 +8,7 @@ import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../../runtime/reload/evidence';
 import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
+import { symbolicateRuntimeErrorsAsync } from '../../runtime/symbolicate';
 import { waitForAppConnectionAsync } from '../../runtime/waitReady';
 import { CommandError } from '../../utils/errors';
 import { firstLine } from '../../utils/text';
@@ -262,7 +263,11 @@ async function collectErrors(
       targetSelection,
       deviceInventory,
     }).collectAsync();
-    return { ok: true, records, reason: null };
+    return {
+      ok: true,
+      records: await symbolicateRuntimeErrorsAsync(records, devServerUrl, ctx.projectRoot),
+      reason: null,
+    };
   } catch (error: unknown) {
     // An unreadable app is a result rather than a tool failure: the gate reports that it could
     // not watch, which is exactly what `inconclusive` is for.

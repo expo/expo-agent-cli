@@ -36,6 +36,7 @@ import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { resolveSmokeOptions } from '../resolveOptions';
+import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { deviceBoundByStart } from '../deps/startArgs';
 import { buildSmokeDeps, cleanupLeft } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
@@ -60,6 +61,7 @@ vi.mock('../../utils/easCli', async (importOriginal) => ({
 }));
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 vi.mock('../../utils/gitExclude', () => ({ ensureGitExcludedAsync: vi.fn() }));
+vi.mock('../../runtime/runtimeErrorCollector', () => ({ CdpRuntimeErrorCollector: vi.fn() }));
 vi.mock('../../runtime/resolveTargetSelection', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../runtime/resolveTargetSelection')>();
   return {
@@ -468,5 +470,74 @@ describe('reloadApp beside a local simulator, on a bound EAS session', () => {
     const result = await deps.reloadApp('http://127.0.0.1:8081', 1000);
 
     expect(result.targetOutcomes.map((each) => each.targetId)).toEqual(['session']);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §runtime:errors
+describe('collectErrors', () => {
+  const realFetch = globalThis.fetch;
+  const BUNDLE_URL = 'http://127.0.0.1:8081/index.bundle//&platform=ios&dev=true';
+  const LOCAL: TargetSelection = {
+    platform: { value: 'ios', by: 'bound-device' },
+    device: { backend: 'local-ios', udid: 'SIM-1', name: 'iPhone 16e' },
+    bound: true,
+  };
+
+  beforeEach(() => {
+    mockPlatform('darwin');
+    const deviceInventory = makeDeviceInventory({
+      booted: [{ name: 'iPhone 16e', udid: 'SIM-1' }],
+    });
+    vi.mocked(resolveScopeAsync).mockResolvedValue(LOCAL);
+    vi.mocked(resolveTargetSelectionAsync).mockResolvedValue({
+      targetSelection: LOCAL,
+      deviceInventory,
+      classifiedTargets: classifyTargets([], LOCAL, deviceInventory),
+    });
+    vi.mocked(CdpRuntimeErrorCollector).mockImplementation(function () {
+      return {
+        collectAsync: async () => [
+          {
+            source: 'exception' as const,
+            timestamp: 1700000000000,
+            message: "TypeError: Cannot read property 'name' of undefined",
+            stack: `  at App (${BUNDLE_URL}:49572:40)`,
+            frames: [{ methodName: 'App', file: BUNDLE_URL, lineNumber: 49572, column: 39 }],
+          },
+        ],
+      } as never;
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it(`reports the project file and line of an error, as runtime:errors does`, async () => {
+    globalThis.fetch = (async (url: string) =>
+      String(url).endsWith('/symbolicate')
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              stack: [
+                {
+                  file: `${projectRoot}/App.js`,
+                  lineNumber: 10,
+                  column: 45,
+                  methodName: 'App',
+                  collapse: false,
+                },
+              ],
+              codeFrame: null,
+            }),
+          }
+        : { ok: true, json: async () => [] }) as never;
+    const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
+
+    const result = await deps.collectErrors('http://127.0.0.1:8081', 1000);
+
+    expect(result.records[0]!.stack).toBe('  at App (App.js:10:46)');
+    expect(result.records[0]!.symbolicated).toBe(true);
   });
 });
