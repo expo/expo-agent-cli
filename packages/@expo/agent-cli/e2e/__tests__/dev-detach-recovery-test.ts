@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 import { detachedRunFixture } from '../detachedRunFixture';
 import { detachedBarrierFixture } from '../detachedBarrierFixture';
 import { executeAgentCliAsync, fixturesDir, readDevLockAsync, waitForAsync } from '../utils';
@@ -43,7 +44,9 @@ it.skipIf(process.platform !== 'win32')(
         ['dev:stop', '--timeout', '200ms', '--json'],
         {
           reject: false,
-          env: { SystemRoot: path.join(f.root, 'missing-system-root') },
+          env: {
+            NODE_OPTIONS: `--require "${path.join(fixturesDir, 'ownership-stop-fault.cjs').replaceAll('\\', '/')}"`,
+          },
         }
       );
       expect(failed.exitCode, failed.all).toBe(20);
@@ -175,7 +178,7 @@ it.for(['discard', 'Windows stop'])(
     let delayed: ReturnType<typeof executeAgentCliAsync> | undefined;
     try {
       let id: string = randomUUID();
-      const directory = path.join(fs.realpathSync(f.root), '.expo', 'dev', 'detached-run');
+      const directory = path.join(canonicalizeExistingPath(f.root), '.expo', 'dev', 'detached-run');
       if (operation === 'Windows stop') {
         const started = await f.start();
         expect(started.exitCode, started.all).toBe(0);
