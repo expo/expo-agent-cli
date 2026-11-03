@@ -5,6 +5,18 @@ import path from 'node:path';
 
 import { lockAddressFor } from '../../src/devLock/address';
 import { detachedRunFixture } from '../detachedRunFixture';
+import { executeAgentCliAsync, fixturesDir } from '../utils';
+
+function publishEvidence(root: string, id: string) {
+  const endpoint = lockAddressFor(root, { name: `detached-${id}` }).address;
+  const directory = path.join(root, '.expo', 'dev', 'detached-run');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, `owner-${id}.json`),
+    JSON.stringify({ id, pid: 2147483647, logFile: path.join(root, 'owner.log'), endpoint })
+  );
+  return endpoint;
+}
 
 // @ref llp/0036-detached-run-ownership.rfc.md
 it('simultaneous detached starts elect one owner and normal stop releases it', async () => {
@@ -48,17 +60,7 @@ it('a silent ownership endpoint prevents admission regardless of its diagnostic 
     server.listen(endpoint, resolve);
   });
   try {
-    const directory = path.join(f.root, '.expo', 'dev', 'detached-run');
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(
-      path.join(directory, `owner-${id}.json`),
-      JSON.stringify({
-        id,
-        pid: 2147483647,
-        logFile: path.join(f.root, 'owner.log'),
-        endpoint,
-      })
-    );
+    publishEvidence(f.root, id);
     const refused = await f.start();
     expect(refused.exitCode, refused.all).toBe(20);
     expect(JSON.parse(refused.stdout).error.code).toBe('DEV_START_BUSY');
@@ -70,3 +72,49 @@ it('a silent ownership endpoint prevents admission regardless of its diagnostic 
     await f.cleanup();
   }
 });
+
+it.each(['EACCES', 'timeout'])(
+  'an uncertain endpoint (%s) permits neither start nor discard',
+  async (fault) => {
+    const f = await detachedRunFixture();
+    const id = randomUUID();
+    const endpoint = publishEvidence(f.root, id);
+    const env = {
+      NODE_OPTIONS: `--require "${path.join(fixturesDir, 'ownership-probe-fault.cjs').replaceAll('\\', '/')}"`,
+      OWNERSHIP_TEST_ENDPOINT: endpoint,
+      OWNERSHIP_TEST_FAULT: fault,
+    };
+    try {
+      for (const args of [
+        [
+          'dev',
+          '--android',
+          '--local',
+          '--go',
+          '--no-open',
+          '--port',
+          String(f.port),
+          '--detach',
+          '--wait-ready',
+        ],
+        ['dev:stop', '--discard-run', id],
+      ]) {
+        const result = await executeAgentCliAsync(f.root, [...args, '--json'], {
+          env,
+          reject: false,
+        });
+        expect(result.exitCode, result.all).toBe(20);
+        expect(JSON.parse(result.stdout).error.code).toBe('DEV_START_UNCERTAIN');
+        expect(JSON.parse(result.stdout).error.suggestedCommand).toBeNull();
+      }
+      // Removing the network fault reveals the retained evidence and its explicit recovery.
+      const refused = await f.start();
+      expect(refused.exitCode, refused.all).toBe(20);
+      expect(refused.stdout).toContain(`dev:stop --discard-run ${id}`);
+      const discarded = await f.run(['dev:stop', '--discard-run', id, '--json']);
+      expect(JSON.parse(discarded.stdout).discardedRun).toBe(id);
+    } finally {
+      await f.cleanup();
+    }
+  }
+);

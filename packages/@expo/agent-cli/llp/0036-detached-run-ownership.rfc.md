@@ -46,5 +46,6 @@ out of scope. Socket liveness does not imply that Metro is ready.
 | Election and normal release             | `simultaneous detached starts elect one owner and normal stop releases it`        |
 | Empty-target recovery                   | `an empty ownership directory does not prevent publication`                       |
 | Endpoint, not PID, establishes liveness | `a silent ownership endpoint prevents admission regardless of its diagnostic PID` |
+| Ambiguous connection retains evidence   | `an uncertain endpoint (%s) permits neither start nor discard`                    |
 
 These tests live in `e2e/__tests__/dev-detach-ownership-test.ts`.
