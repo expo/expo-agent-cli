@@ -19,19 +19,17 @@ fs.appendFileSync(process.env.STUB_PM_LOG, JSON.stringify({ args: process.argv.s
 process.exit(Number(process.env.STUB_PM_EXIT_CODE ?? 0));
 `;
 
-/** A go-app copy with no installed `expo`, and stub `npm` and `bun` bins that record each call. */
-async function setupUninstalledProjectAsync(lockfile: string) {
+/** A go-app copy with an npm lockfile, no installed `expo`, and a stub `npm` that records each call. */
+async function setupUninstalledProjectAsync() {
   const projectRoot = await setupFixtureAsync('go-app');
   await fs.promises.rm(path.join(projectRoot, 'node_modules', 'expo'), { recursive: true });
-  await fs.promises.writeFile(path.join(projectRoot, lockfile), '');
+  await fs.promises.writeFile(path.join(projectRoot, 'package-lock.json'), '');
 
   const binDir = path.join(getTemporaryPath(), 'pm-bin');
   const script = path.join(binDir, 'stub-pm.js');
   await fs.promises.mkdir(binDir, { recursive: true });
   await fs.promises.writeFile(script, STUB_PACKAGE_MANAGER);
-  for (const name of ['npm', 'bun']) {
-    await installStubBinAsync(binDir, name, script);
-  }
+  await installStubBinAsync(binDir, 'npm', script);
   const log = path.join(binDir, 'calls.jsonl');
   const env = {
     ...pathEnvVars(`${binDir}${path.delimiter}${stubExpoEnv(projectRoot).PATH}`),
@@ -49,19 +47,17 @@ async function setupUninstalledProjectAsync(lockfile: string) {
 }
 
 describe('@expo/agent-cli install with no installed dependencies', () => {
-  it.each([
-    ['package-lock.json', ['npm', 'ci']],
-    ['bun.lock', ['bun', 'install', '--frozen-lockfile']],
-  ])(`should install %s's dependencies on a bare install`, async (lockfile, argv) => {
-    const { projectRoot, env, calls } = await setupUninstalledProjectAsync(lockfile);
+  // Which command each lockfile gets is the `lockfileInstall` table's unit test; this proves the run.
+  it(`should run the lockfile's install in its directory on a bare install`, async () => {
+    const { projectRoot, env, calls } = await setupUninstalledProjectAsync();
 
     await executeAgentCliAsync(projectRoot, ['install'], { env });
 
-    expect(calls()).toEqual([{ args: argv.slice(1), cwd: fs.realpathSync(projectRoot) }]);
+    expect(calls()).toEqual([{ args: ['ci'], cwd: fs.realpathSync(projectRoot) }]);
   });
 
   it(`should exit with the package manager's code when its install fails`, async () => {
-    const { projectRoot, env } = await setupUninstalledProjectAsync('package-lock.json');
+    const { projectRoot, env } = await setupUninstalledProjectAsync();
 
     const result = await executeAgentCliAsync(projectRoot, ['install'], {
       env: { ...env, STUB_PM_EXIT_CODE: '3' },
@@ -72,7 +68,7 @@ describe('@expo/agent-cli install with no installed dependencies', () => {
   });
 
   it(`should refuse a named package and name the bare install`, async () => {
-    const { projectRoot, env, calls } = await setupUninstalledProjectAsync('package-lock.json');
+    const { projectRoot, env, calls } = await setupUninstalledProjectAsync();
 
     const result = await executeAgentCliAsync(projectRoot, ['install', 'expo-sqlite', '--json'], {
       env,
