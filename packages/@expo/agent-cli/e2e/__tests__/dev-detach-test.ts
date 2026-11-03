@@ -17,7 +17,7 @@ import {
   waitForAsync,
 } from '../utils';
 
-/** Where a detached dev server writes, per `src/dev/logFile.ts`. Spelled out, as a wire contract. */
+/** Legacy fixed-name log fixture; new runs report their private log path. */
 const LOG_PATH = path.join('.expo', 'dev', 'logs', 'dev-detached.log');
 
 /** Long enough for a test to do its work against a running dev server, short enough to end. */
@@ -761,9 +761,6 @@ describe('@expo/agent-cli dev --detach', () => {
       }
     });
 
-    // The other half, and the one that keeps the grace honest: a `--ios` run whose dev server stays
-    // up still reports ready and still exits 0. A check that failed both would only have moved the
-    // dishonesty to the other side.
     it('still reports ready for a child that stays up', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
 
