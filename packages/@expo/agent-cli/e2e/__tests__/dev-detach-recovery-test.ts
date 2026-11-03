@@ -81,7 +81,13 @@ it.skipIf(process.platform === 'win32')(
       expect(stopped.stdout).toContain(`dev:stop --discard-run ${id}`);
       const discarded = await f.run(['dev:stop', '--discard-run', id, '--json']);
       expect(discarded.exitCode, discarded.all).toBe(0);
-      expect(JSON.parse(discarded.stdout)).toMatchObject({ discardedRun: id, stopped: false });
+      expect(JSON.parse(discarded.stdout)).toMatchObject({
+        discardedRun: id,
+        stopped: false,
+        devices: [],
+        reaped: [],
+        deviceError: null,
+      });
       const restarted = await f.start();
       expect(restarted.exitCode, restarted.all).toBe(0);
     } finally {
