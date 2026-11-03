@@ -189,10 +189,6 @@ export function chooseNextAction({
     recoveryPlan
   );
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-  const bound = bindings ? bindings.filter((e) => e.platform === platform) : [];
-  const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > host.now);
-  const expiredSession =
-    cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
   const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
   const eas = !!(easServer || expiredSession);
   const { devArgs, devCommand } = devRerun(platform, request, port, devNext, eas);

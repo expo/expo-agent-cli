@@ -6,7 +6,7 @@ import path from 'node:path';
 import { guardedCloudArgs } from '../../src/device/cloudCommand';
 import type { Binding } from '../../src/deviceBinding/types';
 import { easCliArgs, easCliInvocation } from '../../src/utils/easCli';
-import { findExecutableOnPath, spawnSubprocessAsync } from '../../src/utils/subprocess';
+import { spawnSubprocessAsync } from '../../src/utils/subprocess';
 import {
   cloudBindingFile,
   installStubEasAsync,
@@ -377,12 +377,9 @@ it('round-trips guarded cloud target argv', async () => {
     'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
     ...targetArgs,
   ];
-  // This calls the transport in-process: resolve against the fixture PATH before Windows
-  // selects a .cmd shim from the test runner's own environment.
-  const runner = findExecutableOnPath(easCli.command, { pathEnv: env.PATH });
-  expect(runner).not.toBeNull();
+  // The subprocess adapter resolves Windows shims against the supplied fixture environment.
   const accepted = await spawnSubprocessAsync(
-    runner!,
+    easCli.command,
     easCliArgs(easCli, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
     { cwd: root, env, timeoutMs: 60_000 }
   );
