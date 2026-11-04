@@ -1,9 +1,8 @@
 import type { ScreenshotResult } from '../device/screenshot';
 import type { DeviceBackend } from '../navigate/device';
-import type { SmokeRun } from './phases';
 import { noScreenshot, showingReason } from './results';
 import type { SmokeOutcome, SmokePhaseStatus } from './types';
-import type { PhaseWalk } from './walk/walk';
+import type { PhaseWalk, SmokeRunReport, WalkRun } from './walk/walk';
 
 /**
  * The picture, and the device it was taken on.
@@ -101,14 +100,13 @@ export async function stopWithPicture(
   walk: PhaseWalk,
   outcome: SmokeOutcome,
   showing: 'project' | 'dev-launcher' | 'device',
-  extra: Partial<SmokeRun> = {}
-): Promise<SmokeRun> {
+  extra: Partial<SmokeRunReport> = {}
+): Promise<WalkRun> {
   const captured = await captureIfPossible(walk, showing);
   return walk.done(outcome, {
     ...extra,
     deviceId: captured.deviceId,
     deviceBackend: captured.deviceBackend,
     screenshot: captured.screenshot,
-    durationMs: walk.deps.now() - walk.startedAt,
   });
 }

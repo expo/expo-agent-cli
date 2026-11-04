@@ -6,34 +6,30 @@ import { appendReason } from '../results';
 import { APP_PROBE_MS, ROOT_ROUTE } from '../timeouts';
 import type { SmokePhase, SmokePhaseStatus } from '../types';
 import type { DeviceReady } from './device';
-import type { PhaseWalk, Step } from './walk';
+import type { PhaseWalk, Step, WalkRun } from './walk';
 
-/** What the device said when it refused this run's deep link. */
-interface RefusedOpen {
+/** What the `app` phase came to, and what the device said if it refused the deep link. */
+interface AppOpen {
+  connection: AppConnectionResult;
   /**
-   * Why the device refused this run's deep link, when it did and the device could say.
+   * Null when the device was not asked. Otherwise why it refused this run's deep link, when the
+   * device could say: "asked, and the device explained nothing" is a real answer.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
    * Reported as a value and not only in the phase's sentence, for the same reason every other
    * finding here is: the follow-ups branch on it, and a re-run is never the answer to it.
    */
-  fit: SmokeAppFit | null;
-  /**
-   * Whether the refused-open path already asked the device.
-   *
-   * Its own flag rather than `fit != null`, because "asked, and the device explained
-   * nothing" is a real answer and `??` cannot tell it from "not asked" — which made the run spend
-   * two device reads on one question.
-   */
-  asked: boolean;
+  refused: { fit: SmokeAppFit | null } | null;
 }
 
 // ---- Phase 5: is an app attached, and can one be opened if not? ---------------------------
 export async function appStep(walk: PhaseWalk, ready: DeviceReady): Promise<Step<SmokePhase>> {
-  const refused: RefusedOpen = { fit: null, asked: false };
-  const { value: connection, phase } = await walk.record(
+  const {
+    value: { connection, refused },
+    phase,
+  } = await walk.record(
     'app',
-    () => openAppAsync(walk, ready, refused),
+    () => openAppAsync(walk, ready),
     // The whole phase, because on this path almost all of it is the wait above.
     { bootstrap: () => walk.app.openedByThisRun && walk.coldEnvironment() }
   );
@@ -48,9 +44,8 @@ export async function appStep(walk: PhaseWalk, ready: DeviceReady): Promise<Step
 
 async function openAppAsync(
   walk: PhaseWalk,
-  { firstConnection, appReplaced }: DeviceReady,
-  refused: RefusedOpen
-): Promise<{ status: SmokePhaseStatus; reason?: string | null; value: AppConnectionResult }> {
+  { firstConnection, appReplaced }: DeviceReady
+): Promise<{ status: SmokePhaseStatus; reason?: string | null; value: AppOpen }> {
   const { deps, options, environment } = walk;
   const { devServerUrl } = walk.report;
   // Reused when the boot decision above already asked. It answered "nothing is attached", which
@@ -66,7 +61,7 @@ async function openAppAsync(
   // app. This binds the controller for screenshots and makes a second reload unnecessary.
   const needsCloudController = options.cloud === 'required' && environment.device === 'booted';
   if (!appReplaced && first.appsConnected > 0 && !needsCloudController) {
-    return { status: 'ok' as const, value: first };
+    return { status: 'ok' as const, value: { connection: first, refused: null } };
   }
 
   // Nothing is attached. `navigate` is what puts an app in that list, so the gate opens one
@@ -78,7 +73,7 @@ async function openAppAsync(
     return {
       status: 'inconclusive' as const,
       reason: `no app is connected to the dev server, and ${device.reason ?? 'no device was found to open one on'}`,
-      value: first,
+      value: { connection: first, refused: null },
     };
   }
 
@@ -110,17 +105,16 @@ async function openAppAsync(
     // says nothing else [observed — Kudo, local run, 2026-09-04, a development build and a
     // simulator that had not got it], and a report that stopped at the refusal sent its reader to
     // `navigate`, which is refused in exactly the same way for ever (llp/0009).
-    refused.asked = true;
-    refused.fit = await deps.explainSilentApp(opened.deviceId, opened.deviceBackend);
+    const fit = await deps.explainSilentApp(opened.deviceId, opened.deviceBackend);
     return {
       status: 'failed' as const,
       reason: [
         `no app was connected, and the device refused the deep link that would have opened one ("${opened.command}" exited ${opened.exitCode ?? 'on a signal'})`,
-        refused.fit?.mismatch,
+        fit?.mismatch,
       ]
         .filter(Boolean)
         .join(' · '),
-      value: first,
+      value: { connection: first, refused: { fit } },
     };
   }
 
@@ -134,11 +128,15 @@ async function openAppAsync(
     Math.max(0, attachDeadline - deps.now())
   );
   return second.appsConnected > 0
-    ? { status: 'ok' as const, reason: `opened ${opened.url} to connect one`, value: second }
+    ? {
+        status: 'ok' as const,
+        reason: `opened ${opened.url} to connect one`,
+        value: { connection: second, refused: null },
+      }
     : {
         status: 'inconclusive' as const,
         reason: `${opened.url} was opened on the device and no app had attached when the budget ran out`,
-        value: second,
+        value: { connection: second, refused: null },
       };
 }
 
@@ -146,8 +144,8 @@ async function openAppAsync(
 async function noAppExit(
   walk: PhaseWalk,
   appPhase: SmokePhase,
-  refused: RefusedOpen
-): Promise<SmokeRun> {
+  refused: AppOpen['refused']
+): Promise<WalkRun> {
   const { deps, report } = walk;
   const { skippedApps } = report;
   if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
@@ -163,10 +161,10 @@ async function noAppExit(
   // The refused-open path already asked, and already put the answer in the phase's sentence, so
   // this reads its result rather than spending a second device read — and appends nothing, which
   // is what keeps the same finding from being printed twice on one row.
-  const silent = refused.asked
+  const silent = refused
     ? refused.fit
     : await deps.explainSilentApp(report.deviceId, report.deviceBackend);
-  if (!refused.asked && silent?.mismatch != null) {
+  if (refused == null && silent?.mismatch != null) {
     // Appended rather than substituted: "the link was opened and nothing attached" is what the
     // phase measured, and the device fact is why. A reader needs both — the second without the
     // first would not say that the open itself succeeded.

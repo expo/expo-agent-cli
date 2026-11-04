@@ -70,7 +70,7 @@ import { bundlerReadyStep, bundleStep } from './walk/bundle';
 import { prepareDeviceStep } from './walk/device';
 import { devServerStep } from './walk/devServer';
 import { reloadStep, routeStep, runtimeAndErrorsStep } from './walk/reads';
-import { createPhaseWalk } from './walk/walk';
+import { createPhaseWalk, type WalkRun } from './walk/walk';
 
 /** What starting a dev server amounted to. */
 export interface SmokeStartResult {
@@ -520,7 +520,7 @@ export async function runSmokePhasesAsync(
 
   // The cleanup runs on both paths, and neither of them is a `finally` that swallows anything: a
   // tool error still propagates, and it still leaves the machine as it found it. `durationMs` is
-  // recomputed afterwards because the caller waited for the cleanup too, and a run that reported
+  // computed afterwards because the caller waited for the cleanup too, and a run that reported
   // `4.2s` while spending eight seconds shutting a simulator down would be describing a moment
   // that had passed (llp/0021 §The rules).
   try {
@@ -633,7 +633,7 @@ async function runPhasesAsync(
   deps: SmokeDeps,
   options: SmokeOptions,
   ctx: SmokeRunContext
-): Promise<SmokeRun> {
+): Promise<WalkRun> {
   const walk = createPhaseWalk(deps, options, ctx);
 
   const found = await devServerStep(walk);

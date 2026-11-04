@@ -7,7 +7,10 @@ import type { SmokeOutcome, SmokePhase, SmokePhaseId, SmokePhaseStatus } from '.
 import { AppSession } from './appSession';
 
 /** What one step of the walk hands back: the run, when it ends here, or what the next step needs. */
-export type Step<T> = { stop: SmokeRun } | { next: T };
+export type Step<T> = { stop: WalkRun } | { next: T };
+
+/** A run as the walk ends it. `runSmokePhasesAsync` adds the duration, after the cleanup. */
+export type WalkRun = Omit<SmokeRun, 'durationMs'>;
 
 export type PhaseRunner<T> = () => Promise<{
   status: SmokePhaseStatus;
@@ -46,7 +49,7 @@ export interface PhaseWalk extends SmokeRunContext {
     options?: RecordOptions
   ): Promise<{ value: T; phase: SmokePhase }>;
   skipRest(from: SmokePhaseId, reason: string, stopBefore?: SmokePhaseId): void;
-  done(outcome: SmokeOutcome, extra?: Partial<SmokeRun>): SmokeRun;
+  done(outcome: SmokeOutcome, extra?: Partial<SmokeRunReport>): WalkRun;
   deviceAsync(): Promise<DeviceProbe>;
   coldEnvironment(): boolean;
   attachBudget(): number;
@@ -133,10 +136,9 @@ export function createPhaseWalk(
     }
   };
 
-  const done = (outcome: SmokeOutcome, extra: Partial<SmokeRun> = {}): SmokeRun => ({
+  const done = (outcome: SmokeOutcome, extra: Partial<SmokeRunReport> = {}): WalkRun => ({
     outcome,
     ...report,
-    durationMs: deps.now() - startedAt,
     ...extra,
   });
 
