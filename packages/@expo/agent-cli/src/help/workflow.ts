@@ -8,9 +8,10 @@
 // the same for every command, and repeating them in twenty help blocks would be twenty places to
 // get them wrong. So they are here, once, and every help block ends with the line that points here.
 //
-// The steps themselves are **not** written here: they are `workflow` and `oneTimeSetup` in the
-// registry, which is what `@expo/agent-cli -h` prints too. Two screens that both claim to say what to run
-// first are two screens that will one day disagree.
+// The steps themselves are `workflow` and `oneTimeSetup`, defined below. This file owns them and
+// `help workflow` is the only screen that prints them; `@expo/agent-cli -h` only points at that
+// topic. Two screens that both claim to say what to run first are two screens that will one day
+// disagree.
 //
 // The acceptance test for this file is a walk: an agent that has read `@expo/agent-cli -h` and this text,
 // and nothing else, gets a project from nothing to a checked, running app. Every place such an
@@ -34,24 +35,21 @@ export interface WorkflowStep {
    * What the step **is**, as a plain phrase: `Check the project`, `Edit and reload`.
    *
    * @ref llp/0024-cli-ui.rfc.md §The workflow map
-   * Not a label. The first version of this map read `orient · run · iterate · gate · ship · once`,
-   * which is a vocabulary a reader has to be taught before the map means anything [confirmed —
-   * 2026-08-28: "i'm not clear specifically what they mean"]. The rule the wording is held
-   * to: **if a title needs a legend, it is the wrong title.**
+   * Not a label: a vocabulary such as `orient · run · iterate` has to be taught before the map
+   * means anything. The rule the wording is held to: **if a title needs a legend, it is the wrong
+   * title.**
    */
   title: string;
   rungs: WorkflowRung[];
 }
 
 /**
- * What to run, in order, as the top-level help and the `workflow` topic both state it.
+ * What to run, in order, as the `workflow` topic prints it. `-h` only points at that topic.
  *
  * @ref llp/0024-cli-ui.rfc.md §The workflow map
- * The listing below says which commands exist. It cannot say which one to run first, and that is
- * the question an agent handed this CLI actually has [confirmed, 2026-08-28: "should find
- * help a way let agent to know the typical workflow"]. So this comes before the listing, and it is
- * five numbered steps because five is how many there are between an unopened project and a
- * released one.
+ * A listing of commands cannot say which one to run first, and that is the question an agent
+ * handed this CLI actually has. It is five numbered steps because five is how many there are
+ * between an unopened project and a released one.
  *
  * Every rung resolves against the registry — a unit test checks it — so the map cannot come to name
  * a command that has been renamed out from under it.
