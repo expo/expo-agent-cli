@@ -12,11 +12,8 @@ import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { localRequirement } from '../../toolchain/runsOn';
 import { firstLine } from '../../utils/text';
-import {
-  BUILD_DEV_SERVER_TIMEOUT_MS,
-  START_DEV_SERVER_TIMEOUT_MS,
-  type SmokeDeps,
-} from '../phases';
+import type { SmokeDeps } from '../phases';
+import { BUILD_DEV_SERVER_TIMEOUT_MS, START_DEV_SERVER_TIMEOUT_MS } from '../timeouts';
 import { smokeCommand } from '../suggest';
 import { whatAndHow } from './reasons';
 import { deviceBoundByStart, START_DEV_SERVER_ARGV, startPortArgs } from './startArgs';
@@ -113,14 +110,14 @@ export async function startDevServer(
     // `print: false`: the detached start is one phase of this run, and this run prints one
     // report. Its `cli:dev_detach` event is still emitted, so nothing about it is hidden.
     //
-    // The budget is this phase's own (@ref ../phases §START_DEV_SERVER_TIMEOUT_MS) rather than
+    // The budget is this phase's own (@ref ../timeouts §START_DEV_SERVER_TIMEOUT_MS) rather than
     // `--timeout`, which bounds the phases that read the app and is not charged for the start.
     await devDetachAsync(
       projectRoot,
       {
         ...resolveDevOptions(argv),
         // A plan that compiles needs a budget the shape of a compile
-        // (@ref ../phases §BUILD_DEV_SERVER_TIMEOUT_MS).
+        // (@ref ../timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
         detachTimeoutMs:
           target.buildLocation != null ? BUILD_DEV_SERVER_TIMEOUT_MS : START_DEV_SERVER_TIMEOUT_MS,
       },

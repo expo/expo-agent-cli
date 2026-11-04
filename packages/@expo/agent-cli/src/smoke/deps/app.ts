@@ -274,7 +274,7 @@ export async function collectErrors(
   }
 }
 
-// @ref ../phases §SCREENSHOT_SETTLE_MS — friction run 6, F57. Nothing over this protocol says
+// @ref ../timeouts §APP_SETTLE_MS — friction run 6, F57. Nothing over this protocol says
 // "rendered", so what is waited for is the app having stopped re-registering: two reads of the
 // dev server's target list that name the same ids. A relaunching app changes them.
 export async function waitForStableTargets(

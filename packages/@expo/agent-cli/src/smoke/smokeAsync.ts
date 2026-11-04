@@ -45,16 +45,10 @@ import {
 import { createSmokeDepsContext } from './deps/shared';
 import { startPortArgs } from './deps/startArgs';
 import { formatSmokeResult, smokeResultToJson } from './format';
-import {
-  runSmokePhasesAsync,
-  smokeExitCode,
-  type SmokeDeps,
-  type SmokeRun,
-} from './phases';
+import { runSmokePhasesAsync, smokeExitCode, type SmokeDeps, type SmokeRun } from './phases';
 import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';
-import { BUILD_DEV_SERVER_TIMEOUT_MS, START_DEV_SERVER_TIMEOUT_MS } from './timeouts';
 import type { SmokeEnvironmentJson } from './types';
 
 /** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
@@ -139,7 +133,7 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     appMismatch: run.appMismatch,
     appMismatchKind: run.appMismatchKind,
     // The `start-dev-server` phase is only in the list for a run that performed one, and it is
-    // charged as a build when the plan compiled (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
+    // charged as a build when the plan compiled (@ref ./timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
     buildAttempted: run.buildAttempted,
     ...cleanupLeft(run.environment),
     port: startPortArgs(options.devServerUrl)[1] ?? null,
