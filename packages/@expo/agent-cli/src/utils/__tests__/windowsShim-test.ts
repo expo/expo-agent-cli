@@ -115,36 +115,31 @@ describe(resolveSpawnTarget, () => {
     it(`should not quote a bare .cmd name, so cmd.exe still searches PATH`, () => {
       // Quoting `"npx.cmd"` makes cmd.exe look in cwd rather than PATH, which printed
       // `'"npx.cmd"' is not recognized` on the Windows runner.
-      const originalPath = process.env.PATH;
-      process.env.PATH = 'C:\\no-such-npx';
-      try {
-        expect(resolveSpawnTarget('npx.cmd', ['--yes', 'eas-cli'])).toEqual({
-          command: 'npx.cmd',
-          args: ['^"--yes^"', '^"eas-cli^"'],
-          shell: true,
-        });
-      } finally {
-        process.env.PATH = originalPath;
-      }
+      expect(
+        resolveSpawnTarget('npx.cmd', ['--yes', 'eas-cli'], { PATH: 'C:\\no-such-npx' })
+      ).toEqual({
+        command: 'npx.cmd',
+        args: ['^"--yes^"', '^"eas-cli^"'],
+        shell: true,
+      });
     });
 
     it(`should resolve a bare name on the child's PATH, not on this process's`, () => {
       const shims = new Set(['C:\\machine-npm\\npx.cmd', 'C:\\stub-bin\\npx.cmd']);
-      const statSync = vi.spyOn(fs, 'statSync').mockImplementation(((file: string) => {
-        if (shims.has(file)) {
-          return { isFile: () => true };
+      vi.spyOn(fs, 'statSync').mockImplementation((file) => {
+        if (shims.has(String(file))) {
+          return { isFile: () => true } as fs.Stats;
         }
         throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      }) as unknown as typeof fs.statSync);
-      const originalPath = process.env.PATH;
-      process.env.PATH = 'C:\\machine-npm';
+      });
+      vi.stubEnv('PATH', 'C:\\machine-npm');
       try {
-        expect(
-          resolveSpawnTarget('npx.cmd', ['--yes'], { PATH: 'C:\\stub-bin' }).command
-        ).toContain('C:\\stub-bin\\npx.cmd');
+        expect(resolveSpawnTarget('npx.cmd', ['--yes'], { PATH: 'C:\\stub-bin' }).command).toBe(
+          '"C:\\stub-bin\\npx.cmd"'
+        );
       } finally {
-        process.env.PATH = originalPath;
-        statSync.mockRestore();
+        vi.unstubAllEnvs();
+        vi.restoreAllMocks();
       }
     });
   });
