@@ -14,8 +14,6 @@ export const CLOUD_SESSION_ID_VAR = 'EAS_SIMULATOR_SESSION_ID';
  */
 export const DRIVABLE_SESSION_TYPE = 'agent-device';
 
-// ---- Reading a session -----------------------------------------------------------------------
-
 /** One session, as much of it as this CLI reads. */
 export interface CloudSessionInfo {
   id: string;
@@ -90,7 +88,6 @@ export function parseSessionListJson(stdout: string): CloudSessionInfo[] | null 
     }
     const id = stringOf(entry.id) ?? stringOf(entry.sessionId);
     if (id == null) {
-      // An entry with no id names no session, and there is nothing to drive or to report.
       continue;
     }
     sessions.push({
@@ -193,7 +190,7 @@ export interface CloudAvailability {
  * `{available, accountName}` [observed — 2026-08-26, eas-cli 22.4.0, recorded in
  * `src/__fixtures__/eas/simulator-availability.json`], plus `waitlistUrl` when and only when the account is gated [observed
  * — `build/commands/simulator/availability.js`]. The URL is read rather than hard-coded here so a
- * refusal quotes the service; {@link CLOUD_SIMULATOR_WAITLIST_URL} is the fallback for an older CLI
+ * refusal quotes the service; `CLOUD_SIMULATOR_WAITLIST_URL` is the fallback for an older CLI
  * that answers without one.
  */
 export function parseAvailabilityJson(stdout: string): CloudAvailability {
@@ -202,9 +199,7 @@ export function parseAvailabilityJson(stdout: string): CloudAvailability {
     if (isRecord(parsed) && typeof parsed.available === 'boolean') {
       return { available: parsed.available, waitlistUrl: stringOf(parsed.waitlistUrl) };
     }
-  } catch {
-    // An answer this cannot read establishes nothing, which is what null says.
-  }
+  } catch {}
   return { available: null, waitlistUrl: null };
 }
 
