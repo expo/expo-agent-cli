@@ -14,8 +14,10 @@
 // so a Bun user got npm's exec — a different runner, a different cache, and a
 // slower first run — from a CLI they had reached through Bun.
 
+import path from 'path';
+
+import { fileExistsSync } from './dir';
 import { detectInvoker, type Invoker } from './invoker';
-import { findLockfile } from './lockfile';
 import { findExecutableOnPath } from './subprocess';
 
 /** The runner to spawn a published package with. */
@@ -77,13 +79,48 @@ export function resolvePackageRunner({
 }
 
 /**
+ * Lockfile names per manager, in the order one directory is searched.
+ *
+ * A copy of a *decision*, not an import: the same table `@expo/package-manager`'s
+ * `resolvePackageManager` uses [observed — `packages/@expo/package-manager/src/utils/nodeManagers.ts`],
+ * which `src/deferred/doctor-fix/packageManager.ts` also mirrors. That module is the v1 narrowing's
+ * reference shelf and is imported by nothing (llp/0016 §Deferred is a place), so the four names are
+ * spelled again here rather than reached for across that line.
+ *
+ * The whole table and not just bun's two entries, because the *precedence* is the answer: a project
+ * with both `bun.lock` and `package-lock.json` in one directory installs with bun, and a walk that
+ * only looked for bun's would keep climbing past an npm project into whatever a parent directory has.
+ */
+const LOCKFILES: { manager: string; files: string[] }[] = [
+  { manager: 'bun', files: ['bun.lock', 'bun.lockb'] },
+  { manager: 'yarn', files: ['yarn.lock'] },
+  { manager: 'npm', files: ['package-lock.json'] },
+  { manager: 'pnpm', files: ['pnpm-lock.yaml'] },
+];
+
+/**
  * Whether the lockfile that governs this project is bun's.
  *
  * Walks up, because a package of a monorepo has no lockfile of its own and the workspace root's is
  * the one that installed it. The first directory holding *any* known lockfile decides.
  */
 export function projectUsesBun(projectRoot: string): boolean {
-  return findLockfile(projectRoot)?.manager === 'bun';
+  let dir = path.resolve(projectRoot);
+  // Bounded by the filesystem root: `path.dirname('/')` is `'/'`, which ends the walk.
+  for (;;) {
+    for (const { manager, files } of LOCKFILES) {
+      for (const file of files) {
+        if (fileExistsSync(path.join(dir, file))) {
+          return manager === 'bun';
+        }
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return false;
+    }
+    dir = parent;
+  }
 }
 
 /**

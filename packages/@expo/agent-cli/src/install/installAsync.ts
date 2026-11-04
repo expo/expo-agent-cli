@@ -9,12 +9,9 @@ import {
   listSkillPackagesAsync,
   printSkillsForAgentAsync,
 } from '../skills/skillsAsync';
-import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
-import { runInheritedAsync } from '../utils/inheritedRun';
-import { lockfileInstall } from '../utils/lockfile';
-import { spawnSubprocessAsync } from '../utils/subprocess';
 import { diagnoseCheckedPackagesAsync, type InstallCheckReport } from './checkReport';
+import { runBareInstallAsync, stillUnresolvedError } from './bareInstall';
 import { reportInstallImpactAsync } from './impactReport';
 import type { InstallPlan } from './resolveOptions';
 import type { InstallReport } from './types';
@@ -43,13 +40,14 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
   if (dependenciesMissing && plan.expoArgs.length > 0) {
     throw dependenciesNotInstalledError('nothing was installed or checked');
   }
-  const { exitCode, checkPayload, checkOutput } = dependenciesMissing
-    ? { exitCode: await runLockfileInstallAsync(projectRoot, plan.json), ...NO_CHECK }
+  const bare = dependenciesMissing ? await runBareInstallAsync(projectRoot, plan.json) : null;
+  const { exitCode, checkPayload, checkOutput } = bare
+    ? { exitCode: bare.exitCode, checkPayload: null, checkOutput: null }
     : await runInstallAsync(projectRoot, plan);
   // @ref llp/0021-honest-reports.rfc.md — a 0 exit is not the answer; an expo that resolves is. No
   // Try: line, because running the bare install again would only repeat this.
-  if (dependenciesMissing && exitCode === 0 && dependenciesMissingSync(projectRoot)) {
-    throw stillUnresolvedError(projectRoot);
+  if (bare && exitCode === 0 && dependenciesMissingSync(projectRoot)) {
+    throw stillUnresolvedError(bare.ran);
   }
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
@@ -87,49 +85,6 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
 
   await reportAsync(projectRoot, plan, { exitCode, impact, checkPayload, checkOutput });
   return exitCode;
-}
-
-/**
- * Install the lockfile's dependencies, for a project whose `expo` does not resolve yet.
- *
- * `expo install` cannot do this: the `expo` it would run is fetched by the package runner, and it
- * cannot read the SDK of a project with no `node_modules`. The package manager's own frozen install
- * can, so it runs, in the lockfile's directory. Output follows {@link runInstallAsync}: inherited
- * for a person, captured and sent to stderr under `--json`.
- *
- * @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception
- */
-async function runLockfileInstallAsync(projectRoot: string, json: boolean): Promise<number> {
-  const { command, args, cwd, lockfile } = lockfileInstall(projectRoot);
-  const message = `Installing the dependencies of ${lockfile ?? 'package.json'} with ${[command, ...args].join(' ')}`;
-
-  if (!json) {
-    Log.log(message);
-    return runInheritedAsync(command, args, { cwd });
-  }
-  Log.error(message);
-  const result = await spawnSubprocessAsync(command, args, { cwd, output: 'capture' });
-  const printed = `${result.stdout}${result.stderr}`.trim();
-  if (printed) {
-    Log.error(printed);
-  }
-  return result.exitCode ?? 1;
-}
-
-/** The lockfile path has no `--check` report: `installAsync` refuses `--check` before it. */
-const NO_CHECK = { checkPayload: null, checkOutput: null } as const;
-
-/** The stop of a lockfile install that exited 0 and still left `expo` unresolved. */
-function stillUnresolvedError(projectRoot: string): CommandError {
-  const { command, args, cwd, lockfile } = lockfileInstall(projectRoot);
-  return new CommandError(
-    'DEPENDENCIES_NOT_INSTALLED',
-    [
-      `"${[command, ...args].join(' ')}" exited 0 in ${cwd}, but expo still does not resolve from this project, so its dependencies are not installed.`,
-      `Why: what ${lockfile ?? 'package.json'} installs does not include this project's expo, for example a lockfile written before expo was added, or a workspace that does not list this package.`,
-      `How: install this project with its package manager directly, and check that the lockfile lists expo.`,
-    ].join('\n')
-  );
 }
 
 /**
