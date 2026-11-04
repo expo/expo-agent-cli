@@ -2,6 +2,7 @@ import { refreshDocsAfterInstallAsync } from '../docs/autoSync';
 import { buildInstallFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
+import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/expoApp';
 import type { InstallImpactReport } from '../project/types';
 import {
   autoSyncSkillsAsync,
@@ -10,22 +11,42 @@ import {
 } from '../skills/skillsAsync';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import { diagnoseCheckedPackagesAsync, type InstallCheckReport } from './checkReport';
+import { runBareInstallAsync } from './bareInstall';
 import { reportInstallImpactAsync } from './impactReport';
 import type { InstallPlan } from './resolveOptions';
 import type { InstallReport } from './types';
 
+/** What an `expo install` subprocess left: its code, and the `--check` report when there is one. */
+interface InstallRun {
+  exitCode: number;
+  checkPayload: unknown;
+  checkOutput: string | null;
+}
+
 /**
- * Run `expo install` as a subprocess, then report what it changed and link the skills of what it
- * installed.
+ * Run `expo install` as a subprocess — or the lockfile's own install, for an app whose dependencies
+ * are not installed yet — then report what it changed and link the skills of what it installed.
  *
  * Both post-install steps run after the subprocess, never inside `@expo/cli`. They are
  * best-effort and never throw, so neither a skill problem nor an unclassifiable package can fail
  * a good install.
  *
- * @returns the exit code of the `expo install` subprocess.
+ * @returns the exit code of the install subprocess.
  */
 export async function installAsync(projectRoot: string, plan: InstallPlan): Promise<number> {
-  const { exitCode, checkPayload, checkOutput } = await runInstallAsync(projectRoot, plan);
+  // @ref llp/0010-agent-conventions.rfc.md §Forwarded codes, and the exception — only the bare
+  // form runs, because every other form is `expo install`, which cannot read the SDK yet.
+  const dependenciesMissing = dependenciesMissingSync(projectRoot);
+  if (dependenciesMissing && plan.expoArgs.length > 0) {
+    throw dependenciesNotInstalledError('nothing was installed or checked');
+  }
+  const { exitCode, checkPayload, checkOutput } = dependenciesMissing
+    ? {
+        exitCode: await runBareInstallAsync(projectRoot, plan.json),
+        checkPayload: null,
+        checkOutput: null,
+      }
+    : await runInstallAsync(projectRoot, plan);
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
     // that asked for JSON still gets one object, the way a successful run does.
@@ -72,10 +93,7 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
  * command prints, and a package manager writing into the middle of it is exactly what makes such
  * output unparseable.
  */
-async function runInstallAsync(
-  projectRoot: string,
-  plan: InstallPlan
-): Promise<{ exitCode: number; checkPayload: unknown; checkOutput: string | null }> {
+async function runInstallAsync(projectRoot: string, plan: InstallPlan): Promise<InstallRun> {
   const args = ['install', ...plan.expoArgs];
 
   if (!plan.json) {

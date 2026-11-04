@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { executeAgentCliAsync, installStubBinAsync, setupFixtureAsync } from '../utils';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/expoApp';
 
 const STUB_LOG_NAME = 'stub-tsc-invocations.jsonl';
 
@@ -260,6 +261,23 @@ describe('@expo/agent-cli typecheck', () => {
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli install typescript --dev');
     // The two reasons must not read the same: that is the whole finding.
     expect(error.message).not.toContain('nothing to type-check');
+  });
+
+  // @ref llp/0010-agent-conventions.rfc.md §The fourth: `typecheck`
+  it(`should stop and name the bare install when the app's dependencies are not installed`, async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    await fs.promises.writeFile(path.join(projectRoot, 'tsconfig.json'), '{}');
+    await fs.promises.rm(path.join(projectRoot, 'node_modules', 'expo'), { recursive: true });
+
+    const result = await executeAgentCliAsync(projectRoot, ['typecheck', '--json'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error).toMatchObject({
+      code: 'DEPENDENCIES_NOT_INSTALLED',
+      suggestedCommand: INSTALL_DEPENDENCIES_COMMAND,
+    });
   });
 
   // A compiler that failed without reporting a diagnostic has not answered the question, so it is

@@ -6,7 +6,7 @@ import { assertWithOptionsArgs } from '../utils/args';
 
 export const installHelp: CommandHelp = {
   command: 'install',
-  usage: `${PROGRAM_PREFIX} install <package>...`,
+  usage: `${PROGRAM_PREFIX} install [<package>...]`,
   options: [
     `--check             Report which installed packages are out of date, and install nothing`,
     `--json              Print the result as JSON`,
@@ -18,16 +18,16 @@ export const installHelp: CommandHelp = {
   ],
   examples: [
     {
+      run: `${PROGRAM_PREFIX} install`,
+      gets: "with no package: the lockfile's dependencies, for a fresh clone or worktree",
+    },
+    {
       run: `${PROGRAM_PREFIX} install expo-sqlite`,
       gets: 'the version this SDK wants, installed, and any skills it ships linked',
     },
     {
       run: `${PROGRAM_PREFIX} install --check`,
       gets: 'which installed packages are out of date; nothing is installed',
-    },
-    {
-      run: `${PROGRAM_PREFIX} install expo-router --json`,
-      gets: 'one object: what was installed, what must rerun, which packages ship skills',
     },
     {
       run: `${PROGRAM_PREFIX} install react -- --verbose`,

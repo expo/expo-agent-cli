@@ -42,7 +42,7 @@ No-dev-server and wrong-platform stay `1`. Neither becomes different within a se
 
 ### Forwarded codes, and the exception
 
-`install`, `start`, `dev`, and the `expo` passthrough hand back whatever the subprocess exited with, verbatim. A wrapper's own failures use the table.
+`install`, `start`, `dev`, and the `expo` passthrough hand back whatever the subprocess exited with, verbatim. A wrapper's own failures use the table. A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's own install instead (`npm install`, `bun install`, `pnpm install` or `yarn install`) and exits with its code. The manager and the directory are the ones `@expo/package-manager` resolves: the root of the workspace the project belongs to, or the project, so an unrelated parent's lockfile never runs. The install is the plain one, not a frozen one: `npm ci` would delete a workspace root's `node_modules` for every member, and a lockfile that no longer matches package.json is better updated than refused when the point is a runnable clone. A manager that is not installed stops with `PACKAGE_MANAGER_NOT_FOUND`, and an install that exits 0 and leaves `expo` unresolved fails with `DEPENDENCIES_NOT_INSTALLED`, naming the command that ran. Every other form of `install` would run `expo install`, which cannot read the SDK yet. So in that state a named package, `--check`, `--fix` and arguments for the package manager all stop with `DEPENDENCIES_NOT_INSTALLED`, and the `Try:` line is the bare `install`. Pinned in `e2e/__tests__/install-bootstrap-test.ts`.
 
 The exception is a command that adds a verdict. `doctor` is `0` when every check passed, `20` when any failed, `1` only when the run produced no verdict ([[0016-v1-scope]] §Doctor's exit code). expo-doctor's own code stays on the `--json` `exitCode` field.
 
@@ -62,7 +62,7 @@ No `eas --json` payload can contain a `null`. `printJsonOnlyOutput` deletes ever
 
 A project with no TypeScript exits `0`, with `checked: false`. `reason` is present exactly when `checked` is false. The follow-up says so in a command as well as in a field, so "nothing was checked" cannot read as "everything passed".
 
-A TypeScript project with no compiler is `1` (`TYPECHECK_CLI_MISSING`), with `Try: npx @expo/agent-cli install typescript --dev`. Either `tsconfig.json` or `.ts`/`.tsx` sources makes it a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
+A TypeScript project with no compiler is `1` (`TYPECHECK_CLI_MISSING`), with `Try: npx @expo/agent-cli install typescript --dev`. In an Expo app whose dependencies are not installed, the cause is that, so the stop is `DEPENDENCIES_NOT_INSTALLED` with the bare `install` as its Try line (pinned in `e2e/__tests__/typecheck-test.ts`). Either `tsconfig.json` or `.ts`/`.tsx` sources makes it a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
 
 No compiler is ever fetched. `doctor:check` falls back to `npx expo-doctor`. This command does not. A type check is a function of the project's own compiler version, its `tsconfig.json`, and its `@types`. Only `node_modules/.bin/tsc` counts.
 

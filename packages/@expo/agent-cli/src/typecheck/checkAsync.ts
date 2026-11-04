@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { stripVTControlCharacters } from 'util';
 
+import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/expoApp';
 import { PROGRAM_PREFIX } from '../programName';
 import { fileExistsSync } from '../utils/dir';
 import { CommandError } from '../utils/errors';
@@ -161,6 +162,10 @@ export async function runTypeCheckAsync(projectRoot: string): Promise<TypeCheckR
   const tsConfigPath = resolveTsConfigPath(projectRoot);
   if (!cli) {
     if (tsConfigPath != null || hasTypeScriptSourcesSync(projectRoot)) {
+      // @ref llp/0010-agent-conventions.rfc.md §The fourth: `typecheck` — one cause, one code.
+      if (dependenciesMissingSync(projectRoot)) {
+        throw dependenciesNotInstalledError('nothing was type-checked');
+      }
       throw compilerMissingError(tsConfigPath != null, lookupProjectBin(projectRoot, 'tsc'));
     }
     return nothingToCheck(
