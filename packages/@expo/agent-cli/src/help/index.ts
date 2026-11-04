@@ -66,6 +66,8 @@ export const agentCliHelp: Command = async (argv) => {
   const Log = require('../log') as typeof import('../log');
   const { EXIT_OK } = require('../exitCodes') as typeof import('../exitCodes');
   const registry = require('../commandRegistry') as typeof import('../commandRegistry');
+  const listing = require('./listing') as typeof import('./listing');
+  const errors = require('../commandErrors') as typeof import('../commandErrors');
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
 
   return (async () => {
@@ -74,7 +76,7 @@ export const agentCliHelp: Command = async (argv) => {
     // `Log.exit` never returns, but it is reached through a `require`, which the type checker
     // cannot use for control-flow narrowing — so each branch says it is done.
     if (asked == null) {
-      Log.exit(registry.formatTopLevelHelp(), EXIT_OK);
+      Log.exit(listing.formatTopLevelHelp(), EXIT_OK);
       return;
     }
 
@@ -98,7 +100,7 @@ export const agentCliHelp: Command = async (argv) => {
       // A bare group is its listing, exactly as `@expo/agent-cli runtime --help` prints it, plus the
       // options of the action the bare name runs when it has one.
       case 'group-help': {
-        Log.log(registry.formatGroupHelp(resolution.group));
+        Log.log(listing.formatGroupHelp(resolution.group));
         const { defaultAction, actions } = registry.commandGroups[resolution.group]!;
         if (!defaultAction) {
           process.exit(EXIT_OK);
@@ -119,18 +121,18 @@ export const agentCliHelp: Command = async (argv) => {
       // that says the name was wrong.
       case 'unknown-action': {
         const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
-        Log.log(registry.formatGroupHelp(resolution.group));
+        Log.log(listing.formatGroupHelp(resolution.group));
         const error = new CommandError(
           'UNKNOWN_ACTION',
-          registry.unknownActionMessage(resolution.group, resolution.action)
+          errors.unknownActionMessage(resolution.group, resolution.action)
         );
         error.suggestedCommand = `${PROGRAM_PREFIX} ${resolution.group} --help`;
         throw error;
       }
       default: {
         const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
-        const error = new CommandError('UNKNOWN_COMMAND', registry.unknownCommandMessage(asked));
-        error.suggestedCommand = registry.unknownCommandSuggestion(asked);
+        const error = new CommandError('UNKNOWN_COMMAND', errors.unknownCommandMessage(asked));
+        error.suggestedCommand = errors.unknownCommandSuggestion(asked);
         throw error;
       }
     }

@@ -4,17 +4,15 @@ import arg from 'arg';
 import { boolish } from 'getenv';
 
 import {
-  commandGroups,
   flagsWithoutActionMessage,
   flagsWithoutActionSuggestion,
-  formatGroupHelp,
-  formatTopLevelHelp,
-  resolveCommand,
   unknownActionMessage,
   unknownCommandMessage,
   unknownCommandSuggestion,
-} from './commandRegistry';
+} from './commandErrors';
+import { commandGroups, resolveCommand } from './commandRegistry';
 import { EXIT_OK } from './exitCodes';
+import { formatGroupHelp, formatTopLevelHelp } from './help/listing';
 import * as Log from './log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import { configureColor } from './utils/color';
