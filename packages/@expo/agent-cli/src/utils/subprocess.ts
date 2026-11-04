@@ -172,8 +172,11 @@ function spawnNowAsync(
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
   return new Promise<SubprocessResult>((resolve) => {
+    // Only when there is something to add: `undefined` is what makes the child inherit, and
+    // spelling out `process.env` here would freeze a copy for no reason.
+    const env = childEnv ? { ...process.env, ...childEnv } : undefined;
     // `eas`, `create-expo` and `npx` all resolve to a batch shim on Windows, which needs `cmd.exe`.
-    const target = resolveSpawnTarget(command, args);
+    const target = resolveSpawnTarget(command, args, env ? { pathEnv: env.PATH ?? env.Path } : {});
     const child = spawn(target.command, target.args, {
       cwd,
       stdio: stdioFor(output),
@@ -182,9 +185,7 @@ function spawnNowAsync(
       // spawns is usually a package runner, and the program that does the work is the runner's
       // child (`src/utils/processGroup.ts`).
       detached: USE_PROCESS_GROUP,
-      // Only when there is something to add: `undefined` is what makes the child inherit, and
-      // spelling out `process.env` here would freeze a copy for no reason.
-      ...(childEnv ? { env: { ...process.env, ...childEnv } } : null),
+      ...(env ? { env } : null),
     });
 
     let stdout = '';

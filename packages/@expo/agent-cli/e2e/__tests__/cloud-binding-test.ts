@@ -352,15 +352,10 @@ it('round-trips guarded cloud target argv', async () => {
   const root = await project();
   const sessionId = 'argv-session';
   await writeCloudSessionFileAsync(root, sessionId);
-  // Each process of the chain records its start and exit, so a run that hangs names the one that did.
-  const trace = path.join(root, 'hop-trace.log');
-  const env = { ...envFor(root), STUB_HOP_TRACE: trace };
-  // Resolved against the PATH the child gets, or this finds the machine's own global eas.
-  const easCli = resolveEasCli(root, { env, pathEnv: stubExpoEnv(root).PATH });
+  const env = envFor(root);
+  // Resolved on the PATH the child gets, or this finds the machine's own global eas.
+  const easCli = resolveEasCli(root, { env, pathEnv: env['PATH'] });
   expect(easCli).toMatchObject({ global: false, runner: 'npx' });
-  // The stub runner by path: on Windows the spawn resolves a bare `npx` on this process's PATH,
-  // which is the machine's npx and a download of the real eas-cli.
-  const runner = path.join(root, '.stub-bin', process.platform === 'win32' ? 'npx.cmd' : 'npx');
 
   const targetArgs = [
     'space value',
@@ -374,22 +369,19 @@ it('round-trips guarded cloud target argv', async () => {
   const target = [
     process.execPath,
     '-e',
-    "require('fs').appendFileSync(process.env.STUB_HOP_TRACE, Date.now() + ' target ' + process.pid + ' start\\n'); process.stdout.write(JSON.stringify(process.argv.slice(1)))",
+    'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
     ...targetArgs,
   ];
   const accepted = await spawnSubprocessAsync(
-    runner,
+    easCli!.command,
     easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
     { cwd: root, env, timeoutMs: 60_000 }
   );
-  const output = [
-    `stdout: ${accepted.stdout}`,
-    `stderr: ${accepted.stderr}`,
-    `trace:\n${fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8') : '(none)'}`,
-  ].join('\n');
-  expect(accepted.timedOut ?? false, output).toBe(false);
+  const output = `stdout: ${accepted.stdout}\nstderr: ${accepted.stderr}`;
+  expect(accepted.timedOut, output).toBeFalsy();
   expect(accepted.exitCode, output).toBe(0);
-  expect(fs.readFileSync(trace, 'utf8'), output).toMatch(/ runner \d+ start eas-cli\n/);
+  // Only the stub eas writes this log, so the machine's own npx did not answer.
+  expect(readStubEasInvocations(root), output).not.toEqual([]);
   expect(JSON.parse(accepted.stdout)).toEqual(targetArgs);
 });
 // A STOPPED session is no longer listed as usable, so the probe asks for availability before it

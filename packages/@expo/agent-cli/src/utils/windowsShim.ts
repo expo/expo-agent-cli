@@ -30,8 +30,14 @@ export interface SpawnTarget {
  * from `shell: true`. Node then sets `windowsVerbatimArguments` and quotes **nothing**, so every
  * part is quoted here instead; `/s` strips the outer pair `cmd` is handed, leaving the quoted
  * program and the quoted arguments it needs to see.
+ *
+ * @param pathEnv `PATH` the child gets, so a bare name resolves to what that child's own PATH holds.
  */
-export function resolveSpawnTarget(command: string, args: string[]): SpawnTarget {
+export function resolveSpawnTarget(
+  command: string,
+  args: string[],
+  { pathEnv = process.env.PATH ?? process.env.Path }: { pathEnv?: string } = {}
+): SpawnTarget {
   if (process.platform !== 'win32') {
     return { command, args, shell: false };
   }
@@ -39,7 +45,7 @@ export function resolveSpawnTarget(command: string, args: string[]): SpawnTarget
   // A bare `npx` or `xcrun` is a `.cmd` shim once PATH/PATHEXT has answered. Resolve it here so
   // the batch-file rule below sees the shim, rather than leaving `spawn` to find it without a shell
   // and throw EINVAL (CVE-2024-27980).
-  const resolved = resolveBareCommandOnPath(command);
+  const resolved = resolveBareCommandOnPath(command, pathEnv ?? '');
   if (!BATCH_FILE.test(resolved)) {
     return { command: resolved, args, shell: false };
   }
@@ -57,11 +63,10 @@ export function resolveSpawnTarget(command: string, args: string[]): SpawnTarget
  * Kept here rather than imported from `subprocess.ts` so this module does not import the file that
  * imports it.
  */
-function resolveBareCommandOnPath(command: string): string {
+function resolveBareCommandOnPath(command: string, pathEnv: string): string {
   if (/[\\/]/.test(command)) {
     return command;
   }
-  const pathEnv = process.env.PATH ?? process.env.Path ?? '';
   const names =
     BATCH_FILE.test(command) || /\.exe$/i.test(command)
       ? [command]
