@@ -356,7 +356,7 @@ it('round-trips guarded cloud target argv', async () => {
   const trace = path.join(root, 'hop-trace.log');
   const env = { ...envFor(root), STUB_HOP_TRACE: trace };
   // Resolved against the PATH the child gets, or this finds the machine's own global eas.
-  const easCli = resolveEasCli(root, { env, pathEnv: env.PATH });
+  const easCli = resolveEasCli(root, { env, pathEnv: stubExpoEnv(root).PATH });
   expect(easCli).toMatchObject({ global: false, runner: 'npx' });
   // The stub runner by path: on Windows the spawn resolves a bare `npx` on this process's PATH,
   // which is the machine's npx and a download of the real eas-cli.

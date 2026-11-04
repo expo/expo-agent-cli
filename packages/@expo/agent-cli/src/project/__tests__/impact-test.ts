@@ -1,10 +1,13 @@
 import { vol } from 'memfs';
 
+import { buildInstallFollowUps } from '../../followups/install';
+import { checkExpoGoCompatibilityAsync } from '../expoGo';
 import { classifyInstallImpactAsync } from '../impact';
 
 const projectRoot = '/project';
 
 interface ProjectFixture {
+  sdkVersion?: string;
   /** Project dependencies, defaults to `expo` only. */
   dependencies?: Record<string, string>;
   /** Bundled native modules of the installed `expo` package. */
@@ -16,6 +19,7 @@ interface ProjectFixture {
 }
 
 function writeProject({
+  sdkVersion = '54.0.0',
   dependencies = { expo: '54.0.0' },
   bundled = {},
   nativeDirs = false,
@@ -23,7 +27,10 @@ function writeProject({
 }: ProjectFixture) {
   vol.fromJSON({
     [`${projectRoot}/package.json`]: JSON.stringify({ name: 'app', dependencies }),
-    [`${projectRoot}/node_modules/expo/package.json`]: '{"name":"expo","version":"54.0.0"}',
+    [`${projectRoot}/node_modules/expo/package.json`]: JSON.stringify({
+      name: 'expo',
+      version: sdkVersion,
+    }),
     [`${projectRoot}/node_modules/expo/bundledNativeModules.json`]: JSON.stringify(bundled),
     ...(nativeDirs
       ? { [`${projectRoot}/ios/Podfile`]: '', [`${projectRoot}/android/build.gradle`]: '' }
@@ -159,23 +166,60 @@ describe(classifyInstallImpactAsync, () => {
     expect(report?.reasons.join(' ')).toContain('app.plugin.js');
   });
 
-  it(`should only need a reload for a bundled module in an Expo Go project`, async () => {
-    writeProject({
-      bundled: { 'expo-camera': '~54.0.0' },
-      files: {
-        [`${projectRoot}/node_modules/expo-camera/package.json`]: '{}',
-        [`${projectRoot}/node_modules/expo-camera/ios/Camera.swift`]: '',
-      },
-    });
+  it.each([
+    ['57.0.0', 'ios'],
+    ['57.0.0', 'android'],
+    ['58.0.0', 'ios'],
+    ['58.0.0', 'android'],
+  ])(
+    `should use runtime membership for install advice on SDK %s (%s)`,
+    async (sdkVersion, platform) => {
+      writeProject({
+        sdkVersion,
+        dependencies: { expo: sdkVersion, 'expo-maps': '~58.0.0', 'expo-camera': '~58.0.0' },
+        // A captured runtime does not need camera in the version catalog. An uncaptured
+        // SDK may use the catalog only to corroborate a known runtime module.
+        bundled: {
+          'expo-maps': '~58.0.0',
+          ...(sdkVersion.startsWith('58') ? { 'expo-camera': '~58.0.0' } : {}),
+        },
+        files: {
+          [`${projectRoot}/node_modules/expo-camera/package.json`]: '{}',
+          [`${projectRoot}/node_modules/expo-camera/${platform}/native`]: '',
+          [`${projectRoot}/node_modules/expo-maps/package.json`]: '{}',
+          [`${projectRoot}/node_modules/expo-maps/${platform}/native`]: '',
+          [`${projectRoot}/node_modules/expo-maps/expo-module.config.json`]: '{}',
+          [`${projectRoot}/node_modules/expo-maps/app.plugin.js`]: '',
+          [`${projectRoot}/app.json`]: JSON.stringify({ expo: { plugins: ['expo-maps'] } }),
+        },
+      });
 
-    const [report] = await classifyInstallImpactAsync(projectRoot, ['expo-camera']);
-
-    expect(report).toMatchObject({
-      impact: 'native-module',
-      expoGoBundled: true,
-      action: 'reload',
-    });
-  });
+      const reports = await classifyInstallImpactAsync(projectRoot, ['expo-camera', 'expo-maps']);
+      expect(reports).toMatchObject([
+        {
+          packageName: 'expo-camera',
+          impact: 'native-module',
+          expoGoBundled: true,
+          action: 'reload',
+        },
+        {
+          packageName: 'expo-maps',
+          impact: 'native-module',
+          expoGoBundled: false,
+          action: 'prebuild-and-build',
+        },
+      ]);
+      const followups = buildInstallFollowUps({ reports, packagesWithSkills: [] });
+      expect(followups.map(({ id }) => id)).toEqual(['dev', 'typecheck']);
+      expect(followups[0]?.why).toContain('expo-maps');
+      expect(await checkExpoGoCompatibilityAsync(projectRoot)).toMatchObject({
+        compatible: false,
+        reasons: expect.arrayContaining([
+          expect.objectContaining({ kind: 'unbundled-native-module', packageName: 'expo-maps' }),
+        ]),
+      });
+    }
+  );
 
   it(`should require a build for a bundled module in a dev client project`, async () => {
     writeProject({

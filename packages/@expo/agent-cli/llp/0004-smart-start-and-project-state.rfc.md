@@ -265,9 +265,11 @@ change the answer.
 Expo Go compatibility check. Answer "can this run in Expo Go?" with reasons. Native
 modules are compared against a vendored autolink dump of `apps/expo-go`
 (`src/project/expoGoNativeModules.json`), captured per SDK major. Lookups are a Set. An SDK
-this CLI has not recaptured falls back to that project's
-`expo/bundledNativeModules.json`, so a new Expo release does not wait on an agent-cli
-update. Config plugins still use the catalog (optimistic for `expo-build-properties`).
+this CLI has not recaptured uses the intersection of the default captured runtime and
+that project's `expo/bundledNativeModules.json`. A version catalog entry alone must
+never establish native runtime membership: it also lists packages that need a
+development build. Newly bundled modules need a recapture before the CLI recommends
+Expo Go for them. Config plugins still use the catalog (optimistic for `expo-build-properties`).
 The fallback also recognizes `@expo/log-box` and `expo-modules-jsi` on SDK 57 and
 newer: both are internal runtime modules absent from the version catalog, present
 in the SDK 57 dump, and verified in SDK 58.0.0-preview.2 [observed, 2026-09-16].
@@ -278,7 +280,7 @@ excluding `@expo/log-box`; `expo-modules-core` depends on `expo-modules-jsi`, li
 Installed package metadata confirms both dependency edges and the catalog omissions.
 These exact-name exceptions supplement only uncaptured SDKs; a captured dump still
 decides membership. They do not imply that every Expo package or transitive dependency
-is compatible. The fallback catalog remains optimistic for packages it does list.
+is compatible.
 `custom-native-code` is a native directory that git does not ignore (bare), not
 merely one that exists: `expo prebuild` writes `ios/` and `android/` that the
 template gitignore covers, and those are still CNG. Local packages under
@@ -287,8 +289,12 @@ template gitignore covers, and those are still CNG. Local packages under
 
 Post-install impact. After `npx expo install {pkg}`, JS-only means keep the dev server
 and maybe reload. A new config plugin or native module under CNG means prebuild plus a
-new dev build. Bare native dirs mean pod install or gradle sync. The classifier lives in
-`src/project/impact.ts`. The change classifier (what a working-tree diff costs) is
+new dev build. Bare native dirs mean pod install or gradle sync. Install advice and the
+compatibility check share the same runtime membership rule. The integration test
+"should use runtime membership for install advice on SDK %s (%s)" verifies that
+`expo-maps` in the version catalog still requires a build while `expo-camera` can reload,
+for captured and uncaptured SDKs with native code on either platform.
+The change classifier (what a working-tree diff costs) is
 [[0011-impact-and-freshness]].
 
 ## Status

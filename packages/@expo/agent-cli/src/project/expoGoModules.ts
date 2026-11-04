@@ -1,8 +1,8 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Sub-features
 // The native modules compiled into Expo Go, captured from apps/expo-go autolinking and
 // shipped in this CLI. Lookups are Set.has. A project whose SDK major is not in the dump
-// falls back to that SDK's bundledNativeModules.json so a new Expo release does not wait
-// on an agent-cli update.
+// falls back to known runtime modules that also appear in that SDK's version catalog.
+// A catalog entry alone is not evidence that Expo Go compiles the package.
 // Not `expoGoModules.json`: ncc merges a .ts and .json that share a basename into one
 // namespace, and the named exports of this file disappear.
 import dump from './expoGoNativeModules.json';
@@ -69,9 +69,10 @@ export function dumpCoversSdk(sdkVersion: string | null | undefined): boolean {
  * Whether a package's native code is in Expo Go for this project.
  *
  * Prefer the captured dump (O(1) Set). When this CLI has no dump for the SDK — a new release
- * we have not recaptured yet — fall back to the installed `expo` package's
- * `bundledNativeModules.json`. That version catalog is over-inclusive and omits some internal
- * runtime modules, so supplement it with the known internals on SDKs that include them.
+ * we have not recaptured yet — intersect the default dump with the installed `expo` package's
+ * `bundledNativeModules.json`. The catalog includes packages that require a development build;
+ * new runtime modules need a recapture before we recommend Expo Go for them. Supplement the
+ * intersection with known internals omitted from the catalog on SDKs that include them.
  *
  * `alsoCompatible` applies on both paths: those packages are missing from Go's autolink
  * output on purpose and still run there. Runtime and tooling packages are never a reason:
@@ -103,7 +104,10 @@ export function isExpoGoNativeModule(
   ) {
     return true;
   }
-  return options.bundledNativeModules?.[packageName] != null;
+  return (
+    MODULES_BY_SDK.get(DUMP.defaultSdk)?.has(packageName) === true &&
+    options.bundledNativeModules?.[packageName] != null
+  );
 }
 
 export const EXPO_GO_MODULES_DUMP: ExpoGoModulesDump = DUMP;

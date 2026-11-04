@@ -2,7 +2,7 @@
 // "Can this project run in Expo Go?" — answered from files only, with a reason per finding.
 //
 // Expo Go ships a fixed native runtime. A project can use it only when every native module it
-// needs is already inside that runtime (the vendored autolink dump, falling back to
+// needs is already inside that runtime (the vendored autolink dump, intersected with
 // `expo/bundledNativeModules.json` for an SDK this CLI has not recaptured), no config plugin
 // changes the native projects, and no native project is checked in.
 import { requireAutolinking } from '../utils/autolinking';

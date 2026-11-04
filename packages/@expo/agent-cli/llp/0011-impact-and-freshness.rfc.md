@@ -25,7 +25,7 @@ There is no `@expo/agent-cli impact` command. The classifier is the engine under
 1. `impact === 'js-only'`. Nothing native was added, so the native runtime is unchanged.
 2. `expoGoBundled && targetsExpoGo`. Something native was added, and the runtime the project targets already contains it.
 
-The classification was always right. The sentence beside it used to be one string: "Only JavaScript changed...". Reason 2 is conditional on the runtime. Reason 1 is not. The moment that project gains `expo-dev-client` or a native directory, `targetsExpoGo` goes false and the same package needs a build.
+Reason 2 requires the runtime membership check described in [[0004-smart-start-and-project-state]]; an SDK version catalog entry is insufficient. Reason 2 is conditional on the runtime. Reason 1 is not. The moment that project gains `expo-dev-client` or a native directory, `targetsExpoGo` goes false and the same package needs a build.
 
 `reloadReason` in `src/followups/install.ts` words the rung from the reports it was already given: the js-only sentence when nothing native was added, and "Expo Go already carries `<packages>`, so no rebuild is needed for it... A project that builds its own runtime would need a new build." when something was. A set that mixes both says only what is true of the set. No new input. `impact` and `expoGoBundled` are on every report.
 
