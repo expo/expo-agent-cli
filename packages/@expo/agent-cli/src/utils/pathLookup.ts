@@ -41,13 +41,14 @@ function executableNames(name: string): string[] {
  *
  * @param env the environment whose `PATH` is searched: a child's, or a test's that must not depend
  *   on the machine's.
+ * @param paths how to split and join `PATH`: this host's, or `path.win32` for a caller that has
+ *   already decided it runs on Windows.
  * @returns the absolute path of the executable, or `null` when no entry of `PATH` holds it.
  */
 export function findExecutableOnPath(
   name: string,
-  { env = process.env }: { env?: NodeJS.ProcessEnv } = {}
+  { env = process.env, paths = path }: { env?: NodeJS.ProcessEnv; paths?: path.PlatformPath } = {}
 ): string | null {
-  const paths = process.platform === 'win32' ? path.win32 : path.posix;
   for (const dir of pathFromEnv(env).split(paths.delimiter)) {
     if (!dir) {
       continue;

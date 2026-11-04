@@ -77,9 +77,9 @@ describe('on windows', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
 
-    expect(findExecutableOnPath('foo', { env: { PATH: 'C:\\none;C:\\tools' } })).toBe(
-      'C:\\tools\\foo.bat'
-    );
+    expect(
+      findExecutableOnPath('foo', { env: { PATH: 'C:\\none;C:\\tools' }, paths: path.win32 })
+    ).toBe('C:\\tools\\foo.bat');
   });
 
   it(`should read PATH whatever its case, like the child does`, () => {
