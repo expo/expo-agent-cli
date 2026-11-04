@@ -1267,7 +1267,7 @@ describe('@expo/agent-cli smoke', () => {
         expect(readNpx().some((argv) => argv.includes('download'))).toBe(false);
         expect(adb.read().some((argv) => argv.includes('install'))).toBe(false);
         // Not `skipped`: a machine that already had the app never had an install to do, and a
-        // skipped row reads as work that was owed (@ref src/smoke/phases §CONDITIONAL_PHASES).
+        // skipped row reads as work that was owed (@ref src/smoke/timeouts §CONDITIONAL_PHASES).
         expect(report.phases.some((entry: any) => entry.id === 'install-app')).toBe(false);
       } finally {
         await stub.close();
