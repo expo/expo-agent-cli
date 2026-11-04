@@ -8,9 +8,14 @@ import { fileExistsSync } from './dir';
  * On Windows env keys are case-insensitive, and an env object can hold `PATH` and `Path` at once.
  * Node keeps the first of them in sort order for the child (`lib/child_process.js`), so this does
  * too.
+ *
+ * @param platform the platform the child runs on, for a caller that injects it.
  */
-export function pathFromEnv(env: NodeJS.ProcessEnv = process.env): string {
-  if (process.platform !== 'win32') {
+export function pathFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform
+): string {
+  if (platform !== 'win32') {
     return env.PATH ?? '';
   }
   const key = Object.keys(env)

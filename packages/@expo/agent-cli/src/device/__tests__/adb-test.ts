@@ -6,6 +6,17 @@ function existsIn(paths: string[]) {
 }
 
 describe(resolveAdb, () => {
+  it('finds adb on a Windows PATH whose env key is spelled Path', () => {
+    const resolution = resolveAdb({
+      env: { Path: 'C:\\tools' },
+      platform: 'win32',
+      homedir: 'C:\\Users\\ada',
+      exists: existsIn(['C:\\tools\\adb.exe']),
+    });
+
+    expect(resolution).toMatchObject({ bin: 'C:\\tools\\adb.exe', source: 'PATH' });
+  });
+
   it('prefers ANDROID_HOME when it holds platform-tools/adb', () => {
     const resolution = resolveAdb({
       env: { ANDROID_HOME: '/sdk-home', ANDROID_SDK_ROOT: '/sdk-root' },

@@ -28,6 +28,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { pathFromEnv } from '../utils/pathLookup';
 import { CommandError } from '../utils/errors';
 import {
   spawnCaptureAsync,
@@ -134,7 +135,7 @@ export function resolveAdb({
   }
 
   // A copy somebody put on `PATH` on purpose, before this module's own guess at where the SDK is.
-  const onPath = findOnPath(executables, env.PATH ?? '', platform, exists);
+  const onPath = findOnPath(executables, pathFromEnv(env, platform), platform, exists);
   if (onPath) {
     return { bin: onPath, source: 'PATH', searched, fromPathOnly: false };
   }
