@@ -78,7 +78,7 @@ describe('on windows', () => {
     });
 
     expect(
-      findExecutableOnPath('foo', { env: { PATH: 'C:\\none;C:\\tools' }, paths: path.win32 })
+      findExecutableOnPath('foo', { env: { PATH: 'C:\\none;C:\\tools' }, platform: 'win32' })
     ).toBe('C:\\tools\\foo.bat');
   });
 

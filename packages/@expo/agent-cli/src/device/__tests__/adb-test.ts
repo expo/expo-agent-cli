@@ -1,3 +1,4 @@
+import { findExecutableOnPath } from '../../utils/pathLookup';
 import { adbNotRunnableError, resolveAdb } from '../adb';
 
 /** A filesystem that only knows the paths it was handed. */
@@ -6,6 +7,29 @@ function existsIn(paths: string[]) {
 }
 
 describe(resolveAdb, () => {
+  it('picks the same adb on PATH as the toolchain check does', () => {
+    const options = {
+      env: { PATH: 'C:\\tools' },
+      platform: 'win32',
+      exists: existsIn(['C:\\tools\\adb.cmd', 'C:\\tools\\adb.exe', 'C:\\tools\\adb.bat']),
+    };
+
+    expect(resolveAdb({ ...options, homedir: 'C:\\Users\\ada' }).bin).toBe(
+      findExecutableOnPath('adb', options)
+    );
+  });
+
+  it('finds an adb.bat wrapper on a Windows PATH', () => {
+    const resolution = resolveAdb({
+      env: { PATH: 'C:\\tools' },
+      platform: 'win32',
+      homedir: 'C:\\Users\\ada',
+      exists: existsIn(['C:\\tools\\adb.bat']),
+    });
+
+    expect(resolution).toMatchObject({ bin: 'C:\\tools\\adb.bat', fromPathOnly: false });
+  });
+
   it('finds adb on a Windows PATH whose env key is spelled Path', () => {
     const resolution = resolveAdb({
       env: { Path: 'C:\\tools' },

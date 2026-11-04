@@ -26,9 +26,8 @@
 
 import fs from 'fs';
 import os from 'os';
-import path from 'path';
 
-import { pathFromEnv } from '../utils/pathLookup';
+import { findExecutableOnPath, pathFor } from '../utils/pathLookup';
 import { CommandError } from '../utils/errors';
 import {
   spawnCaptureAsync,
@@ -62,11 +61,6 @@ export interface AdbResolution {
    * and one that gets it on the bare name has no SDK this module could find.
    */
   fromPathOnly: boolean;
-}
-
-/** Path helpers for the platform being searched, not the host running the test. */
-function pathFor(platform: string): path.PlatformPath {
-  return platform === 'win32' ? path.win32 : path.posix;
 }
 
 /** The default Android SDK install locations, per platform. */
@@ -135,7 +129,9 @@ export function resolveAdb({
   }
 
   // A copy somebody put on `PATH` on purpose, before this module's own guess at where the SDK is.
-  const onPath = findOnPath(executables, pathFromEnv(env, platform), platform, exists);
+  // Resolved rather than left as a bare name so the report can say *which* copy ran: two Android
+  // SDKs on one machine is common, and "adb" names neither of them.
+  const onPath = findExecutableOnPath('adb', { env, platform, exists });
   if (onPath) {
     return { bin: onPath, source: 'PATH', searched, fromPathOnly: false };
   }
@@ -150,35 +146,6 @@ export function resolveAdb({
   // Nothing on disk anywhere. The bare name is still spawned rather than refused here: `PATH` can
   // be rewritten by a shim this module cannot see, and letting the spawn fail names the real error.
   return { bin: executables[0]!, source: 'PATH', searched, fromPathOnly: true };
-}
-
-/**
- * The first `adb` on `PATH`, resolved to an absolute path.
- *
- * Resolved rather than left as a bare name so the report can say *which* copy ran — two Android
- * SDKs on one machine is common, and "adb" names neither of them.
- */
-function findOnPath(
-  executables: string[],
-  pathValue: string,
-  platform: string,
-  exists: (candidate: string) => boolean
-): string | null {
-  const separator = platform === 'win32' ? ';' : ':';
-  for (const entry of pathValue.split(separator)) {
-    if (!entry) {
-      continue;
-    }
-    for (const executable of executables) {
-      const candidate = pathFor(platform).join(entry, executable);
-      if (exists(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  // Not listed in `searched`: `PATH` is often dozens of directories, and naming every one of them
-  // in an error message would bury the two that matter.
-  return null;
 }
 
 /** Everything one `adb` run amounts to, with where the binary came from kept alongside. */

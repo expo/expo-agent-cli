@@ -24,9 +24,14 @@ export function pathFromEnv(
   return (key && env[key]) ?? '';
 }
 
-/** Filename variants of one command, in the order this CLI tries them on this platform. */
-function executableNames(name: string): string[] {
-  if (process.platform !== 'win32' || /\.(cmd|bat|exe)$/i.test(name)) {
+/** Path helpers for the platform being searched, not the host running the code. */
+export function pathFor(platform: string): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
+/** Filename variants of one command, in the order this CLI tries them on `platform`. */
+function executableNames(name: string, platform: string): string[] {
+  if (platform !== 'win32' || /\.(cmd|bat|exe)$/i.test(name)) {
     return [name];
   }
   return [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name];
@@ -46,21 +51,29 @@ function executableNames(name: string): string[] {
  *
  * @param env the environment whose `PATH` is searched: a child's, or a test's that must not depend
  *   on the machine's.
- * @param paths how to split and join `PATH`: this host's, or `path.win32` for a caller that has
- *   already decided it runs on Windows.
+ * @param platform the platform being searched, for a caller that decides it. Unset, `PATH` is split
+ *   and joined with this host's path module, so a test that fakes `process.platform` still plants
+ *   its files where the lookup reads them.
+ * @param exists the file check, for a caller that fakes the filesystem.
  * @returns the absolute path of the executable, or `null` when no entry of `PATH` holds it.
  */
 export function findExecutableOnPath(
   name: string,
-  { env = process.env, paths = path }: { env?: NodeJS.ProcessEnv; paths?: path.PlatformPath } = {}
+  {
+    env = process.env,
+    platform,
+    exists = isFileSync,
+  }: { env?: NodeJS.ProcessEnv; platform?: string; exists?: (file: string) => boolean } = {}
 ): string | null {
-  for (const dir of pathFromEnv(env).split(paths.delimiter)) {
+  const paths = platform ? pathFor(platform) : path;
+  const target = platform ?? process.platform;
+  for (const dir of pathFromEnv(env, target).split(paths.delimiter)) {
     if (!dir) {
       continue;
     }
-    for (const fileName of executableNames(name)) {
+    for (const fileName of executableNames(name, target)) {
       const candidate = paths.join(dir, fileName);
-      if (isFileSync(candidate)) {
+      if (exists(candidate)) {
         return candidate;
       }
     }

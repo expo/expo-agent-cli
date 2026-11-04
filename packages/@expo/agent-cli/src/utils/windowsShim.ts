@@ -48,7 +48,7 @@ export function resolveSpawnTarget(
   // and throw EINVAL (CVE-2024-27980).
   const resolved = /[\\/]/.test(command)
     ? command
-    : (findExecutableOnPath(command, { env, paths: path.win32 }) ?? command);
+    : (findExecutableOnPath(command, { env, platform: 'win32' }) ?? command);
   if (!BATCH_FILE.test(resolved)) {
     return { command: resolved, args, shell: false };
   }
