@@ -84,7 +84,7 @@ describe(buildSmokeProgress, () => {
     expect(said((say) => say('reload', 800))[0]).not.toContain('up to');
   });
 
-  // @ref src/smoke/phases.ts, the `app` phase. Two steps of very different sizes — a two-second
+  // @ref src/smoke/walk/app §openAppAsync. Two steps of very different sizes — a two-second
   // look, then an open and a wait that is the longest thing the command does — so the phase says
   // two lines rather than one that covers neither.
   it(`tells the app phase's cheap look apart from its long wait`, () => {
