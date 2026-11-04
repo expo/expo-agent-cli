@@ -1,0 +1,271 @@
+import type { BundleCheckResult } from '../../runtime/bundleCheck';
+import { describeSkippedApps, type SkippedApp } from '../../runtime/targetSelection';
+import type { AppConnectionResult } from '../../runtime/waitReady';
+import { captureIfPossible } from '../capture';
+import type { SmokeAppFit, SmokeRun } from '../phases';
+import { appendReason } from '../results';
+import { APP_PROBE_MS, ROOT_ROUTE } from '../timeouts';
+import type { SmokePhase, SmokePhaseStatus } from '../types';
+import type { AppSession } from './appSession';
+import type { RunBase } from './bundle';
+import type { DeviceReady } from './device';
+import type { PhaseWalk, Step } from './walk';
+
+/** What every exit from phase 5 on reports about the dev server, the bundle and the app. */
+export interface WithApp extends RunBase {
+  bundle: BundleCheckResult;
+  appsConnected: number;
+  skippedApps: SkippedApp[];
+}
+
+/** What the device said when it refused this run's deep link. */
+interface RefusedOpen {
+  /**
+   * Why the device refused this run's deep link, when it did and the device could say.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+   * Reported as a value and not only in the phase's sentence, for the same reason every other
+   * finding here is: the follow-ups branch on it, and a re-run is never the answer to it.
+   */
+  fit: SmokeAppFit | null;
+  /**
+   * Whether the refused-open path already asked the device.
+   *
+   * Its own flag rather than `fit != null`, because "asked, and the device explained
+   * nothing" is a real answer and `??` cannot tell it from "not asked" — which made the run spend
+   * two device reads on one question.
+   */
+  asked: boolean;
+}
+
+// ---- Phase 5: is an app attached, and can one be opened if not? ---------------------------
+export async function appStep(
+  walk: PhaseWalk,
+  session: AppSession,
+  base: RunBase,
+  bundle: BundleCheckResult,
+  ready: DeviceReady
+): Promise<Step<WithApp>> {
+  const refused: RefusedOpen = { fit: null, asked: false };
+  const connection = await walk.record('app', () =>
+    openAppAsync(walk, session, base.devServerUrl, ready, refused)
+  );
+  // The whole phase, because on this path almost all of it is the wait above.
+  if (session.openedByThisRun && walk.coldEnvironment()) {
+    walk.chargeToBootstrap();
+  }
+
+  const { appsConnected, skippedApps } = connection;
+  const withApp = { ...base, bundle, appsConnected, skippedApps };
+  if (appsConnected === 0) {
+    return { stop: await noAppExit(walk, session, withApp, refused) };
+  }
+  return { next: withApp };
+}
+
+async function openAppAsync(
+  walk: PhaseWalk,
+  session: AppSession,
+  devServerUrl: string,
+  { firstConnection, appReplaced }: DeviceReady,
+  refused: RefusedOpen
+): Promise<{ status: SmokePhaseStatus; reason?: string | null; value: AppConnectionResult }> {
+  const { deps, options, environment } = walk;
+  // Reused when the boot decision above already asked. It answered "nothing is attached", which
+  // is still true of a simulator that has only just finished booting — and asking again would
+  // spend a second wait on a fact this run established one phase ago.
+  const first =
+    firstConnection ??
+    (await deps.waitForAppConnection(devServerUrl, Math.min(walk.remaining(), APP_PROBE_MS)));
+  // `!appReplaced` is the whole of the fix above: an install replaced the app, so a count that
+  // says one is attached is describing the process the install ended.
+  // EAS's --open-url launches the app without opening an agent-device controller session.
+  // Go through the normal open once for a session we created, even if Metro already sees the
+  // app. This binds the controller for screenshots and makes a second reload unnecessary.
+  const needsCloudController = options.cloud === 'required' && environment.device === 'booted';
+  if (!appReplaced && first.appsConnected > 0 && !needsCloudController) {
+    return { status: 'ok' as const, value: first };
+  }
+
+  // Nothing is attached. `navigate` is what puts an app in that list, so the gate opens one
+  // rather than waiting out its budget on a state it could have changed itself. This is friction
+  // run 1's F4 absorbed into the gate, and the same reasoning F48-8 gave `status.next`: a wait
+  // for an app cannot succeed while nothing is opening one.
+  const device = await walk.deviceAsync();
+  if (device.deviceId == null) {
+    return {
+      status: 'inconclusive' as const,
+      reason: `no app is connected to the dev server, and ${device.reason ?? 'no device was found to open one on'}`,
+      value: first,
+    };
+  }
+
+  // **One budget, spent across the open and the wait after it.** The open now waits for the app
+  // it loads (F123's ladder is gated on that), and the wait below asks the same question — so a
+  // budget handed to each would be two of them: a cold run whose app never arrives would spend
+  // four minutes to report what it knew after two.
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+  //
+  // The second line this phase says, and the only phase that says two. The reason is that the
+  // phase does two things of very different sizes: a two-second look for an app that is already
+  // there, and — when there is none — an open followed by a wait that on a cold environment is
+  // two minutes. One line covering both would either overstate the look or say nothing about the
+  // wait, and the wait is the longest single thing this command ever does.
+  const attachDeadline = deps.now() + walk.attachBudget();
+  deps.progress('app', Math.max(0, attachDeadline - deps.now()));
+  const opened = await deps.openRoute(
+    options.route ?? ROOT_ROUTE,
+    devServerUrl,
+    Math.max(0, attachDeadline - deps.now())
+  );
+  session.noteOpened(opened);
+  if (options.route != null) {
+    session.routeOpenedWhileConnecting = true;
+  }
+  if (opened.exitCode !== 0) {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+    //
+    // "The device refused the deep link" is what happened and not why, and it reads as a fault in
+    // the device. The why is almost always one thing: nothing on that device handles this
+    // project's scheme, because the app is not there. `simctl openurl` says so with `115` and
+    // says nothing else [observed — Kudo, local run, 2026-09-04, a development build and a
+    // simulator that had not got it], and a report that stopped at the refusal sent its reader to
+    // `navigate`, which is refused in exactly the same way for ever (llp/0009).
+    refused.asked = true;
+    refused.fit = await deps.explainSilentApp(opened.deviceId, opened.deviceBackend);
+    return {
+      status: 'failed' as const,
+      reason: [
+        `no app was connected, and the device refused the deep link that would have opened one ("${opened.command}" exited ${opened.exitCode ?? 'on a signal'})`,
+        refused.fit?.mismatch,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      value: first,
+    };
+  }
+
+  // @ref ../timeouts §APP_ATTACH_TIMEOUT_MS. The deep link is a request and not a result: the open
+  // exited 0 above, and what is waited for here is a **debugger target appearing** — the app
+  // launching, fetching the manifest and downloading its bundle. On an environment this run made
+  // cold that is its own cost and gets its own budget; on a warm one it is a slow app, which is
+  // what the caller's `--timeout` is for.
+  const second = await deps.waitForAppConnection(
+    devServerUrl,
+    Math.max(0, attachDeadline - deps.now())
+  );
+  return second.appsConnected > 0
+    ? { status: 'ok' as const, reason: `opened ${opened.url} to connect one`, value: second }
+    : {
+        status: 'inconclusive' as const,
+        reason: `${opened.url} was opened on the device and no app had attached when the budget ran out`,
+        value: second,
+      };
+}
+
+/** No app attached: explain why if the device can, take a picture, and end the run. */
+async function noAppExit(
+  walk: PhaseWalk,
+  session: AppSession,
+  withApp: WithApp,
+  refused: RefusedOpen
+): Promise<SmokeRun> {
+  const { deps, options, phases } = walk;
+  const { skippedApps } = withApp;
+  const appPhase = phases[phases.length - 1]!;
+  if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
+  // @ref ../phases §SmokeDeps.explainSilentApp
+  //
+  // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is
+  // an Expo Go built from another SDK: it takes the deep link, fails to load a bundle it cannot
+  // run, and registers no debugger target — so the wait expires and the run reports the symptom
+  // [observed — emulator-5554 on Expo Go 54.0.8 against an SDK 57 project, 119 s, 2026-09-04].
+  //
+  // Asked here rather than in the `app` phase itself so it costs nothing on the healthy path:
+  // this branch is only reached by a run that already has nothing to read.
+  // The refused-open path already asked, and already put the answer in the phase's sentence, so
+  // this reads its result rather than spending a second device read — and appends nothing, which
+  // is what keeps the same finding from being printed twice on one row.
+  const silent = refused.asked
+    ? refused.fit
+    : await deps.explainSilentApp(session.deviceId, session.deviceBackend);
+  if (!refused.asked && silent?.mismatch != null) {
+    // Appended rather than substituted: "the link was opened and nothing attached" is what the
+    // phase measured, and the device fact is why. A reader needs both — the second without the
+    // first would not say that the open itself succeeded.
+    appendReason(appPhase, silent.mismatch);
+  }
+
+  // No app, so no runtime and no window — but there may still be a device, and a picture of
+  // whatever is on it is the most useful thing left to hand back.
+  // From `reload` rather than from `route`: the reload phase sits between this one and the route
+  // now, and a phase that is stepped over rather than filled in is a phase missing from the
+  // report — which is the one property the phase list has (`reports every phase exactly once`).
+  walk.skipRest('reload', 'no app is connected, so there was nothing to read', 'screenshot');
+  // The run opened the app in this phase, so whatever is on screen may still be loading.
+  const captured = await captureIfPossible(
+    deps,
+    options,
+    session.deviceId,
+    session.deviceBackend,
+    phases,
+    {
+      settleAsync: () => session.settleAsync(),
+      deviceAsync: walk.deviceAsync,
+      showing: session.devLauncherLeftOnScreen ? 'dev-launcher' : 'device',
+    }
+  );
+  return walk.done(appPhase.status === 'failed' ? 'failed' : 'inconclusive', {
+    ...withApp,
+    deviceId: captured.deviceId,
+    deviceBackend: captured.deviceBackend,
+    routeCheck: session.routeCheck,
+    // Reported as a fact and not only as the phase's sentence, so the follow-ups can lead with
+    // the command that fixes it rather than with "open the app again" — which is what they did,
+    // for ever, against a device that will answer the same way every time (llp/0009).
+    appMismatch: silent?.mismatch ?? null,
+    appMismatchKind: silent?.kind ?? null,
+    screenshot: captured.screenshot,
+    durationMs: deps.now() - walk.startedAt,
+  });
+}
+
+// ---- Is the app that answered one this project can run at all? ---------------------------
+//
+// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+//
+// Not a phase of its own: it is the second half of the question the `app` phase asks. "Is an app
+// attached" and "is it *this project's* app" have one answer between them, and a run that split
+// them into two rows would report `app ok` above a row saying the app cannot run this project.
+//
+// Asked on both paths — an app this run found *and* one it opened — because the open picks its
+// target from the same decision, so a mismatch on that path would mean this gate had opened the
+// wrong app. Never asked when nothing is connected: there is no runtime for it to be about, and
+// that path returned above.
+//
+// Downgrades the phase rather than stopping the run. The phases below still read the app that is
+// there and still photograph it — the same rule llp/0005 §Android sets for a runtime with no
+// debugger, where an empty window costs one wait and the report is more useful with it. What
+// changes is that the verdict can no longer be `passed`.
+export async function appFitStep(
+  walk: PhaseWalk,
+  devServerUrl: string
+): Promise<Pick<SmokeRun, 'appMismatch' | 'appMismatchKind'>> {
+  const appFit = await walk.deps.checkAppFitsProject(devServerUrl);
+  const appMismatch = appFit.mismatch;
+  const appPhase: SmokePhase | undefined = walk.phases.find((phase) => phase.id === 'app');
+  if (appPhase != null) {
+    if (appMismatch != null) {
+      // A mismatch outranks a note: there is no use telling a caller their Expo Go is a patch
+      // behind when the answer is that it cannot run their project at all.
+      appPhase.status = 'inconclusive';
+      appPhase.reason = appMismatch;
+    } else if (appFit.note != null) {
+      // Appended rather than substituted. The sentence already there says how the app got where it
+      // is — "opened … to connect one" — which is the fact the row exists for, and a note that
+      // replaced it would trade a finding for a finding.
+      appendReason(appPhase, appFit.note);
+    }
+  }
+  return { appMismatch, appMismatchKind: appFit.kind };
+}

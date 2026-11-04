@@ -50,44 +50,28 @@ import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
-import { describeSkippedApps, type SkippedApp } from '../runtime/targetSelection';
-import { firstLine } from '../utils/text';
+import type { SkippedApp } from '../runtime/targetSelection';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
+import { firstLine } from '../utils/text';
 import { captureIfPossible } from './capture';
 import type { SmokeProgress } from './progress';
-import { coldWaitMs, type SmokeOptions } from './resolveOptions';
-import {
-  appendReason,
-  bundleErrorSentence,
-  isFailingRecord,
-  noReload,
-  noScreenshot,
-} from './results';
-import {
-  APP_ATTACH_TIMEOUT_MS,
-  APP_PROBE_MS,
-  APP_SETTLE_MS,
-  BUILD_DEV_SERVER_TIMEOUT_MS,
-  CONDITIONAL_PHASES,
-  FIRST_BUNDLE_TIMEOUT_MS,
-  PHASE_ORDER,
-  RELOAD_TIMEOUT_MS,
-  ROOT_ROUTE,
-  RUNTIME_READY_POLL_MS,
-  RUNTIME_READY_TIMEOUT_MS,
-  RUNTIME_UNSUPPORTED_GRACE_MS,
-  START_SESSION_TIMEOUT_MS,
-} from './timeouts';
+import type { SmokeOptions } from './resolveOptions';
+import { isFailingRecord } from './results';
 import type {
   SmokeCleanupJson,
   SmokeEnvironmentJson,
   SmokeOutcome,
   SmokePhase,
-  SmokePhaseId,
-  SmokePhaseStatus,
   SmokeReloadJson,
   SmokeResource,
 } from './types';
+import { appFitStep, appStep } from './walk/app';
+import { AppSession } from './walk/appSession';
+import { bundlerReadyStep, bundleStep } from './walk/bundle';
+import { bootStep, installStep, startSessionStep, type DeviceReady } from './walk/device';
+import { devServerStep } from './walk/devServer';
+import { reloadStep, routeStep, runtimeAndErrorsStep } from './walk/reads';
+import { createPhaseWalk } from './walk/walk';
 
 /** What starting a dev server amounted to. */
 export interface SmokeStartResult {
@@ -569,7 +553,7 @@ export async function runSmokePhasesAsync(
 }
 
 /** One resource this run started, and the call that puts it back. */
-interface RegisteredCleanup {
+export interface RegisteredCleanup {
   resource: SmokeResource;
   /** What it is, for a report written even when the release call answers nothing. */
   target: string | null;
@@ -637,7 +621,7 @@ async function releaseAsync(
 }
 
 /** What {@link runSmokePhasesAsync} hands the phase walk, so the walk owns none of it. */
-interface SmokeRunContext {
+export interface SmokeRunContext {
   startedAt: number;
   /** Appended to as resources are started, and read back by the cleanup. */
   cleanups: RegisteredCleanup[];
@@ -646,1081 +630,77 @@ interface SmokeRunContext {
 }
 
 /** The phases themselves. Everything it starts is registered with the context first. */
-// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 async function runPhasesAsync(
   deps: SmokeDeps,
   options: SmokeOptions,
-  { startedAt, cleanups, environment }: SmokeRunContext
+  ctx: SmokeRunContext
 ): Promise<SmokeRun> {
-  const phases: SmokePhase[] = [];
-  /**
-   * How much of the clock the bootstrap spent, which `--timeout` is not charged for.
-   *
-   * A cold simulator takes a minute to come up. A budget that paid for it would leave a run that
-   * had to boot one with seconds for the bundle, the app and the error window — so the boot's
-   * minute is subtracted here and the phases that read the app get the budget the caller named.
-   */
-  let bootstrapMs = 0;
-  const remaining = () => Math.max(0, options.timeoutMs - (deps.now() - startedAt - bootstrapMs));
+  const walk = createPhaseWalk(deps, options, ctx);
 
-  /**
-   * Record one phase and hand back what it produced.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-   * The progress line is said here rather than at each call site, because "a phase is starting" and
-   * "a phase is being recorded" are the same event and a second place to say it would be a second
-   * place to forget one. The phases that are pushed straight onto the list instead of going through
-   * this — a `route` that was already opened, a `reload` the run declined — say nothing, and that is
-   * right: they are rows about work that did not happen, and a progress line for one would report a
-   * wait the caller is not in.
-   *
-   * @param budgetMs how long this phase may spend, when the walk knows (@ref ./progress §SmokeProgress).
-   */
-  const record = async <T>(
-    id: SmokePhaseId,
-    run: () => Promise<{ status: SmokePhaseStatus; reason?: string | null; value: T }>,
-    budgetMs?: number | null
-  ): Promise<T> => {
-    deps.progress(id, budgetMs ?? null);
-    const at = deps.now();
-    const { status, reason, value } = await run();
-    phases.push({ id, status, ms: deps.now() - at, reason: reason ?? null });
-    return value;
-  };
+  const found = await devServerStep(walk);
+  if ('stop' in found) return found.stop;
+  const ready = await bundlerReadyStep(walk, found.next);
+  if ('stop' in ready) return ready.stop;
+  const base = ready.next;
+  const bundled = await bundleStep(walk, base);
+  if ('stop' in bundled) return bundled.stop;
+  const bundle = bundled.next;
 
-  /** Take the phase that was just recorded off the reading budget rather than out of it. */
-  const chargeToBootstrap = (): void => {
-    bootstrapMs += phases[phases.length - 1]!.ms;
-  };
-
-  /** The same, for a phase that is always bootstrap. */
-  const recordBootstrap: typeof record = async (id, run, budgetMs) => {
-    const value = await record(id, run, budgetMs);
-    chargeToBootstrap();
-    return value;
-  };
-
-  /**
-   * Everything from `from` onwards did not run, for the reason given.
-   *
-   * `stopBefore` is for the two exits that still take a picture: a phase must appear exactly once,
-   * and a `screenshot` marked skipped here and then attempted below would appear twice.
-   *
-   * The conditional phases are never filled in here: a run that stopped at the bundle did not skip
-   * a device boot, it had no device boot to do (@ref ./timeouts §CONDITIONAL_PHASES).
-   */
-  const skipRest = (from: SmokePhaseId, reason: string, stopBefore?: SmokePhaseId): void => {
-    const end = stopBefore == null ? PHASE_ORDER.length : PHASE_ORDER.indexOf(stopBefore);
-    for (const id of PHASE_ORDER.slice(PHASE_ORDER.indexOf(from), end)) {
-      if (!CONDITIONAL_PHASES.has(id) && !phases.some((phase) => phase.id === id)) {
-        phases.push({ id, status: 'skipped', ms: 0, reason });
-      }
-    }
-  };
-
-  const done = (outcome: SmokeOutcome, run: Partial<SmokeRun>): SmokeRun => ({
-    outcome,
-    phases,
-    devServerUrl: '',
-    discovery: null,
-    projectRootMatched: null,
-    started: false,
-    environment,
-    appsConnected: null,
-    skippedApps: [],
-    bundle: null,
-    route: options.route,
-    routeCheck: null,
-    deviceId: null,
-    deviceBackend: null,
-    runtimeSupported: null,
-    reload: noReload(),
-    appMismatch: null,
-    appMismatchKind: null,
-    buildAttempted: false,
-    windowMs: null,
-    errors: [],
-    screenshot: noScreenshot('nothing was photographed'),
-    durationMs: deps.now() - startedAt,
-    ...run,
-  });
-
-  // ---- Phase 1: is there a dev server, and does this run start one? -------------------------
-  //
-  // The look comes first and is not a phase of its own: it is the question "is one running", and
-  // its answer decides whether there is a start to report at all. Its time belongs to the
-  // `dev-server` phase, which is the phase about finding one, so it is counted there by hand.
-
-  let started = false;
-  /**
-   * The start phase ran a plan that compiled (@ref ./timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
-   *
-   * Kept for the follow-ups, and set whether the start succeeded or failed: a build that failed is
-   * exactly the case where the cheapest next step differs from the ordinary one.
-   */
-  let buildAttempted = false;
-  let devServerMs = 0;
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-  //
-  // Said here rather than left to `record`, because this phase is the one that does not go through
-  // it: its row is pushed by hand further down, since its milliseconds are the *sum* of the look
-  // and the second look after a start. The caller is nonetheless waiting on this from the first
-  // moment of the run, so it is the first thing the run says.
-  deps.progress('dev-server', null);
-  const lookAt = deps.now();
-  let discovery = await deps.discoverDevServer(options.devServerUrl);
-  devServerMs += deps.now() - lookAt;
-
-  if (discovery.reachable) {
-    environment.devServer = 'reused';
-  } else if (options.bootstrap) {
-    // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — this run starts the
-    // dev server, so the config's EAS device applies. Set on the shared options, because the deps
-    // read it when they start the child and the session.
-    if (options.configuredEas && options.cloud === 'fallback') {
-      options.cloud = 'required';
-    }
-    // @ref ./phases §RegisteredCleanup — registered **before** the start, so a start that got
-    // halfway is still put back: a detached child that published its lock and then died in the
-    // readiness wait is a dev server this run is responsible for, and one it never saw succeed.
-    cleanups.push({ resource: 'dev-server', target: null, release: () => deps.stopDevServer() });
-    const start = await recordBootstrap('start-dev-server', async () => {
-      const result = await deps.startDevServer();
-      buildAttempted = result.built === true;
-      return result.ok && result.devServerUrl != null
-        ? {
-            status: 'ok' as const,
-            reason: `started for this run at ${result.devServerUrl}, and stopped again afterwards`,
-            value: result,
-          }
-        : { status: 'failed' as const, reason: result.reason, value: result };
-    });
-    if (start.ok && start.devServerUrl != null) {
-      started = true;
-      environment.devServer = 'started';
-      environment.boundDevice = start.bound
-        ? {
-            ...start.bound,
-            released: start.bound.action === 'existing' ? null : false,
-            shutDown: false,
-          }
-        : null;
-      // Discovered the same way the first look was, rather than by naming the URL the start
-      // reported: naming it would make `source` say `flag` for a run whose caller passed no flag,
-      // and `source` is reported precisely because `lock` and `flag` prove different things
-      // (llp/0005 §One preflight for the runtime family).
-      const againAt = deps.now();
-      discovery = await deps.discoverDevServer(options.devServerUrl);
-      devServerMs += deps.now() - againAt;
-    } else {
-      environment.devServer = 'failed';
-    }
-  }
-
-  phases.push({
-    id: 'dev-server',
-    status: discovery.reachable ? 'ok' : 'failed',
-    ms: devServerMs,
-    reason: discovery.reachable
-      ? started
-        ? 'the dev server started above answered'
-        : null
-      : started
-        ? `a dev server was started and nothing answered at ${discovery.devServerUrl} afterwards`
-        : environment.devServer === 'failed'
-          ? `nothing answered at ${discovery.devServerUrl}, and the start above did not produce one`
-          : `nothing answered at ${discovery.devServerUrl} (${discovery.reason ?? 'no answer'})`,
-  });
-
-  if (!discovery.reachable) {
-    skipRest('bundler-ready', 'no dev server answered, so nothing could be read');
-    return done('failed', {
-      devServerUrl: discovery.devServerUrl,
-      discovery,
-      started,
-      buildAttempted,
-      screenshot: noScreenshot('no dev server answered, so nothing was opened to photograph'),
-    });
-  }
-
-  const devServerUrl = discovery.devServerUrl;
-
-  // ---- Phase 2: has its bundler finished, and is it this project's? -------------------------
-  //
-  // @ref ./timeouts §FIRST_BUNDLE_TIMEOUT_MS. On a dev server this run started, this and the phase
-  // below are the dev server *coming up* rather than this run reading it, so they get the cold
-  // budget and what they spend is not taken off the window the caller gave the reads.
-
-  const warming = environment.devServer === 'started';
-  const warmingBudget = () => (warming ? FIRST_BUNDLE_TIMEOUT_MS : remaining());
-
-  const readiness = await record(
-    'bundler-ready',
-    async () => {
-      const result = await deps.waitForBundlerReady(devServerUrl, warmingBudget());
-      // Checked before the timeout, because it is decided rather than pending: no amount of looking
-      // again turns another project's dev server into this one's (llp/0010 §Other gates, in brief).
-      if (result.projectRootMatched === false) {
-        return {
-          status: 'failed' as const,
-          reason: `it serves ${result.reportedProjectRoot ?? 'another project'}, not this one`,
-          value: result,
-        };
-      }
-      if (result.ready) {
-        return { status: 'ok' as const, value: result };
-      }
-      return {
-        status: result.timedOut ? ('inconclusive' as const) : ('failed' as const),
-        reason: result.reason ?? 'the bundler did not answer',
-        value: result,
-      };
-    },
-    warmingBudget()
-  );
-  if (warming) {
-    chargeToBootstrap();
-  }
-
-  const base = {
-    devServerUrl,
-    discovery,
-    started,
-    buildAttempted,
-    projectRootMatched: readiness.projectRootMatched,
-  };
-
-  if (readiness.projectRootMatched === false) {
-    // Building *their* entry bundle answers nothing about this code, and reading *their* app is
-    // worse: it would report on a stranger's runtime as though it were this project's.
-    skipRest('bundle', 'the dev server serves another project, so nothing here is about this one');
-    return done('failed', {
-      ...base,
-      screenshot: noScreenshot(
-        'the dev server serves another project, so nothing was photographed'
-      ),
-    });
-  }
-  if (!readiness.ready) {
-    skipRest(
-      'bundle',
-      'the bundler never answered, so there was no bundle to read the app through'
-    );
-    return done(readiness.timedOut ? 'inconclusive' : 'failed', {
-      ...base,
-      screenshot: noScreenshot('the bundler was not ready, so nothing was photographed'),
-    });
-  }
-
-  // ---- Phase 3: does this project's own code compile? ---------------------------------------
-
-  const bundle = await record(
-    'bundle',
-    async () => {
-      const result = await deps.checkEntryBundle(devServerUrl, warmingBudget());
-      switch (result.outcome) {
-        case 'ok':
-          return { status: 'ok' as const, value: result };
-        case 'broken':
-          return { status: 'failed' as const, reason: bundleErrorSentence(result), value: result };
-        case 'timeout':
-          return {
-            status: 'inconclusive' as const,
-            reason: 'the bundler was still building it when the budget ran out',
-            value: result,
-          };
-        default:
-          // Fail-open, unchanged from `dev:wait`: a dev server that answered nothing this CLI
-          // understands has not shown the project to be broken (llp/0010 §An empty target list is inconclusive).
-          return {
-            status: 'inconclusive' as const,
-            reason: result.reason ?? 'the bundler gave no answer about the entry bundle',
-            value: result,
-          };
-      }
-    },
-    warmingBudget()
-  );
-  if (warming) {
-    chargeToBootstrap();
-  }
-
-  if (bundle.outcome === 'broken') {
-    // Nothing after this is worth doing: the app cannot be running code that does not compile, and
-    // an error window against the red screen would report the bundler's own error as the app's.
-    skipRest('app', 'the entry bundle does not compile, so there is no working app to read');
-    return done('failed', {
-      ...base,
-      bundle,
-      screenshot: noScreenshot('the entry bundle does not compile, so nothing was photographed'),
-    });
-  }
-  if (bundle.outcome === 'timeout') {
-    skipRest('app', 'the entry bundle was still building, so nothing is known about the app yet');
-    return done('inconclusive', {
-      ...base,
-      bundle,
-      screenshot: noScreenshot('the entry bundle was still building, so nothing was photographed'),
-    });
-  }
-
-  // ---- Phase 4: is there a device, and does this run boot one? ------------------------------
-  //
-  // The dependencies own the chosen device, including one returned by boot/session creation.
-  // Asking again lets a failed lookup recover without a second cache in the phase runner.
-  const deviceAsync = () => deps.probeDevice();
-
-  /**
-   * The app probe the boot decision needed, kept for the `app` phase that asks the same question.
-   *
-   * Null on a run that never had to decide about a boot, which is every run with a device already.
-   */
-  let firstConnection: AppConnectionResult | null = null;
-  /**
-   * This run replaced the app on the device, so nothing that was attached before is still running.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-   * Read by the `app` phase, which must open rather than take the attached-app shortcut: a target
-   * the dev server still lists is one the install has already killed.
-   */
-  let appReplaced = false;
-  /**
-   * The boot said its device has no app: a simulator the registry created this run, whose disk
-   * holds nothing to read (llp/0035 §iOS smoke).
-   */
+  // Phase 1 may have changed `options.cloud`, so it is read only from here on.
+  const device: DeviceReady = { firstConnection: null, appReplaced: false };
   let bootInstallNeeded = false;
-
-  // @ref llp/0027-everything-on-eas.rfc.md §smoke
-  // `--eas` named the device, and the device it named is not on this machine. The run still brings
-  // its own environment: the session in progress on this platform, or one it starts with the app
-  // on its command line — and ends again afterwards, the way a booted simulator is shut down.
   if (options.bootstrap && options.cloud === 'required') {
-    const session = await recordBootstrap(
-      'start-session',
-      async () => {
-        const result = await deps.ensureEasSession(devServerUrl);
-        if (result.sessionId != null && result.started) {
-          cleanups.push({
-            resource: 'session',
-            target: result.sessionId,
-            release: () => deps.stopEasSession(result.sessionId!),
-          });
-        }
-        return result.ok
-          ? {
-              status: 'ok' as const,
-              reason: result.started
-                ? `started EAS Simulator session ${result.sessionId} for this run`
-                : `EAS Simulator session ${result.sessionId} was already up`,
-              value: result,
-            }
-          : {
-              status: 'failed' as const,
-              reason: result.reason ?? 'no session came up, and nothing said why',
-              value: result,
-            };
-      },
-      START_SESSION_TIMEOUT_MS
-    );
-    if (session.ok && session.sessionId != null) {
-      environment.device = session.started ? 'booted' : 'reused';
-    } else {
-      environment.device = 'failed';
-      skipRest(
-        'app',
-        'no EAS Simulator session was reached, so there was nothing to open the app on and nothing to read'
-      );
-      return done('failed', {
-        ...base,
-        bundle,
-        screenshot: noScreenshot(
-          'no EAS Simulator session was reached, so nothing was photographed'
-        ),
-      });
-    }
+    const session = await startSessionStep(walk, base, bundle);
+    if ('stop' in session) return session.stop;
   }
-
-  // `--eas` named the device, and the device it named is not on this machine: booting a
-  // simulator here would be answering a question about a session with a laptop (llp/0005 §Cloud simulator).
   if (options.bootstrap && options.cloud !== 'required') {
-    // The **app** is asked about first, and the device only if nothing answers. Two reasons, and
-    // they point the same way. An app attached to this dev server is the app under test whatever
-    // it is running on — a phone on the same network is a device none of this machine's tools can
-    // see — so a simulator booted beside it would cost a minute and then photograph an empty
-    // screen to answer for the app that is really running. And it keeps the ordinary healthy run
-    // spawning no device tool at all until the picture is taken, which is where it always did.
-    firstConnection = await deps.waitForAppConnection(
-      devServerUrl,
-      Math.min(remaining(), APP_PROBE_MS)
-    );
-    if (firstConnection.appsConnected === 0) {
-      const found = await deviceAsync();
-      if (found.deviceId == null) {
-        const boot = await recordBootstrap('boot-device', async () => {
-          const result = await deps.bootDevice();
-          if (
-            result.ok &&
-            result.deviceId &&
-            !cleanups.some(({ resource }) => resource === 'dev-server')
-          ) {
-            cleanups.push({
-              resource: 'device',
-              target: result.deviceId,
-              release: () => deps.releaseDevice(),
-            });
-          }
-          return result.ok && result.deviceId != null
-            ? {
-                status: 'ok' as const,
-                reason: `booted ${result.deviceId} for this run${result.choice ? ` because ${result.choice}` : ''}`,
-                value: result,
-              }
-            : {
-                status: 'failed' as const,
-                reason: result.reason ?? 'no device came up, and nothing said why',
-                value: result,
-              };
-        });
-        if (boot.ok && boot.deviceId != null) {
-          environment.device = 'booted';
-          environment.deviceChoice = boot.choice ?? null;
-          environment.boundDevice = boot.bound
-            ? { id: boot.deviceId, ...boot.bound, released: false, shutDown: false }
-            : null;
-          bootInstallNeeded = boot.installNeeded === true;
-        } else {
-          environment.device = 'failed';
-          skipRest(
-            'app',
-            'no device could be booted, so there was nothing to open the app on and nothing to read'
-          );
-          return done('failed', {
-            ...base,
-            bundle,
-            screenshot: noScreenshot('no device came up, so nothing was photographed'),
-          });
-        }
-      }
-    }
+    const booted = await bootStep(walk, base, bundle);
+    if ('stop' in booted) return booted.stop;
+    device.firstConnection = booted.next.firstConnection;
+    bootInstallNeeded = booted.next.bootInstallNeeded;
   }
-
-  // ---- Is there an app on that device to open at all? ---------------------------------------
-  //
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-  //
-  // Conditional and an *act*, like the start and the boot: only a run that installed something
-  // reports a row, because a machine that already had the app never had an install to do.
-  //
-  // Driven off the **device**, not off the boot. Hanging it on the boot was the first version and
-  // it missed the ordinary case: a simulator somebody left running without Expo Go, where this run
-  // boots nothing and the deep link comes back `115` [observed — iOS 26.5, 2026-09-03].
-  //
-  // Bootstrap, like the boot: a 423 MB download is cold this run caused, and charging it to
-  // `--timeout` would leave the error window with nothing. Only for a run allowed to bring its own
-  // environment — `--no-start` says read what is there, and installing an app is not reading.
   if (options.bootstrap) {
-    const device = await deviceAsync();
-    if (
-      device.deviceId != null &&
-      (bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))
-    ) {
-      const releasedAfterRun =
-        environment.boundDevice?.id === device.deviceId &&
-        environment.boundDevice.released !== null;
-      // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
-      //
-      // The build budget rather than an install budget, because this phase now covers both and the
-      // larger of the two is a native compile — the same `BUILD_DEV_SERVER_TIMEOUT_MS` the start
-      // phase gives a plan that compiles. A download that finishes in twenty seconds is not made
-      // slower by a bound it never reaches; a compile stopped at two minutes is a build reported as
-      // failed for no reason (§It builds what the app needs, and says so first).
-      const installed = await recordBootstrap(
-        'install-app',
-        async () => {
-          const result = await deps.installApp(device.deviceId!);
-          return result.ok
-            ? {
-                status: 'ok' as const,
-                reason: [
-                  `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
-                  result.replaced ? `, replacing ${result.replaced}` : '',
-                  releasedAfterRun ? '' : `, and left it there`,
-                ].join(''),
-                value: result,
-              }
-            : {
-                status: 'failed' as const,
-                reason: result.reason ?? 'the install failed, and nothing said why',
-                value: result,
-              };
-        },
-        BUILD_DEV_SERVER_TIMEOUT_MS
-      );
-      if (installed.ok) {
-        // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got
-        // it. **The install invalidates every read of the app that came before it.** `simctl
-        // install` over a running app replaces the bundle and takes the process with it, and the
-        // dev server's target list does not forget that app as quickly as the install kills it.
-        //
-        // So the probe taken in the boot decision above is dropped. Without this, a run that
-        // replaced a running Expo Go reported `app ok` off that stale count, opened nothing, and
-        // then found no app to reload, read or watch — every phase after it arguing with the one
-        // above [observed, Kudo, 2026-09-03]. The run after it passed, because it found nothing
-        // attached and opened the app, which is what this run has to do.
-        firstConnection = null;
-        appReplaced = true;
-      } else {
-        // Nothing to open. Deep-linking into a device this run has just been told has no app would
-        // spend the attach budget proving what this phase already said.
-        skipRest('app', 'the app could not be installed, so there was nothing to open');
-        return done('failed', {
-          ...base,
-          bundle,
-          deviceId: device.deviceId,
-          deviceBackend: device.backend,
-          screenshot: noScreenshot(
-            'the app could not be installed, so there was nothing to photograph it running'
-          ),
-        });
-      }
+    const installed = await installStep(walk, base, bundle, bootInstallNeeded);
+    if ('stop' in installed) return installed.stop;
+    if (installed.next) {
+      device.firstConnection = null;
+      device.appReplaced = true;
     }
   }
 
-  // ---- Phase 5: is an app attached, and can one be opened if not? ---------------------------
+  const session = new AppSession(walk, base.devServerUrl);
+  const attached = await appStep(walk, session, base, bundle, device);
+  if ('stop' in attached) return attached.stop;
+  const withApp = attached.next;
+  const { appMismatch, appMismatchKind } = await appFitStep(walk, base.devServerUrl);
 
-  let deviceId: string | null = null;
-  let deviceBackend: DeviceBackend | null = null;
-  let routeCheck: RouteCheckJson | null = null;
-  let routeOpenedWhileConnecting = false;
-  // Whether this run put the app on the screen. Not the same as `routeOpenedWhileConnecting`: a
-  // run with no `--route` still opens the root route when nothing is attached.
-  let appOpenedByThisRun = false;
-  /**
-   * Whether this run changed what the app is running, so it may still be coming up.
-   *
-   * Opened **or reloaded** (F57 plus the `reload` phase). The two waits below — the target settle
-   * and the runtime-ready poll — exist for an app that is mid-load, and after wave 25 there are two
-   * ways for this run to have put it there. Kept apart from `appOpenedByThisRun`, which still
-   * answers a different question: whether the thing on the screen is something this run opened,
-   * which is what the picture's caption rests on.
-   */
-  let appMovedByThisRun = false;
-  /**
-   * The launcher URL this run opened that never produced a loaded app, if any.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it. What a
-   * development build shows in that state is the launcher's own screen, and a picture of it has to
-   * say so — `openRouteAsync` reports the open it performed, so this is read rather than guessed.
-   *
-   * **`exitCode === 0` is part of the question**, and leaving it out made the picture lie
-   * [observed — Kudo, local run, 2026-09-04]. A launcher open the device *refused* also comes back
-   * `attached: false`, so a run whose deep link was rejected with `115` — no app on that device
-   * handles the scheme — captioned its screenshot "the loading link was opened and this project's
-   * bundle never ran". The link was not opened. Nothing was. The screenshot is the one piece of
-   * evidence a reader believes without checking it (llp/0021 §The rules), so a caption that
-   * describes an act that never happened is the worst thing in this file to get wrong.
-   */
-  let devLauncherLeftOnScreen = false;
-  /**
-   * Why the device refused this run's deep link, when it did and the device could say.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
-   * Reported as a value and not only in the phase's sentence, for the same reason every other
-   * finding here is: the follow-ups branch on it, and a re-run is never the answer to it.
-   */
-  let refusedOpen: SmokeAppFit | null = null;
-  /**
-   * Whether the refused-open path already asked the device.
-   *
-   * Its own flag rather than `refusedOpen != null`, because "asked, and the device explained
-   * nothing" is a real answer and `??` cannot tell it from "not asked" — which made the run spend
-   * two device reads on one question.
-   */
-  let refusedOpenAsked = false;
-
-  /**
-   * Whether this run is the reason the thing it is now waiting for is cold.
-   *
-   * @ref ./timeouts §APP_ATTACH_TIMEOUT_MS. A dev server it started has never served this app's
-   * bundle; a simulator it booted has never launched it. Either one makes the next wait a first
-   * launch rather than a measurement.
-   */
-  const coldEnvironment = () =>
-    environment.devServer === 'started' || environment.device === 'booted';
-
-  /**
-   * The budget the open gets to wait for the app it loads.
-   *
-   * @ref ./timeouts §APP_ATTACH_TIMEOUT_MS — the same rule as the attach wait that follows it, and
-   * for the same reason: loading an app onto an environment this run made cold is this run's own
-   * setup, and loading one onto a warm environment is this run reading a slow app.
-   */
-  const attachBudget = () => (coldEnvironment() ? coldWaitMs(APP_ATTACH_TIMEOUT_MS) : remaining());
-
-  /**
-   * Wait for the app this run moved to stop re-registering. At most once, and never otherwise.
-   *
-   * @ref ./timeouts §APP_SETTLE_MS. Shared by the runtime read and the picture because it is one
-   * fact about one app: a second wait would be a second budget spent proving what the first one
-   * already proved.
-   *
-   * "Moved" rather than "opened": a proved reload leaves the app re-registering exactly the way a
-   * cold launch does, so it owes this wait for the same reason.
-   */
-  let settled = false;
-  const settleIfOpenedAsync = async (): Promise<void> => {
-    if (!appMovedByThisRun || settled) {
-      return;
-    }
-    settled = true;
-    await deps.waitForStableTargets(
-      devServerUrl,
-      Math.min(APP_SETTLE_MS, Math.max(0, remaining()))
-    );
-  };
-
-  const connection = await record('app', async () => {
-    // Reused when the boot decision above already asked. It answered "nothing is attached", which
-    // is still true of a simulator that has only just finished booting — and asking again would
-    // spend a second wait on a fact this run established one phase ago.
-    const first =
-      firstConnection ??
-      (await deps.waitForAppConnection(devServerUrl, Math.min(remaining(), APP_PROBE_MS)));
-    // `!appReplaced` is the whole of the fix above: an install replaced the app, so a count that
-    // says one is attached is describing the process the install ended.
-    // EAS's --open-url launches the app without opening an agent-device controller session.
-    // Go through the normal open once for a session we created, even if Metro already sees the
-    // app. This binds the controller for screenshots and makes a second reload unnecessary.
-    const needsCloudController = options.cloud === 'required' && environment.device === 'booted';
-    if (!appReplaced && first.appsConnected > 0 && !needsCloudController) {
-      return { status: 'ok' as const, value: first };
-    }
-
-    // Nothing is attached. `navigate` is what puts an app in that list, so the gate opens one
-    // rather than waiting out its budget on a state it could have changed itself. This is friction
-    // run 1's F4 absorbed into the gate, and the same reasoning F48-8 gave `status.next`: a wait
-    // for an app cannot succeed while nothing is opening one.
-    const device = await deviceAsync();
-    if (device.deviceId == null) {
-      return {
-        status: 'inconclusive' as const,
-        reason: `no app is connected to the dev server, and ${device.reason ?? 'no device was found to open one on'}`,
-        value: first,
-      };
-    }
-
-    // **One budget, spent across the open and the wait after it.** The open now waits for the app
-    // it loads (F123's ladder is gated on that), and the wait below asks the same question — so a
-    // budget handed to each would be two of them: a cold run whose app never arrives would spend
-    // four minutes to report what it knew after two.
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-    //
-    // The second line this phase says, and the only phase that says two. The reason is that the
-    // phase does two things of very different sizes: a two-second look for an app that is already
-    // there, and — when there is none — an open followed by a wait that on a cold environment is
-    // two minutes. One line covering both would either overstate the look or say nothing about the
-    // wait, and the wait is the longest single thing this command ever does.
-    const attachDeadline = deps.now() + attachBudget();
-    deps.progress('app', Math.max(0, attachDeadline - deps.now()));
-    const opened = await deps.openRoute(
-      options.route ?? ROOT_ROUTE,
-      devServerUrl,
-      Math.max(0, attachDeadline - deps.now())
-    );
-    appOpenedByThisRun = true;
-    appMovedByThisRun = true;
-    devLauncherLeftOnScreen =
-      opened.launch != null && opened.launch.exitCode === 0 && !opened.launch.attached;
-    deviceId = opened.deviceId;
-    deviceBackend = opened.deviceBackend;
-    if (options.route != null) {
-      routeCheck = opened.routeCheck;
-      routeOpenedWhileConnecting = true;
-    }
-    if (opened.exitCode !== 0) {
-      // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
-      //
-      // "The device refused the deep link" is what happened and not why, and it reads as a fault in
-      // the device. The why is almost always one thing: nothing on that device handles this
-      // project's scheme, because the app is not there. `simctl openurl` says so with `115` and
-      // says nothing else [observed — Kudo, local run, 2026-09-04, a development build and a
-      // simulator that had not got it], and a report that stopped at the refusal sent its reader to
-      // `navigate`, which is refused in exactly the same way for ever (llp/0009).
-      refusedOpenAsked = true;
-      refusedOpen = await deps.explainSilentApp(opened.deviceId, opened.deviceBackend);
-      return {
-        status: 'failed' as const,
-        reason: [
-          `no app was connected, and the device refused the deep link that would have opened one ("${opened.command}" exited ${opened.exitCode ?? 'on a signal'})`,
-          refusedOpen?.mismatch,
-        ]
-          .filter(Boolean)
-          .join(' · '),
-        value: first,
-      };
-    }
-
-    // @ref ./timeouts §APP_ATTACH_TIMEOUT_MS. The deep link is a request and not a result: the open
-    // exited 0 above, and what is waited for here is a **debugger target appearing** — the app
-    // launching, fetching the manifest and downloading its bundle. On an environment this run made
-    // cold that is its own cost and gets its own budget; on a warm one it is a slow app, which is
-    // what the caller's `--timeout` is for.
-    const second = await deps.waitForAppConnection(
-      devServerUrl,
-      Math.max(0, attachDeadline - deps.now())
-    );
-    return second.appsConnected > 0
-      ? { status: 'ok' as const, reason: `opened ${opened.url} to connect one`, value: second }
-      : {
-          status: 'inconclusive' as const,
-          reason: `${opened.url} was opened on the device and no app had attached when the budget ran out`,
-          value: second,
-        };
-  });
-  // The whole phase, because on this path almost all of it is the wait above.
-  if (appOpenedByThisRun && coldEnvironment()) {
-    chargeToBootstrap();
-  }
-
-  const { appsConnected, skippedApps } = connection;
-  const withApp = { ...base, bundle, appsConnected, skippedApps };
-
-  if (appsConnected === 0) {
-    const appPhase = phases[phases.length - 1]!;
-    if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
-    // @ref ./phases §SmokeDeps.explainSilentApp
-    //
-    // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is
-    // an Expo Go built from another SDK: it takes the deep link, fails to load a bundle it cannot
-    // run, and registers no debugger target — so the wait expires and the run reports the symptom
-    // [observed — emulator-5554 on Expo Go 54.0.8 against an SDK 57 project, 119 s, 2026-09-04].
-    //
-    // Asked here rather than in the `app` phase itself so it costs nothing on the healthy path:
-    // this branch is only reached by a run that already has nothing to read.
-    // The refused-open path already asked, and already put the answer in the phase's sentence, so
-    // this reads its result rather than spending a second device read — and appends nothing, which
-    // is what keeps the same finding from being printed twice on one row.
-    const silent = refusedOpenAsked
-      ? refusedOpen
-      : await deps.explainSilentApp(deviceId, deviceBackend);
-    if (!refusedOpenAsked && silent?.mismatch != null) {
-      // Appended rather than substituted: "the link was opened and nothing attached" is what the
-      // phase measured, and the device fact is why. A reader needs both — the second without the
-      // first would not say that the open itself succeeded.
-      appendReason(appPhase, silent.mismatch);
-    }
-
-    // No app, so no runtime and no window — but there may still be a device, and a picture of
-    // whatever is on it is the most useful thing left to hand back.
-    // From `reload` rather than from `route`: the reload phase sits between this one and the route
-    // now, and a phase that is stepped over rather than filled in is a phase missing from the
-    // report — which is the one property the phase list has (`reports every phase exactly once`).
-    skipRest('reload', 'no app is connected, so there was nothing to read', 'screenshot');
-    // The run opened the app in this phase, so whatever is on screen may still be loading.
-    const captured = await captureIfPossible(deps, options, deviceId, deviceBackend, phases, {
-      settleAsync: settleIfOpenedAsync,
-      deviceAsync,
-      showing: devLauncherLeftOnScreen ? 'dev-launcher' : 'device',
-    });
-    return done(appPhase.status === 'failed' ? 'failed' : 'inconclusive', {
-      ...withApp,
-      deviceId: captured.deviceId,
-      deviceBackend: captured.deviceBackend,
-      routeCheck,
-      // Reported as a fact and not only as the phase's sentence, so the follow-ups can lead with
-      // the command that fixes it rather than with "open the app again" — which is what they did,
-      // for ever, against a device that will answer the same way every time (llp/0009).
-      appMismatch: silent?.mismatch ?? null,
-      appMismatchKind: silent?.kind ?? null,
-      screenshot: captured.screenshot,
-      durationMs: deps.now() - startedAt,
-    });
-  }
-
-  // ---- Is the app that answered one this project can run at all? ---------------------------
-  //
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
-  //
-  // Not a phase of its own: it is the second half of the question the `app` phase asks. "Is an app
-  // attached" and "is it *this project's* app" have one answer between them, and a run that split
-  // them into two rows would report `app ok` above a row saying the app cannot run this project.
-  //
-  // Asked on both paths — an app this run found *and* one it opened — because the open picks its
-  // target from the same decision, so a mismatch on that path would mean this gate had opened the
-  // wrong app. Never asked when nothing is connected: there is no runtime for it to be about, and
-  // that path returned above.
-  //
-  // Downgrades the phase rather than stopping the run. The phases below still read the app that is
-  // there and still photograph it — the same rule llp/0005 §Android sets for a runtime with no
-  // debugger, where an empty window costs one wait and the report is more useful with it. What
-  // changes is that the verdict can no longer be `passed`.
-  const appFit = await deps.checkAppFitsProject(devServerUrl);
-  const appMismatch = appFit.mismatch;
-  const appMismatchKind = appFit.kind;
-  const appPhase = phases.find((phase) => phase.id === 'app');
-  if (appPhase != null) {
-    if (appMismatch != null) {
-      // A mismatch outranks a note: there is no use telling a caller their Expo Go is a patch
-      // behind when the answer is that it cannot run their project at all.
-      appPhase.status = 'inconclusive';
-      appPhase.reason = appMismatch;
-    } else if (appFit.note != null) {
-      // Appended rather than substituted. The sentence already there says how the app got where it
-      // is — "opened … to connect one" — which is the fact the row exists for, and a note that
-      // replaced it would trade a finding for a finding.
-      appendReason(appPhase, appFit.note);
-    }
-  }
-
-  // ---- Phase 6: is the app that answers the rest of this run the code on disk? --------------
-  //
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
-  //
-  // The phase that makes the three after it mean something. `runtime`, `errors` and `screenshot`
-  // all read *the app*, and an app that was already attached when this run arrived is running
-  // whatever it last loaded — which, at the moment this command is for, is the bundle from before
-  // the edit the caller wants verified. Without this the gate reported `passed` over a `throw` at
-  // the top of the entry component, with the *previous* screen in the screenshot [observed — iOS
-  // 26.5 simulator, Expo Go SDK 57, 2026-09-03; `errors` ok at 3.1 s, exit 0].
-  //
-  // llp/0005 §Reloading the app had already written the rule this phase applies — "an error window
-  // is a property of the app's session, and the session outlives the fix" — and named the command
-  // that must not be believed without it. `smoke` reads that window and was not applying it.
-
-  const reloadJson = noReload();
-
-  if (appOpenedByThisRun) {
-    // Nothing to replace: the app came up during the `app` phase, so it fetched the bundle the dev
-    // server is serving now on its way in. A reload here would cost a relaunch to reach the state
-    // the run is already in.
-    phases.push({
-      id: 'reload',
-      status: 'skipped',
-      ms: 0,
-      reason: 'this run opened the app, so it already fetched the bundle the dev server is serving',
-    });
-  } else if (!options.reload) {
-    // Asked for, so the row says which of the two questions this run is answering rather than
-    // reading as a step that was owed and not done. The verdict is left alone: "is the app throwing
-    // where I left it" is a real question, and it is the one this caller asked.
-    reloadJson.disposition = 'declined';
-    phases.push({
-      id: 'reload',
-      status: 'skipped',
-      ms: 0,
-      reason:
-        '--no-reload was given, so the app was read on the bundle it already had, which may predate the code on disk',
-    });
-  } else {
-    const reloaded = await record(
-      'reload',
-      async () => {
-        const result = await deps.reloadApp(devServerUrl, Math.min(RELOAD_TIMEOUT_MS, remaining()));
-        reloadJson.knownTargetIds = result.knownTargetIds;
-        reloadJson.freshTargets = result.freshTargets;
-        reloadJson.commandSocketReconnected = result.commandSocketReconnected;
-        reloadJson.targetOutcomes = result.targetOutcomes;
-        reloadJson.bundleServed = result.bundleServed;
-        if (result.ok) {
-          reloadJson.disposition = 'reloaded';
-          reloadJson.verifiedBy = result.verifiedBy;
-          return {
-            status: 'ok' as const,
-            reason: `the app fetched the served bundle again (${result.verifiedBy})`,
-            value: result,
-          };
-        }
-        // @ref llp/0021-honest-reports.rfc.md §The rules band. Not `failed`: nothing has been shown
-        // to be wrong with the app, and the next action is to look again rather than to fix
-        // something. What is unknown is *which session* the phases below are about, and that is
-        // exactly the band `inconclusive` exists for (llp/0010 §Exit codes).
-        reloadJson.disposition = 'unproved';
-        return {
-          status: 'inconclusive' as const,
-          reason: `${result.reason ?? 'nothing was observed to come of the reload'}, so what the phases below read may be the session from before the code on disk`,
-          value: result,
-        };
-      },
-      Math.min(RELOAD_TIMEOUT_MS, remaining())
-    );
-    if (reloaded.ok) {
-      // The app is coming back, so it owes the same waits a freshly opened one does: the settle
-      // before the reads, and the runtime-ready poll rather than a single look
-      // (@ref ./timeouts §APP_SETTLE_MS, §RUNTIME_READY_TIMEOUT_MS). A reload that was *not* proved
-      // must not claim them — an app that never acted is not coming up, and waiting on it would
-      // spend the caller's budget proving nothing.
-      appMovedByThisRun = true;
-    }
-  }
-
-  // ---- Phase 7: the route, unless the app phase already opened it -------------------------
-
-  if (options.route == null) {
-    phases.push({
-      id: 'route',
-      status: 'skipped',
-      ms: 0,
-      reason: 'no --route was given, so the app was read where it already was',
-    });
-  } else if (routeOpenedWhileConnecting) {
-    phases.push({
-      id: 'route',
-      status: 'ok',
-      ms: 0,
-      reason: 'it was the route the app was opened on, above',
-    });
-  } else {
-    const opened = await record('route', async () => {
-      const result = await deps.openRoute(options.route!, devServerUrl, attachBudget());
-      appOpenedByThisRun = true;
-      appMovedByThisRun = true;
-      devLauncherLeftOnScreen =
-        result.launch != null && result.launch.exitCode === 0 && !result.launch.attached;
-      deviceId = result.deviceId;
-      deviceBackend = result.deviceBackend;
-      routeCheck = result.routeCheck;
-      return result.exitCode === 0
-        ? { status: 'ok' as const, reason: `opened ${result.url}`, value: result }
-        : {
-            status: 'failed' as const,
-            reason: `the device refused the deep link ("${result.command}" exited ${result.exitCode ?? 'on a signal'})`,
-            value: result,
-          };
-    });
-    if (opened.exitCode !== 0) {
-      skipRest(
-        'runtime',
-        'the route was not opened, so the app is not on the screen under test',
-        'screenshot'
-      );
-      const captured = await captureIfPossible(deps, options, deviceId, deviceBackend, phases, {
-        settleAsync: settleIfOpenedAsync,
-        deviceAsync,
-        // The route was refused, so whatever is on screen is not the route under test.
-        showing: devLauncherLeftOnScreen ? 'dev-launcher' : 'device',
-      });
-      return done('failed', {
-        ...withApp,
-        deviceId: captured.deviceId,
-        deviceBackend: captured.deviceBackend,
-        routeCheck,
-        reload: reloadJson,
-        screenshot: captured.screenshot,
-        durationMs: deps.now() - startedAt,
-      });
-    }
-  }
-
-  // ---- Phase 8: can the runtime be read at all? ---------------------------------------------
-
-  // @ref ./timeouts §APP_SETTLE_MS. Before the read rather than only before the picture: an app that
-  // has just been launched onto a simulator this run booted is still registering, and asking a
-  // debugger target list mid-churn answers "No target found" about an app that is running fine.
-  await settleIfOpenedAsync();
-
-  /**
-   * Ask the runtime until it answers, for an app this run opened.
-   *
-   * @ref ./timeouts §RUNTIME_READY_TIMEOUT_MS. The settle above waits for the target *list* to stop
-   * changing, which is a fact about registration and turned out to be too weak a proxy for "the
-   * bundle has run": two reads of one id 500 ms apart are alike whether the app is ready or about
-   * to reload. This asks the runtime itself, which is the thing the phase is about.
-   *
-   * An app that was already there when this run arrived **and was not reloaded** is asked once,
-   * exactly as before: it is not coming up, so a second look would answer the same and cost the
-   * caller a wait. One this run reloaded *is* coming up, and gets the same poll a cold launch does.
-   */
-  const evaluateUntilReadableAsync = async (): Promise<SmokeEvaluateResult> => {
-    const deadline = deps.now() + (appMovedByThisRun ? RUNTIME_READY_TIMEOUT_MS : 0);
-    let unsupportedSince: number | null = null;
-    for (;;) {
-      const result = await deps.evaluate(devServerUrl);
-      const now = deps.now();
-      // `unsupported` is decided only after the grace: a runtime with no debugger (llp/0005
-      // §Android) will not grow one, but a reloading one answers the same way until it is back.
-      const unsupportedFor = result.unsupported ? now - (unsupportedSince ??= now) : 0;
-      if (result.ok || now >= deadline || unsupportedFor >= RUNTIME_UNSUPPORTED_GRACE_MS) {
-        return result;
-      }
-      await new Promise((resolve) => setTimeout(resolve, RUNTIME_READY_POLL_MS));
-    }
-  };
-
-  const runtime = await record('runtime', async () => {
-    const result = await evaluateUntilReadableAsync();
-    if (result.ok) {
-      return { status: 'ok' as const, value: result };
-    }
-    return {
-      // Both are "nothing was proved", and they differ only in whether looking again could help.
-      status: 'inconclusive' as const,
-      reason: result.unsupported
-        ? 'this runtime has no debugger, so an error window from it would be empty whatever the app is doing'
-        : (result.reason ?? 'the runtime did not answer'),
-      value: result,
-    };
-  });
-
-  // ---- Phase 9: what did the app report while it was watched? -------------------------------
-
-  // Opened even for a runtime that cannot be evaluated, because an empty window costs one wait and
-  // the report is more useful with it — but the *verdict* never rests on it. That is the rule
-  // llp/0005-runtime-loop-tools.rfc.md §Android forces: Expo Go on Android acknowledges `Runtime.enable` and reports
-  // nothing, so an empty window there is silence and not health.
-  const collected = await record(
-    'errors',
-    async () => {
-      const result = await deps.collectErrors(devServerUrl, options.windowMs);
-      if (!result.ok) {
-        return {
-          status: 'inconclusive' as const,
-          reason: result.reason ?? 'the error window could not be opened',
-          value: result,
-        };
-      }
-      const failing = result.records.filter(isFailingRecord);
-      if (failing.length > 0) {
-        return {
-          status: 'failed' as const,
-          reason: `${failing.length} ${failing.length === 1 ? 'error' : 'errors'} reported by the app: ${failing[0]!.message}`,
-          value: result,
-        };
-      }
-      if (!runtime.ok) {
-        return {
-          status: 'inconclusive' as const,
-          reason: 'the window was empty, and this runtime reports nothing whatever the app does',
-          value: result,
-        };
-      }
-      return {
-        status: 'ok' as const,
-        reason:
-          result.records.length > 0
-            ? `${result.records.length} console.error ${result.records.length === 1 ? 'line' : 'lines'}, none of them an error the app reported`
-            : null,
-        value: result,
-      };
-    },
-    options.windowMs
-  );
+  const reloadJson = await reloadStep(walk, session, base.devServerUrl);
+  const routed = await routeStep(walk, session, withApp, reloadJson);
+  if ('stop' in routed) return routed.stop;
+  const { runtime, collected } = await runtimeAndErrorsStep(walk, session, base.devServerUrl);
 
   // ---- Phase 10: the picture ----------------------------------------------------------------
 
   // Already done before the runtime read on this path, so this call costs nothing: the wait
   // happens once per run, for a run that opened the app.
-  const captured = await captureIfPossible(deps, options, deviceId, deviceBackend, phases, {
-    settleAsync: settleIfOpenedAsync,
-    deviceAsync,
-    // An app is connected on this path — the run got past the `app` phase — so the picture is of
-    // the project.
-    showing: 'project',
-  });
-
+  const captured = await captureIfPossible(
+    deps,
+    options,
+    session.deviceId,
+    session.deviceBackend,
+    walk.phases,
+    {
+      settleAsync: () => session.settleAsync(),
+      deviceAsync: walk.deviceAsync,
+      // An app is connected on this path — the run got past the `app` phase — so the picture is of
+      // the project.
+      showing: 'project',
+    }
+  );
   // The verdict. `failed` needs something to have gone wrong; `passed` needs the runtime to have
   // answered, so a window nobody could have read is never a pass.
   //
-  // **And it needs the window to be of the code on disk** (@ref ./phases, the `reload` phase). A
+  // **And it needs the window to be of the code on disk** (@ref ./walk/reads §reloadStep). A
   // reload that was attempted and never observed leaves the run unable to say which of two
   // sessions the runtime read and the window are about, and `passed` is a claim about the app the
   // caller has on disk. `threw` still wins: an app that reported an error has been shown to be
@@ -1731,7 +711,7 @@ async function runPhasesAsync(
   // it: Expo Go reporting an error while running this project's bundle is a fact about the code,
   // whichever app was holding it.
   const appFitsProject = appMismatch == null;
-  return done(
+  return walk.done(
     threw
       ? 'failed'
       : runtime.ok && collected.ok && sessionKnown && appFitsProject
@@ -1739,7 +719,7 @@ async function runPhasesAsync(
         : 'inconclusive',
     {
       ...withApp,
-      routeCheck,
+      routeCheck: session.routeCheck,
       deviceId: captured.deviceId,
       deviceBackend: captured.deviceBackend,
       runtimeSupported: runtime.unsupported ? false : runtime.ok ? true : null,
@@ -1749,7 +729,7 @@ async function runPhasesAsync(
       windowMs: options.windowMs,
       errors: collected.records,
       screenshot: captured.screenshot,
-      durationMs: deps.now() - startedAt,
+      durationMs: deps.now() - ctx.startedAt,
     }
   );
 }
