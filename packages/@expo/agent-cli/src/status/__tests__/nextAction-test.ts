@@ -3,6 +3,7 @@ import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import type { BindingSummary } from '../../deviceBinding/summary';
 import { decideStartPlan } from '../../plan/decide';
 import { PROGRAM_PREFIX } from '../../programName';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/expoApp';
 import type { ProjectState, StartPlan } from '../../project/types';
 import {
   chooseNextAction,
@@ -15,7 +16,7 @@ import type { DevServerStatus, LocalDeviceStatus } from '../types';
 
 const state: ProjectState = {
   projectRoot: '/project',
-  isExpoApp: true,
+  app: 'ready',
   sdkVersion: '54.0.0',
   nativeDirs: { ios: false, android: false },
   usesDevClient: false,
@@ -132,6 +133,19 @@ interface Row {
 // @ref llp/0021-honest-reports.rfc.md §How they show up
 describe(chooseNextAction, () => {
   it.each<Row>([
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+    {
+      name: 'names the bare install, not a device, for an app whose dependencies are not installed',
+      facts: { state: { ...state, app: 'dependencies-not-installed' } },
+      command: INSTALL_DEPENDENCIES_COMMAND,
+      why: expect.stringContaining('the dependencies are not installed'),
+    },
+    {
+      name: 'names a new app, not a device, for a directory that is not an Expo app',
+      facts: { state: { ...state, app: 'not-expo-app' } },
+      command: `${PROGRAM_PREFIX} new my-app`,
+      why: expect.stringContaining('not an Expo app'),
+    },
     {
       name: 'keeps a saved Android request before Metro published a lock',
       facts: { platform: undefined, request: androidRequest, devServerUrl: null },

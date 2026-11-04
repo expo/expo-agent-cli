@@ -26,6 +26,8 @@ import type {
   StatusSectionName,
 } from './types';
 import { easCommandPrefix } from '../utils/easCli';
+import { NO_APP } from '../plan/noApp';
+import { appStateOf } from './appState';
 
 /** Width of the label column, matching the other commands. */
 const LABEL_WIDTH = 12;
@@ -459,10 +461,12 @@ function projectLine(project: ProjectStatus): string {
   // Second on the line and in yellow, because everything after it — the SDK, the native shape, the
   // dev client — describes a package this CLI has no business acting on, and a reader who misses
   // that reads five facts about the wrong repository.
-  const notAnApp = project.isExpoApp ? [] : [chalk.yellow('not an Expo app')];
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — the cause of
+  // the "SDK unknown" and "no dev client" beside it.
+  const app = appStateOf(project);
   return [
     project.name ?? 'unnamed project',
-    ...notAnApp,
+    ...(app === 'ready' ? [] : [chalk.yellow(NO_APP[app].label)]),
     `SDK ${project.sdkVersion ?? chalk.yellow('unknown')}`,
     project.native === 'bare' && dirs.length ? `bare (${dirs.join(', ')})` : 'CNG',
     project.usesDevClient ? 'dev client' : 'no dev client',

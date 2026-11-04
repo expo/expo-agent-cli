@@ -22,7 +22,7 @@ const projectRoot = '/project';
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot,
-    isExpoApp: true,
+    app: 'ready',
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: false,
@@ -39,6 +39,7 @@ describe(buildProjectStatus, () => {
       root: projectRoot,
       name: 'my-app',
       isExpoApp: true,
+      dependenciesInstalled: true,
       sdkVersion: '54.0.0',
       native: 'cng',
       nativeDirs: { ios: false, android: false },
@@ -475,7 +476,7 @@ describe(buildNextActionStatus, () => {
   // `status` answers here rather than refusing, so its `next` line is the one place the trap could
   // survive: `@expo/agent-cli dev` in a directory that is not an Expo app is exactly what `dev` now stops.
   it(`should not name @expo/agent-cli dev for a directory that is not an Expo app`, () => {
-    const next = buildNextActionStatus(mockState({ isExpoApp: false }), {}, 'ios', null);
+    const next = buildNextActionStatus(mockState({ app: 'not-expo-app' }), {}, 'ios', null);
 
     expect(next.command).not.toBe('npx @expo/agent-cli dev');
     expect(next.rule).toBe('not-expo-app');
@@ -486,7 +487,7 @@ describe(buildNextActionStatus, () => {
   });
 
   it(`should say so even when a dev server this project could use is answering`, () => {
-    const next = buildNextActionStatus(mockState({ isExpoApp: false }), {}, 'ios', {
+    const next = buildNextActionStatus(mockState({ app: 'not-expo-app' }), {}, 'ios', {
       url: 'http://127.0.0.1:8081',
       running: true,
       appsConnected: 1,

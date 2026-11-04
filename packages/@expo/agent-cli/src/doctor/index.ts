@@ -58,12 +58,13 @@ export const agentCliDoctorCheck: Command = async (argv) => {
   const { exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
-  const { findUpExpoAppRootOrAssert } =
+  const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
   const { printDoctorCheckAsync } = require('./doctorAsync') as typeof import('./doctorAsync');
 
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
+    assertDependenciesInstalledSync(projectRoot);
     const exitCode = await printDoctorCheckAsync(projectRoot, {
       json: !!args['--json'],
       followups: !args['--no-followups'],

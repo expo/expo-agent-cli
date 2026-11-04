@@ -40,7 +40,7 @@ function stubToolchain(status: ToolchainStatus, { impossible = false } = {}): vo
 function devClientState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot,
-    isExpoApp: true,
+    app: 'ready',
     sdkVersion: '54.0.0',
     nativeDirs: { ios: false, android: false },
     usesDevClient: true,

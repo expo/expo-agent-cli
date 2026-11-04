@@ -21,19 +21,29 @@ export type FreshnessState =
   /** No fingerprint to compare, so freshness cannot be decided either way. */
   | 'unknown';
 
-export interface ProjectStatus {
+/**
+ * Whether there is an app here to act on, as two fields: one {@link AppState} on the wire. `status`
+ * is the one command that answers in every state rather than refusing: it is how a caller finds
+ * out it is in the wrong directory, or that the dependencies are not installed
+ * (llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app, §Dependencies not installed).
+ */
+export type ProjectAppFields =
+  | {
+      /** This package declares no `expo`, so every other field describes a package that is not this CLI's subject. */
+      isExpoApp: false;
+      /** No answer: the question is about an Expo app. */
+      dependenciesInstalled: null;
+    }
+  | {
+      isExpoApp: true;
+      /** `expo` resolves from this project. When false, `next` is the bare install. */
+      dependenciesInstalled: boolean;
+    };
+
+export type ProjectStatus = ProjectAppFields & {
   root: string;
   /** `name` from the project `package.json`, or the directory name. */
   name: string | null;
-  /**
-   * This package declares `expo`, which is what makes it an Expo app.
-   *
-   * `status` is the one command that answers here rather than refusing: it is how a caller finds
-   * out it is in the wrong directory, so taking the answer away would leave nothing to read
-   * (llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app). Every other field below describes a package that may not
-   * be this CLI's subject at all, and this is the field that says which.
-   */
-  isExpoApp: boolean;
   /**
    * The version of the **installed `expo` package**, e.g. `57.0.15`. Null when it is unresolvable.
    *
@@ -48,7 +58,7 @@ export interface ProjectStatus {
   nativeDirs: { ios: boolean; android: boolean };
   usesDevClient: boolean;
   hasWeb: boolean;
-}
+};
 
 export interface ExpoGoStatus {
   compatible: boolean;

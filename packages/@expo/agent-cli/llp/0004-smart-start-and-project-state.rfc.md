@@ -36,6 +36,7 @@ The project-state probe reads:
 | State                                                    | Plan                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------- |
 | Not an Expo app (no `expo` dependency)                   | nothing. no steps                                       |
+| `expo` declared, not installed                           | nothing. no steps. the bare `install` first             |
 | Expo Go compatible, Go installed                         | start Metro, then open in Expo Go                       |
 | Dev client installed, fingerprint matches last build     | start Metro, then open the dev client                   |
 | Fingerprint matches, and the device has not got the app  | install the built app, then start Metro                 |
@@ -90,7 +91,7 @@ holds all of the gates:
 - **A plan that builds never asks.** It ends in `expo run:*`, which installs what it built, so the
   answer would change nothing and the subprocesses would be spent on every stale run. `expo-go` is
   left out with it — that runtime is a published app `expo start` offers to install itself — and so
-  are `web` and `not-expo-app`, which have no app to look for.
+  are `web`, `not-expo-app` and `dependencies-not-installed`, which have no app to look for.
 - **Only the run that opens the app asks.** The install exists to serve the open, so the gate is
   the same condition as the open's: a typed native platform flag, and not `--no-open`. That keeps
   `dev` off devices a caller said to leave alone — `smoke` spawns `dev` with `--no-open` and
@@ -216,9 +217,60 @@ Try: npx @expo/agent-cli new my-app
 `cd` is not a command this CLI can name. `npx @expo/agent-cli install expo` writes into
 a repository the caller most likely only walked past, so it stays in the `How:` prose.
 
-Pinned in `e2e/__tests__/project-shapes-test.ts`. The last row of that file is an app
-whose dependencies are not installed being planned for normally. A guard that read
-`node_modules` would refuse every freshly cloned Expo app.
+Pinned in `e2e/__tests__/project-shapes-test.ts`. An app whose dependencies are not
+installed is never refused as `NOT_EXPO_APP`. A guard that read `node_modules` would
+call every freshly cloned Expo app "not an Expo app". That app gets the next section's
+answer instead.
+
+## Dependencies not installed
+
+An Expo app whose `expo` package does not resolve, from the project root or any
+directory above it, has no installed dependencies. A fresh clone or a new git worktree
+is in this state.
+
+The plan reads its facts from `node_modules`. The dev client counts only when
+`expo-dev-client` is installed, and the fingerprint needs `@expo/fingerprint`. Without
+them the table sees "no dev client" and "no fingerprint". It then plans
+`expo install expo-dev-client` and a new native build, which the project may not need.
+On `--eas` that build costs EAS time.
+
+The probe reports this state as one fact, and the decision table reads it in its second
+row, under `not-expo-app` and above every other row:
+
+```
+dependencies-not-installed → target: none, steps: [], buildLocation: null
+```
+
+| Command                                                                              | When the dependencies are not installed                                            |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `dev` (also `--plan`), `start`, `smoke`, `deploy`, `doctor`, `skills` except `clean` | stop with `DEPENDENCIES_NOT_INSTALLED`, exit 1, after a bad flag, before any spawn |
+| `status`                                                                             | reports. `next` and the one follow-up are the bare install                         |
+| `install` with no arguments                                                          | installs the lockfile (llp/0010 §Forwarded codes)                                  |
+| every other `install`                                                                | stops with `DEPENDENCIES_NOT_INSTALLED`                                            |
+
+Each of these commands would otherwise fail inside an Expo tool that cannot read the SDK,
+and name a fix that does not install the dependencies, or print a raw Node stack. A bad
+flag is the caller's mistake on any machine, so it is named first; `start` forwards its
+flags to `expo start`, so it has none to name. `navigate` is not in the list: it needs a
+running dev server, and its own stop already says that there is none. `skills:clean` and
+`dev:stop` clean up what is here, so they run in this state too. A billing EAS session
+that a deleted worktree left behind is still the first `status` follow-up.
+
+The `Try:` line of each stop, and the `next` of `status`, is:
+
+```
+npx @expo/agent-cli install
+```
+
+The `status` project line says `dependencies not installed`, beside the "SDK unknown" and
+"no dev client" that it causes. Its `next.rule` is `dependencies-not-installed`, with no
+steps and no build location. No device or EAS session `next` replaces it, because each of
+those runs `dev`. A directory that is not an Expo app reports `dependenciesInstalled: null`,
+because the question has no answer there.
+
+Pinned in `e2e/__tests__/project-shapes-test.ts`, §an Expo app whose dependencies are not
+installed, for these commands and `status`, and in
+`e2e/__tests__/install-bootstrap-test.ts` for `install`.
 
 ## Plan contract
 
@@ -566,8 +618,9 @@ a request the lock refused never replaces the one that started the running serve
 `--device` on a run that binds nothing is still `BAD_ARGS` first: the refusals about the
 command come before the outcome about the project. The lock alone decides.
 Every plan `dev` can reach that has a step has a step that serves (`isDevServerStep`:
-`expo start`, or `run:*` without `--no-bundler`), and the one empty plan,
-`not-expo-app`, is refused by the command before `devAsync` runs. Under
+`expo start`, or `run:*` without `--no-bundler`), and the two empty plans,
+`not-expo-app` and `dependencies-not-installed`, are refused by the command before
+`devAsync` runs. Under
 `--plan` the probe and the resolver run, because the plan prints its rule and its
 reasons: the device callback of [[0035-one-device-per-worktree]] §How `dev` uses it
 answers null on a live lock instead of inspecting the own binding, and the port block

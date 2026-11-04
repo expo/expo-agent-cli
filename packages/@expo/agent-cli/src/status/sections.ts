@@ -12,6 +12,8 @@ import { classifyAgainstRecordedBuild, type RecordedImpact } from '../impact/fro
 import { buildConnectUrls, openInPhrase, type ConnectUrl } from '../navigate/connectUrl';
 import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
+import { NO_APP } from '../plan/noApp';
+import { appStateFields } from './appState';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -39,15 +41,6 @@ const PLATFORMS: NativePlatform[] = ['ios', 'android'];
 
 /** How many characters of a fingerprint hash are shown, as in the plan engine. */
 const HASH_DISPLAY_LENGTH = 8;
-
-/**
- * The command the next action names when this directory is not an Expo app.
- *
- * The safe one of the three recoveries `NOT_EXPO_APP` spells out: creating an app changes nothing
- * that is already here, where adding Expo to this package would write into a repository the caller
- * most likely only walked past (llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app).
- */
-const NOT_AN_APP_COMMAND = `${PROGRAM_PREFIX} new my-app`;
 
 /**
  * The gate to put in front of anything that reads the app, once a dev server is up, with the
@@ -100,7 +93,7 @@ export function buildProjectStatus(state: ProjectState, packageName: string | nu
   return {
     root: state.projectRoot,
     name: name || null,
-    isExpoApp: state.isExpoApp,
+    ...appStateFields(state.app),
     sdkVersion: state.sdkVersion,
     native: bare ? 'bare' : 'cng',
     nativeDirs: state.nativeDirs,
@@ -524,18 +517,12 @@ export function buildNextActionStatus(
 ): NextActionStatus {
   const plan = resolvedPlan ?? decideStartPlan(state, { platform, lastBuild });
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // Above the verify branch, because it outranks every reason to name a command at all: a
-  // directory that is not an Expo app has nothing to put on a device and nothing to verify, and
-  // `@expo/agent-cli dev` here is the very trap this report would otherwise send the reader into.
-  if (!state.isExpoApp) {
-    return {
-      command: NOT_AN_APP_COMMAND,
-      rule: plan.rule,
-      target: plan.target,
-      steps: [],
-      why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
-      buildLocation: null,
-    };
+  // Above the verify branch, because it outranks every reason to name a command at all: a plan that
+  // plans nothing has nothing to verify, and `@expo/agent-cli dev` there is the very trap this report
+  // would otherwise send the reader into.
+  if (state.app !== 'ready') {
+    const { command, why } = NO_APP[state.app];
+    return { command, why, rule: plan.rule, target: plan.target, steps: [], buildLocation: null };
   }
   const verify = verifyAction(devServer, device, state, scheme, cloudSession);
   if (verify) {

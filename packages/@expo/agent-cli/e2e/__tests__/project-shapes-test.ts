@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { INSTALL_DEPENDENCIES_COMMAND } from '../../src/project/expoApp';
+
 import {
   executeAgentCliAsync,
   installStubBinAsync,
@@ -439,7 +441,7 @@ describe('a package.json that is not an Expo app', () => {
 
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
-    expect(report.project.isExpoApp).toBe(false);
+    expect(report.project).toMatchObject({ isExpoApp: false, dependenciesInstalled: null });
     expect(report.next.rule).toBe('not-expo-app');
     expect(report.next.command).not.toBe('npx @expo/agent-cli dev');
     expect(report.next.steps).toEqual([]);
@@ -530,27 +532,80 @@ describe('a package.json that is not an Expo app', () => {
 });
 
 describe('an Expo app whose dependencies are not installed', () => {
-  // The rule is *declared*, not installed: `expo` in package.json makes this an Expo app, and a
-  // fresh clone with no node_modules is the most ordinary state a real project is ever in. Reading
-  // the installed package instead would have refused every one of them.
-  it('is planned for, rather than refused as not an Expo app', async () => {
+  // `expo` in package.json makes this an Expo app, so it is never refused as NOT_EXPO_APP. But the
+  // plan reads expo-dev-client and the fingerprint from node_modules, so without them it would plan
+  // a dev-client install and a new build. The answer is the bare install, first.
+  async function uninstalledAppAsync(): Promise<string> {
     const directory = await fs.promises.realpath(
       await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-uninstalled-'))
     );
     await fs.promises.writeFile(
       path.join(directory, 'package.json'),
       JSON.stringify(
-        { name: 'cloned', version: '1.0.0', dependencies: { expo: '~54.0.0' } },
+        {
+          name: 'cloned',
+          version: '1.0.0',
+          dependencies: { expo: '~54.0.0', 'expo-dev-client': '~6.0.0' },
+        },
         null,
         2
       )
     );
+    return directory;
+  }
 
-    const result = await executeAgentCliAsync(directory, ['dev', '--plan', '--json'], {
+  // A command that acts on the app stops before it plans or spawns: each would otherwise fail inside
+  // an Expo tool that cannot read the SDK, and name a fix that does not install the dependencies.
+  it.each([
+    [['dev', '--android', '--plan']],
+    [['start', '--ios']],
+    [['smoke', '--ios']],
+    [['deploy', '--web']],
+    [['doctor']],
+    [['skills', 'list']],
+  ])('%j stops and names the bare install', async (args) => {
+    const directory = await uninstalledAppAsync();
+
+    const result = await executeAgentCliAsync(directory, args, { reject: false });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "This project's dependencies are not installed, so nothing ran."
+    );
+    expect(result.stderr).toMatch(new RegExp(`^Try: ${INSTALL_DEPENDENCIES_COMMAND}$`, 'm'));
+  });
+
+  // A bad flag is the caller's mistake on any machine, so it is named before the dependencies.
+  it.each([['dev'], ['smoke'], ['deploy'], ['doctor']])(
+    '%s reports a bad flag first',
+    async (command) => {
+      const directory = await uninstalledAppAsync();
+
+      const result = await executeAgentCliAsync(directory, [command, '--bogus'], { reject: false });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Unknown option --bogus');
+    }
+  );
+
+  it('lets status report, with the bare install as next and as the one follow-up', async () => {
+    const directory = await uninstalledAppAsync();
+
+    const result = await executeAgentCliAsync(directory, ['status', '--json'], {
       reject: false,
     });
 
-    expect(result.all).not.toContain('NOT_EXPO_APP');
-    expect(JSON.parse(result.stdout).rule).not.toBe('not-expo-app');
+    const report = JSON.parse(result.stdout);
+    expect(report.project).toMatchObject({ isExpoApp: true, dependenciesInstalled: false });
+    expect(report.next).toMatchObject({
+      command: INSTALL_DEPENDENCIES_COMMAND,
+      rule: 'dependencies-not-installed',
+    });
+    expect(report.followups.map((followup: { command: string }) => followup.command)).toEqual([
+      INSTALL_DEPENDENCIES_COMMAND,
+    ]);
+
+    const text = await executeAgentCliAsync(directory, ['status'], { reject: false });
+    expect(text.stdout).toMatch(/^project .*dependencies not installed/m);
   });
 });

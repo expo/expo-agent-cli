@@ -1726,6 +1726,22 @@ describe('@expo/agent-cli status', () => {
     }
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — a new
+  // worktree is this state, and the one a deleted sibling left a billing session in.
+  it('keeps the orphan session stop first, then the bare install, when nothing is installed', async () => {
+    const projectRoot = await setupAsync('go-app');
+    await fs.promises.rm(path.join(projectRoot, 'node_modules', 'expo'), { recursive: true });
+    const gone = `${fs.realpathSync(projectRoot)}-deleted`;
+    await writeCloudBindingAsync(expoHomeOf(projectRoot), gone, { id: 'sess-orphan' });
+
+    const report = await reportInAsync(projectRoot);
+
+    expect(report.followups.map(({ id }) => id)).toEqual([
+      'stop-orphan-session',
+      'dependencies-not-installed',
+    ]);
+  });
+
   // @ref llp/0021-honest-reports.rfc.md §The rules
   describe('a tunnelled dev server', () => {
     it('names the tunnel and the URLs that open the app on it', async () => {

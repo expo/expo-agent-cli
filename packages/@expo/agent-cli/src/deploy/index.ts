@@ -74,13 +74,15 @@ export const agentCliDeploy: Command = async (argv) => {
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
-  const { findUpExpoAppRootOrAssert } =
+  const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
   const { resolveDeployOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
   const { deployAsync } = require('./deployAsync') as typeof import('./deployAsync');
 
   return (async () => {
     const options = resolveDeployOptions(argv ?? []);
-    await deployAsync(findUpExpoAppRootOrAssert(process.cwd()), options);
+    const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
+    assertDependenciesInstalledSync(projectRoot);
+    await deployAsync(projectRoot, options);
   })().catch(logCmdError);
 };

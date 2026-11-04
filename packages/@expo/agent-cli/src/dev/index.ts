@@ -107,7 +107,7 @@ export const agentCliDev: Command = async (argv) => {
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
-  const { findUpExpoAppRootOrAssert } =
+  const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
   const { resolveDevOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
 
@@ -115,6 +115,7 @@ export const agentCliDev: Command = async (argv) => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
     const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
     const options = resolveDevOptions(argv ?? [], readAgentCliSettings(projectRoot).settings);
+    assertDependenciesInstalledSync(projectRoot);
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — Renamed: the
     // plan-first engine is `@expo/agent-cli dev`, and `@expo/agent-cli start` is the plain `expo start` wrapper.

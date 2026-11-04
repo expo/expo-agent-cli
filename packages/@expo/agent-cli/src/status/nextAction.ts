@@ -31,6 +31,36 @@ export function cloudBindings(bindings: BindingSummary[]): {
   };
 }
 
+/** What the recorded bindings say about one platform's device. */
+function bindingsFor(
+  bindings: BindingSummary[],
+  platform: PlanPlatform,
+  now: number
+): {
+  cloud: BindingSummary[];
+  /** The platform of the cloud session `next` can verify against: this one's, else any. */
+  cloudPlatform: BindingSummary['platform'] | null;
+  bound: BindingSummary[];
+  liveBound: boolean;
+  /** This platform's EAS Simulator session whose lease expired, when nothing else is bound. */
+  expiredSession: BindingSummary | undefined;
+} {
+  const { cloud, expiredCloud } = cloudBindings(bindings);
+  const bound = bindings.filter((entry) => entry.platform === platform);
+  const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > now);
+  return {
+    cloud,
+    cloudPlatform:
+      (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null,
+    bound,
+    liveBound,
+    expiredSession:
+      cloud.length === 0 && !liveBound
+        ? expiredCloud.find((entry) => entry.platform === platform)
+        : undefined,
+  };
+}
+
 export interface NextTargetFacts {
   /** The platform the caller named, if any. */
   platform?: PlanPlatform;
@@ -111,9 +141,11 @@ export function chooseNextAction({
   plan,
   host,
 }: NextActionFacts): NextActionStatus {
-  const { cloud, expiredCloud } = cloudBindings(bindings ?? []);
-  const cloudPlatform =
-    (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null;
+  const { cloud, cloudPlatform, bound, liveBound, expiredSession } = bindingsFor(
+    bindings ?? [],
+    platform,
+    host.now
+  );
   const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;
   let next = buildNextActionStatus(
     state,
@@ -133,6 +165,11 @@ export function chooseNextAction({
     // "expo run:ios" on a Linux box would be the report disagreeing with the command.
     recoveryPlan
   );
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app, §Dependencies not installed
+  // — no app to act on outranks every device next below: each of them runs `dev`, which stops first.
+  if (state.app !== 'ready') {
+    return next;
+  }
   const devNext = buildNextActionStatus(
     state,
     record,
@@ -149,12 +186,6 @@ export function chooseNextAction({
       platform === 'web'
         ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
         : devCommand;
-  const bound = bindings ? bindings.filter((e) => e.platform === platform) : [];
-  const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > host.now);
-  const expiredSession =
-    cloud.length === 0 && !liveBound
-      ? expiredCloud.find((entry) => entry.platform === platform)
-      : undefined;
   // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
   if (expiredSession) {
@@ -165,7 +196,6 @@ export function chooseNextAction({
       why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
     };
   } else if (
-    state.isExpoApp &&
     platform !== 'web' &&
     bindings &&
     !liveBound &&
