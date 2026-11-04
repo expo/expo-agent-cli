@@ -82,6 +82,17 @@ describe('on windows', () => {
     ).toBe('C:\\tools\\foo.bat');
   });
 
+  it(`should prefer a real .exe over a .cmd wrapper beside it, as PATHEXT does`, () => {
+    const files = ['C:\\tools\\adb.cmd', 'C:\\tools\\adb.exe'];
+    expect(
+      findExecutableOnPath('adb', {
+        env: { PATH: 'C:\\tools' },
+        platform: 'win32',
+        exists: (file) => files.includes(file),
+      })
+    ).toBe('C:\\tools\\adb.exe');
+  });
+
   it(`should read PATH whatever its case, like the child does`, () => {
     expect(pathFromEnv({ path: 'C:\\lower' })).toBe('C:\\lower');
   });

@@ -29,12 +29,17 @@ export function pathFor(platform: string): path.PlatformPath {
   return platform === 'win32' ? path.win32 : path.posix;
 }
 
-/** Filename variants of one command, in the order this CLI tries them on `platform`. */
+/**
+ * Filename variants of one command, in the order this CLI tries them on `platform`.
+ *
+ * On Windows the order is the default `PATHEXT` order, so a real `.exe` wins over a wrapper beside
+ * it. The bare name comes last: an npm bin directory holds a POSIX shell script by that name.
+ */
 function executableNames(name: string, platform: string): string[] {
   if (platform !== 'win32' || /\.(cmd|bat|exe)$/i.test(name)) {
     return [name];
   }
-  return [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name];
+  return [`${name}.exe`, `${name}.bat`, `${name}.cmd`, name];
 }
 
 /**
