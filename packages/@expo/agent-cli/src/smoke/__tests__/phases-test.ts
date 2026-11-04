@@ -15,10 +15,6 @@ import type { BundleCheckResult } from '../../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../../runtime/devServer';
 import type { RuntimeErrorRecord } from '../../runtime/runtimeErrorCollector';
 import {
-  APP_ATTACH_TIMEOUT_MS,
-  APP_SETTLE_MS,
-  FIRST_BUNDLE_TIMEOUT_MS,
-  RUNTIME_UNSUPPORTED_GRACE_MS,
   runSmokePhasesAsync,
   smokeExitCode,
   type SmokeDeps,
@@ -27,6 +23,12 @@ import {
 } from '../phases';
 import { silentProgress } from '../progress';
 import type { SmokeOptions } from '../resolveOptions';
+import {
+  APP_ATTACH_TIMEOUT_MS,
+  APP_SETTLE_MS,
+  FIRST_BUNDLE_TIMEOUT_MS,
+  RUNTIME_UNSUPPORTED_GRACE_MS,
+} from '../timeouts';
 import type { SmokePhaseId, SmokePhaseStatus } from '../types';
 
 function options(overrides: Partial<SmokeOptions> = {}): SmokeOptions {

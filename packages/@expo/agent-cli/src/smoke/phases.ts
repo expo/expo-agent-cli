@@ -51,9 +51,33 @@ import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import { describeSkippedApps, type SkippedApp } from '../runtime/targetSelection';
+import { firstLine } from '../utils/text';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
+import { captureIfPossible } from './capture';
 import type { SmokeProgress } from './progress';
 import { coldWaitMs, type SmokeOptions } from './resolveOptions';
+import {
+  appendReason,
+  bundleErrorSentence,
+  isFailingRecord,
+  noReload,
+  noScreenshot,
+} from './results';
+import {
+  APP_ATTACH_TIMEOUT_MS,
+  APP_PROBE_MS,
+  APP_SETTLE_MS,
+  BUILD_DEV_SERVER_TIMEOUT_MS,
+  CONDITIONAL_PHASES,
+  FIRST_BUNDLE_TIMEOUT_MS,
+  PHASE_ORDER,
+  RELOAD_TIMEOUT_MS,
+  ROOT_ROUTE,
+  RUNTIME_READY_POLL_MS,
+  RUNTIME_READY_TIMEOUT_MS,
+  RUNTIME_UNSUPPORTED_GRACE_MS,
+  START_SESSION_TIMEOUT_MS,
+} from './timeouts';
 import type {
   SmokeCleanupJson,
   SmokeEnvironmentJson,
@@ -411,25 +435,6 @@ export interface SmokeDeps {
   now(): number;
 }
 
-/**
- * Whether one record is something the gate fails on. Exported so the report and the follow-ups
- * count the same thing this decides the verdict on.
- */
-export function isFailingRecord(record: RuntimeErrorRecord): boolean {
-  // Not `source === 'exception'` alone, which is what the design said and what the live round
-  // disproved [observed — 2026-08-24, notesapp on SDK 57 in Expo Go, iOS 26.5 simulator]. An
-  // uncaught `throw` never reached `Runtime.exceptionThrown` in any run: React Native caught it
-  // and reported it through the console path, so a gate reading `source` passed **seventeen
-  // crashes** in one window and called them `console.error` calls. `RuntimeErrorRecord.isError`
-  // documents the three cases measured to settle it, and the limit it leaves — a deliberately
-  // logged `Error` is the same bytes and fails too.
-  //
-  // `source === 'exception'` stays in the test rather than being dropped: a runtime that does use
-  // that channel exists, and a gate reading only the console path would be the same mistake
-  // pointed the other way.
-  return record.isError === true || record.source === 'exception';
-}
-
 /** Everything one run of the phases established, before it is formatted or exited with. */
 export interface SmokeRun {
   outcome: SmokeOutcome;
@@ -484,222 +489,6 @@ export interface SmokeRun {
   errors: RuntimeErrorRecord[];
   screenshot: ScreenshotResult;
   durationMs: number;
-}
-
-/**
- * What the `reload` phase amounts to for a run that never got there.
- *
- * A fresh object each call: this is handed out as the run's own mutable record, and a shared
- * literal would let one run's phase write into the next one's report.
- */
-export function noReload(): SmokeReloadJson {
-  return {
-    disposition: 'not-needed',
-    verifiedBy: null,
-    knownTargetIds: [],
-    freshTargets: null,
-    commandSocketReconnected: null,
-    targetOutcomes: [],
-    bundleServed: null,
-  };
-}
-
-/** The route opened when nothing was named and there is no app to read. */
-const ROOT_ROUTE = '/';
-
-/** How long the first look for an attached app gets before the run opens one itself. */
-const APP_PROBE_MS = 2_000;
-
-/**
- * How long the app gets to stop re-registering before anything is read from it.
- *
- * Only spent by a run that opened the app itself: a run that attached to an app already on screen
- * has nothing to settle, and the wait would be dead time in the common case.
- *
- * **Before the runtime read, not only before the picture** — and that is the correction this wave
- * made [observed — 2026-08-30, a cold-start run of the shape §The run brings its own environment
- * exists for: dev server started, simulator booted, Expo Go launched from nothing]. The `app` phase
- * answered `ok` at 7.4 s and the `runtime` phase two seconds later got `No target found`, so a run
- * whose app was on the screen and working reported `22`. Its own picture shows the app rendered.
- *
- * It is the same finding as F57, one phase earlier. F57 was about the *picture* being of a splash
- * screen; this is about the *debugger target list* still churning while the app boots, and the
- * bootstrap is what made that window common — before it, the app was nearly always opened onto a
- * simulator that was already warm.
- */
-export const APP_SETTLE_MS = 4_000;
-
-/**
- * How long the **first** compile of a dev server this run started gets, out of a budget of its own.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
- * Coming up is not reading, and this is the phase where the difference is largest: a dev server
- * that has never bundled has to transform the whole dependency graph, which is minutes on a real
- * app and milliseconds on the second run. Charging that to `--timeout` — the window meant for
- * measuring the app — is the same mistake as charging it the simulator boot, and it fails in the
- * same way: the measurement gets what the setup left over, which on a cold machine is nothing.
- *
- * Only for a dev server **this run started**. One somebody else started has either bundled
- * already or has not, and either way this run is reading their dev server rather than warming its
- * own — so `--timeout` is the honest bound there.
- */
-export const FIRST_BUNDLE_TIMEOUT_MS = 180_000;
-
-/**
- * How long an app this run opened onto a cold environment gets to attach, out of its own budget.
- *
- * The same rule one phase later. `simctl openurl` exits 0 as soon as the URL is handed over, so
- * the wait that follows is the app *launching* — and on a simulator this run booted a moment ago
- * that is a cold Expo Go start, a manifest fetch and the first bundle download before anything
- * registers a debugger target.
- *
- * Only when this run made the environment cold, by starting the dev server or booting the device.
- * An app that is slow to attach to a dev server and a device that were both already there is a
- * slow app, which is exactly what the caller's budget is for.
- */
-export const APP_ATTACH_TIMEOUT_MS = 120_000;
-
-/**
- * How long an app this run opened gets to become *readable*, after it has attached.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
- * The third window of a cold launch, and the one nothing was waiting for. Expo Go attaches to the
- * dev server, and *then* downloads and runs the bundle — so the debugger target it registered on
- * the way in goes away and comes back when the JS runtime is created. A single read landing in
- * that gap answers `No target found` about an app that is running perfectly well, which is what a
- * cold run of a real app did: `app` `ok` at 4.2 s, `runtime` `No target found` two seconds later,
- * and the run's own screenshot showing the app on screen [observed — 2026-08-30, `friction/run7/
- * tapapp` on a simulator this run booted].
- *
- * Waiting is not a softer verdict. The question the phase asks is "can this runtime be read at
- * all", and a runtime that answers at eight seconds *can* be. In an app this run moved, a runtime
- * with no debugger is asked for {@link RUNTIME_UNSUPPORTED_GRACE_MS} (5 s) after its first "method
- * not found"; one that nothing moved is asked once. A wait that ends with no answer reports the runtime's own reason exactly as it did before.
- */
-export const RUNTIME_READY_TIMEOUT_MS = 15_000;
-
-/**
- * How long the reload gets to be proved, before the run reports that it was not.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
- * `runtime:reload`'s own default is 30 s and covers a ladder that can stop and start the app. This
- * covers one broadcast on a socket that is already open, and the app fetching a bundle the dev
- * server has already built — the `bundle` phase two rows above just proved that it compiles, which
- * is the slow part. Ten seconds is the reconnect, not the compile.
- *
- * Charged to `--timeout` rather than to the bootstrap: the caller's app was already running, so
- * nothing here is this run paying for cold it caused.
- */
-export const RELOAD_TIMEOUT_MS = 10_000;
-
-/** How often the runtime is asked again while that wait runs. */
-const RUNTIME_READY_POLL_MS = 500;
-
-/**
- * How long, from its first "method not found" to `Runtime.evaluate`, a moved app may go on answering
- * that way before the answer counts as a runtime with no debugger.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §A reloading runtime answers like one with no debugger.
- * A development build on Android answers `-32601` for about 1.5 s after a reload, on the same
- * target id [observed — EAS Simulator Android session, SDK 58 development build, 2026-10-22]. Expo
- * Go for Android answers it for ever, so this grace is its whole extra cost.
- */
-export const RUNTIME_UNSUPPORTED_GRACE_MS = 5_000;
-
-/**
- * How long the run gives a dev server to come up, out of a budget of its own.
- *
- * Not out of `--timeout`, and that is the rule for both bootstrap budgets: a cold start contains a
- * first bundle, and charging it to the budget meant for the phases that read the app would leave
- * a run that had to start its own dev server with nothing left to read it with.
- *
- * The number is the detach path's own default, because it is the same wait: `dev --detach
- * --wait-ready` is what this phase runs.
- */
-export const START_DEV_SERVER_TIMEOUT_MS = 120_000;
-
-/**
- * How long the `start-session` phase may take: the EAS CLI's own readiness wait, and then some.
- *
- * @ref llp/0027-everything-on-eas.rfc.md §smoke
- * A session boots a virtual machine and installs an app; two to four minutes was the observed
- * range, and the EAS CLI gives up on one that never becomes ready after ten [observed — expo-ci,
- * 2026-09-06]. Bootstrap, like the boot: none of it is charged to `--timeout`.
- */
-export const START_SESSION_TIMEOUT_MS = 900_000;
-
-/**
- * How long the start phase gets when the plan it runs **builds** first.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
- *
- * Thirty minutes, and the number is the shape of the work rather than a measurement: a cold
- * `expo run:ios` is a pod install and a full native compile, and a machine doing it for the first
- * time on a cold Xcode cache is the slow end of that. The cost of a bound that is too short is the
- * worst kind of failure this command has — twenty minutes spent and then a timeout reported for a
- * build that was going fine.
- *
- * Bootstrap, like every other act: what the build spends is not taken out of the budget the error
- * window and the runtime read live on.
- */
-export const BUILD_DEV_SERVER_TIMEOUT_MS = 1_800_000;
-
-/** Every phase, in the order they are reported. */
-const PHASE_ORDER: SmokePhaseId[] = [
-  'start-dev-server',
-  'dev-server',
-  'bundler-ready',
-  'bundle',
-  // @ref llp/0027-everything-on-eas.rfc.md §smoke — the EAS device's counterpart of the boot.
-  'start-session',
-  'boot-device',
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it.
-  // After the boot and not before it: `simctl install` answers `Unable to lookup in current state:
-  // Shutdown` for a device that is not up [observed, 2026-09-03].
-  'install-app',
-  'app',
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk. Before
-  // `route` rather than after it: a reload sends the app back to its initial route, so a run that
-  // opened the route first would reload out of the screen it had just asked for.
-  'reload',
-  'route',
-  'runtime',
-  'errors',
-  'screenshot',
-];
-
-/**
- * The phases that are reported only by a run that performed them.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
- * Every other phase is a question of every run, so a run that did not reach one owes the reader a
- * `skipped` row saying why. These two are not questions; they are *acts*, and a machine that
- * already had a dev server and a simulator did not skip them — there was nothing there to do. A
- * `skipped start dev server` on a healthy run reads as work that was owed and not done. The same
- * holds for the install: a machine that already had the app never had one to do.
- */
-const CONDITIONAL_PHASES = new Set<SmokePhaseId>([
-  'start-dev-server',
-  'start-session',
-  'boot-device',
-  'install-app',
-]);
-
-/**
- * A screenshot that was never attempted, so the report has the same keys either way.
- *
- * @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract.
- */
-export function noScreenshot(reason: string): ScreenshotResult {
-  return {
-    path: '',
-    ok: false,
-    reason,
-    platform: null,
-    deviceId: null,
-    command: null,
-    bytes: null,
-  };
 }
 
 /**
@@ -918,7 +707,7 @@ async function runPhasesAsync(
    * and a `screenshot` marked skipped here and then attempted below would appear twice.
    *
    * The conditional phases are never filled in here: a run that stopped at the bundle did not skip
-   * a device boot, it had no device boot to do (@ref ./phases §CONDITIONAL_PHASES).
+   * a device boot, it had no device boot to do (@ref ./timeouts §CONDITIONAL_PHASES).
    */
   const skipRest = (from: SmokePhaseId, reason: string, stopBefore?: SmokePhaseId): void => {
     const end = stopBefore == null ? PHASE_ORDER.length : PHASE_ORDER.indexOf(stopBefore);
@@ -964,7 +753,7 @@ async function runPhasesAsync(
 
   let started = false;
   /**
-   * The start phase ran a plan that compiled (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
+   * The start phase ran a plan that compiled (@ref ./timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
    *
    * Kept for the follow-ups, and set whether the start succeeded or failed: a build that failed is
    * exactly the case where the cheapest next step differs from the ordinary one.
@@ -1058,7 +847,7 @@ async function runPhasesAsync(
 
   // ---- Phase 2: has its bundler finished, and is it this project's? -------------------------
   //
-  // @ref ./phases §FIRST_BUNDLE_TIMEOUT_MS. On a dev server this run started, this and the phase
+  // @ref ./timeouts §FIRST_BUNDLE_TIMEOUT_MS. On a dev server this run started, this and the phase
   // below are the dev server *coming up* rather than this run reading it, so they get the cold
   // budget and what they spend is not taken off the window the caller gave the reads.
 
@@ -1452,7 +1241,7 @@ async function runPhasesAsync(
   /**
    * Whether this run is the reason the thing it is now waiting for is cold.
    *
-   * @ref ./phases §APP_ATTACH_TIMEOUT_MS. A dev server it started has never served this app's
+   * @ref ./timeouts §APP_ATTACH_TIMEOUT_MS. A dev server it started has never served this app's
    * bundle; a simulator it booted has never launched it. Either one makes the next wait a first
    * launch rather than a measurement.
    */
@@ -1462,7 +1251,7 @@ async function runPhasesAsync(
   /**
    * The budget the open gets to wait for the app it loads.
    *
-   * @ref ./phases §APP_ATTACH_TIMEOUT_MS — the same rule as the attach wait that follows it, and
+   * @ref ./timeouts §APP_ATTACH_TIMEOUT_MS — the same rule as the attach wait that follows it, and
    * for the same reason: loading an app onto an environment this run made cold is this run's own
    * setup, and loading one onto a warm environment is this run reading a slow app.
    */
@@ -1471,7 +1260,7 @@ async function runPhasesAsync(
   /**
    * Wait for the app this run moved to stop re-registering. At most once, and never otherwise.
    *
-   * @ref ./phases §APP_SETTLE_MS. Shared by the runtime read and the picture because it is one
+   * @ref ./timeouts §APP_SETTLE_MS. Shared by the runtime read and the picture because it is one
    * fact about one app: a second wait would be a second budget spent proving what the first one
    * already proved.
    *
@@ -1571,7 +1360,7 @@ async function runPhasesAsync(
       };
     }
 
-    // @ref ./phases §APP_ATTACH_TIMEOUT_MS. The deep link is a request and not a result: the open
+    // @ref ./timeouts §APP_ATTACH_TIMEOUT_MS. The deep link is a request and not a result: the open
     // exited 0 above, and what is waited for here is a **debugger target appearing** — the app
     // launching, fetching the manifest and downloading its bundle. On an environment this run made
     // cold that is its own cost and gets its own budget; on a warm one it is a slow app, which is
@@ -1757,7 +1546,7 @@ async function runPhasesAsync(
     if (reloaded.ok) {
       // The app is coming back, so it owes the same waits a freshly opened one does: the settle
       // before the reads, and the runtime-ready poll rather than a single look
-      // (@ref ./phases §APP_SETTLE_MS, §RUNTIME_READY_TIMEOUT_MS). A reload that was *not* proved
+      // (@ref ./timeouts §APP_SETTLE_MS, §RUNTIME_READY_TIMEOUT_MS). A reload that was *not* proved
       // must not claim them — an app that never acted is not coming up, and waiting on it would
       // spend the caller's budget proving nothing.
       appMovedByThisRun = true;
@@ -1824,7 +1613,7 @@ async function runPhasesAsync(
 
   // ---- Phase 8: can the runtime be read at all? ---------------------------------------------
 
-  // @ref ./phases §APP_SETTLE_MS. Before the read rather than only before the picture: an app that
+  // @ref ./timeouts §APP_SETTLE_MS. Before the read rather than only before the picture: an app that
   // has just been launched onto a simulator this run booted is still registering, and asking a
   // debugger target list mid-churn answers "No target found" about an app that is running fine.
   await settleIfOpenedAsync();
@@ -1832,7 +1621,7 @@ async function runPhasesAsync(
   /**
    * Ask the runtime until it answers, for an app this run opened.
    *
-   * @ref ./phases §RUNTIME_READY_TIMEOUT_MS. The settle above waits for the target *list* to stop
+   * @ref ./timeouts §RUNTIME_READY_TIMEOUT_MS. The settle above waits for the target *list* to stop
    * changing, which is a fact about registration and turned out to be too weak a proxy for "the
    * bundle has run": two reads of one id 500 ms apart are alike whether the app is ready or about
    * to reload. This asks the runtime itself, which is the thing the phase is about.
@@ -1963,137 +1752,4 @@ async function runPhasesAsync(
       durationMs: deps.now() - startedAt,
     }
   );
-}
-
-/**
- * The picture, and the device it was taken on.
- *
- * The device travels with it because the screenshot phase is the one step that resolves a device of
- * its own — every other phase either has one already or does not need one (F98).
- */
-interface CaptureOutcome {
-  screenshot: ScreenshotResult;
-  deviceId: string | null;
-  deviceBackend: DeviceBackend | null;
-}
-
-/**
- * Take the picture, or record why there is none.
- *
- * Degrading rather than failing is the decision: a screenshot is evidence attached to an answer,
- * and a run on a machine with no simulator has still answered whether the app throws. Reporting
- * `ok: false` with a reason keeps that honest without spending the verdict on it — the outcome
- * never depends on this phase, in either direction.
- */
-async function captureIfPossible(
-  deps: SmokeDeps,
-  options: SmokeOptions,
-  deviceId: string | null,
-  deviceBackend: DeviceBackend | null,
-  phases: SmokePhase[],
-  settle: {
-    /**
-     * The run's settle wait, which is a no-op unless this run opened the app and has not waited
-     * yet (@ref ./phases §APP_SETTLE_MS).
-     */
-    settleAsync: () => Promise<void>;
-    /**
-     * What the picture is a picture *of*, as far as this run can tell.
-     *
-     * @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it
-     * Three cases, because a reader believes a screenshot without checking it and all three look
-     * plausible: the project's own screen, the **dev launcher's** screen — which is what a
-     * development build shows when the loading link was opened and the bundle did not arrive — and
-     * a device with neither on it.
-     */
-    showing: 'project' | 'dev-launcher' | 'device';
-    /** The run's own device probe, cached, so this phase never resolves a second one (F98). */
-    deviceAsync: () => Promise<{
-      deviceId: string | null;
-      backend: DeviceBackend | null;
-      reason: string | null;
-    }>;
-  }
-): Promise<CaptureOutcome> {
-  const at = deps.now();
-  const push = (status: SmokePhaseStatus, reason: string | null) =>
-    phases.push({ id: 'screenshot', status, ms: deps.now() - at, reason });
-
-  if (!options.screenshot) {
-    const skipped = noScreenshot('no screenshot was taken (--no-screenshot)');
-    push('skipped', skipped.reason);
-    return { screenshot: skipped, deviceId, deviceBackend };
-  }
-
-  let device = deviceId;
-  let backend = deviceBackend;
-  if (device == null) {
-    const probe = await settle.deviceAsync();
-    backend = probe.backend;
-    if (probe.deviceId == null) {
-      const skipped = noScreenshot(
-        `no screenshot was taken: ${probe.reason ?? 'no booted device was found to photograph'}`
-      );
-      push('skipped', skipped.reason);
-      // Null, not the probe's backend: nothing was found, so there is no device for the run to name
-      // and a backend on its own would say a device was used.
-      return { screenshot: skipped, deviceId: null, deviceBackend: null };
-    }
-    device = probe.deviceId;
-  }
-
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-  //
-  // Here rather than at the top of this function, because everything above it is a decision and
-  // this is where the work starts: a run with `--no-screenshot`, or one with no device to
-  // photograph, has no wait to announce. The settle below is the wait, which is why the line comes
-  // before it and not before the capture.
-  deps.progress('screenshot', null);
-
-  // @ref ./phases §APP_SETTLE_MS — friction run 6, F57. Usually already done: the runtime read
-  // needs the same settle and asks for it first, on every path that reaches it.
-  await settle.settleAsync();
-
-  const result = await deps.captureScreenshot(device, backend);
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app. A picture is the
-  // one piece of evidence a reader believes without checking, and a home screen, a dev launcher
-  // and an app that failed to render look equally plausible. An `ok` beside a run whose app never
-  // connected has to say what it is a picture *of*.
-  push(result.ok ? 'ok' : 'skipped', result.ok ? showingReason(settle.showing) : result.reason);
-  // Handed back, and this is F98. A healthy app opens nothing — the `app` phase finds it already
-  // connected and the `route` phase is skipped — so before this the two steps that set the run's
-  // device fields never ran, and a run that had photographed a **billed cloud session** reported
-  // `deviceBackend: null` next to the `eas simulator:exec … screenshot` that took the picture
-  // [observed — live cloud, 2026-08-27]. The device a run used is a fact of the run, whichever phase
-  // found it.
-  return { screenshot: result, deviceId: device, deviceBackend: backend };
-}
-
-/** Add a finding to a phase's sentence, after the one already there. */
-function appendReason(phase: SmokePhase, finding: string): void {
-  phase.reason = phase.reason == null ? finding : `${phase.reason} · ${finding}`;
-}
-
-/** What an `ok` screenshot says it captured, or null when it is the app itself. */
-function showingReason(showing: 'project' | 'dev-launcher' | 'device'): string | null {
-  switch (showing) {
-    case 'project':
-      return null;
-    case 'dev-launcher':
-      return `the dev launcher's own screen — the loading link was opened and this project's bundle never ran, so this is not a picture of the app`;
-    case 'device':
-      return `the device's screen — no app of this project was connected, so this is not a picture of it running`;
-  }
-}
-
-function firstLine(text: string): string {
-  return text.split('\n')[0] ?? '';
-}
-
-/** The bundler's own error, as one sentence with the location in it. */
-function bundleErrorSentence(bundle: BundleCheckResult): string {
-  const where = [bundle.error?.filename, bundle.error?.lineNumber, bundle.error?.column]
-    .filter((part) => part != null)
-    .join(':');
-  return `${where ? `${where}: ` : ''}${bundle.error?.message ?? 'the bundler reported an error'}`;
 }

@@ -6,7 +6,8 @@
 import { stripVTControlCharacters } from 'node:util';
 
 import { formatSmokeResult, smokeResultToJson } from '../format';
-import { noReload, noScreenshot, type SmokeRun } from '../phases';
+import type { SmokeRun } from '../phases';
+import { noReload, noScreenshot } from '../results';
 import type { SmokeOptions } from '../resolveOptions';
 
 function options(overrides: Partial<SmokeOptions> = {}): SmokeOptions {
