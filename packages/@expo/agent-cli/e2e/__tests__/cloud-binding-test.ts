@@ -352,7 +352,9 @@ it('round-trips guarded cloud target argv', async () => {
   const root = await project();
   const sessionId = 'argv-session';
   await writeCloudSessionFileAsync(root, sessionId);
-  const env = envFor(root);
+  // Each process of the chain records its start and exit, so a run that hangs names the one that did.
+  const trace = path.join(root, 'hop-trace.log');
+  const env = { ...envFor(root), STUB_HOP_TRACE: trace };
   const easCli = resolveEasCli(root, { env });
   expect(easCli).not.toBeNull();
 
@@ -368,15 +370,22 @@ it('round-trips guarded cloud target argv', async () => {
   const target = [
     process.execPath,
     '-e',
-    'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
+    "require('fs').appendFileSync(process.env.STUB_HOP_TRACE, Date.now() + ' target ' + process.pid + ' start\\n'); process.stdout.write(JSON.stringify(process.argv.slice(1)))",
     ...targetArgs,
   ];
   const accepted = await spawnSubprocessAsync(
     easCli!.command,
     easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
-    { cwd: root, env }
+    { cwd: root, env, timeoutMs: 60_000 }
   );
-  expect(accepted.exitCode, accepted.stderr).toBe(0);
+  const output = [
+    `stdout: ${accepted.stdout}`,
+    `stderr: ${accepted.stderr}`,
+    `trace:\n${fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8') : '(none)'}`,
+  ].join('\n');
+  console.log(`TEMP-HOP-TRACE\n${output}`);
+  expect(accepted.timedOut ?? false, output).toBe(false);
+  expect(accepted.exitCode, output).toBe(0);
   expect(JSON.parse(accepted.stdout)).toEqual(targetArgs);
 });
 // A STOPPED session is no longer listed as usable, so the probe asks for availability before it

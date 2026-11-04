@@ -18,6 +18,7 @@
 // Steered with environment variables, so one script covers every path:
 //
 // Everything
+// - STUB_HOP_TRACE: a file each process of a guarded `simulator:exec` appends its start and exit to
 // - STUB_EAS_CRASH=1 (alias STUB_SIM_CRASH): behave like a binary that is not the EAS CLI — exit
 //   101 with a Rust backtrace and no Expo vocabulary (`src/utils/wrapperCrash.ts`)
 //
@@ -98,6 +99,9 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const trace = (event) =>
+  process.env.STUB_HOP_TRACE &&
+  fs.appendFileSync(process.env.STUB_HOP_TRACE, `${Date.now()} eas ${process.pid} ${event}\n`);
 
 const LOG_NAME = 'stub-eas-invocations.jsonl';
 /** Where sessions this stub started are remembered for `simulator:list`, under the cwd. */
@@ -532,10 +536,12 @@ if (command === 'simulator:exec') {
     // file as EAS. The npx stub routes agent-device to this file as __controller, after cmd.exe has
     // decoded the Windows shim arguments just as it would for the real package runner.
     const env = loadSessionEnv({ ...process.env });
+    trace('guard spawn');
     const result = require('node:child_process').spawnSync(args[1], args.slice(2), {
       env,
       stdio: 'inherit',
     });
+    trace(`guard exit ${result.status} ${result.error?.message ?? ''}`);
     if (result.error) process.stderr.write(result.error.message + '\n');
     process.exit(result.status ?? 1);
   }

@@ -171,6 +171,9 @@ export async function installStubEasRunnerAsync(
     `#!/usr/bin/env node
 'use strict';
 const args = process.argv.slice(2);
+const trace = (event) =>
+  process.env.STUB_HOP_TRACE &&
+  require('node:fs').appendFileSync(process.env.STUB_HOP_TRACE, Date.now() + ' runner ' + process.pid + ' ' + event + '\\n');
 ${
   logFile
     ? `require('node:fs').appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({ args, runner: process.env.STUB_RUNNER_NAME || null }) + '\\n');`
@@ -180,6 +183,7 @@ ${
 const rest = args[0] === '--yes' ? args.slice(1) : args;
 const spec = rest[0] || '';
 const isAgentDevice = ${agentDeviceController} && spec === 'agent-device@latest';
+trace('start ' + spec);
 if (!isAgentDevice && spec !== 'eas-cli') {
   process.stderr.write('stub runner: no such package ' + JSON.stringify(spec) + '\\n');
   process.exit(1);
@@ -189,6 +193,7 @@ const result = require('node:child_process').spawnSync(
   [${JSON.stringify(easScript)}, ...(isAgentDevice ? ['__controller'] : []), ...rest.slice(1)],
   { stdio: 'inherit' }
 );
+trace('exit ' + result.status + ' ' + (result.error ? result.error.message : ''));
 process.exit(result.status === null ? 1 : result.status);
 `
   );
