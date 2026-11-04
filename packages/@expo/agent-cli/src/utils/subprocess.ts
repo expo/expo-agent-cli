@@ -3,7 +3,6 @@
 // covers the ones `@expo/agent-cli` has to find for itself (`create-expo`, `eas`) and the two output modes
 // a command needs: hand the terminal over, or capture what the tool printed.
 import { spawn } from 'child_process';
-import path from 'path';
 
 import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/promptShape';
 import { env } from './env';
