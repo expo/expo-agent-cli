@@ -2,7 +2,6 @@
 // "What must rerun after installing this package?" — the same classification the decision table
 // uses, consumed right after `expo install`.
 import { readAppConfigPlugins } from './appConfig';
-import { isExpoGoNativeModule } from './expoGoModules';
 import {
   describeNativeCode,
   hasNativeCode,
@@ -14,7 +13,6 @@ import {
   loadBundledNativeModulesAsync,
   parsePackageName,
   readProjectPackageJsonAsync,
-  readSdkVersionAsync,
   resolvePackageRootAsync,
 } from './nodeModules';
 import type { InstallImpact, InstallImpactReport } from './types';
@@ -36,12 +34,11 @@ export async function classifyInstallImpactAsync(
     return [];
   }
 
-  const [bundledNativeModules, appConfig, nativeDirs, packageJson, sdkVersion] = await Promise.all([
+  const [bundledNativeModules, appConfig, nativeDirs, packageJson] = await Promise.all([
     loadBundledNativeModulesAsync(projectRoot),
     readAppConfigPlugins(projectRoot),
     readProjectNativeDirsAsync(projectRoot),
     readProjectPackageJsonAsync(projectRoot),
-    readSdkVersionAsync(projectRoot),
   ]);
 
   const isBare = nativeDirs.ios || nativeDirs.android;
@@ -87,7 +84,7 @@ export async function classifyInstallImpactAsync(
       : isConfigPlugin
         ? 'config-plugin'
         : 'js-only';
-    const expoGoBundled = isExpoGoNativeModule(packageName, { sdkVersion, bundledNativeModules });
+    const expoGoBundled = !!bundledNativeModules?.[packageName];
 
     reports.push({
       packageName,

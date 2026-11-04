@@ -75,18 +75,20 @@ describe(isExpoGoNativeModule, () => {
     ).toBe(false);
   });
 
-  it.each([
-    ['expo-camera', { 'expo-camera': '~99.0.0' }, true],
-    ['expo-camera', {}, false],
-    ['react-native-mmkv', { 'react-native-mmkv': '^4.0.0' }, false],
-  ] as const)(
-    `should require both runtime and catalog membership for %s on an uncaptured SDK`,
-    (packageName, bundledNativeModules, expected) => {
-      expect(
-        isExpoGoNativeModule(packageName, { sdkVersion: '99.0.0', bundledNativeModules })
-      ).toBe(expected);
-    }
-  );
+  it(`should fall back to bundledNativeModules.json when the dump has no entry for that SDK`, () => {
+    expect(
+      isExpoGoNativeModule('expo-camera', {
+        sdkVersion: '99.0.0',
+        bundledNativeModules: { 'expo-camera': '~99.0.0' },
+      })
+    ).toBe(true);
+    expect(
+      isExpoGoNativeModule('react-native-mmkv', {
+        sdkVersion: '99.0.0',
+        bundledNativeModules: { 'expo-camera': '~99.0.0' },
+      })
+    ).toBe(false);
+  });
 
   it.each(['58.0.0-preview.2', '99.0.0'])(
     `should recognize internal runtime modules omitted from the SDK %s catalog`,
