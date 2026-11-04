@@ -39,7 +39,7 @@ import semver from 'semver';
 import { CommandError } from './errors';
 import { type Invoker } from './invoker';
 import { resolvePackageRunnerForProject } from './packageRunner';
-import { findExecutableOnPath, pathFromEnv } from './pathLookup';
+import { findExecutableOnPath } from './pathLookup';
 
 /** The `eas` invocation to spawn. */
 export interface EasCli {
@@ -225,12 +225,12 @@ function declaresEasCli(field: unknown): boolean {
  * Sync, never spawns, and never throws: anything unreadable reads as "no global eas-cli", which
  * costs the speed and never the command.
  */
-export function findGlobalEasCli({ pathEnv }: { pathEnv?: string } = {}): string | null {
+export function findGlobalEasCli({ env }: { env?: NodeJS.ProcessEnv } = {}): string | null {
   // Not supported on Windows: npm installs an `eas.cmd` shim there, not a symlink into the package.
   if (process.platform === 'win32') {
     return null;
   }
-  const bin = findExecutableOnPath(EAS_CLI_BIN, { pathEnv });
+  const bin = findExecutableOnPath(EAS_CLI_BIN, { env });
   if (!bin) {
     return null;
   }
@@ -275,17 +275,16 @@ function nearestPackageJson(file: string): { name?: unknown; version?: unknown }
  * caller that has to tell "nothing here can ask EAS" apart from "EAS said no" uses
  * {@link resolveEasCli}.
  *
- * @param pathEnv `PATH` to search for the runner, for tests that must not depend on the machine's own.
- *   Defaults to the `PATH` of `env`.
- * @param env the environment to read the invoking runner from, for the same reason.
+ * @param env the environment to read the invoking runner and `PATH` from, for tests that must not
+ *   depend on the machine's own.
  */
 export function easCliInvocation(
   projectRoot: string,
-  { env, pathEnv = env && pathFromEnv(env) }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): EasCli {
-  const runner = resolvePackageRunnerForProject(projectRoot, { env, pathEnv });
+  const runner = resolvePackageRunnerForProject(projectRoot, { env });
   const pinned = projectDeclaresEasCli(projectRoot);
-  const globalEas = pinned ? null : findGlobalEasCli({ pathEnv });
+  const globalEas = pinned ? null : findGlobalEasCli({ env });
   if (globalEas) {
     return {
       command: globalEas,
@@ -324,27 +323,26 @@ export function easCliInvocation(
  */
 export function resolveEasCli(
   projectRoot: string,
-  { env, pathEnv = env && pathFromEnv(env) }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): EasCli | null {
-  const easCli = easCliInvocation(projectRoot, { pathEnv, env });
+  const easCli = easCliInvocation(projectRoot, { env });
   if (easCli.global || path.isAbsolute(easCli.command)) {
     return easCli;
   }
-  return findExecutableOnPath(easCli.command, { pathEnv }) ? easCli : null;
+  return findExecutableOnPath(easCli.command, { env }) ? easCli : null;
 }
 
 /**
  * Resolve the EAS CLI for a caller that cannot do its job without one.
  *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own. Defaults to
- *   the `PATH` of `env`.
+ * @param env the environment to read `PATH` from, for tests that must not depend on the machine's own.
  * @throws {CommandError} `EAS_CLI_MISSING` when no package runner can be reached.
  */
 export function resolveEasCliOrThrow(
   projectRoot: string,
-  { env, pathEnv = env && pathFromEnv(env) }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): EasCli {
-  const resolved = resolveEasCli(projectRoot, { pathEnv, env });
+  const resolved = resolveEasCli(projectRoot, { env });
   if (resolved) {
     return resolved;
   }

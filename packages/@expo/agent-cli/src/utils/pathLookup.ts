@@ -2,9 +2,6 @@ import path from 'path';
 
 import { fileExistsSync } from './dir';
 
-/** Extensions of the shims npm and pnpm write for a package bin on Windows. */
-export const BATCH_FILE = /\.(cmd|bat)$/i;
-
 /**
  * The `PATH` a child spawned with `env` searches.
  *
@@ -42,15 +39,16 @@ function executableNames(name: string): string[] {
  * entry can still answer. `throwIfNoEntry: false` covers only `ENOENT` [observed — Node 26.5,
  * 2026-10-16].
  *
- * @param pathEnv `PATH` to search: the child's, or a test's that must not depend on the machine's.
+ * @param env the environment whose `PATH` is searched: a child's, or a test's that must not depend
+ *   on the machine's.
  * @returns the absolute path of the executable, or `null` when no entry of `PATH` holds it.
  */
 export function findExecutableOnPath(
   name: string,
-  { pathEnv = pathFromEnv() }: { pathEnv?: string } = {}
+  { env = process.env }: { env?: NodeJS.ProcessEnv } = {}
 ): string | null {
   const paths = process.platform === 'win32' ? path.win32 : path.posix;
-  for (const dir of pathEnv.split(paths.delimiter)) {
+  for (const dir of pathFromEnv(env).split(paths.delimiter)) {
     if (!dir) {
       continue;
     }

@@ -105,7 +105,7 @@ function spawnCaptureNowAsync(
 ): Promise<SpawnCaptureBufferResult> {
   return new Promise<SpawnCaptureBufferResult>((resolve, reject) => {
     // A `fingerprint` resolved inside a project is a batch shim on Windows, which needs `cmd.exe`.
-    const target = resolveSpawnTarget(command, args);
+    const target = resolveSpawnTarget(command, args, process.env);
     assertSubprocessDeadline();
     const child = spawn(target.command, target.args, {
       cwd: options.cwd,

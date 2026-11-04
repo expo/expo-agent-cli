@@ -18,7 +18,7 @@ import path from 'path';
 
 import { fileExistsSync } from './dir';
 import { detectInvoker, type Invoker } from './invoker';
-import { findExecutableOnPath, pathFromEnv } from './pathLookup';
+import { findExecutableOnPath } from './pathLookup';
 
 /** The runner to spawn a published package with. */
 export interface PackageRunner {
@@ -50,13 +50,10 @@ export function resetPackageRunnerCache(): void {
  * `npx` stays the default and stays a bare name: it is resolved through `PATH` by the spawn, the
  * way it always was, and nothing about a machine that never mentioned Bun changes.
  *
- * @param env the environment to read, for tests that must not depend on this process's own.
- * @param pathEnv `PATH` to search, for the same reason. Defaults to the `PATH` of `env`.
+ * @param env the environment to read the invoker and `PATH` from, for tests that must not depend
+ *   on this process's own.
  */
-export function resolvePackageRunner({
-  env,
-  pathEnv = env && pathFromEnv(env),
-}: { env?: NodeJS.ProcessEnv; pathEnv?: string } = {}): PackageRunner {
+export function resolvePackageRunner({ env }: { env?: NodeJS.ProcessEnv } = {}): PackageRunner {
   if (cached) {
     return cached;
   }
@@ -73,7 +70,7 @@ export function resolvePackageRunner({
 
   // The absolute path rather than the bare name, so the binary that answered the question is the
   // binary that runs — the same discipline `resolveEasCli` and `resolveExpoCli` follow.
-  const bunx = findExecutableOnPath('bunx', { pathEnv });
+  const bunx = findExecutableOnPath('bunx', { env });
   cached = bunx ? { runner: 'bunx', command: bunx } : npx;
   return cached;
 }
@@ -141,13 +138,13 @@ export function projectUsesBun(projectRoot: string): boolean {
  */
 export function resolvePackageRunnerForProject(
   projectRoot: string,
-  { env, pathEnv = env && pathFromEnv(env) }: { env?: NodeJS.ProcessEnv; pathEnv?: string } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): PackageRunner {
-  const fromProcess = resolvePackageRunner({ env, pathEnv });
+  const fromProcess = resolvePackageRunner({ env });
   if (fromProcess.runner === 'bunx' || !projectUsesBun(projectRoot)) {
     return fromProcess;
   }
-  const bunx = findExecutableOnPath('bunx', { pathEnv });
+  const bunx = findExecutableOnPath('bunx', { env });
   return bunx ? { runner: 'bunx', command: bunx } : fromProcess;
 }
 

@@ -174,7 +174,7 @@ function spawnNowAsync(
     // spelling out `process.env` here would freeze a copy for no reason.
     const spawnEnv = childEnv ? { ...process.env, ...childEnv } : undefined;
     // `eas`, `create-expo` and `npx` all resolve to a batch shim on Windows, which needs `cmd.exe`.
-    const target = resolveSpawnTarget(command, args, spawnEnv);
+    const target = resolveSpawnTarget(command, args, spawnEnv ?? process.env);
     const child = spawn(target.command, target.args, {
       cwd,
       stdio: stdioFor(output),

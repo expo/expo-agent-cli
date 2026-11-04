@@ -16,27 +16,27 @@ describe(findExecutableOnPath, () => {
   it(`should return the first directory of PATH that holds the executable`, () => {
     vol.fromJSON({ '/usr/local/bin/eas': '#!/bin/sh', '/opt/bin/eas': '#!/bin/sh' });
 
-    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/opt/bin', '/usr/local/bin') })).toBe(
-      path.join('/opt/bin', 'eas')
-    );
+    expect(
+      findExecutableOnPath('eas', { env: { PATH: pathOf('/opt/bin', '/usr/local/bin') } })
+    ).toBe(path.join('/opt/bin', 'eas'));
   });
 
   it(`should skip entries of PATH that do not hold the executable`, () => {
     vol.fromJSON({ '/usr/local/bin/eas': '#!/bin/sh' });
 
-    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/nope', '', '/usr/local/bin') })).toBe(
-      path.join('/usr/local/bin', 'eas')
-    );
+    expect(
+      findExecutableOnPath('eas', { env: { PATH: pathOf('/nope', '', '/usr/local/bin') } })
+    ).toBe(path.join('/usr/local/bin', 'eas'));
   });
 
   it(`should return null when nothing on PATH provides the executable`, () => {
     vol.fromJSON({ '/usr/local/bin/expo': '#!/bin/sh' });
 
-    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/usr/local/bin') })).toBeNull();
+    expect(findExecutableOnPath('eas', { env: { PATH: pathOf('/usr/local/bin') } })).toBeNull();
   });
 
   it(`should return null for an empty PATH`, () => {
-    expect(findExecutableOnPath('eas', { pathEnv: '' })).toBeNull();
+    expect(findExecutableOnPath('eas', { env: { PATH: '' } })).toBeNull();
   });
 
   it(`should skip an entry of PATH whose stat throws, and keep looking`, () => {
@@ -56,10 +56,10 @@ describe(findExecutableOnPath, () => {
       return realStat(file, options);
     }) as typeof fs.statSync);
 
-    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/loop', '/usr/local/bin') })).toBe(
+    expect(findExecutableOnPath('eas', { env: { PATH: pathOf('/loop', '/usr/local/bin') } })).toBe(
       path.join('/usr/local/bin', 'eas')
     );
-    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/loop') })).toBeNull();
+    expect(findExecutableOnPath('eas', { env: { PATH: pathOf('/loop') } })).toBeNull();
     vi.mocked(fs.statSync).mockRestore();
   });
 });
@@ -77,7 +77,7 @@ describe('on windows', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
 
-    expect(findExecutableOnPath('foo', { pathEnv: 'C:\\none;C:\\tools' })).toBe(
+    expect(findExecutableOnPath('foo', { env: { PATH: 'C:\\none;C:\\tools' } })).toBe(
       'C:\\tools\\foo.bat'
     );
   });

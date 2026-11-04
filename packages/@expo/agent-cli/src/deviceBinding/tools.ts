@@ -43,7 +43,7 @@ function spawnEmulator(emulator: string, args: string[]): EmulatorHandle {
     spawnError ?? (output === 'ignore' ? null : lastLineOf(log)) ?? 'it printed nothing';
   let child: ReturnType<typeof spawn>;
   try {
-    const target = resolveSpawnTarget(emulator, args);
+    const target = resolveSpawnTarget(emulator, args, process.env);
     child = spawn(target.command, target.args, {
       detached: true,
       stdio: ['ignore', output, output],

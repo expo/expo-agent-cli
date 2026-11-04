@@ -1,6 +1,6 @@
 import path from 'path';
 
-import { BATCH_FILE, findExecutableOnPath, pathFromEnv } from './pathLookup';
+import { findExecutableOnPath } from './pathLookup';
 
 // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md §Constraints — the Expo CLI family is invoked as
 // subprocesses, so how a platform starts a process is this package's problem.
@@ -10,6 +10,9 @@ import { BATCH_FILE, findExecutableOnPath, pathFromEnv } from './pathLookup';
 // paper over that; since the fix for CVE-2024-27980 (Node 18.20, 20.12, 21.7) `spawn` throws
 // `EINVAL` for a `.cmd`/`.bat` target unless a shell is asked for. So on Windows every Expo-family
 // CLI has to be started through `cmd.exe`, which is what this module works out.
+
+/** Extensions of the shims npm and pnpm write for a package bin on Windows. */
+const BATCH_FILE = /\.(cmd|bat)$/i;
 
 export interface SpawnTarget {
   command: string;
@@ -34,7 +37,7 @@ export interface SpawnTarget {
 export function resolveSpawnTarget(
   command: string,
   args: string[],
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv
 ): SpawnTarget {
   if (process.platform !== 'win32') {
     return { command, args, shell: false };
@@ -45,7 +48,7 @@ export function resolveSpawnTarget(
   // and throw EINVAL (CVE-2024-27980).
   const resolved = /[\\/]/.test(command)
     ? command
-    : (findExecutableOnPath(command, { pathEnv: pathFromEnv(env) }) ?? command);
+    : (findExecutableOnPath(command, { env }) ?? command);
   if (!BATCH_FILE.test(resolved)) {
     return { command: resolved, args, shell: false };
   }

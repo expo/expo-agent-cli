@@ -39,23 +39,23 @@ export interface CreateLaunchCli {
  * package's dependencies at its root, and a repository that pins a version pins it for the packages
  * inside it — so a hoisted copy has to beat the machine's own `PATH` entry (F113, wave 28).
  *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
+ * @param env the environment to read `PATH` from, for tests that must not depend on the machine's own.
  */
 export function resolveCreateLaunchCli(
   projectRoot: string,
-  { pathEnv }: { pathEnv?: string } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): CreateLaunchCli {
   const projectBin = resolveProjectBin(projectRoot, 'create-launch');
   if (projectBin) {
     return { command: projectBin, args: [] };
   }
 
-  const pathBin = findExecutableOnPath('create-launch', { pathEnv });
+  const pathBin = findExecutableOnPath('create-launch', { env });
   if (pathBin) {
     return { command: pathBin, args: [] };
   }
 
-  const { command } = resolvePackageRunner({ pathEnv });
+  const { command } = resolvePackageRunner({ env });
   return { command, args: ['create-launch@latest'] };
 }
 

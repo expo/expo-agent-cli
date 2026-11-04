@@ -100,11 +100,11 @@ const EXPO_CLI_PACKAGE = 'expo';
  * Still async, and still the async one every caller awaits: the signature is the contract of a
  * forwarded command, and narrowing it to sync would churn every call site for nothing.
  *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
+ * @param env the environment to read `PATH` from, for tests that must not depend on the machine's own.
  */
 export async function resolveAuthCliAsync(
   projectRoot: string,
-  { pathEnv }: { pathEnv?: string } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): Promise<AuthCli> {
   const projectExpo = projectBin(projectRoot, 'expo');
   if (projectExpo) {
@@ -114,7 +114,7 @@ export async function resolveAuthCliAsync(
   // The ungated invocation, because this function's contract is to always answer with something to
   // spawn. When no runner is on `PATH` the spawn fails with ENOENT, and what the runner said is a
   // truer sentence than any guess this module could make.
-  const easCli = easCliInvocation(projectRoot, { pathEnv });
+  const easCli = easCliInvocation(projectRoot, { env });
   if (easCli.global) {
     return { tool: 'eas', source: 'global-eas', command: easCli.command, prefixArgs: [] };
   }
@@ -157,18 +157,18 @@ function projectBin(projectRoot: string, name: string): string | null {
  * The runner comes from `resolvePackageRunner`, so a Bun user gets `bunx expo` rather than npm's
  * exec (`src/utils/packageRunner.ts`).
  *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
+ * @param env the environment to read `PATH` from, for tests that must not depend on the machine's own.
  */
 export function resolveRegisterCli(
   projectRoot: string,
-  { pathEnv }: { pathEnv?: string } = {}
+  { env }: { env?: NodeJS.ProcessEnv } = {}
 ): AuthCli {
   const projectExpo = projectBin(projectRoot, 'expo');
   if (projectExpo) {
     return { tool: 'expo', source: 'project-expo', command: projectExpo, prefixArgs: [] };
   }
 
-  const resolved = resolvePackageRunner({ pathEnv });
+  const resolved = resolvePackageRunner({ env });
   return {
     tool: 'expo',
     source: 'runner-expo',

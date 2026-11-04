@@ -34,7 +34,7 @@ export function guardRefusal(result: {
 export function guardedCloudArgs(args: string[], sessionId: string): string[] {
   if (!sessionId)
     throw new Error('guardedCloudArgs needs a session id, which is a bug in this CLI');
-  const target = resolveSpawnTarget(args[1]!, args.slice(2));
+  const target = resolveSpawnTarget(args[1]!, args.slice(2), process.env);
   return [
     args[0]!,
     process.execPath,

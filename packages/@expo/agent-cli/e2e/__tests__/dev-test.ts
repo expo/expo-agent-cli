@@ -32,6 +32,7 @@ import {
   installStubXcrunAsync,
   killBoundEmulatorsAsync,
 } from './installedAppStubs';
+import { pathFromEnv } from '../../src/utils/pathLookup';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
@@ -1316,7 +1317,7 @@ describe('@expo/agent-cli dev', () => {
       const { binDir, calls: readXcrun } = await installStubXcrunAsync(first!);
       const home = expoHomeOf(first);
       const env = {
-        ...pathEnvVars(`${binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`),
+        ...pathEnvVars(`${binDir}${path.delimiter}${pathFromEnv()}`),
         __UNSAFE_EXPO_HOME_DIRECTORY: home,
         AGENT_CLI_NO_DEVICE: '0',
       };

@@ -351,7 +351,7 @@ function runScreenshotAsync(
       }
     }
 
-    const target = resolveSpawnTarget(command.bin, command.args);
+    const target = resolveSpawnTarget(command.bin, command.args, process.env);
     const child = spawn(target.command, target.args, {
       stdio: ['ignore', fd ?? 'ignore', 'pipe'],
       shell: target.shell,

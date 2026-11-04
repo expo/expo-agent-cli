@@ -48,7 +48,7 @@ describe(resolveCreateLaunchCli, () => {
       '/usr/local/bin/create-launch': '#!/bin/sh',
     });
 
-    expect(resolveCreateLaunchCli(projectRoot, { pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateLaunchCli(projectRoot, { env: { PATH: '/usr/local/bin' } })).toEqual({
       command: path.join(projectRoot, 'node_modules', '.bin', 'create-launch'),
       args: [],
     });
@@ -60,7 +60,7 @@ describe(resolveCreateLaunchCli, () => {
       [path.join(projectRoot, 'node_modules', '.bin', 'create-launch.cmd')]: '',
     });
 
-    expect(resolveCreateLaunchCli(projectRoot, { pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateLaunchCli(projectRoot, { env: { PATH: '/usr/local/bin' } })).toEqual({
       command: path.join(projectRoot, 'node_modules', '.bin', 'create-launch.cmd'),
       args: [],
     });
@@ -74,7 +74,7 @@ describe(resolveCreateLaunchCli, () => {
     const hoisted = path.join(workspace, 'node_modules', '.bin', 'create-launch');
     vol.fromJSON({ [hoisted]: '#!/bin/sh', '/usr/local/bin/create-launch': '#!/bin/sh' });
 
-    expect(resolveCreateLaunchCli(app, { pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateLaunchCli(app, { env: { PATH: '/usr/local/bin' } })).toEqual({
       command: hoisted,
       args: [],
     });
@@ -83,14 +83,14 @@ describe(resolveCreateLaunchCli, () => {
   it(`should fall back to a create-launch on PATH`, () => {
     vol.fromJSON({ '/usr/local/bin/create-launch': '#!/bin/sh' });
 
-    expect(resolveCreateLaunchCli(projectRoot, { pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateLaunchCli(projectRoot, { env: { PATH: '/usr/local/bin' } })).toEqual({
       command: path.join('/usr/local/bin', 'create-launch'),
       args: [],
     });
   });
 
   it(`should fall back to the registry, so no install step is needed`, () => {
-    expect(resolveCreateLaunchCli(projectRoot, { pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateLaunchCli(projectRoot, { env: { PATH: '/usr/local/bin' } })).toEqual({
       command: expect.stringMatching(/^npx(\.cmd)?$/),
       args: ['create-launch@latest'],
     });

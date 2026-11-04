@@ -40,7 +40,7 @@ describe(resolvePackageRunner, () => {
   it(`should run packages with bunx when bunx started this process`, () => {
     vol.fromJSON({ [bunxPath]: '' });
 
-    expect(resolvePackageRunner({ env: BUNX_ENV, pathEnv: binDir })).toEqual({
+    expect(resolvePackageRunner({ env: { ...BUNX_ENV, PATH: binDir } })).toEqual({
       runner: 'bunx',
       command: bunxPath,
     });
@@ -49,7 +49,7 @@ describe(resolvePackageRunner, () => {
   it(`should run packages with npx when npx started this process`, () => {
     vol.fromJSON({ [bunxPath]: '' });
 
-    expect(resolvePackageRunner({ env: NPX_ENV, pathEnv: binDir })).toEqual({
+    expect(resolvePackageRunner({ env: { ...NPX_ENV, PATH: binDir } })).toEqual({
       runner: 'npx',
       command: npxCommand,
     });
@@ -58,7 +58,7 @@ describe(resolvePackageRunner, () => {
   // Detection says which runner *started* this process, which is not the same as "that runner is
   // reachable from here". A `bunx` that cannot be found is not a `bunx` that can be spawned.
   it(`should fall back to npx when bun started this process but bunx is not on PATH`, () => {
-    expect(resolvePackageRunner({ env: BUNX_ENV, pathEnv: binDir })).toEqual({
+    expect(resolvePackageRunner({ env: { ...BUNX_ENV, PATH: binDir } })).toEqual({
       runner: 'npx',
       command: npxCommand,
     });
@@ -67,10 +67,10 @@ describe(resolvePackageRunner, () => {
   it(`should answer once per process`, () => {
     vol.fromJSON({ [bunxPath]: '' });
 
-    const first = resolvePackageRunner({ env: BUNX_ENV, pathEnv: binDir });
+    const first = resolvePackageRunner({ env: { ...BUNX_ENV, PATH: binDir } });
     // The environment does not change under a running command, so neither does the answer — even
     // asked with an environment that would decide differently.
-    expect(resolvePackageRunner({ env: NPX_ENV, pathEnv: binDir })).toEqual(first);
+    expect(resolvePackageRunner({ env: { ...NPX_ENV, PATH: binDir } })).toEqual(first);
   });
 });
 
