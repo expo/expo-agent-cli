@@ -25,7 +25,6 @@ import {
   CLOUD_SESSION_LIST_LIMIT,
   CLOUD_SESSION_MAX_PAGES,
   CLOUD_SIMULATOR_WAITLIST_URL,
-  DRIVABLE_SESSION_TYPE,
   buildAvailabilityArgs,
   buildCloudAlertArgs,
   cloudExecArgs,
@@ -36,16 +35,19 @@ import {
   captureCloudScreenshotAsync,
   isOpenInAppAlert,
   openUrlOnCloudSimulatorAsync,
-  parseAvailabilityJson,
-  parseSessionIdFromEnvFile,
-  parseSessionListJson,
   probeCloudSessionAsync,
   readCloudSessionIdSync,
   readControllerError,
-  selectCloudSession,
   type CloudRunResult,
-  type CloudSessionInfo,
 } from '../cloudSimulator';
+import {
+  DRIVABLE_SESSION_TYPE,
+  parseAvailabilityJson,
+  parseSessionIdFromEnvFile,
+  parseSessionListJson,
+  selectCloudSession,
+  type CloudSessionInfo,
+} from '../cloudSessionList';
 import {
   cloudNeedsTunnelError,
   cloudSessionUnavailableError,

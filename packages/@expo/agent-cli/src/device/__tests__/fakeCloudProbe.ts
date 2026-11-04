@@ -1,10 +1,10 @@
 import {
   CLOUD_SIMULATOR_WAITLIST_URL,
   type CloudRunResult,
-  type CloudSessionInfo,
   type CloudSessionProbe,
   type LiveCloudSessionProbe,
 } from '../cloudSimulator';
+import type { CloudSessionInfo } from '../cloudSessionList';
 
 type SessionFields = Partial<CloudSessionInfo> & { id: string };
 
