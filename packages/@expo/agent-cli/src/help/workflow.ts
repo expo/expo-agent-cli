@@ -91,7 +91,7 @@ export const workflow: WorkflowStep[] = [
   },
   {
     // `Deploy` rather than `Release`: the step, the help group (`Deployment`) and the command
-    // itself then share one word [confirmed, 2026-08-28].
+    // itself then share one word.
     title: 'Deploy',
     rungs: [{ run: 'deploy', gets: 'publish the web app to EAS Hosting' }],
   },
