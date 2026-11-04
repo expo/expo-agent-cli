@@ -5,7 +5,8 @@ import path from 'path';
 import { stripVTControlCharacters } from 'util';
 
 import * as Log from '../log';
-import { findExecutableOnPath, spawnSubprocessAsync } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
+import { spawnSubprocessAsync } from '../utils/subprocess';
 import type { AgentInstallPlan, InstallCommand, PluginSetupResult } from './types';
 import { CLAUDE_PLUGIN, CODEX_PLUGIN, displayInstallCommand } from './installers';
 

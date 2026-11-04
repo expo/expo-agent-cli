@@ -3,7 +3,7 @@
 // constraint 5), and with the arguments that make it answer its own prompts.
 
 import { resolvePackageRunner } from '../utils/packageRunner';
-import { findExecutableOnPath } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
 import type { NewOptions } from './resolveOptions';
 
 /** The `create-expo` invocation to spawn. */

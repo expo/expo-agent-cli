@@ -6,7 +6,7 @@
 import { vol } from 'memfs';
 
 import { spawnCaptureAsync as spawnCaptureAsyncFn } from '../../utils/spawnCapture';
-import { findExecutableOnPath as findExecutableOnPathFn } from '../../utils/subprocess';
+import { findExecutableOnPath as findExecutableOnPathFn } from '../../utils/pathLookup';
 import { detectToolchainAsync, resetToolchainCache } from '../detect';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
@@ -21,7 +21,7 @@ vi.mock('os', async (importOriginal) => {
   return { ...mocked, default: mocked };
 });
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
-vi.mock('../../utils/subprocess', () => ({ findExecutableOnPath: vi.fn(() => null) }));
+vi.mock('../../utils/pathLookup', () => ({ findExecutableOnPath: vi.fn(() => null) }));
 
 /** The default Android SDK location on a Mac, which is where this machine's SDK actually is. */
 const MAC_SDK = '/home/dev/Library/Android/sdk';

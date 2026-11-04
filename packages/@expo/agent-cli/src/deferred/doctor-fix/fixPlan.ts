@@ -16,7 +16,7 @@ import { dirtyTrackedPathsAsync } from '../../checkpoint/git';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../../programName';
 import { directoryExistsSync, fileExistsSync } from '../../utils/dir';
 import { CommandError } from '../../utils/errors';
-import { findExecutableOnPath } from '../../utils/subprocess';
+import { findExecutableOnPath } from '../../utils/pathLookup';
 import { rejectUnsafeTarget, type TargetSafetyContext } from './fixSafety';
 import {
   stepsForTier,

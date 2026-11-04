@@ -39,7 +39,7 @@ import semver from 'semver';
 import { CommandError } from './errors';
 import { type Invoker } from './invoker';
 import { resolvePackageRunnerForProject } from './packageRunner';
-import { findExecutableOnPath } from './subprocess';
+import { findExecutableOnPath, pathFromEnv } from './pathLookup';
 
 /** The `eas` invocation to spawn. */
 export interface EasCli {
@@ -276,11 +276,12 @@ function nearestPackageJson(file: string): { name?: unknown; version?: unknown }
  * {@link resolveEasCli}.
  *
  * @param pathEnv `PATH` to search for the runner, for tests that must not depend on the machine's own.
+ *   Defaults to the `PATH` of `env`.
  * @param env the environment to read the invoking runner from, for the same reason.
  */
 export function easCliInvocation(
   projectRoot: string,
-  { pathEnv, env }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
+  { env, pathEnv = env && pathFromEnv(env) }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
 ): EasCli {
   const runner = resolvePackageRunnerForProject(projectRoot, { env, pathEnv });
   const pinned = projectDeclaresEasCli(projectRoot);
@@ -323,7 +324,7 @@ export function easCliInvocation(
  */
 export function resolveEasCli(
   projectRoot: string,
-  { pathEnv, env }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
+  { env, pathEnv = env && pathFromEnv(env) }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
 ): EasCli | null {
   const easCli = easCliInvocation(projectRoot, { pathEnv, env });
   if (easCli.global || path.isAbsolute(easCli.command)) {
@@ -335,12 +336,13 @@ export function resolveEasCli(
 /**
  * Resolve the EAS CLI for a caller that cannot do its job without one.
  *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
+ * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own. Defaults to
+ *   the `PATH` of `env`.
  * @throws {CommandError} `EAS_CLI_MISSING` when no package runner can be reached.
  */
 export function resolveEasCliOrThrow(
   projectRoot: string,
-  { pathEnv, env }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
+  { env, pathEnv = env && pathFromEnv(env) }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
 ): EasCli {
   const resolved = resolveEasCli(projectRoot, { pathEnv, env });
   if (resolved) {

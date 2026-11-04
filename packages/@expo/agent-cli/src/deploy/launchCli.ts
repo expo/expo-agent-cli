@@ -16,7 +16,8 @@ import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { resolveProjectBin } from '../utils/projectBin';
-import { findExecutableOnPath, spawnSubprocessAsync } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
+import { spawnSubprocessAsync } from '../utils/subprocess';
 import type { LaunchResult } from './types';
 
 /** The `create-launch` invocation to spawn. */

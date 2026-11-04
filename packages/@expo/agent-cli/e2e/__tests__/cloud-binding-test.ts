@@ -39,7 +39,7 @@ afterEach(async () => {
     });
   }
 });
-function envFor(root: string): Record<string, string> {
+function envFor(root: string) {
   return {
     ...stubExpoEnv(root),
     AGENT_CLI_NO_DEVICE: '0',
@@ -353,8 +353,7 @@ it('round-trips guarded cloud target argv', async () => {
   const sessionId = 'argv-session';
   await writeCloudSessionFileAsync(root, sessionId);
   const env = envFor(root);
-  // Resolved on the PATH the child gets, or this finds the machine's own global eas.
-  const easCli = easCliInvocation(root, { env, pathEnv: env['PATH'] });
+  const easCli = easCliInvocation(root, { env });
   expect(easCli).toMatchObject({ global: false, runner: 'npx' });
 
   const targetArgs = [

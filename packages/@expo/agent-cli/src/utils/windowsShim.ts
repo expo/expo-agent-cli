@@ -1,5 +1,6 @@
-import fs from 'fs';
 import path from 'path';
+
+import { BATCH_FILE, findExecutableOnPath, pathFromEnv } from './pathLookup';
 
 // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md §Constraints — the Expo CLI family is invoked as
 // subprocesses, so how a platform starts a process is this package's problem.
@@ -9,9 +10,6 @@ import path from 'path';
 // paper over that; since the fix for CVE-2024-27980 (Node 18.20, 20.12, 21.7) `spawn` throws
 // `EINVAL` for a `.cmd`/`.bat` target unless a shell is asked for. So on Windows every Expo-family
 // CLI has to be started through `cmd.exe`, which is what this module works out.
-
-/** Extensions of the shims npm and pnpm write for a package bin on Windows. */
-const BATCH_FILE = /\.(cmd|bat)$/i;
 
 export interface SpawnTarget {
   command: string;
@@ -45,7 +43,9 @@ export function resolveSpawnTarget(
   // A bare `npx` or `xcrun` is a `.cmd` shim once PATH/PATHEXT has answered. Resolve it here so
   // the batch-file rule below sees the shim, rather than leaving `spawn` to find it without a shell
   // and throw EINVAL (CVE-2024-27980).
-  const resolved = resolveBareCommandOnPath(command, env.PATH ?? env.Path ?? '');
+  const resolved = /[\\/]/.test(command)
+    ? command
+    : (findExecutableOnPath(command, { pathEnv: pathFromEnv(env) }) ?? command);
   if (!BATCH_FILE.test(resolved)) {
     return { command: resolved, args, shell: false };
   }
@@ -55,38 +55,6 @@ export function resolveSpawnTarget(
     args: args.map(escapeArgumentForCmd),
     shell: true,
   };
-}
-
-/**
- * The file PATH would start for a bare name, or the name itself when nothing matches.
- *
- * Kept here rather than imported from `subprocess.ts` so this module does not import the file that
- * imports it.
- */
-function resolveBareCommandOnPath(command: string, pathEnv: string): string {
-  if (/[\\/]/.test(command)) {
-    return command;
-  }
-  const names =
-    BATCH_FILE.test(command) || /\.exe$/i.test(command)
-      ? [command]
-      : [`${command}.cmd`, `${command}.exe`, `${command}.bat`, command];
-  for (const dir of pathEnv.split(';')) {
-    if (!dir) {
-      continue;
-    }
-    for (const fileName of names) {
-      const candidate = path.win32.join(dir, fileName);
-      try {
-        if (fs.statSync(candidate).isFile()) {
-          return candidate;
-        }
-      } catch {
-        // Not there.
-      }
-    }
-  }
-  return command;
 }
 
 /**

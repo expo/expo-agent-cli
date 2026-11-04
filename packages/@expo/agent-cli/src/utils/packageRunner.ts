@@ -18,7 +18,7 @@ import path from 'path';
 
 import { fileExistsSync } from './dir';
 import { detectInvoker, type Invoker } from './invoker';
-import { findExecutableOnPath } from './subprocess';
+import { findExecutableOnPath, pathFromEnv } from './pathLookup';
 
 /** The runner to spawn a published package with. */
 export interface PackageRunner {
@@ -51,11 +51,11 @@ export function resetPackageRunnerCache(): void {
  * way it always was, and nothing about a machine that never mentioned Bun changes.
  *
  * @param env the environment to read, for tests that must not depend on this process's own.
- * @param pathEnv `PATH` to search, for the same reason.
+ * @param pathEnv `PATH` to search, for the same reason. Defaults to the `PATH` of `env`.
  */
 export function resolvePackageRunner({
   env,
-  pathEnv,
+  pathEnv = env && pathFromEnv(env),
 }: { env?: NodeJS.ProcessEnv; pathEnv?: string } = {}): PackageRunner {
   if (cached) {
     return cached;
@@ -141,7 +141,7 @@ export function projectUsesBun(projectRoot: string): boolean {
  */
 export function resolvePackageRunnerForProject(
   projectRoot: string,
-  { env, pathEnv }: { env?: NodeJS.ProcessEnv; pathEnv?: string } = {}
+  { env, pathEnv = env && pathFromEnv(env) }: { env?: NodeJS.ProcessEnv; pathEnv?: string } = {}
 ): PackageRunner {
   const fromProcess = resolvePackageRunner({ env, pathEnv });
   if (fromProcess.runner === 'bunx' || !projectUsesBun(projectRoot)) {

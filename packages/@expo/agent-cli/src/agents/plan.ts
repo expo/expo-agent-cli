@@ -15,7 +15,7 @@ import {
 import type { SkillsAgent } from '../skills/types';
 import { CommandError } from '../utils/errors';
 import { isInteractive } from '../utils/interactive';
-import { findExecutableOnPath } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
 import { buildInstallerPlans, displayInstallCommand } from './installers';
 import { createSetupPrompt, type SetupPrompt } from './prompt';
 import type { AgentInstallPlan, SetupOptions, SetupScope } from './types';
