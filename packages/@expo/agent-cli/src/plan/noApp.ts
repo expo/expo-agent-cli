@@ -14,11 +14,10 @@ interface NoAppState {
   reasons: string[];
   /** The `next` of `status`: the one command that gives this directory an app to act on. */
   command: string;
+  /** Why `next` names it. The one `status` follow-up says the same, as a sentence. */
   why: string;
   /** Said on the `status` project line. */
   label: string;
-  /** The `why` of the one `status` follow-up, which names {@link command} in place of every rung. */
-  followUpWhy: string;
 }
 
 export const NO_APP: Record<NoAppRule, NoAppState> = {
@@ -37,8 +36,6 @@ export const NO_APP: Record<NoAppRule, NoAppState> = {
     command: `${PROGRAM_PREFIX} new my-app`,
     why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
     label: 'not an Expo app',
-    followUpWhy:
-      'This package declares no "expo" dependency, so it is not an Expo app: change to the app\'s own directory, or create one here.',
   },
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
   // Every other row reads expo-dev-client and the fingerprint from node_modules, and would plan a
@@ -46,13 +43,11 @@ export const NO_APP: Record<NoAppRule, NoAppState> = {
   'dependencies-not-installed': {
     reasons: [
       `This project's dependencies are not installed: its package.json declares "expo", and no installed expo resolves from it.`,
-      `Every other fact of the plan is read from node_modules, so nothing is planned until "${INSTALL_DEPENDENCIES_COMMAND}" installs the lockfile.`,
+      `Every other fact of the plan is read from node_modules, so nothing is planned until "${INSTALL_DEPENDENCIES_COMMAND}" installs them.`,
     ],
     command: INSTALL_DEPENDENCIES_COMMAND,
-    why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile; run status again after it',
+    why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs them; run status again after it',
     label: 'dependencies not installed',
-    followUpWhy:
-      "This app's dependencies are not installed, so every other action would read a node_modules that is not there: install the lockfile first.",
   },
 };
 

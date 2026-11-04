@@ -35,8 +35,11 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
   // replaces was `npx @expo/agent-cli install expo-dev-client` — the trap, spelled as a follow-up.
   const app = report.project ? appStateOf(report.project) : 'ready';
   if (app !== 'ready') {
-    const { command, followUpWhy } = NO_APP[app];
-    return [...followups, { id: app, command, why: followUpWhy }];
+    const { command, why } = NO_APP[app];
+    return [
+      ...followups,
+      { id: app, command, why: `${why.charAt(0).toUpperCase()}${why.slice(1)}.` },
+    ];
   }
 
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
