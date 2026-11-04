@@ -27,7 +27,7 @@ jobs:
         working-directory: packages/@expo/agent-cli
         run: |
           fails=0
-          for i in $(seq 1 ${LOOPS:-3}); do
+          for i in $(seq 1 ${LOOPS:-10}); do
             echo "::group::iteration $i"
             bun run test:e2e -- cloud-binding-test -t "round-trips guarded cloud target argv" || fails=$((fails+1))
             echo "::endgroup::"
