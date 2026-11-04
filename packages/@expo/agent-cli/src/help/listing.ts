@@ -96,7 +96,6 @@ export function isUnstableCommand(name: string): boolean {
   return topLevelCommands[name]?.unstable === true;
 }
 
-/** One command as a wrapped list prints it: the name, plus the tag when it has one. */
 function helpName(command: string): string {
   return isUnstableCommand(command) ? `${command} ${EXPERIMENTAL_TAG}` : command;
 }
@@ -104,10 +103,8 @@ function helpName(command: string): string {
 /**
  * One line per command: the name in a column, then what it is for.
  *
- * The prose that used to sit under a section — three sentences about what `dev` blocks, five about
- * which CLI answers `whoami` — is gone from here. A listing answers "which command", and every
- * command's own `--help` answers the rest in the same shape (`src/help/format.ts`). A wall of prose
- * inside a list is the thing that made this screen unreadable [confirmed, 2026-08-28].
+ * A listing answers "which command", and every command's own `--help` answers the rest in the same
+ * shape (`src/help/format.ts`). Prose inside a list makes the screen unreadable.
  */
 function commandLines(commands: string[], indent: string): string {
   return commands
@@ -123,7 +120,6 @@ function commandLines(commands: string[], indent: string): string {
     .join('\n');
 }
 
-/** Break one sentence onto lines no longer than `width`, on spaces. */
 function wrapText(text: string, width: number): string[] {
   const lines: string[] = [];
   for (const word of text.split(' ')) {
@@ -137,13 +133,6 @@ function wrapText(text: string, width: number): string[] {
   return lines.length ? lines : [''];
 }
 
-/**
- * The rung column, sized to the longest rung anywhere in the workflow.
- *
- * One width across the numbered steps and the setup block, so the "what it gets you" column starts
- * in one place and the whole map reads as one table.
- */
-/** One comma-separated list of commands, wrapped onto as many indented lines as it needs. */
 function wrapCommands(commands: string[], indent: string): string {
   const lines: string[] = [];
   for (const command of commands) {

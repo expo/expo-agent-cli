@@ -100,10 +100,8 @@ export function suggestCommandNames(command: string): string[] {
   const query = command.toLowerCase();
   const names = allCommandNames();
 
-  // Rule 1: `<group>:<action>` whose action is exactly the name that was typed.
   const suffixMatches = names.filter((name) => name.slice(name.indexOf(':') + 1) === query);
 
-  // Rule 2: the rest, near enough to be a mistyping of one of them.
   const nearMatches = names
     .filter((name) => !suffixMatches.includes(name))
     .map((name) => ({ name, distance: editDistance(query, name.toLowerCase()) }))
@@ -114,7 +112,6 @@ export function suggestCommandNames(command: string): string[] {
   return [...suffixMatches, ...nearMatches].slice(0, MAX_SUGGESTIONS);
 }
 
-/** Levenshtein distance, one row of the matrix at a time. */
 function editDistance(a: string, b: string): number {
   if (a === b) {
     return 0;
@@ -150,13 +147,7 @@ function editDistance(a: string, b: string): number {
 const absentCapabilities: {
   [name: string]: { absent: string; instead: string; suggestedCommand: string };
 } = {
-  // `dev:logs` exists now, so the bare name is a caller one hop away from it rather than one
-  // reaching for a capability this CLI does not have. The other two commands stay in the answer:
-  // a log is read for three different questions, and only one of them is "what did it print".
-  // `@expo/agent-cli build --platform ios` is a real command of a real CLI aimed at the wrong one. It used
-  // to be answered by a `build` group with a `bareNameCommand` (llp/0010 §Registry rules (c)); the
-  // v1 narrowing left that group with nothing in it — `build:wait` deferred, `build:explain` renamed
-  // to `inspect:build-log` — so the answer moved here, where a name this CLI does not have belongs.
+  // `@expo/agent-cli build --platform ios` is a real command of a real CLI aimed at the wrong one.
   build: {
     absent: `starting a build is the EAS CLI's job, not this one's`,
     // Getters, so the runner is resolved when the line is printed and not when this module loads.
@@ -167,6 +158,8 @@ const absentCapabilities: {
       return `${easCommandPrefix()} build`;
     },
   },
+  // The bare name is one hop from `dev:logs`. The other two commands stay in the answer: a log is
+  // read for three different questions, and only one of them is "what did it print".
   logs: {
     absent: `the log this CLI keeps is the dev server's, and it is "${PROGRAM_PREFIX} dev:logs"`,
     instead: `That reads what a dev server started with "${PROGRAM_PREFIX} dev --detach" has printed. For the two questions a log is more often opened for: "${PROGRAM_PREFIX} smoke --ios|--android" says whether the bundler finished, whether this project compiles and whether the app came up, and "${PROGRAM_PREFIX} runtime:errors" collects what the running app threw over a time window.`,
@@ -180,11 +173,11 @@ absentCapabilities.log = absentCapabilities.logs!;
 // The spellings of the on-ramp that are not the on-ramp, and there are three kinds.
 //
 // **The colon form** is the first thing an agent that has learned this CLI's naming convention
-// types [found by the wave-34 naive-agent walk]: `help` is a top-level command with a positional
+// types: `help` is a top-level command with a positional
 // topic rather than a group, so `help:workflow` is in none of the three maps. **The bare word** is
 // a caller who read the topic's name and tried it as a verb. **The old name** is `how-to`, which
-// this topic was called for one unpublished day; anybody who read it then is one hop from the line
-// that works, which is the whole job of this table.
+// anybody who read it earlier is one hop from the line that works, which is the whole job of this
+// table.
 //
 // Edit distance cannot reach any of them — `workflow` is nine edits from every name in the
 // registry — so the table is the only thing that can answer.
