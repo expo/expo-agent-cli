@@ -130,7 +130,7 @@ describe(resolveSpawnTarget, () => {
 
     it(`should resolve a bare name on the child's PATH, not on this process's`, () => {
       const shims = new Set(['C:\\machine-npm\\npx.cmd', 'C:\\stub-bin\\npx.cmd']);
-      const statSync = jest
+      const statSync = vi
         .spyOn(fs, 'statSync')
         .mockImplementation(((file: string) => {
           if (shims.has(file)) {
