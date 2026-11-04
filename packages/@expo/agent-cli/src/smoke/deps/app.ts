@@ -1,9 +1,7 @@
-import { checkExpoGoVersionAsync } from '../../device/expoGoVersion';
 import { isExpoGoAppId } from '../../navigate/target';
 import { openRouteAsync } from '../../navigate/openRoute';
 import { PROGRAM_PREFIX } from '../../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../../project/expoGo';
-import { readSdkVersionAsync } from '../../project/nodeModules';
 import { CdpClient, isMethodNotFoundError } from '../../runtime/cdpClient';
 import { probeDevServerAsync } from '../../runtime/devServer';
 import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
@@ -11,10 +9,11 @@ import { observeReloadAsync } from '../../runtime/reload/evidence';
 import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { waitForAppConnectionAsync } from '../../runtime/waitReady';
+import { CommandError } from '../../utils/errors';
+import { firstLine } from '../../utils/text';
 import type { SmokeDeps } from '../phases';
-import type { SmokeOptions } from '../resolveOptions';
-import { debuggerFailureReason } from './reasons';
-import type { SmokeDepsShared } from './shared';
+import { expoGoVersionMismatch } from './device';
+import type { SmokeDepsContext } from './shared';
 
 /**
  * The expression the runtime is asked to evaluate.
@@ -35,13 +34,12 @@ const TARGET_SETTLE_POLL_MS = 500;
 // attached to this dev server would go on to read that simulator's runtime, and report the
 // verdict as Android's [friction run 6, F51].
 export async function waitForAppConnection(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   devServerUrl: string,
   timeoutMs: number
 ): ReturnType<SmokeDeps['waitForAppConnection']> {
-  const { targetSelection, deviceInventory, targets } = await s.targetSelectionAsync(devServerUrl);
+  const { targetSelection, deviceInventory, targets } =
+    await ctx.targetSelectionAsync(devServerUrl);
   return await waitForAppConnectionAsync(devServerUrl, {
     timeoutMs,
     targetSelection,
@@ -62,12 +60,11 @@ export async function waitForAppConnection(
 // The run's device choice, so the open and the waits after it are about one device. An earlier
 // lookup that failed is not kept, so this one looks again, and throws its own refusal.
 export async function openRoute(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   ...[route, devServerUrl, attachBudgetMs]: Parameters<SmokeDeps['openRoute']>
 ): ReturnType<SmokeDeps['openRoute']> {
-  const lookup = await s.deviceAsync();
+  const { projectRoot, options } = ctx;
+  const lookup = await ctx.deviceAsync();
   if (lookup.device == null) throw lookup.error;
   return await openRouteAsync(projectRoot, {
     device: lookup.device,
@@ -99,15 +96,14 @@ export async function openRoute(
 // Scoped to this run's platform for the same reason every other read is (F51): an iOS Expo Go
 // attached to the same dev server must not decide an `--android` run's answer.
 export async function checkAppFitsProject(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   devServerUrl: string
 ): ReturnType<SmokeDeps['checkAppFitsProject']> {
+  const { projectRoot, options } = ctx;
   const nothing = { mismatch: null, kind: null, note: null };
   // `read` only: a target nothing placed must not earn this run's verdict either way (@ref
   // src/runtime/targetSelection §classifyTargets), so an unreadable target never becomes a refusal.
-  const { classifiedTargets } = await s.targetSelectionAsync(devServerUrl);
+  const { classifiedTargets } = await ctx.targetSelectionAsync(devServerUrl);
   const expoGo = classifiedTargets.read.map((target) => target.appId).find(isExpoGoAppId);
   // Everything below is about Expo Go. A development build is this project's own app and its
   // version is the project's own business, so there is nothing here to ask about it.
@@ -135,7 +131,7 @@ export async function checkAppFitsProject(
   // The same resolution `probeDevice` performs, and for the same reason: the device this run is
   // about. Any failure to find one is nothing to check rather than something to report — the
   // app answered, so whatever it is running on is beyond this check's reach.
-  const { device } = await s.deviceAsync();
+  const { device } = await ctx.deviceAsync();
   // @ref llp/0005-runtime-loop-tools.rfc.md §Android — both local backends now, because both
   // have a reader for the version on the device (@ref src/device/expoGoVersion). A cloud
   // session is still excluded: the check reads the device, and that device is not this
@@ -145,32 +141,20 @@ export async function checkAppFitsProject(
   if (localDeviceId == null) {
     return nothing;
   }
-  const version = await checkExpoGoVersionAsync(
-    localDeviceId,
-    options.platform,
-    await readSdkVersionAsync(projectRoot)
-  );
   // `unknown` says nothing at all, and that is a decision rather than an oversight: a machine
   // with no route out would otherwise carry "the version could not be checked" on the `app` row
   // of every run it ever makes, which is chatter rather than a finding.
-  if (version.verdict !== 'mismatch') {
-    return nothing;
-  }
   // A run that could install has already fixed this in the `install-app` phase, so what reaches
   // here is a run that could not — `--no-start`, which says change nothing. It blocks the pass
   // rather than noting it: the runtime that answered is not the release this SDK ships, so the
   // window is not about the app the caller would ship.
-  return {
-    mismatch: [
-      version.reason,
-      `— so this window is about an Expo Go this SDK does not ship.`,
-      options.bootstrap
-        ? `This run was allowed to install the right one and did not manage to.`
-        : `--no-start told this run to change nothing; a run without it installs the right one.`,
-    ].join(' '),
-    kind: 'expo-go-version' as const,
-    note: null,
-  };
+  return (
+    (await expoGoVersionMismatch(
+      ctx,
+      localDeviceId,
+      `— so this window is about an Expo Go this SDK does not ship.`
+    )) ?? nothing
+  );
 }
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
@@ -185,17 +169,16 @@ export async function checkAppFitsProject(
 // `dev-server-bundle` says a bundle was served after this run acted, which is only readable
 // against a count from before it.
 export async function reloadApp(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   devServerUrl: string,
   timeoutMs: number
 ): ReturnType<SmokeDeps['reloadApp']> {
+  const { projectRoot } = ctx;
   const deadline = Date.now() + timeoutMs;
   const remainingMs = () => Math.max(0, deadline - Date.now());
-  const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, await s.scopeAsync(), {
+  const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
     budgetMs: remainingMs(),
-    preflight: s.lastObservation(),
+    preflight: ctx.lastObservation(),
   });
   const bundleMark = markBundleSignalSync(projectRoot);
   const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
@@ -234,13 +217,11 @@ export async function reloadApp(
 }
 
 export async function evaluate(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   devServerUrl: string
 ): ReturnType<SmokeDeps['evaluate']> {
   try {
-    const { targetSelection, deviceInventory } = await s.targetSelectionAsync(devServerUrl);
+    const { targetSelection, deviceInventory } = await ctx.targetSelectionAsync(devServerUrl);
     await new CdpClient({
       metroUrl: devServerUrl,
       targetSelection,
@@ -269,14 +250,12 @@ export async function evaluate(
 }
 
 export async function collectErrors(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   devServerUrl: string,
   windowMs: number
 ): ReturnType<SmokeDeps['collectErrors']> {
   try {
-    const { targetSelection, deviceInventory } = await s.targetSelectionAsync(devServerUrl);
+    const { targetSelection, deviceInventory } = await ctx.targetSelectionAsync(devServerUrl);
     const records = await new CdpRuntimeErrorCollector({
       metroUrl: devServerUrl,
       durationMs: windowMs,
@@ -299,9 +278,6 @@ export async function collectErrors(
 // "rendered", so what is waited for is the app having stopped re-registering: two reads of the
 // dev server's target list that name the same ids. A relaunching app changes them.
 export async function waitForStableTargets(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
   devServerUrl: string,
   timeoutMs: number
 ): ReturnType<SmokeDeps['waitForStableTargets']> {
@@ -324,27 +300,13 @@ export async function waitForStableTargets(
   }
 }
 
-export function buildAppDeps(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions
-): Pick<
-  SmokeDeps,
-  | 'waitForAppConnection'
-  | 'openRoute'
-  | 'checkAppFitsProject'
-  | 'reloadApp'
-  | 'evaluate'
-  | 'collectErrors'
-  | 'waitForStableTargets'
-> {
-  return {
-    waitForAppConnection: (...args) => waitForAppConnection(s, projectRoot, options, ...args),
-    openRoute: (...args) => openRoute(s, projectRoot, options, ...args),
-    checkAppFitsProject: (...args) => checkAppFitsProject(s, projectRoot, options, ...args),
-    reloadApp: (...args) => reloadApp(s, projectRoot, options, ...args),
-    evaluate: (...args) => evaluate(s, projectRoot, options, ...args),
-    collectErrors: (...args) => collectErrors(s, projectRoot, options, ...args),
-    waitForStableTargets: (...args) => waitForStableTargets(s, projectRoot, options, ...args),
-  };
+/** A debugger failure as one phase reason: a refusal keeps its Why, because that names what was skipped. */
+function debuggerFailureReason(error: unknown): string {
+  if (error instanceof CommandError) {
+    return error.message
+      .split('\n')
+      .filter((line) => line.trim() && !line.startsWith('How:'))
+      .join(' ');
+  }
+  return error instanceof Error ? firstLine(error.message) : String(error);
 }

@@ -6,18 +6,18 @@ import {
 } from '../../deviceBinding';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import type { SmokeOptions } from '../resolveOptions';
-import { buildSmokeTargetSelection } from '../targetSelection';
+import { buildSmokeTargetSelection, type SmokeTargetSelection } from '../targetSelection';
 import { resolveSmokeTargetAsync, type SmokeTarget } from './target';
 
 /**
- * The state one `buildSmokeDeps` call shares between its dependencies: which device this run
- * bound, which app it is about, and whether the start phase kept the device. Created once per run.
+ * What one `buildSmokeDeps` call shares between its dependencies: the run's inputs, which app it is
+ * about and which device it chose. Created once per run.
  */
-export interface SmokeDepsShared extends ReturnType<typeof buildSmokeTargetSelection> {
-  bootBinding: Binding | undefined;
+export interface SmokeDepsContext extends SmokeTargetSelection {
+  readonly projectRoot: string;
+  readonly options: SmokeOptions;
   /** The plan's install kind, once anything has asked for the target. Read at call time by `progress`. */
-  installKind: SmokeTarget['installWithKind'] | null;
-  keepBoundDevice: boolean;
+  readonly installKind: SmokeTarget['installWithKind'] | null;
   /**
    * Built once and shared by every phase that reads a target, so no two phases can disagree about
    * which app this run is about (F51). Built lazily: a run that fails at the dev-server phase never
@@ -38,16 +38,22 @@ export interface SmokeDepsShared extends ReturnType<typeof buildSmokeTargetSelec
   ownBinding(): Binding | null;
 }
 
-export function createSmokeDepsShared(projectRoot: string, options: SmokeOptions): SmokeDepsShared {
+export function createSmokeDepsContext(
+  projectRoot: string,
+  options: SmokeOptions
+): SmokeDepsContext {
   let target: Promise<SmokeTarget> | null = null;
-  const shared: SmokeDepsShared = {
+  let installKind: SmokeTarget['installWithKind'] | null = null;
+  const ctx: SmokeDepsContext = {
     ...buildSmokeTargetSelection(projectRoot, options),
-    bootBinding: undefined,
-    installKind: null,
-    keepBoundDevice: false,
+    projectRoot,
+    options,
+    get installKind() {
+      return installKind;
+    },
     targetAsync: () =>
       (target ??= resolveSmokeTargetAsync(projectRoot, options).then((resolved) => {
-        shared.installKind = resolved.installWithKind;
+        installKind = resolved.installWithKind;
         return resolved;
       })),
     forgetTarget: () => {
@@ -62,5 +68,5 @@ export function createSmokeDepsShared(projectRoot: string, options: SmokeOptions
       return read.kind === 'binding' ? read.binding : null;
     },
   };
-  return shared;
+  return ctx;
 }

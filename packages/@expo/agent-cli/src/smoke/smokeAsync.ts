@@ -12,10 +12,37 @@ import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../follo
 import * as Log from '../log';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { describeSkippedApps } from '../runtime/targetSelection';
-import { buildAppDeps } from './deps/app';
-import { buildDeviceDeps } from './deps/device';
-import { buildDevServerDeps } from './deps/devServer';
-import { createSmokeDepsShared } from './deps/shared';
+import {
+  checkAppFitsProject,
+  collectErrors,
+  evaluate,
+  openRoute,
+  reloadApp,
+  waitForAppConnection,
+  waitForStableTargets,
+} from './deps/app';
+import {
+  bootDevice,
+  captureScreenshot,
+  ensureEasSession,
+  explainSilentApp,
+  installApp,
+  installNeededOnDevice,
+  probeDevice,
+  readBoundDevice,
+  releaseDevice,
+  stopEasSession,
+  type DeviceState,
+} from './deps/device';
+import {
+  checkEntryBundle,
+  discoverDevServer,
+  startDevServer,
+  stopDevServer,
+  waitForBundlerReady,
+  type DevServerState,
+} from './deps/devServer';
+import { createSmokeDepsContext } from './deps/shared';
 import { startPortArgs } from './deps/startArgs';
 import { formatSmokeResult, smokeResultToJson } from './format';
 import {
@@ -168,14 +195,40 @@ function explainOutcome(run: SmokeRun): string {
  * findings behind them to be forgotten.
  */
 export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
-  const shared = createSmokeDepsShared(projectRoot, options);
+  const ctx = createSmokeDepsContext(projectRoot, options);
+  const server: DevServerState = { keepBoundDevice: false };
+  const bound: DeviceState = { bootBinding: undefined };
   return {
-    ...buildDevServerDeps(shared, projectRoot, options),
-    ...buildDeviceDeps(shared, projectRoot, options),
-    ...buildAppDeps(shared, projectRoot, options),
+    discoverDevServer: (explicitUrl) => discoverDevServer(ctx, explicitUrl),
+    startDevServer: () => startDevServer(ctx, server),
+    stopDevServer: () => stopDevServer(ctx, server),
+    waitForBundlerReady: (devServerUrl, timeoutMs) =>
+      waitForBundlerReady(ctx, devServerUrl, timeoutMs),
+    checkEntryBundle: (devServerUrl, timeoutMs) => checkEntryBundle(ctx, devServerUrl, timeoutMs),
+
+    ensureEasSession: (devServerUrl) => ensureEasSession(ctx, devServerUrl),
+    stopEasSession: (sessionId) => stopEasSession(ctx, sessionId),
+    readBoundDevice: () => readBoundDevice(ctx),
+    releaseDevice: () => releaseDevice(ctx, bound),
+    bootDevice: () => bootDevice(ctx, bound),
+    installNeededOnDevice: (deviceId, backend) => installNeededOnDevice(ctx, deviceId, backend),
+    installApp: (deviceId) => installApp(ctx, deviceId),
+    probeDevice: () => probeDevice(ctx),
+    explainSilentApp: (deviceId, backend) => explainSilentApp(ctx, deviceId, backend),
+    captureScreenshot: (deviceId, backend) => captureScreenshot(ctx, deviceId, backend),
+
+    waitForAppConnection: (devServerUrl, timeoutMs) =>
+      waitForAppConnection(ctx, devServerUrl, timeoutMs),
+    openRoute: (route, devServerUrl, attachBudgetMs) =>
+      openRoute(ctx, route, devServerUrl, attachBudgetMs),
+    checkAppFitsProject: (devServerUrl) => checkAppFitsProject(ctx, devServerUrl),
+    reloadApp: (devServerUrl, timeoutMs) => reloadApp(ctx, devServerUrl, timeoutMs),
+    evaluate: (devServerUrl) => evaluate(ctx, devServerUrl),
+    collectErrors: (devServerUrl, windowMs) => collectErrors(ctx, devServerUrl, windowMs),
+    waitForStableTargets,
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-    progress: buildSmokeProgress(options, { installKind: () => shared.installKind }),
+    progress: buildSmokeProgress(options, { installKind: () => ctx.installKind }),
 
     now: () => Date.now(),
   };

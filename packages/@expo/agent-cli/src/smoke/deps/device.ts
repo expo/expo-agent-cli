@@ -1,11 +1,18 @@
+import path from 'path';
+
+import type { EnsureEasSessionReport } from '../../dev/easSession';
 import {
   acquireDeviceAsync,
   acquireLine,
   deviceIdOf,
   deviceNameOf,
   devicesDisabled,
+  localBackendOf,
   releaseWorktreeDevicesAsync,
+  type Binding,
+  type BoundDevice,
 } from '../../deviceBinding';
+import { releaseStartedSessionAsync } from '../../deviceBinding/cloudRelease';
 import { checkExpoGoVersionAsync } from '../../device/expoGoVersion';
 import { hasAppOnDeviceAsync } from '../../device/hasApp';
 import { installDevBuildAsync } from '../../device/installDevBuild';
@@ -13,32 +20,60 @@ import { installExpoGoAsync } from '../../device/installExpoGo';
 import { captureScreenshotAsync, defaultScreenshotPath } from '../../device/screenshot';
 import * as Log from '../../log';
 import { navigateDeviceOf, type DeviceBackend } from '../../navigate/device';
+import { PROGRAM_PREFIX } from '../../programName';
 import { readSdkVersionAsync } from '../../project/nodeModules';
-import type { SmokeDeps } from '../phases';
-import type { SmokeOptions } from '../resolveOptions';
-import { choiceOf, whatAndHow } from './reasons';
-import type { SmokeDepsShared } from './shared';
+import { EAS_SIMULATOR_PROFILE } from '../../toolchain/runsOn';
+import type { SmokeAppFit, SmokeDeps, SmokeSessionResult } from '../phases';
+import { whatAndHow } from './reasons';
+import type { SmokeDepsContext } from './shared';
 
-/**
- * Whether one local device has one app, with each platform's own reader.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Android
- *
- * **Three answers, not two.** `null` is "this could not be looked up", and it is separate from
- * `false` because the callers *act* on `false`: one downloads a few hundred megabytes and another
- * runs a native build. A machine with no CoreSimulator tree — the e2e tier's Linux runner, a udid
- * nothing here has — read as "not installed" and reached for a real download until this
- * distinction existed [observed — tier0-linux, 2026-09-03].
- *
- * One function because there are three callers: the install decision, the explanation for a
- * device that answered nothing, and the check that judges a native build by its result rather than
- * its exit code. The switch itself lives in `src/device/hasApp.ts`, because the plan engine asks the
- * same question (llp/0004 §A current build is not an installed app).
- */
-// @ref ./device §hasAppOnDeviceAsync
+/** The device this run acquired, for the release phase to check it is still the one bound. */
+export interface DeviceState {
+  bootBinding: Binding | undefined;
+}
 
-export function readBoundDevice(s: SmokeDepsShared): ReturnType<SmokeDeps['readBoundDevice']> {
-  const binding = s.ownBinding();
+// @ref llp/0027-everything-on-eas.rfc.md §smoke
+// The EAS device's boot-and-install: the session in progress on this platform, or one started
+// with the app named. A development build needs a finished simulator build of this fingerprint
+// on EAS; the gate never compiles one — `dev --eas` does, and is named.
+export async function ensureEasSession(
+  ctx: SmokeDepsContext,
+  devServerUrl: string
+): ReturnType<SmokeDeps['ensureEasSession']> {
+  const { projectRoot, options } = ctx;
+  ctx.setDevice(null);
+  const { ensureEasSessionAsync } =
+    require('../../dev/easSession') as typeof import('../../dev/easSession');
+  const target = await ctx.targetAsync();
+  const result = await ensureEasSessionAsync(projectRoot, {
+    platform: options.platform,
+    expoGo: target.installWithKind === 'expo-go',
+    devServerUrl,
+    // A new session looks up the build of this fingerprint, and is never started without one.
+    buildId: null,
+    sessionName: `${path.basename(projectRoot)} — agent-cli smoke`,
+    keepSession: false,
+    noBuildReason: `no EAS Simulator session is up, and EAS has no finished "${EAS_SIMULATOR_PROFILE}" build of this project's ${options.platform} fingerprint to start one with — "${PROGRAM_PREFIX} dev --${options.platform} --eas" builds it and starts the session; this gate compiles nothing`,
+  });
+  if (result.ok && result.sessionId) {
+    ctx.setDevice({ backend: 'cloud', platform: options.platform, deviceId: result.sessionId });
+  }
+  return smokeSessionResult(result);
+}
+
+export async function stopEasSession(
+  ctx: SmokeDepsContext,
+  sessionId: string
+): ReturnType<SmokeDeps['stopEasSession']> {
+  const { projectRoot } = ctx;
+  const release = await releaseStartedSessionAsync(projectRoot, sessionId, 'smoke');
+  return release.outcome === 'stopped'
+    ? { ok: true, target: sessionId, reason: null }
+    : { ok: false, target: sessionId, reason: release.reason };
+}
+
+export function readBoundDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['readBoundDevice']> {
+  const binding = ctx.ownBinding();
   return binding && { id: deviceIdOf(binding.device), name: deviceNameOf(binding.device) };
 }
 
@@ -48,14 +83,14 @@ export function readBoundDevice(s: SmokeDepsShared): ReturnType<SmokeDeps['readB
 // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke — a child-owned binding is released by
 // dev:stop; a binding acquired with a reused server is released by this hook.
 export async function releaseDevice(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions
+  ctx: SmokeDepsContext,
+  bound: DeviceState
 ): ReturnType<SmokeDeps['releaseDevice']> {
-  if (!s.bootBinding) return { ok: true, target: null, reason: null };
+  const { projectRoot, options } = ctx;
+  if (!bound.bootBinding) return { ok: true, target: null, reason: null };
   const devices = await releaseWorktreeDevicesAsync(projectRoot, {
     platform: options.platform,
-    expected: s.bootBinding,
+    expected: bound.bootBinding,
   });
   if (devices.length === 0) {
     return {
@@ -75,11 +110,11 @@ export async function releaseDevice(
 }
 
 export async function bootDevice(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions
+  ctx: SmokeDepsContext,
+  bound: DeviceState
 ): ReturnType<SmokeDeps['bootDevice']> {
-  s.setDevice(null);
+  const { projectRoot, options } = ctx;
+  ctx.setDevice(null);
   const platform = options.platform;
   if (devicesDisabled()) {
     return {
@@ -92,13 +127,13 @@ export async function bootDevice(
   }
   try {
     const acquired = await acquireDeviceAsync(projectRoot, platform);
-    s.setDevice(navigateDeviceOf(acquired.device));
-    s.bootBinding = acquired.binding;
+    ctx.setDevice(navigateDeviceOf(acquired.device));
+    bound.bootBinding = acquired.binding;
     Log.progress(acquireLine(acquired));
     return {
       ok: true,
       deviceId: deviceIdOf(acquired.device),
-      backend: platform === 'ios' ? 'local-ios' : 'local-android',
+      backend: localBackendOf(platform),
       choice: choiceOf(acquired.device),
       installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
       reason: null,
@@ -122,13 +157,11 @@ export async function bootDevice(
 // already means "the project fits in Expo Go and nothing overrode it to a development build".
 // The second is the same disk read the device choice makes (`installedApps.ts`).
 export async function installNeededOnDevice(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   deviceId: string,
   backend: DeviceBackend | null
 ): ReturnType<SmokeDeps['installNeededOnDevice']> {
-  const target = await s.targetAsync();
+  const target = await ctx.targetAsync();
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
   //
@@ -149,7 +182,7 @@ export async function installNeededOnDevice(
   if (target.appId == null) {
     return target.installWithKind === 'native-build';
   }
-  // @ref ./device §hasAppOnDeviceAsync. Local devices only — a cloud session's device is
+  // @ref src/device/hasApp §hasAppOnDeviceAsync. Local devices only — a cloud session's device is
   // not this machine's, and there is nothing this CLI can install on somebody else's session
   // (llp/0005 §Cloud simulator) — and `null` for a lookup that did not happen, which is never
   // a licence to install.
@@ -170,12 +203,7 @@ export async function installNeededOnDevice(
   //
   // `unknown` installs nothing: a machine that is offline, or one whose version would not
   // read, has shown no reason to spend a few hundred megabytes.
-  const version = await checkExpoGoVersionAsync(
-    deviceId,
-    options.platform,
-    await readSdkVersionAsync(projectRoot)
-  );
-  return version.verdict === 'mismatch';
+  return (await checkExpoGoVersion(ctx, deviceId)).verdict === 'mismatch';
 }
 
 // `expo-go download` for the binary and `simctl install` for the device, both as subprocesses.
@@ -189,12 +217,11 @@ export async function installNeededOnDevice(
 // (@ref ./target §SmokeTarget.installWithKind), so this reads the answer rather than
 // forming a third opinion about which app the run is even about.
 export async function installApp(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   deviceId: string
 ): ReturnType<SmokeDeps['installApp']> {
-  const target = await s.targetAsync();
+  const { projectRoot, options } = ctx;
+  const target = await ctx.targetAsync();
   if (target.installWithKind === 'expo-go') {
     return await installExpoGoAsync(
       deviceId,
@@ -212,11 +239,7 @@ export async function installApp(
     verifyInstalledAsync: async () =>
       target.appId == null
         ? null
-        : await hasAppOnDeviceAsync(
-            deviceId,
-            options.platform === 'android' ? 'local-android' : 'local-ios',
-            target.appId
-          ),
+        : await hasAppOnDeviceAsync(deviceId, localBackendOf(options.platform), target.appId),
   });
   // The shapes differ in what they can report: a download knows which release it fetched and
   // what it replaced, and a compile knows neither — the version of a development build is the
@@ -238,8 +261,8 @@ export async function installApp(
 // gate reports rather than fails on. The answer keeps the refusal's How line: with no device
 // bound, that line is the `dev` command that binds one, and a skip row without it left a
 // reader with a booted simulator and no way forward [observed — issue #171].
-export async function probeDevice(s: SmokeDepsShared): ReturnType<SmokeDeps['probeDevice']> {
-  const { device, reason } = await s.deviceAsync();
+export async function probeDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['probeDevice']> {
+  const { device, reason } = await ctx.deviceAsync();
   return {
     deviceId: device?.deviceId ?? null,
     backend: device?.backend ?? null,
@@ -260,16 +283,14 @@ export async function probeDevice(s: SmokeDepsShared): ReturnType<SmokeDeps['pro
 // about is Expo Go: a development build that did not attach is this project's own artefact, and
 // there is no release of it for this to have an opinion about.
 export async function explainSilentApp(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
+  ctx: SmokeDepsContext,
   deviceId: string | null,
   backend: DeviceBackend | null
 ): ReturnType<SmokeDeps['explainSilentApp']> {
   if (deviceId == null || (backend !== 'local-ios' && backend !== 'local-android')) {
     return null;
   }
-  const target = await s.targetAsync();
+  const target = await ctx.targetAsync();
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
   //
@@ -279,7 +300,7 @@ export async function explainSilentApp(
   // `115` and the report used to say only that the device refused it, which reads as a fault in
   // the device [observed — Kudo, local run, 2026-09-04].
   if (target.appId != null) {
-    // `null` is "could not look", which explains nothing (@ref ./device §hasAppOnDeviceAsync).
+    // `null` is "could not look", which explains nothing (@ref src/device/hasApp §hasAppOnDeviceAsync).
     const has = await hasAppOnDeviceAsync(deviceId, backend, target.appId);
     if (has === false) {
       return {
@@ -303,69 +324,82 @@ export async function explainSilentApp(
   if (target.installWithKind !== 'expo-go') {
     return null;
   }
-  const version = await checkExpoGoVersionAsync(
-    deviceId,
-    options.platform,
-    await readSdkVersionAsync(projectRoot)
-  );
   // `unknown` explains nothing, and saying "the version could not be checked" beside a wait
   // that expired would add a sentence without adding a fact.
+  return await expoGoVersionMismatch(
+    ctx,
+    deviceId,
+    `— and an Expo Go built from another SDK takes the link, fails to load a bundle it cannot run, and registers no debugger target, which is what this wait was waiting for.`
+  );
+}
+
+export async function captureScreenshot(
+  ctx: SmokeDepsContext,
+  deviceId: string,
+  backend: DeviceBackend | null
+): ReturnType<SmokeDeps['captureScreenshot']> {
+  const { projectRoot, options } = ctx;
+  return captureScreenshotAsync({
+    platform: options.platform,
+    deviceId,
+    backend: backend ?? undefined,
+    projectRoot,
+    appId: backend === 'cloud' ? ((await ctx.targetAsync()).appId ?? undefined) : undefined,
+    filePath: options.screenshotPath ?? defaultScreenshotPath(projectRoot),
+  });
+}
+
+/** The boot line's "because": a spawned instance's AVD, and nothing for an explicit serial. */
+function choiceOf(device: BoundDevice): string | null {
+  if (device.backend !== 'local-android') {
+    return deviceNameOf(device);
+  }
+  return device.origin.kind === 'spawned' ? device.origin.avd : null;
+}
+
+/** The phase result of a session start; a refusal gives its What and How, not only its first line. */
+export function smokeSessionResult(
+  result: Pick<EnsureEasSessionReport, 'ok' | 'sessionId' | 'started' | 'reason' | 'refusal'>
+): SmokeSessionResult {
+  return {
+    ok: result.ok,
+    sessionId: result.sessionId,
+    started: result.started,
+    reason: result.refusal ? whatAndHow(result.refusal.message) : result.reason,
+  };
+}
+
+/** Whether the Expo Go on the device is built from the release line this project's SDK ships. */
+export async function checkExpoGoVersion(ctx: SmokeDepsContext, deviceId: string) {
+  return await checkExpoGoVersionAsync(
+    deviceId,
+    ctx.options.platform,
+    await readSdkVersionAsync(ctx.projectRoot)
+  );
+}
+
+/**
+ * The `expo-go-version` finding for a device whose Expo Go is built from another SDK, or null.
+ * `unknown` is null: a version that could not be read says nothing. `lead` is why that matters here.
+ */
+export async function expoGoVersionMismatch(
+  ctx: SmokeDepsContext,
+  deviceId: string,
+  lead: string
+): Promise<SmokeAppFit | null> {
+  const version = await checkExpoGoVersion(ctx, deviceId);
   if (version.verdict !== 'mismatch') {
     return null;
   }
   return {
     mismatch: [
       version.reason,
-      `— and an Expo Go built from another SDK takes the link, fails to load a bundle it cannot run, and registers no debugger target, which is what this wait was waiting for.`,
-      options.bootstrap
+      lead,
+      ctx.options.bootstrap
         ? `This run was allowed to install the right one and did not manage to.`
         : `--no-start told this run to change nothing; a run without it installs the right one.`,
     ].join(' '),
     kind: 'expo-go-version' as const,
     note: null,
-  };
-}
-
-export async function captureScreenshot(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions,
-  deviceId: string,
-  backend: DeviceBackend | null
-): ReturnType<SmokeDeps['captureScreenshot']> {
-  return captureScreenshotAsync({
-    platform: options.platform,
-    deviceId,
-    backend: backend ?? undefined,
-    projectRoot,
-    appId: backend === 'cloud' ? ((await s.targetAsync()).appId ?? undefined) : undefined,
-    filePath: options.screenshotPath ?? defaultScreenshotPath(projectRoot),
-  });
-}
-
-export function buildDeviceDeps(
-  s: SmokeDepsShared,
-  projectRoot: string,
-  options: SmokeOptions
-): Pick<
-  SmokeDeps,
-  | 'readBoundDevice'
-  | 'releaseDevice'
-  | 'bootDevice'
-  | 'installNeededOnDevice'
-  | 'installApp'
-  | 'probeDevice'
-  | 'explainSilentApp'
-  | 'captureScreenshot'
-> {
-  return {
-    readBoundDevice: () => readBoundDevice(s),
-    releaseDevice: (...args) => releaseDevice(s, projectRoot, options, ...args),
-    bootDevice: (...args) => bootDevice(s, projectRoot, options, ...args),
-    installNeededOnDevice: (...args) => installNeededOnDevice(s, projectRoot, options, ...args),
-    installApp: (...args) => installApp(s, projectRoot, options, ...args),
-    probeDevice: () => probeDevice(s),
-    explainSilentApp: (...args) => explainSilentApp(s, projectRoot, options, ...args),
-    captureScreenshot: (...args) => captureScreenshot(s, projectRoot, options, ...args),
   };
 }
