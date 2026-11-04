@@ -1,29 +1,20 @@
-import type { DevServerDiscovery } from '../../runtime/devServer';
 import { noScreenshot } from '../results';
 import type { PhaseWalk, Step } from './walk';
-
-/** What phase 1 established: the dev server every later phase talks to. */
-export interface DevServerFound {
-  devServerUrl: string;
-  discovery: DevServerDiscovery;
-  started: boolean;
-  /**
-   * The start phase ran a plan that compiled (@ref ../timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
-   *
-   * Kept for the follow-ups, and set whether the start succeeded or failed: a build that failed is
-   * exactly the case where the cheapest next step differs from the ordinary one.
-   */
-  buildAttempted: boolean;
-}
 
 // ---- Phase 1: is there a dev server, and does this run start one? -------------------------
 //
 // The look comes first and is not a phase of its own: it is the question "is one running", and
 // its answer decides whether there is a start to report at all. Its time belongs to the
 // `dev-server` phase, which is the phase about finding one, so it is counted there by hand.
-export async function devServerStep(walk: PhaseWalk): Promise<Step<DevServerFound>> {
-  const { deps, options, environment, cleanups, phases } = walk;
+export async function devServerStep(walk: PhaseWalk): Promise<Step<null>> {
+  const { deps, options, environment, cleanups, phases, report } = walk;
   let started = false;
+  /**
+   * The start phase ran a plan that compiled (@ref ../timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
+   *
+   * Kept for the follow-ups, and set whether the start succeeded or failed: a build that failed is
+   * exactly the case where the cheapest next step differs from the ordinary one.
+   */
   let buildAttempted = false;
   let devServerMs = 0;
   // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
@@ -50,17 +41,21 @@ export async function devServerStep(walk: PhaseWalk): Promise<Step<DevServerFoun
     // halfway is still put back: a detached child that published its lock and then died in the
     // readiness wait is a dev server this run is responsible for, and one it never saw succeed.
     cleanups.push({ resource: 'dev-server', target: null, release: () => deps.stopDevServer() });
-    const start = await walk.recordBootstrap('start-dev-server', async () => {
-      const result = await deps.startDevServer();
-      buildAttempted = result.built === true;
-      return result.ok && result.devServerUrl != null
-        ? {
-            status: 'ok' as const,
-            reason: `started for this run at ${result.devServerUrl}, and stopped again afterwards`,
-            value: result,
-          }
-        : { status: 'failed' as const, reason: result.reason, value: result };
-    });
+    const { value: start } = await walk.record(
+      'start-dev-server',
+      async () => {
+        const result = await deps.startDevServer();
+        buildAttempted = result.built === true;
+        return result.ok && result.devServerUrl != null
+          ? {
+              status: 'ok' as const,
+              reason: `started for this run at ${result.devServerUrl}, and stopped again afterwards`,
+              value: result,
+            }
+          : { status: 'failed' as const, reason: result.reason, value: result };
+      },
+      { bootstrap: true }
+    );
     if (start.ok && start.devServerUrl != null) {
       started = true;
       environment.devServer = 'started';
@@ -98,20 +93,19 @@ export async function devServerStep(walk: PhaseWalk): Promise<Step<DevServerFoun
           : `nothing answered at ${discovery.devServerUrl} (${discovery.reason ?? 'no answer'})`,
   });
 
+  Object.assign(report, {
+    devServerUrl: discovery.devServerUrl,
+    discovery,
+    started,
+    buildAttempted,
+  });
   if (!discovery.reachable) {
     walk.skipRest('bundler-ready', 'no dev server answered, so nothing could be read');
     return {
       stop: walk.done('failed', {
-        devServerUrl: discovery.devServerUrl,
-        discovery,
-        started,
-        buildAttempted,
         screenshot: noScreenshot('no dev server answered, so nothing was opened to photograph'),
       }),
     };
   }
-
-  return {
-    next: { devServerUrl: discovery.devServerUrl, discovery, started, buildAttempted },
-  };
+  return { next: null };
 }

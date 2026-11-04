@@ -1,4 +1,4 @@
-import { captureIfPossible } from '../capture';
+import { stopWithPicture } from '../capture';
 import type { SmokeErrorsResult, SmokeEvaluateResult } from '../phases';
 import { isFailingRecord, noReload } from '../results';
 import {
@@ -7,9 +7,6 @@ import {
   RUNTIME_READY_TIMEOUT_MS,
   RUNTIME_UNSUPPORTED_GRACE_MS,
 } from '../timeouts';
-import type { SmokeReloadJson } from '../types';
-import type { WithApp } from './app';
-import type { AppSession } from './appSession';
 import type { PhaseWalk, Step } from './walk';
 
 // ---- Phase 6: is the app that answers the rest of this run the code on disk? --------------
@@ -26,15 +23,13 @@ import type { PhaseWalk, Step } from './walk';
 // llp/0005 §Reloading the app had already written the rule this phase applies — "an error window
 // is a property of the app's session, and the session outlives the fix" — and named the command
 // that must not be believed without it. `smoke` reads that window and was not applying it.
-export async function reloadStep(
-  walk: PhaseWalk,
-  session: AppSession,
-  devServerUrl: string
-): Promise<SmokeReloadJson> {
+export async function reloadStep(walk: PhaseWalk): Promise<void> {
   const { deps, options, phases, remaining } = walk;
+  const { devServerUrl } = walk.report;
   const reloadJson = noReload();
+  walk.report.reload = reloadJson;
 
-  if (session.openedByThisRun) {
+  if (walk.app.openedByThisRun) {
     // Nothing to replace: the app came up during the `app` phase, so it fetched the bundle the dev
     // server is serving now on its way in. A reload here would cost a relaunch to reach the state
     // the run is already in.
@@ -57,7 +52,7 @@ export async function reloadStep(
         '--no-reload was given, so the app was read on the bundle it already had, which may predate the code on disk',
     });
   } else {
-    const reloaded = await walk.record(
+    const { value: reloaded } = await walk.record(
       'reload',
       async () => {
         const result = await deps.reloadApp(devServerUrl, Math.min(RELOAD_TIMEOUT_MS, remaining()));
@@ -86,7 +81,7 @@ export async function reloadStep(
           value: result,
         };
       },
-      Math.min(RELOAD_TIMEOUT_MS, remaining())
+      { budgetMs: Math.min(RELOAD_TIMEOUT_MS, remaining()) }
     );
     if (reloaded.ok) {
       // The app is coming back, so it owes the same waits a freshly opened one does: the settle
@@ -94,19 +89,13 @@ export async function reloadStep(
       // (@ref ../timeouts §APP_SETTLE_MS, §RUNTIME_READY_TIMEOUT_MS). A reload that was *not* proved
       // must not claim them — an app that never acted is not coming up, and waiting on it would
       // spend the caller's budget proving nothing.
-      session.movedByThisRun = true;
+      walk.app.noteReloaded();
     }
   }
-  return reloadJson;
 }
 
 // ---- Phase 7: the route, unless the app phase already opened it -------------------------
-export async function routeStep(
-  walk: PhaseWalk,
-  session: AppSession,
-  withApp: WithApp,
-  reloadJson: SmokeReloadJson
-): Promise<Step<null>> {
+export async function routeStep(walk: PhaseWalk): Promise<Step<null>> {
   const { deps, options, phases } = walk;
   if (options.route == null) {
     phases.push({
@@ -117,7 +106,8 @@ export async function routeStep(
     });
     return { next: null };
   }
-  if (session.routeOpenedWhileConnecting) {
+  // A `--route` was given, so an app the `app` phase opened was opened on it.
+  if (walk.app.openedByThisRun) {
     phases.push({
       id: 'route',
       status: 'ok',
@@ -127,9 +117,9 @@ export async function routeStep(
     return { next: null };
   }
   const route = options.route;
-  const opened = await walk.record('route', async () => {
-    const result = await deps.openRoute(route, withApp.devServerUrl, walk.attachBudget());
-    session.noteOpened(result);
+  const { value: opened } = await walk.record('route', async () => {
+    const result = await deps.openRoute(route, walk.report.devServerUrl, walk.attachBudget());
+    walk.app.noteOpened(result);
     return result.exitCode === 0
       ? { status: 'ok' as const, reason: `opened ${result.url}`, value: result }
       : {
@@ -146,30 +136,8 @@ export async function routeStep(
     'the route was not opened, so the app is not on the screen under test',
     'screenshot'
   );
-  const captured = await captureIfPossible(
-    deps,
-    options,
-    session.deviceId,
-    session.deviceBackend,
-    phases,
-    {
-      settleAsync: () => session.settleAsync(),
-      deviceAsync: walk.deviceAsync,
-      // The route was refused, so whatever is on screen is not the route under test.
-      showing: session.devLauncherLeftOnScreen ? 'dev-launcher' : 'device',
-    }
-  );
-  return {
-    stop: walk.done('failed', {
-      ...withApp,
-      deviceId: captured.deviceId,
-      deviceBackend: captured.deviceBackend,
-      routeCheck: session.routeCheck,
-      reload: reloadJson,
-      screenshot: captured.screenshot,
-      durationMs: deps.now() - walk.startedAt,
-    }),
-  };
+  // The route was refused, so whatever is on screen is not the route under test.
+  return { stop: await stopWithPicture(walk, 'failed', walk.app.showingWithoutApp()) };
 }
 
 /**
@@ -184,13 +152,10 @@ export async function routeStep(
  * exactly as before: it is not coming up, so a second look would answer the same and cost the
  * caller a wait. One this run reloaded *is* coming up, and gets the same poll a cold launch does.
  */
-async function evaluateUntilReadableAsync(
-  walk: PhaseWalk,
-  session: AppSession,
-  devServerUrl: string
-): Promise<SmokeEvaluateResult> {
+async function evaluateUntilReadableAsync(walk: PhaseWalk): Promise<SmokeEvaluateResult> {
   const { deps } = walk;
-  const deadline = deps.now() + (session.movedByThisRun ? RUNTIME_READY_TIMEOUT_MS : 0);
+  const { devServerUrl } = walk.report;
+  const deadline = deps.now() + (walk.app.movedByThisRun ? RUNTIME_READY_TIMEOUT_MS : 0);
   let unsupportedSince: number | null = null;
   for (;;) {
     const result = await deps.evaluate(devServerUrl);
@@ -208,18 +173,17 @@ async function evaluateUntilReadableAsync(
 // ---- Phase 8: can the runtime be read at all? ---------------------------------------------
 // ---- Phase 9: what did the app report while it was watched? -------------------------------
 export async function runtimeAndErrorsStep(
-  walk: PhaseWalk,
-  session: AppSession,
-  devServerUrl: string
+  walk: PhaseWalk
 ): Promise<{ runtime: SmokeEvaluateResult; collected: SmokeErrorsResult }> {
   const { deps, options } = walk;
+  const { devServerUrl } = walk.report;
   // @ref ../timeouts §APP_SETTLE_MS. Before the read rather than only before the picture: an app that
   // has just been launched onto a simulator this run booted is still registering, and asking a
   // debugger target list mid-churn answers "No target found" about an app that is running fine.
-  await session.settleAsync();
+  await walk.app.settleAsync();
 
-  const runtime = await walk.record('runtime', async () => {
-    const result = await evaluateUntilReadableAsync(walk, session, devServerUrl);
+  const { value: runtime } = await walk.record('runtime', async () => {
+    const result = await evaluateUntilReadableAsync(walk);
     if (result.ok) {
       return { status: 'ok' as const, value: result };
     }
@@ -237,7 +201,7 @@ export async function runtimeAndErrorsStep(
   // the report is more useful with it — but the *verdict* never rests on it. That is the rule
   // llp/0005-runtime-loop-tools.rfc.md §Android forces: Expo Go on Android acknowledges `Runtime.enable` and reports
   // nothing, so an empty window there is silence and not health.
-  const collected = await walk.record(
+  const { value: collected } = await walk.record(
     'errors',
     async () => {
       const result = await deps.collectErrors(devServerUrl, options.windowMs);
@@ -272,7 +236,7 @@ export async function runtimeAndErrorsStep(
         value: result,
       };
     },
-    options.windowMs
+    { budgetMs: options.windowMs }
   );
   return { runtime, collected };
 }

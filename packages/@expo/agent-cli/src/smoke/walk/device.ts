@@ -1,8 +1,6 @@
-import type { BundleCheckResult } from '../../runtime/bundleCheck';
 import type { AppConnectionResult } from '../../runtime/waitReady';
 import { noScreenshot } from '../results';
 import { APP_PROBE_MS, BUILD_DEV_SERVER_TIMEOUT_MS, START_SESSION_TIMEOUT_MS } from '../timeouts';
-import type { RunBase } from './bundle';
 import type { PhaseWalk, Step } from './walk';
 
 /** What phase 4 and the install hand the `app` phase. */
@@ -29,16 +27,12 @@ export interface DeviceReady {
 // `--eas` named the device, and the device it named is not on this machine. The run still brings
 // its own environment: the session in progress on this platform, or one it starts with the app
 // on its command line — and ends again afterwards, the way a booted simulator is shut down.
-export async function startSessionStep(
-  walk: PhaseWalk,
-  base: RunBase,
-  bundle: BundleCheckResult
-): Promise<Step<null>> {
-  const { deps, environment, cleanups } = walk;
-  const session = await walk.recordBootstrap(
+async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
+  const { deps, environment, cleanups, report } = walk;
+  const { value: session } = await walk.record(
     'start-session',
     async () => {
-      const result = await deps.ensureEasSession(base.devServerUrl);
+      const result = await deps.ensureEasSession(report.devServerUrl);
       if (result.sessionId != null && result.started) {
         cleanups.push({
           resource: 'session',
@@ -60,7 +54,7 @@ export async function startSessionStep(
             value: result,
           };
     },
-    START_SESSION_TIMEOUT_MS
+    { budgetMs: START_SESSION_TIMEOUT_MS, bootstrap: true }
   );
   if (session.ok && session.sessionId != null) {
     environment.device = session.started ? 'booted' : 'reused';
@@ -73,8 +67,6 @@ export async function startSessionStep(
   );
   return {
     stop: walk.done('failed', {
-      ...base,
-      bundle,
       screenshot: noScreenshot('no EAS Simulator session was reached, so nothing was photographed'),
     }),
   };
@@ -87,10 +79,8 @@ export async function startSessionStep(
  * The next value says whether the boot said its device has no app: a simulator the registry
  * created this run, whose disk holds nothing to read (llp/0035 §iOS smoke).
  */
-export async function bootStep(
-  walk: PhaseWalk,
-  base: RunBase,
-  bundle: BundleCheckResult
+async function bootStep(
+  walk: PhaseWalk
 ): Promise<Step<{ firstConnection: AppConnectionResult; bootInstallNeeded: boolean }>> {
   const { deps, environment, cleanups } = walk;
   // The **app** is asked about first, and the device only if nothing answers. Two reasons, and
@@ -100,37 +90,41 @@ export async function bootStep(
   // screen to answer for the app that is really running. And it keeps the ordinary healthy run
   // spawning no device tool at all until the picture is taken, which is where it always did.
   const firstConnection = await deps.waitForAppConnection(
-    base.devServerUrl,
+    walk.report.devServerUrl,
     Math.min(walk.remaining(), APP_PROBE_MS)
   );
   if (firstConnection.appsConnected !== 0 || (await walk.deviceAsync()).deviceId != null) {
     return { next: { firstConnection, bootInstallNeeded: false } };
   }
-  const boot = await walk.recordBootstrap('boot-device', async () => {
-    const result = await deps.bootDevice();
-    if (
-      result.ok &&
-      result.deviceId &&
-      !cleanups.some(({ resource }) => resource === 'dev-server')
-    ) {
-      cleanups.push({
-        resource: 'device',
-        target: result.deviceId,
-        release: () => deps.releaseDevice(),
-      });
-    }
-    return result.ok && result.deviceId != null
-      ? {
-          status: 'ok' as const,
-          reason: `booted ${result.deviceId} for this run${result.choice ? ` because ${result.choice}` : ''}`,
-          value: result,
-        }
-      : {
-          status: 'failed' as const,
-          reason: result.reason ?? 'no device came up, and nothing said why',
-          value: result,
-        };
-  });
+  const { value: boot } = await walk.record(
+    'boot-device',
+    async () => {
+      const result = await deps.bootDevice();
+      if (
+        result.ok &&
+        result.deviceId &&
+        !cleanups.some(({ resource }) => resource === 'dev-server')
+      ) {
+        cleanups.push({
+          resource: 'device',
+          target: result.deviceId,
+          release: () => deps.releaseDevice(),
+        });
+      }
+      return result.ok && result.deviceId != null
+        ? {
+            status: 'ok' as const,
+            reason: `booted ${result.deviceId} for this run${result.choice ? ` because ${result.choice}` : ''}`,
+            value: result,
+          }
+        : {
+            status: 'failed' as const,
+            reason: result.reason ?? 'no device came up, and nothing said why',
+            value: result,
+          };
+    },
+    { bootstrap: true }
+  );
   if (boot.ok && boot.deviceId != null) {
     environment.device = 'booted';
     environment.deviceChoice = boot.choice ?? null;
@@ -146,8 +140,6 @@ export async function bootStep(
   );
   return {
     stop: walk.done('failed', {
-      ...base,
-      bundle,
       screenshot: noScreenshot('no device came up, so nothing was photographed'),
     }),
   };
@@ -169,12 +161,7 @@ export async function bootStep(
 // environment — `--no-start` says read what is there, and installing an app is not reading.
 //
 // The next value is whether the install replaced the app (@see DeviceReady.appReplaced).
-export async function installStep(
-  walk: PhaseWalk,
-  base: RunBase,
-  bundle: BundleCheckResult,
-  bootInstallNeeded: boolean
-): Promise<Step<boolean>> {
+async function installStep(walk: PhaseWalk, bootInstallNeeded: boolean): Promise<Step<boolean>> {
   const { deps, environment } = walk;
   const device = await walk.deviceAsync();
   if (
@@ -192,7 +179,7 @@ export async function installStep(
   // phase gives a plan that compiles. A download that finishes in twenty seconds is not made
   // slower by a bound it never reaches; a compile stopped at two minutes is a build reported as
   // failed for no reason (§It builds what the app needs, and says so first).
-  const installed = await walk.recordBootstrap(
+  const { value: installed } = await walk.record(
     'install-app',
     async () => {
       const result = await deps.installApp(device.deviceId!);
@@ -212,7 +199,7 @@ export async function installStep(
             value: result,
           };
     },
-    BUILD_DEV_SERVER_TIMEOUT_MS
+    { budgetMs: BUILD_DEV_SERVER_TIMEOUT_MS, bootstrap: true }
   );
   if (installed.ok) {
     // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got
@@ -232,13 +219,40 @@ export async function installStep(
   walk.skipRest('app', 'the app could not be installed, so there was nothing to open');
   return {
     stop: walk.done('failed', {
-      ...base,
-      bundle,
       deviceId: device.deviceId,
       deviceBackend: device.backend,
       screenshot: noScreenshot(
         'the app could not be installed, so there was nothing to photograph it running'
       ),
     }),
+  };
+}
+
+/**
+ * Phase 4 and the install: make sure there is a device with the app on it, for a run allowed to
+ * bring its own environment. `--no-start` says read what is there.
+ */
+export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceReady>> {
+  const { options } = walk;
+  if (!options.bootstrap) {
+    return { next: { firstConnection: null, appReplaced: false } };
+  }
+  let firstConnection: AppConnectionResult | null = null;
+  let bootInstallNeeded = false;
+  // Phase 1 may have changed `options.cloud`, so it is read only from here on.
+  if (options.cloud === 'required') {
+    const session = await startSessionStep(walk);
+    if ('stop' in session) return session;
+  } else {
+    const booted = await bootStep(walk);
+    if ('stop' in booted) return booted;
+    ({ firstConnection, bootInstallNeeded } = booted.next);
+  }
+  const installed = await installStep(walk, bootInstallNeeded);
+  if ('stop' in installed) return installed;
+  return {
+    next: installed.next
+      ? { firstConnection: null, appReplaced: true }
+      : { firstConnection, appReplaced: false },
   };
 }

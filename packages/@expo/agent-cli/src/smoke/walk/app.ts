@@ -1,22 +1,12 @@
-import type { BundleCheckResult } from '../../runtime/bundleCheck';
-import { describeSkippedApps, type SkippedApp } from '../../runtime/targetSelection';
+import { describeSkippedApps } from '../../runtime/targetSelection';
 import type { AppConnectionResult } from '../../runtime/waitReady';
-import { captureIfPossible } from '../capture';
+import { stopWithPicture } from '../capture';
 import type { SmokeAppFit, SmokeRun } from '../phases';
 import { appendReason } from '../results';
 import { APP_PROBE_MS, ROOT_ROUTE } from '../timeouts';
 import type { SmokePhase, SmokePhaseStatus } from '../types';
-import type { AppSession } from './appSession';
-import type { RunBase } from './bundle';
 import type { DeviceReady } from './device';
 import type { PhaseWalk, Step } from './walk';
-
-/** What every exit from phase 5 on reports about the dev server, the bundle and the app. */
-export interface WithApp extends RunBase {
-  bundle: BundleCheckResult;
-  appsConnected: number;
-  skippedApps: SkippedApp[];
-}
 
 /** What the device said when it refused this run's deep link. */
 interface RefusedOpen {
@@ -39,38 +29,30 @@ interface RefusedOpen {
 }
 
 // ---- Phase 5: is an app attached, and can one be opened if not? ---------------------------
-export async function appStep(
-  walk: PhaseWalk,
-  session: AppSession,
-  base: RunBase,
-  bundle: BundleCheckResult,
-  ready: DeviceReady
-): Promise<Step<WithApp>> {
+export async function appStep(walk: PhaseWalk, ready: DeviceReady): Promise<Step<SmokePhase>> {
   const refused: RefusedOpen = { fit: null, asked: false };
-  const connection = await walk.record('app', () =>
-    openAppAsync(walk, session, base.devServerUrl, ready, refused)
+  const { value: connection, phase } = await walk.record(
+    'app',
+    () => openAppAsync(walk, ready, refused),
+    // The whole phase, because on this path almost all of it is the wait above.
+    { bootstrap: () => walk.app.openedByThisRun && walk.coldEnvironment() }
   );
-  // The whole phase, because on this path almost all of it is the wait above.
-  if (session.openedByThisRun && walk.coldEnvironment()) {
-    walk.chargeToBootstrap();
-  }
 
   const { appsConnected, skippedApps } = connection;
-  const withApp = { ...base, bundle, appsConnected, skippedApps };
+  Object.assign(walk.report, { appsConnected, skippedApps });
   if (appsConnected === 0) {
-    return { stop: await noAppExit(walk, session, withApp, refused) };
+    return { stop: await noAppExit(walk, phase, refused) };
   }
-  return { next: withApp };
+  return { next: phase };
 }
 
 async function openAppAsync(
   walk: PhaseWalk,
-  session: AppSession,
-  devServerUrl: string,
   { firstConnection, appReplaced }: DeviceReady,
   refused: RefusedOpen
 ): Promise<{ status: SmokePhaseStatus; reason?: string | null; value: AppConnectionResult }> {
   const { deps, options, environment } = walk;
+  const { devServerUrl } = walk.report;
   // Reused when the boot decision above already asked. It answered "nothing is attached", which
   // is still true of a simulator that has only just finished booting — and asking again would
   // spend a second wait on a fact this run established one phase ago.
@@ -118,10 +100,7 @@ async function openAppAsync(
     devServerUrl,
     Math.max(0, attachDeadline - deps.now())
   );
-  session.noteOpened(opened);
-  if (options.route != null) {
-    session.routeOpenedWhileConnecting = true;
-  }
+  walk.app.noteOpened(opened);
   if (opened.exitCode !== 0) {
     // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
     //
@@ -166,13 +145,11 @@ async function openAppAsync(
 /** No app attached: explain why if the device can, take a picture, and end the run. */
 async function noAppExit(
   walk: PhaseWalk,
-  session: AppSession,
-  withApp: WithApp,
+  appPhase: SmokePhase,
   refused: RefusedOpen
 ): Promise<SmokeRun> {
-  const { deps, options, phases } = walk;
-  const { skippedApps } = withApp;
-  const appPhase = phases[phases.length - 1]!;
+  const { deps, report } = walk;
+  const { skippedApps } = report;
   if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
   // @ref ../phases §SmokeDeps.explainSilentApp
   //
@@ -188,7 +165,7 @@ async function noAppExit(
   // is what keeps the same finding from being printed twice on one row.
   const silent = refused.asked
     ? refused.fit
-    : await deps.explainSilentApp(session.deviceId, session.deviceBackend);
+    : await deps.explainSilentApp(report.deviceId, report.deviceBackend);
   if (!refused.asked && silent?.mismatch != null) {
     // Appended rather than substituted: "the link was opened and nothing attached" is what the
     // phase measured, and the device fact is why. A reader needs both — the second without the
@@ -203,31 +180,18 @@ async function noAppExit(
   // report — which is the one property the phase list has (`reports every phase exactly once`).
   walk.skipRest('reload', 'no app is connected, so there was nothing to read', 'screenshot');
   // The run opened the app in this phase, so whatever is on screen may still be loading.
-  const captured = await captureIfPossible(
-    deps,
-    options,
-    session.deviceId,
-    session.deviceBackend,
-    phases,
+  return stopWithPicture(
+    walk,
+    appPhase.status === 'failed' ? 'failed' : 'inconclusive',
+    walk.app.showingWithoutApp(),
     {
-      settleAsync: () => session.settleAsync(),
-      deviceAsync: walk.deviceAsync,
-      showing: session.devLauncherLeftOnScreen ? 'dev-launcher' : 'device',
+      // Reported as a fact and not only as the phase's sentence, so the follow-ups can lead with
+      // the command that fixes it rather than with "open the app again" — which is what they did,
+      // for ever, against a device that will answer the same way every time (llp/0009).
+      appMismatch: silent?.mismatch ?? null,
+      appMismatchKind: silent?.kind ?? null,
     }
   );
-  return walk.done(appPhase.status === 'failed' ? 'failed' : 'inconclusive', {
-    ...withApp,
-    deviceId: captured.deviceId,
-    deviceBackend: captured.deviceBackend,
-    routeCheck: session.routeCheck,
-    // Reported as a fact and not only as the phase's sentence, so the follow-ups can lead with
-    // the command that fixes it rather than with "open the app again" — which is what they did,
-    // for ever, against a device that will answer the same way every time (llp/0009).
-    appMismatch: silent?.mismatch ?? null,
-    appMismatchKind: silent?.kind ?? null,
-    screenshot: captured.screenshot,
-    durationMs: deps.now() - walk.startedAt,
-  });
 }
 
 // ---- Is the app that answered one this project can run at all? ---------------------------
@@ -247,25 +211,24 @@ async function noAppExit(
 // there and still photograph it — the same rule llp/0005 §Android sets for a runtime with no
 // debugger, where an empty window costs one wait and the report is more useful with it. What
 // changes is that the verdict can no longer be `passed`.
+//
+// Returned rather than written into the report: an exit before the verdict does not report it.
 export async function appFitStep(
   walk: PhaseWalk,
-  devServerUrl: string
+  appPhase: SmokePhase
 ): Promise<Pick<SmokeRun, 'appMismatch' | 'appMismatchKind'>> {
-  const appFit = await walk.deps.checkAppFitsProject(devServerUrl);
+  const appFit = await walk.deps.checkAppFitsProject(walk.report.devServerUrl);
   const appMismatch = appFit.mismatch;
-  const appPhase: SmokePhase | undefined = walk.phases.find((phase) => phase.id === 'app');
-  if (appPhase != null) {
-    if (appMismatch != null) {
-      // A mismatch outranks a note: there is no use telling a caller their Expo Go is a patch
-      // behind when the answer is that it cannot run their project at all.
-      appPhase.status = 'inconclusive';
-      appPhase.reason = appMismatch;
-    } else if (appFit.note != null) {
-      // Appended rather than substituted. The sentence already there says how the app got where it
-      // is — "opened … to connect one" — which is the fact the row exists for, and a note that
-      // replaced it would trade a finding for a finding.
-      appendReason(appPhase, appFit.note);
-    }
+  if (appMismatch != null) {
+    // A mismatch outranks a note: there is no use telling a caller their Expo Go is a patch
+    // behind when the answer is that it cannot run their project at all.
+    appPhase.status = 'inconclusive';
+    appPhase.reason = appMismatch;
+  } else if (appFit.note != null) {
+    // Appended rather than substituted. The sentence already there says how the app got where it
+    // is — "opened … to connect one" — which is the fact the row exists for, and a note that
+    // replaced it would trade a finding for a finding.
+    appendReason(appPhase, appFit.note);
   }
   return { appMismatch, appMismatchKind: appFit.kind };
 }

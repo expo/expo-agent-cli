@@ -53,7 +53,7 @@ import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { SkippedApp } from '../runtime/targetSelection';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
 import { firstLine } from '../utils/text';
-import { captureIfPossible } from './capture';
+import { stopWithPicture } from './capture';
 import type { SmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';
@@ -66,9 +66,8 @@ import type {
   SmokeResource,
 } from './types';
 import { appFitStep, appStep } from './walk/app';
-import { AppSession } from './walk/appSession';
 import { bundlerReadyStep, bundleStep } from './walk/bundle';
-import { bootStep, installStep, startSessionStep, type DeviceReady } from './walk/device';
+import { prepareDeviceStep } from './walk/device';
 import { devServerStep } from './walk/devServer';
 import { reloadStep, routeStep, runtimeAndErrorsStep } from './walk/reads';
 import { createPhaseWalk } from './walk/walk';
@@ -629,7 +628,7 @@ export interface SmokeRunContext {
   environment: SmokeEnvironmentJson;
 }
 
-/** The phases themselves. Everything it starts is registered with the context first. */
+/** The phases themselves, in order. Everything they start is registered with the context first. */
 async function runPhasesAsync(
   deps: SmokeDeps,
   options: SmokeOptions,
@@ -639,64 +638,20 @@ async function runPhasesAsync(
 
   const found = await devServerStep(walk);
   if ('stop' in found) return found.stop;
-  const ready = await bundlerReadyStep(walk, found.next);
+  const ready = await bundlerReadyStep(walk);
   if ('stop' in ready) return ready.stop;
-  const base = ready.next;
-  const bundled = await bundleStep(walk, base);
+  const bundled = await bundleStep(walk);
   if ('stop' in bundled) return bundled.stop;
-  const bundle = bundled.next;
-
-  // Phase 1 may have changed `options.cloud`, so it is read only from here on.
-  const device: DeviceReady = { firstConnection: null, appReplaced: false };
-  let bootInstallNeeded = false;
-  if (options.bootstrap && options.cloud === 'required') {
-    const session = await startSessionStep(walk, base, bundle);
-    if ('stop' in session) return session.stop;
-  }
-  if (options.bootstrap && options.cloud !== 'required') {
-    const booted = await bootStep(walk, base, bundle);
-    if ('stop' in booted) return booted.stop;
-    device.firstConnection = booted.next.firstConnection;
-    bootInstallNeeded = booted.next.bootInstallNeeded;
-  }
-  if (options.bootstrap) {
-    const installed = await installStep(walk, base, bundle, bootInstallNeeded);
-    if ('stop' in installed) return installed.stop;
-    if (installed.next) {
-      device.firstConnection = null;
-      device.appReplaced = true;
-    }
-  }
-
-  const session = new AppSession(walk, base.devServerUrl);
-  const attached = await appStep(walk, session, base, bundle, device);
+  const device = await prepareDeviceStep(walk);
+  if ('stop' in device) return device.stop;
+  const attached = await appStep(walk, device.next);
   if ('stop' in attached) return attached.stop;
-  const withApp = attached.next;
-  const { appMismatch, appMismatchKind } = await appFitStep(walk, base.devServerUrl);
-
-  const reloadJson = await reloadStep(walk, session, base.devServerUrl);
-  const routed = await routeStep(walk, session, withApp, reloadJson);
+  const { appMismatch, appMismatchKind } = await appFitStep(walk, attached.next);
+  await reloadStep(walk);
+  const routed = await routeStep(walk);
   if ('stop' in routed) return routed.stop;
-  const { runtime, collected } = await runtimeAndErrorsStep(walk, session, base.devServerUrl);
+  const { runtime, collected } = await runtimeAndErrorsStep(walk);
 
-  // ---- Phase 10: the picture ----------------------------------------------------------------
-
-  // Already done before the runtime read on this path, so this call costs nothing: the wait
-  // happens once per run, for a run that opened the app.
-  const captured = await captureIfPossible(
-    deps,
-    options,
-    session.deviceId,
-    session.deviceBackend,
-    walk.phases,
-    {
-      settleAsync: () => session.settleAsync(),
-      deviceAsync: walk.deviceAsync,
-      // An app is connected on this path — the run got past the `app` phase — so the picture is of
-      // the project.
-      showing: 'project',
-    }
-  );
   // The verdict. `failed` needs something to have gone wrong; `passed` needs the runtime to have
   // answered, so a window nobody could have read is never a pass.
   //
@@ -706,30 +661,27 @@ async function runPhasesAsync(
   // caller has on disk. `threw` still wins: an app that reported an error has been shown to be
   // broken, and which session it was is no longer the open question.
   const threw = collected.records.some(isFailingRecord);
-  const sessionKnown = reloadJson.disposition !== 'unproved';
+  const sessionKnown = walk.report.reload.disposition !== 'unproved';
   // @ref llp/0005 §Expo Go is only a target for a project that fits in it. `threw` still outranks
   // it: Expo Go reporting an error while running this project's bundle is a fact about the code,
   // whichever app was holding it.
   const appFitsProject = appMismatch == null;
-  return walk.done(
-    threw
-      ? 'failed'
-      : runtime.ok && collected.ok && sessionKnown && appFitsProject
-        ? 'passed'
-        : 'inconclusive',
-    {
-      ...withApp,
-      routeCheck: session.routeCheck,
-      deviceId: captured.deviceId,
-      deviceBackend: captured.deviceBackend,
-      runtimeSupported: runtime.unsupported ? false : runtime.ok ? true : null,
-      reload: reloadJson,
-      appMismatch,
-      appMismatchKind,
-      windowMs: options.windowMs,
-      errors: collected.records,
-      screenshot: captured.screenshot,
-      durationMs: deps.now() - ctx.startedAt,
-    }
-  );
+  const outcome = threw
+    ? 'failed'
+    : runtime.ok && collected.ok && sessionKnown && appFitsProject
+      ? 'passed'
+      : 'inconclusive';
+
+  // ---- Phase 10: the picture ----------------------------------------------------------------
+  //
+  // The settle was already done before the runtime read on this path, so it costs nothing here:
+  // the wait happens once per run, for a run that opened the app. An app is connected on this
+  // path — the run got past the `app` phase — so the picture is of the project.
+  return stopWithPicture(walk, outcome, 'project', {
+    runtimeSupported: runtime.unsupported ? false : runtime.ok ? true : null,
+    appMismatch,
+    appMismatchKind,
+    windowMs: options.windowMs,
+    errors: collected.records,
+  });
 }

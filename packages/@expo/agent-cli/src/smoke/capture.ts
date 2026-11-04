@@ -1,9 +1,9 @@
 import type { ScreenshotResult } from '../device/screenshot';
 import type { DeviceBackend } from '../navigate/device';
-import type { SmokeDeps } from './phases';
-import type { SmokeOptions } from './resolveOptions';
+import type { SmokeRun } from './phases';
 import { noScreenshot, showingReason } from './results';
-import type { SmokePhase, SmokePhaseStatus } from './types';
+import type { SmokeOutcome, SmokePhaseStatus } from './types';
+import type { PhaseWalk } from './walk/walk';
 
 /**
  * The picture, and the device it was taken on.
@@ -11,7 +11,7 @@ import type { SmokePhase, SmokePhaseStatus } from './types';
  * The device travels with it because the screenshot phase is the one step that resolves a device of
  * its own — every other phase either has one already or does not need one (F98).
  */
-export interface CaptureOutcome {
+interface CaptureOutcome {
   screenshot: ScreenshotResult;
   deviceId: string | null;
   deviceBackend: DeviceBackend | null;
@@ -25,36 +25,21 @@ export interface CaptureOutcome {
  * `ok: false` with a reason keeps that honest without spending the verdict on it — the outcome
  * never depends on this phase, in either direction.
  */
-export async function captureIfPossible(
-  deps: SmokeDeps,
-  options: SmokeOptions,
-  deviceId: string | null,
-  deviceBackend: DeviceBackend | null,
-  phases: SmokePhase[],
-  settle: {
-    /**
-     * The run's settle wait, which is a no-op unless this run opened the app and has not waited
-     * yet (@ref ./timeouts §APP_SETTLE_MS).
-     */
-    settleAsync: () => Promise<void>;
-    /**
-     * What the picture is a picture *of*, as far as this run can tell.
-     *
-     * @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it
-     * Three cases, because a reader believes a screenshot without checking it and all three look
-     * plausible: the project's own screen, the **dev launcher's** screen — which is what a
-     * development build shows when the loading link was opened and the bundle did not arrive — and
-     * a device with neither on it.
-     */
-    showing: 'project' | 'dev-launcher' | 'device';
-    /** The run's own device probe, cached, so this phase never resolves a second one (F98). */
-    deviceAsync: () => Promise<{
-      deviceId: string | null;
-      backend: DeviceBackend | null;
-      reason: string | null;
-    }>;
-  }
+async function captureIfPossible(
+  walk: PhaseWalk,
+  /**
+   * What the picture is a picture *of*, as far as this run can tell.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it
+   * Three cases, because a reader believes a screenshot without checking it and all three look
+   * plausible: the project's own screen, the **dev launcher's** screen — which is what a
+   * development build shows when the loading link was opened and the bundle did not arrive — and
+   * a device with neither on it.
+   */
+  showing: 'project' | 'dev-launcher' | 'device'
 ): Promise<CaptureOutcome> {
+  const { deps, options, phases } = walk;
+  const { deviceId, deviceBackend } = walk.report;
   const at = deps.now();
   const push = (status: SmokePhaseStatus, reason: string | null) =>
     phases.push({ id: 'screenshot', status, ms: deps.now() - at, reason });
@@ -68,7 +53,8 @@ export async function captureIfPossible(
   let device = deviceId;
   let backend = deviceBackend;
   if (device == null) {
-    const probe = await settle.deviceAsync();
+    // The run's own device probe, so this phase never resolves a second one (F98).
+    const probe = await walk.deviceAsync();
     backend = probe.backend;
     if (probe.deviceId == null) {
       const skipped = noScreenshot(
@@ -90,16 +76,17 @@ export async function captureIfPossible(
   // before it and not before the capture.
   deps.progress('screenshot', null);
 
-  // @ref ./timeouts §APP_SETTLE_MS — friction run 6, F57. Usually already done: the runtime read
-  // needs the same settle and asks for it first, on every path that reaches it.
-  await settle.settleAsync();
+  // @ref ./timeouts §APP_SETTLE_MS — friction run 6, F57. A no-op unless this run moved the app and
+  // has not waited yet. Usually already done: the runtime read needs the same settle and asks for
+  // it first, on every path that reaches it.
+  await walk.app.settleAsync();
 
   const result = await deps.captureScreenshot(device, backend);
   // @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app. A picture is the
   // one piece of evidence a reader believes without checking, and a home screen, a dev launcher
   // and an app that failed to render look equally plausible. An `ok` beside a run whose app never
   // connected has to say what it is a picture *of*.
-  push(result.ok ? 'ok' : 'skipped', result.ok ? showingReason(settle.showing) : result.reason);
+  push(result.ok ? 'ok' : 'skipped', result.ok ? showingReason(showing) : result.reason);
   // Handed back, and this is F98. A healthy app opens nothing — the `app` phase finds it already
   // connected and the `route` phase is skipped — so before this the two steps that set the run's
   // device fields never ran, and a run that had photographed a **billed cloud session** reported
@@ -107,4 +94,21 @@ export async function captureIfPossible(
   // [observed — live cloud, 2026-08-27]. The device a run used is a fact of the run, whichever phase
   // found it.
   return { screenshot: result, deviceId: device, deviceBackend: backend };
+}
+
+/** Take the picture and end the run with it, on the device the picture was taken on. */
+export async function stopWithPicture(
+  walk: PhaseWalk,
+  outcome: SmokeOutcome,
+  showing: 'project' | 'dev-launcher' | 'device',
+  extra: Partial<SmokeRun> = {}
+): Promise<SmokeRun> {
+  const captured = await captureIfPossible(walk, showing);
+  return walk.done(outcome, {
+    ...extra,
+    deviceId: captured.deviceId,
+    deviceBackend: captured.deviceBackend,
+    screenshot: captured.screenshot,
+    durationMs: walk.deps.now() - walk.startedAt,
+  });
 }
