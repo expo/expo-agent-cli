@@ -11,7 +11,7 @@ import {
 } from '../skills/skillsAsync';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import { diagnoseCheckedPackagesAsync, type InstallCheckReport } from './checkReport';
-import { runBareInstallAsync, stillUnresolvedError } from './bareInstall';
+import { runBareInstallAsync } from './bareInstall';
 import { reportInstallImpactAsync } from './impactReport';
 import type { InstallPlan } from './resolveOptions';
 import type { InstallReport } from './types';
@@ -40,15 +40,13 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
   if (dependenciesMissing && plan.expoArgs.length > 0) {
     throw dependenciesNotInstalledError('nothing was installed or checked');
   }
-  const bare = dependenciesMissing ? await runBareInstallAsync(projectRoot, plan.json) : null;
-  const { exitCode, checkPayload, checkOutput } = bare
-    ? { exitCode: bare.exitCode, checkPayload: null, checkOutput: null }
+  const { exitCode, checkPayload, checkOutput } = dependenciesMissing
+    ? {
+        exitCode: await runBareInstallAsync(projectRoot, plan.json),
+        checkPayload: null,
+        checkOutput: null,
+      }
     : await runInstallAsync(projectRoot, plan);
-  // @ref llp/0021-honest-reports.rfc.md — a 0 exit is not the answer; an expo that resolves is. No
-  // Try: line, because running the bare install again would only repeat this.
-  if (bare && exitCode === 0 && dependenciesMissingSync(projectRoot)) {
-    throw stillUnresolvedError(bare.ran);
-  }
   if (exitCode !== 0) {
     // Nothing was installed, so there is nothing to classify and nothing to link — but a caller
     // that asked for JSON still gets one object, the way a successful run does.

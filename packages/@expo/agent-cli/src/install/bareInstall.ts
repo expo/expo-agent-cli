@@ -2,34 +2,11 @@
 // The bare install of an app whose dependencies are not installed: the package manager's own
 // install, with the manager and the workspace root that `@expo/package-manager` resolves.
 
-import {
-  createForProject,
-  resolvePackageManager,
-  resolveWorkspaceRoot,
-  type NodePackageManager,
-} from '@expo/package-manager';
+import { createForProject, resolveWorkspaceRoot } from '@expo/package-manager';
 
 import * as Log from '../log';
+import { dependenciesMissingSync } from '../project/expoApp';
 import { CommandError } from '../utils/errors';
-
-/**
- * The install that installs exactly what each manager's lockfile records. Yarn's is not frozen,
- * because Yarn 1 spells that `--frozen-lockfile` and Berry `--immutable`.
- */
-const FROZEN_INSTALL_ARGS: Record<NodePackageManager['name'], string[]> = {
-  npm: ['ci'],
-  bun: ['install', '--frozen-lockfile'],
-  pnpm: ['install', '--frozen-lockfile'],
-  yarn: ['install'],
-  nub: ['install'],
-};
-
-/** The install that ran: its command, its arguments and its directory. */
-export interface BareInstall {
-  command: string;
-  args: string[];
-  cwd: string;
-}
 
 /**
  * Run the bare install, in the workspace root the project belongs to, or in the project.
@@ -37,42 +14,36 @@ export interface BareInstall {
  * Output follows `expo install`'s: inherited for a person, captured and sent to stderr under
  * `--json`, whose stdout holds one object.
  *
- * @returns the package manager's exit code, and the install that produced it.
- * @throws {CommandError} `PACKAGE_MANAGER_NOT_FOUND` when the manager could not be started.
+ * @returns the package manager's exit code.
+ * @throws {CommandError} `PACKAGE_MANAGER_NOT_FOUND` when the manager could not be started, and
+ * `DEPENDENCIES_NOT_INSTALLED` when it exited 0 and `expo` still does not resolve.
  */
-export async function runBareInstallAsync(
-  projectRoot: string,
-  json: boolean
-): Promise<{ exitCode: number; ran: BareInstall }> {
+export async function runBareInstallAsync(projectRoot: string, json: boolean): Promise<number> {
   const cwd = resolveWorkspaceRoot(projectRoot) ?? projectRoot;
-  const locked = resolvePackageManager(projectRoot);
   // Its own log goes to stdout, so it is replaced by the line below.
   const manager = createForProject(projectRoot, { cwd, silent: json, log: () => {} });
-  // With no lockfile there is nothing to freeze, and `npm ci` refuses to run.
-  const ran = {
-    command: manager.bin,
-    args: locked ? FROZEN_INSTALL_ARGS[locked] : ['install'],
-    cwd,
-  };
-  const message = `Installing the dependencies with ${spell(ran)} in ${cwd}`;
-  if (json) {
-    Log.error(message);
-  } else {
-    Log.log(message);
-  }
+  const command = `${manager.bin} install`;
+  (json ? Log.error : Log.log)(`Installing the dependencies with ${command} in ${cwd}`);
 
+  let exitCode: number;
   try {
-    printCaptured(json, await manager.runAsync(ran.args));
-    return { exitCode: 0, ran };
+    printCaptured(json, await manager.installAsync());
+    exitCode = 0;
   } catch (error) {
     const failure = asSpawnFailure(error);
     // `@expo/spawn-async` rejects a process that could not start with no status and no signal.
     if (failure.status == null && failure.signal == null) {
-      throw packageManagerNotFoundError(ran, failure.code);
+      throw packageManagerNotFoundError(manager.bin, command, cwd, failure.code);
     }
     printCaptured(json, failure);
-    return { exitCode: failure.status ?? 1, ran };
+    exitCode = failure.status ?? 1;
   }
+  // @ref llp/0021-honest-reports.rfc.md — a 0 exit is not the answer; an expo that resolves is. No
+  // Try: line, because running the bare install again would only repeat this.
+  if (exitCode === 0 && dependenciesMissingSync(projectRoot)) {
+    throw stillUnresolvedError(command, cwd);
+  }
+  return exitCode;
 }
 
 /** What `@expo/spawn-async` attaches to the error it rejects with. */
@@ -88,25 +59,29 @@ function asSpawnFailure(error: unknown): SpawnFailure {
   return typeof error === 'object' && error != null ? (error as SpawnFailure) : {};
 }
 
-/** The stop of a bare install that exited 0 and still left `expo` unresolved. */
-export function stillUnresolvedError({ cwd, ...ran }: BareInstall): CommandError {
+function stillUnresolvedError(command: string, cwd: string): CommandError {
   return new CommandError(
     'DEPENDENCIES_NOT_INSTALLED',
     [
-      `"${spell(ran)}" exited 0 in ${cwd}, but expo still does not resolve from this project, so its dependencies are not installed.`,
-      `Why: what that install installed does not include this project's expo, for example a lockfile written before expo was added, or a workspace that does not list this package.`,
-      `How: install this project with its package manager directly, and check that the lockfile lists expo.`,
+      `"${command}" exited 0 in ${cwd}, but expo still does not resolve from this project, so its dependencies are not installed.`,
+      `Why: what that install installed does not include this project's expo, for example a workspace that does not list this package.`,
+      `How: install this project with its package manager directly, and check that package.json and the lockfile list expo.`,
     ].join('\n')
   );
 }
 
-function packageManagerNotFoundError(ran: BareInstall, code: string | undefined): CommandError {
+function packageManagerNotFoundError(
+  bin: string,
+  command: string,
+  cwd: string,
+  code: string | undefined
+): CommandError {
   return new CommandError(
     'PACKAGE_MANAGER_NOT_FOUND',
     [
-      `"${ran.command}" is not installed on this machine, so the dependencies were not installed.`,
-      `Why: ${ran.command} is the package manager of this project, and starting "${spell(ran)}" in ${ran.cwd} failed${code ? ` with ${code}` : ''}.`,
-      `How: install ${ran.command}, then run this command again.`,
+      `"${bin}" is not installed on this machine, so the dependencies were not installed.`,
+      `Why: ${bin} is the package manager of this project, and starting "${command}" in ${cwd} failed${code ? ` with ${code}` : ''}.`,
+      `How: install ${bin}, then run this command again.`,
     ].join('\n')
   );
 }
@@ -117,8 +92,4 @@ function printCaptured(json: boolean, result: { stdout?: string; stderr?: string
   if (json && printed) {
     Log.error(printed);
   }
-}
-
-function spell({ command, args }: Pick<BareInstall, 'command' | 'args'>): string {
-  return [command, ...args].join(' ');
 }

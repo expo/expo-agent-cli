@@ -81,32 +81,30 @@ async function setupUninstalledProjectAsync({
 }
 
 describe('@expo/agent-cli install with no installed dependencies', () => {
-  it.each<[string, UninstalledProjectOptions, string[], 'project' | 'parent']>([
-    ['its own lockfile', {}, ['ci'], 'project'],
-    ['no lockfile', { lockfile: null }, ['install'], 'project'],
+  it.each<[string, UninstalledProjectOptions, 'project' | 'parent']>([
+    ['its own lockfile', {}, 'project'],
+    ['no lockfile', { lockfile: null }, 'project'],
     [
       'the lockfile of the workspace it belongs to',
       {
         lockfile: null,
         parent: { manifest: { workspaces: ['go-app'] }, lockfile: 'package-lock.json' },
       },
-      ['ci'],
       'parent',
     ],
     // An install in the wrong directory deletes that directory's node_modules.
     [
       'a parent lockfile that is not its workspace',
       { lockfile: null, parent: { manifest: { name: 'outer' }, lockfile: 'package-lock.json' } },
-      ['install'],
       'project',
     ],
-  ])(`should install a project with %s`, async (_, options, args, where) => {
+  ])(`should install a project with %s`, async (_, options, where) => {
     const { projectRoot, parentDir, env, calls } = await setupUninstalledProjectAsync(options);
 
     await executeAgentCliAsync(projectRoot, ['install'], { env });
 
     const cwd = where === 'parent' ? parentDir : fs.realpathSync.native(projectRoot);
-    expect(calls()).toEqual([{ args, cwd }]);
+    expect(calls()).toEqual([{ args: ['install'], cwd }]);
   });
 
   it(`should exit with the package manager's code when its install fails`, async () => {
