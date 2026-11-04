@@ -31,12 +31,12 @@ export interface SpawnTarget {
  * part is quoted here instead; `/s` strips the outer pair `cmd` is handed, leaving the quoted
  * program and the quoted arguments it needs to see.
  *
- * @param pathEnv `PATH` the child gets, so a bare name resolves to what that child's own PATH holds.
+ * @param env the child's environment, so a bare name resolves on the `PATH` that child gets.
  */
 export function resolveSpawnTarget(
   command: string,
   args: string[],
-  { pathEnv = process.env.PATH ?? process.env.Path }: { pathEnv?: string } = {}
+  env: NodeJS.ProcessEnv = process.env
 ): SpawnTarget {
   if (process.platform !== 'win32') {
     return { command, args, shell: false };
@@ -45,7 +45,7 @@ export function resolveSpawnTarget(
   // A bare `npx` or `xcrun` is a `.cmd` shim once PATH/PATHEXT has answered. Resolve it here so
   // the batch-file rule below sees the shim, rather than leaving `spawn` to find it without a shell
   // and throw EINVAL (CVE-2024-27980).
-  const resolved = resolveBareCommandOnPath(command, pathEnv ?? '');
+  const resolved = resolveBareCommandOnPath(command, env.PATH ?? env.Path ?? '');
   if (!BATCH_FILE.test(resolved)) {
     return { command: resolved, args, shell: false };
   }

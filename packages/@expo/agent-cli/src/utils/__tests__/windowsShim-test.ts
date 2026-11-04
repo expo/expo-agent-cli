@@ -130,19 +130,17 @@ describe(resolveSpawnTarget, () => {
 
     it(`should resolve a bare name on the child's PATH, not on this process's`, () => {
       const shims = new Set(['C:\\machine-npm\\npx.cmd', 'C:\\stub-bin\\npx.cmd']);
-      const statSync = vi
-        .spyOn(fs, 'statSync')
-        .mockImplementation(((file: string) => {
-          if (shims.has(file)) {
-            return { isFile: () => true };
-          }
-          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-        }) as unknown as typeof fs.statSync);
+      const statSync = vi.spyOn(fs, 'statSync').mockImplementation(((file: string) => {
+        if (shims.has(file)) {
+          return { isFile: () => true };
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }) as unknown as typeof fs.statSync);
       const originalPath = process.env.PATH;
       process.env.PATH = 'C:\\machine-npm';
       try {
         expect(
-          resolveSpawnTarget('npx.cmd', ['--yes'], { pathEnv: 'C:\\stub-bin' }).command
+          resolveSpawnTarget('npx.cmd', ['--yes'], { PATH: 'C:\\stub-bin' }).command
         ).toContain('C:\\stub-bin\\npx.cmd');
       } finally {
         process.env.PATH = originalPath;

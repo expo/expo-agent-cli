@@ -39,7 +39,7 @@ afterEach(async () => {
     });
   }
 });
-function envFor(root: string) {
+function envFor(root: string): Record<string, string> {
   return {
     ...stubExpoEnv(root),
     AGENT_CLI_NO_DEVICE: '0',
