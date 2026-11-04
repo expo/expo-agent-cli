@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** `smoke`'s bootstrap (`src/smoke/phases.ts` §start-session, `src/smoke/smokeAsync.ts` §ensureEasSession); `dev:stop --eas` (`src/dev/stopAsync.ts` §stopProjectEasSessionAsync); `dev`'s option resolver (`src/dev/resolveOptions.ts` §assertEasRunFits, §namesTunnel); the plan engine (`src/plan/decide.ts` §easRouteSteps, §easBuildPlan; `src/plan/types.ts` §DeviceBackend; `src/plan/resolveAsync.ts`; `src/plan/easBuildLookup.ts`); the EAS open (`src/dev/openAppEas.ts`); `eas.json` (`src/utils/easJson.ts`); the build lookup (`src/impact/buildCache.ts` §buildCacheArgs); the run follow-ups (`src/followups/start.ts` §onEas); the stub `eas` of the e2e tier (`e2e/stubs/eas.js`)
+**Systems:** `smoke`'s bootstrap (`src/smoke/phases.ts` §start-session, `src/smoke/deps/device.ts` §ensureEasSession); `dev:stop --eas` (`src/dev/stopAsync.ts` §stopProjectEasSessionAsync); `dev`'s option resolver (`src/dev/resolveOptions.ts` §assertEasRunFits, §namesTunnel); the plan engine (`src/plan/decide.ts` §easRouteSteps, §easBuildPlan; `src/plan/types.ts` §DeviceBackend; `src/plan/resolveAsync.ts`; `src/plan/easBuildLookup.ts`); the EAS open (`src/dev/openAppEas.ts`); `eas.json` (`src/utils/easJson.ts`); the build lookup (`src/impact/buildCache.ts` §buildCacheArgs); the run follow-ups (`src/followups/start.ts` §onEas); the stub `eas` of the e2e tier (`e2e/stubs/eas.js`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-09-08
 **Related:** [[0015-backend-selection-and-config]] §One flag for EAS, [[0005-runtime-loop-tools]] §Cloud simulator, [[0026-dev-owns-the-open]], [[0004-smart-start-and-project-state]]

@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** the `dev` resolver and run (`src/dev/resolveOptions.ts`, `src/dev/devAsync.ts`, `src/dev/detachAsync.ts`); the plan engine's open switch (`src/plan/decide.ts`, `src/plan/types.ts`, `src/plan/platformFlags.ts`); the stated-platform helpers (`src/smoke/suggest.ts`); smoke's dev-server start (`src/smoke/smokeAsync.ts`); every surface that prints a `dev` command line
+**Systems:** the `dev` resolver and run (`src/dev/resolveOptions.ts`, `src/dev/devAsync.ts`, `src/dev/detachAsync.ts`); the plan engine's open switch (`src/plan/decide.ts`, `src/plan/types.ts`, `src/plan/platformFlags.ts`); the stated-platform helpers (`src/smoke/suggest.ts`); smoke's dev-server start (`src/smoke/deps/devServer.ts`); every surface that prints a `dev` command line
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-09-05
 **Related:** [[0004-smart-start-and-project-state]], [[0005-runtime-loop-tools]], [[0015-backend-selection-and-config]]
