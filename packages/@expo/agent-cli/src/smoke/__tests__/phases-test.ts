@@ -14,13 +14,8 @@ import type { OpenRouteResult } from '../../navigate/openRoute';
 import type { BundleCheckResult } from '../../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../../runtime/devServer';
 import type { RuntimeErrorRecord } from '../../runtime/runtimeErrorCollector';
-import {
-  runSmokePhasesAsync,
-  smokeExitCode,
-  type SmokeDeps,
-  type SmokeEvaluateResult,
-  type SmokeRun,
-} from '../phases';
+import type { SmokeDeps, SmokeEvaluateResult, SmokeRun } from '../contract';
+import { runSmokePhasesAsync, smokeExitCode } from '../phases';
 import { silentProgress } from '../progress';
 import type { SmokeOptions } from '../resolveOptions';
 import {
@@ -199,7 +194,7 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     openRoute: async (route) => opened({ route }),
     // The ordinary case: the app that answered is one this project can run, with nothing to note.
     checkAppFitsProject: async () => ({ mismatch: null, kind: null, note: null }),
-    // @ref ../phases §SmokeDeps.explainSilentApp — nothing on the device explains a wait that
+    // @ref ../contract §SmokeDeps.explainSilentApp — nothing on the device explains a wait that
     // expired, which is the ordinary answer: a slow app is not a wrong app.
     explainSilentApp: async () => null,
     // A reload the dev server's own command socket proved, which is the healthy local case.
@@ -2614,7 +2609,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   });
 });
 
-// @ref ../phases §SmokeDeps.checkAppFitsProject
+// @ref ../contract §SmokeDeps.checkAppFitsProject
 //
 // The dep answers two things, and this is the one that decides nothing: a finding worth printing on
 // the row it is about, which leaves the verdict alone. Nothing produces one today — the version
@@ -2807,7 +2802,7 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
   });
 });
 
-// @ref ../phases §SmokeInstallResult.replaced — an addition and a replacement are different things
+// @ref ../contract §SmokeInstallResult.replaced — an addition and a replacement are different things
 // to do to somebody's machine, and the row has to say which.
 describe(`${runSmokePhasesAsync.name} and what the install replaced`, () => {
   const needsInstall = {
@@ -3084,7 +3079,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
-// @ref ../phases §SmokeDeps.explainSilentApp
+// @ref ../contract §SmokeDeps.explainSilentApp
 //
 // Nothing attached is a symptom, and the device often holds the cause. Found live and at full
 // price: an emulator holding Expo Go 54.0.8, a project on SDK 57, and **119 seconds** spent to

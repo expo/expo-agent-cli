@@ -12,7 +12,7 @@ import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { localRequirement } from '../../toolchain/runsOn';
 import { firstLine } from '../../utils/text';
-import type { SmokeDeps } from '../phases';
+import type { SmokeDeps } from '../contract';
 import { BUILD_DEV_SERVER_TIMEOUT_MS, START_DEV_SERVER_TIMEOUT_MS } from '../timeouts';
 import { smokeCommand } from '../suggest';
 import { whatAndHow } from './reasons';

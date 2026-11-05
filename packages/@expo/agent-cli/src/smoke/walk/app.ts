@@ -1,7 +1,7 @@
 import { describeSkippedApps } from '../../runtime/targetSelection';
 import type { AppConnectionResult } from '../../runtime/waitReady';
 import { stopWithPicture } from './capture';
-import type { SmokeAppFit, SmokeRun } from '../phases';
+import type { SmokeAppFit, SmokeRun } from '../contract';
 import { appendReason } from '../results';
 import { APP_PROBE_MS } from '../timeouts';
 import type { SmokePhase, SmokePhaseStatus } from '../types';
@@ -152,7 +152,7 @@ async function noAppExit(
   const { deps, report } = walk;
   const { skippedApps } = report;
   if (skippedApps.length > 0) appendReason(appPhase, describeSkippedApps(skippedApps));
-  // @ref ../phases §SmokeDeps.explainSilentApp
+  // @ref ../contract §SmokeDeps.explainSilentApp
   //
   // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is
   // an Expo Go built from another SDK: it takes the deep link, fails to load a bundle it cannot

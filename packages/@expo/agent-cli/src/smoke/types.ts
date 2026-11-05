@@ -14,7 +14,7 @@ import type { TargetReloadOutcome } from '../runtime/reload/attempt';
 import type { DevServerSource } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { SkippedApp } from '../runtime/targetSelection';
-import type { SmokeAppMismatchKind } from './phases';
+import type { SmokeAppMismatchKind } from './contract';
 
 /**
  * The phases of a smoke run, in the order they happen.

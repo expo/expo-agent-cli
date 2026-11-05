@@ -7,7 +7,7 @@
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
 import { PROGRAM_PREFIX } from '../programName';
-import type { SmokeAppMismatchKind } from '../smoke/phases';
+import type { SmokeAppMismatchKind } from '../smoke/contract';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface SmokeFollowUpInput {
@@ -131,7 +131,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   if (input.appMismatch) {
     // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
     //
-    // **Two mismatches, two next actions** (@ref src/smoke/phases §SmokeAppMismatchKind). Before
+    // **Two mismatches, two next actions** (@ref src/smoke/contract §SmokeAppMismatchKind). Before
     // this branch existed both got the development-build advice, which is right for a project Expo
     // Go cannot run and wrong for a project it can: the answer to the wrong *version* of Expo Go is
     // the right version, which this gate installs for itself on any run that was not told to change

@@ -6,7 +6,7 @@
 import { stripVTControlCharacters } from 'node:util';
 
 import { formatSmokeResult, smokeResultToJson } from '../format';
-import type { SmokeRun } from '../phases';
+import type { SmokeRun } from '../contract';
 import { noReload, noScreenshot } from '../results';
 import type { SmokeOptions } from '../resolveOptions';
 
