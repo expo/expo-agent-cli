@@ -30,12 +30,7 @@ import {
 import { preflightRuntimeAsync, type RuntimeContext } from './preflight';
 import type { RuntimeEvalOptions, RuntimeErrorsOptions } from './resolveOptions';
 import { CdpRuntimeErrorCollector, type RuntimeErrorRecord } from './runtimeErrorCollector';
-import {
-  formatStackFrames,
-  isUnmappedFrame,
-  relativizeFrame,
-  symbolicateFramesAsync,
-} from './symbolicate';
+import { symbolicateRuntimeErrorsAsync } from './symbolicate';
 import { classifyTargets } from './targetSelection';
 
 // The family's shared type, re-exported from where it was first defined so that the commands and
@@ -426,34 +421,4 @@ function logRecordsOf(entries: DevServerLogEntry[]): RuntimeErrorRecord[] {
     // no structured stack behind them, which is why `frames` stays absent.
     isError: true,
   }));
-}
-
-/**
- * Map every stack onto project files, and make the frames readable either way.
- *
- * One request per error rather than one for all of them: Metro keys its source maps by the frame's
- * bundle URL, so mixing two bundles into one request is fine, but a failure on one error's stack
- * would take the others' with it. The frames are trimmed of their query strings whatever happens,
- * because that is what makes an unmapped stack unreadable.
- */
-async function symbolicateRuntimeErrorsAsync(
-  errors: RuntimeErrorRecord[],
-  devServerUrl: string,
-  projectRoot: string | null
-): Promise<RuntimeErrorRecord[]> {
-  return await Promise.all(
-    errors.map(async (error) => {
-      if (!error.frames?.length) {
-        return error;
-      }
-      const symbolicated = await symbolicateFramesAsync(devServerUrl, error.frames);
-      const frames = symbolicated.map((frame) => relativizeFrame(frame, projectRoot));
-      return {
-        ...error,
-        frames,
-        symbolicated: frames.some((frame) => !isUnmappedFrame(frame)),
-        stack: formatStackFrames(frames),
-      };
-    })
-  );
 }

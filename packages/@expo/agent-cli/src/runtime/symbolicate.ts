@@ -28,6 +28,7 @@
 //   - 400 for a malformed request, 500 when the source map cannot be built.
 
 import { debugEvent } from './events';
+import type { RuntimeErrorRecord } from './runtimeErrorCollector';
 
 /** One stack frame, in the shape Metro's symbolicator speaks. */
 export interface StackFrame {
@@ -335,4 +336,34 @@ function readSymbolicatedFrame(answer: unknown, original: StackFrame): StackFram
     ...(collapse == null ? {} : { collapse }),
     ...hint,
   };
+}
+
+/**
+ * Map every stack onto project files, and make the frames readable either way.
+ *
+ * One request per error rather than one for all of them: Metro keys its source maps by the frame's
+ * bundle URL, so mixing two bundles into one request is fine, but a failure on one error's stack
+ * would take the others' with it. The frames are trimmed of their query strings whatever happens,
+ * because that is what makes an unmapped stack unreadable.
+ */
+export async function symbolicateRuntimeErrorsAsync(
+  errors: RuntimeErrorRecord[],
+  devServerUrl: string,
+  projectRoot: string | null
+): Promise<RuntimeErrorRecord[]> {
+  return await Promise.all(
+    errors.map(async (error) => {
+      if (!error.frames?.length) {
+        return error;
+      }
+      const symbolicated = await symbolicateFramesAsync(devServerUrl, error.frames);
+      const frames = symbolicated.map((frame) => relativizeFrame(frame, projectRoot));
+      return {
+        ...error,
+        frames,
+        symbolicated: frames.some((frame) => !isUnmappedFrame(frame)),
+        stack: formatStackFrames(frames),
+      };
+    })
+  );
 }

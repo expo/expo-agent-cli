@@ -57,6 +57,7 @@ import { markBundleSignalSync } from '../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../runtime/reload/evidence';
 import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
+import { symbolicateRuntimeErrorsAsync } from '../runtime/symbolicate';
 import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
@@ -1041,7 +1042,11 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           targetSelection,
           deviceInventory,
         }).collectAsync();
-        return { ok: true, records, reason: null };
+        return {
+          ok: true,
+          records: await symbolicateRuntimeErrorsAsync(records, devServerUrl, projectRoot),
+          reason: null,
+        };
       } catch (error: unknown) {
         // An unreadable app is a result rather than a tool failure: the gate reports that it could
         // not watch, which is exactly what `inconclusive` is for.
