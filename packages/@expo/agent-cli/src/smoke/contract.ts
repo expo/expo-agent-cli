@@ -214,8 +214,6 @@ export interface SmokeDeps {
    * asks is "is it not running now", and a start that died on its own has answered it.
    */
   stopDevServer(): Promise<SmokeReleaseResult>;
-  /** Switch the deps to the EAS route. Called when the run starts its own dev server on a configured EAS device. */
-  takeConfiguredEasRoute(): void;
   /**
    * Make sure this project has an EAS Simulator session on this run's platform with the app on it.
    *
@@ -389,7 +387,7 @@ export interface SmokeRun {
   bundle: BundleCheckResult | null;
   route: string | null;
   routeCheck: RouteCheckJson | null;
-  /** The cloud route the run took. Starts as the request and becomes `required` on the configured EAS route. Not in the output. */
+  /** The route the run took, read off the {@link CloudRouteCell} when the run ended. Not in the output. */
   cloudRoute: CloudPreference;
   deviceId: string | null;
   deviceBackend: DeviceBackend | null;
@@ -440,9 +438,19 @@ export interface RegisteredCleanup {
   release(): Promise<SmokeReleaseResult>;
 }
 
+/**
+ * The cloud route of one run. The deps and the walk share this one object.
+ *
+ * Starts as `SmokeOptions.cloud`. Phase 1 sets `required` when the run takes the configured EAS route.
+ */
+export interface CloudRouteCell {
+  current: CloudPreference;
+}
+
 /** What `runSmokePhasesAsync` hands the phase walk, so the walk owns none of it. */
 export interface SmokeRunContext {
   startedAt: number;
+  cloudRoute: CloudRouteCell;
   /** Appended to as resources are started, and read back by the cleanup. */
   cleanups: RegisteredCleanup[];
   /** Filled in as the run learns what it found and what it started. */

@@ -44,7 +44,13 @@
 import type { ReleasedDevice } from '../deviceBinding';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { firstLine } from '../utils/text';
-import type { RegisteredCleanup, SmokeDeps, SmokeRun, SmokeRunContext } from './contract';
+import type {
+  CloudRouteCell,
+  RegisteredCleanup,
+  SmokeDeps,
+  SmokeRun,
+  SmokeRunContext,
+} from './contract';
 import { stopWithPicture } from './walk/capture';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';
@@ -88,7 +94,8 @@ export function smokeExitCode(outcome: SmokeOutcome): number {
  */
 export async function runSmokePhasesAsync(
   deps: SmokeDeps,
-  options: SmokeOptions
+  options: SmokeOptions,
+  cloudRoute: CloudRouteCell = { current: options.cloud }
 ): Promise<SmokeRun> {
   const startedAt = deps.now();
   const cleanups: RegisteredCleanup[] = [];
@@ -106,7 +113,12 @@ export async function runSmokePhasesAsync(
   // `4.2s` while spending eight seconds shutting a simulator down would be describing a moment
   // that had passed (llp/0021 §The rules).
   try {
-    const run = await runPhasesAsync(deps, options, { startedAt, cleanups, environment });
+    const run = await runPhasesAsync(deps, options, {
+      startedAt,
+      cloudRoute,
+      cleanups,
+      environment,
+    });
     // Whether a device was *reused* is read off the run rather than probed for, and that is what
     // keeps a healthy run free of device tools: the phase that decides about a boot only asks
     // about a device when no app is connected, so on the ordinary run nothing has asked yet when

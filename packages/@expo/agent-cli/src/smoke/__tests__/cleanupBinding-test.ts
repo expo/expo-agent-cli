@@ -5,6 +5,7 @@ import { bindingFor, fakeTools, writeBinding } from '../../deviceBinding/__tests
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import * as deviceTools from '../../deviceBinding/tools';
 import { devStopAsync } from '../../dev/stopAsync';
+import type { CloudRouteCell } from '../contract';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
 
@@ -83,6 +84,18 @@ it('a start whose device check did not answer keeps the bound device on cleanup'
 
 it('cloud smoke stops its server without releasing local devices', async () => {
   await buildSmokeDeps(root, resolveSmokeOptions(['--ios', '--eas'])).stopDevServer();
+  expect(devStopAsync).toHaveBeenCalledWith(
+    root,
+    expect.objectContaining({ release: false }),
+    expect.anything()
+  );
+});
+
+it('deps read the route the walk sets after they are built', async () => {
+  const cloudRoute: CloudRouteCell = { current: 'fallback' };
+  const deps = buildSmokeDeps(root, resolveSmokeOptions(['--ios']), cloudRoute);
+  cloudRoute.current = 'required';
+  await deps.stopDevServer();
   expect(devStopAsync).toHaveBeenCalledWith(
     root,
     expect.objectContaining({ release: false }),

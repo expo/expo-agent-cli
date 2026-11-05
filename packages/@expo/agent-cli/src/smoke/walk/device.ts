@@ -236,7 +236,7 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
   }
   let firstConnection: AppConnectionResult | null = null;
   let bootInstallNeeded = false;
-  if (walk.report.cloudRoute === 'required') {
+  if (walk.cloudRoute.current === 'required') {
     const session = await startSessionStep(walk);
     if ('stop' in session) return session;
   } else {

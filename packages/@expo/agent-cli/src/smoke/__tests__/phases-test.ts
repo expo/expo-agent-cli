@@ -170,7 +170,6 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       reason: null,
     }),
     stopEasSession: async (sessionId) => ({ ok: true, target: sessionId, reason: null }),
-    takeConfiguredEasRoute: () => {},
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
     installApp: async () => ({ ok: true, version: null, replaced: null, reason: null }),

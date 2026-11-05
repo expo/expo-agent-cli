@@ -18,7 +18,7 @@ import { createDevServerDeps } from './deps/devServer';
 import { createSmokeDepsContext } from './deps/shared';
 import { startPortArgs } from './deps/startArgs';
 import { formatSmokeResult, smokeResultToJson } from './format';
-import type { SmokeDeps, SmokeRun } from './contract';
+import type { CloudRouteCell, SmokeDeps, SmokeRun } from './contract';
 import { runSmokePhasesAsync, smokeExitCode } from './phases';
 import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
@@ -47,7 +47,12 @@ export async function smokeAsync(projectRoot: string, options: SmokeOptions): Pr
   if (options.cloud === 'required') {
     await assertEasProjectConfiguredAsync(projectRoot);
   }
-  const run = await runSmokePhasesAsync(buildSmokeDeps(projectRoot, options), options);
+  const cloudRoute: CloudRouteCell = { current: options.cloud };
+  const run = await runSmokePhasesAsync(
+    buildSmokeDeps(projectRoot, options, cloudRoute),
+    options,
+    cloudRoute
+  );
   // Once per run, from the connection the verdict rests on, not once per wait.
   if (run.appsConnected != null && run.appsConnected > 0 && run.skippedApps.length > 0) {
     Log.progress(describeSkippedApps(run.skippedApps));
@@ -163,8 +168,12 @@ function explainOutcome(run: SmokeRun): string {
  * "is the bundle broken" or "which URL does this route deep-link to" is a second place for the
  * findings behind them to be forgotten.
  */
-export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
-  const ctx = createSmokeDepsContext(projectRoot, options);
+export function buildSmokeDeps(
+  projectRoot: string,
+  options: SmokeOptions,
+  cloudRoute: CloudRouteCell = { current: options.cloud }
+): SmokeDeps {
+  const ctx = createSmokeDepsContext(projectRoot, options, cloudRoute);
   return {
     ...createDevServerDeps(ctx),
     ...createDeviceDeps(ctx),

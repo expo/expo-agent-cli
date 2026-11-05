@@ -34,8 +34,7 @@ export async function devServerStep(walk: PhaseWalk): Promise<Step<null>> {
     // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — this run starts the
     // dev server, so the config's EAS device applies. Both the walk and the deps take the route.
     if (options.configuredEas && options.cloud === 'fallback') {
-      report.cloudRoute = 'required';
-      deps.takeConfiguredEasRoute();
+      walk.cloudRoute.current = 'required';
     }
     // @ref ../contract §RegisteredCleanup — registered **before** the start, so a start that got
     // halfway is still put back: a detached child that published its lock and then died in the
