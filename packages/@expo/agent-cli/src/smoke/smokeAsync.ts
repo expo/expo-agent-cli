@@ -2,10 +2,10 @@
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 // `@expo/agent-cli smoke`: the composite gate.
 //
-// This module is the wiring, and deliberately nothing else. The decisions are in `phases.ts`,
-// which is given the functions below rather than importing them, so the outcome table can be
-// tested against fakes. What is here is the real versions of those functions — every one of them
-// the same function the command that owns the question already calls.
+// This module holds the command run, its report and `buildSmokeDeps`, and nothing else. The
+// decisions are in `phases.ts`, which is given the deps rather than importing them, so the outcome
+// table can be tested against fakes. The real deps are in `deps/*`, one function per phase question,
+// and each is the same function the command that owns the question already calls.
 
 import { event } from '../events';
 import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
