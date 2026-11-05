@@ -68,7 +68,7 @@ async function openAppAsync(
   // rather than waiting out its budget on a state it could have changed itself. This is friction
   // run 1's F4 absorbed into the gate, and the same reasoning F48-8 gave `status.next`: a wait
   // for an app cannot succeed while nothing is opening one.
-  const device = await walk.deviceAsync();
+  const device = await walk.deps.probeDevice();
   if (device.deviceId == null) {
     return {
       status: 'inconclusive' as const,

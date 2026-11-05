@@ -245,6 +245,13 @@ export interface SmokeErrorsResult {
   reason: string | null;
 }
 
+/** What looking for a device without booting one found. @see SmokeDeps.probeDevice */
+export interface SmokeDeviceProbe {
+  deviceId: string | null;
+  backend: DeviceBackend | null;
+  reason: string | null;
+}
+
 /** Everything the runner needs from the outside world, so none of it happens here. */
 export interface SmokeDeps {
   discoverDevServer(explicitUrl: string | null): Promise<DevServerDiscovery>;
@@ -314,11 +321,7 @@ export interface SmokeDeps {
    * The dependencies retain successful choices and adopt devices from boot/session creation;
    * an unsuccessful lookup may be retried by a later phase.
    */
-  probeDevice(): Promise<{
-    deviceId: string | null;
-    backend: DeviceBackend | null;
-    reason: string | null;
-  }>;
+  probeDevice(): Promise<SmokeDeviceProbe>;
   /**
    * Open a route on the device, the way `navigate` does. Throws what `navigate` throws.
    *

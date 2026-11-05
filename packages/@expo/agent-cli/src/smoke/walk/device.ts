@@ -93,7 +93,7 @@ async function bootStep(
     walk.report.devServerUrl,
     Math.min(walk.remaining(), APP_PROBE_MS)
   );
-  if (firstConnection.appsConnected !== 0 || (await walk.deviceAsync()).deviceId != null) {
+  if (firstConnection.appsConnected !== 0 || (await walk.deps.probeDevice()).deviceId != null) {
     return { next: { firstConnection, bootInstallNeeded: false } };
   }
   const { value: boot } = await walk.record(
@@ -163,7 +163,7 @@ async function bootStep(
 // The next value is whether the install replaced the app (@see DeviceReady.appReplaced).
 async function installStep(walk: PhaseWalk, bootInstallNeeded: boolean): Promise<Step<boolean>> {
   const { deps, environment } = walk;
-  const device = await walk.deviceAsync();
+  const device = await walk.deps.probeDevice();
   if (
     device.deviceId == null ||
     !(bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))

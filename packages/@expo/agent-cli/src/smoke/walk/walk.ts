@@ -1,4 +1,3 @@
-import type { DeviceBackend } from '../../navigate/device';
 import type { SmokeDeps, SmokeRun, SmokeRunContext } from '../phases';
 import { coldWaitMs, type SmokeOptions } from '../resolveOptions';
 import { noReload, noScreenshot } from '../results';
@@ -25,12 +24,6 @@ export interface RecordOptions {
   bootstrap?: boolean | (() => boolean);
 }
 
-export interface DeviceProbe {
-  deviceId: string | null;
-  backend: DeviceBackend | null;
-  reason: string | null;
-}
-
 /** Everything the run reports except the verdict and its duration, filled in as it is learned. */
 export type SmokeRunReport = Omit<SmokeRun, 'outcome' | 'durationMs'>;
 
@@ -50,7 +43,6 @@ export interface PhaseWalk extends SmokeRunContext {
   ): Promise<{ value: T; phase: SmokePhase }>;
   skipRest(from: SmokePhaseId, reason: string, stopBefore?: SmokePhaseId): void;
   done(outcome: SmokeOutcome, extra?: Partial<SmokeRunReport>): WalkRun;
-  deviceAsync(): Promise<DeviceProbe>;
   coldEnvironment(): boolean;
   attachBudget(): number;
 }
@@ -142,10 +134,6 @@ export function createPhaseWalk(
     ...extra,
   });
 
-  // The dependencies own the chosen device, including one returned by boot/session creation.
-  // Asking again lets a failed lookup recover without a second cache in the phase runner.
-  const deviceAsync = () => deps.probeDevice();
-
   /**
    * Whether this run is the reason the thing it is now waiting for is cold.
    *
@@ -176,7 +164,6 @@ export function createPhaseWalk(
     record,
     skipRest,
     done,
-    deviceAsync,
     coldEnvironment,
     attachBudget,
   };

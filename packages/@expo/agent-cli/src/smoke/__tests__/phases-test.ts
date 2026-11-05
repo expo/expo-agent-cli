@@ -1415,7 +1415,7 @@ describe(runSmokePhasesAsync, () => {
     // An app that was already attached when this run arrived **and was not reloaded** is not one
     // this run is waiting on. Reading it once and reporting the answer is right, and `--no-reload`
     // is what puts the run in that state now: a reload leaves the app coming back, and an app that
-    // is coming back gets the poll (@ref ./timeouts §RUNTIME_READY_TIMEOUT_MS).
+    // is coming back gets the poll (@ref ../timeouts §RUNTIME_READY_TIMEOUT_MS).
     it(`asks once when the app was already there and nothing moved it`, async () => {
       let tries = 0;
       await runSmokePhasesAsync(
@@ -2465,7 +2465,7 @@ describe(`${runSmokePhasesAsync.name} and the code on disk`, () => {
 
   // A proved reload leaves the app re-registering exactly the way a cold launch does, so it owes
   // the same settle and the same runtime-ready poll — a single read landing in that gap answers
-  // "No target found" about an app that is coming back fine (@ref ./timeouts §APP_SETTLE_MS).
+  // "No target found" about an app that is coming back fine (@ref ../timeouts §APP_SETTLE_MS).
   it(`waits for the app to settle after a reload it proved`, async () => {
     const waitForStableTargets = vi.fn(async () => ({ stable: true }));
     await runSmokePhasesAsync(deps({ waitForStableTargets }), options());
@@ -2614,7 +2614,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   });
 });
 
-// @ref ./phases §SmokeDeps.checkAppFitsProject
+// @ref ../phases §SmokeDeps.checkAppFitsProject
 //
 // The dep answers two things, and this is the one that decides nothing: a finding worth printing on
 // the row it is about, which leaves the verdict alone. Nothing produces one today — the version
@@ -2807,7 +2807,7 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
   });
 });
 
-// @ref ./phases §SmokeInstallResult.replaced — an addition and a replacement are different things
+// @ref ../phases §SmokeInstallResult.replaced — an addition and a replacement are different things
 // to do to somebody's machine, and the row has to say which.
 describe(`${runSmokePhasesAsync.name} and what the install replaced`, () => {
   const needsInstall = {
@@ -3084,7 +3084,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
-// @ref ./phases §SmokeDeps.explainSilentApp
+// @ref ../phases §SmokeDeps.explainSilentApp
 //
 // Nothing attached is a symptom, and the device often holds the cause. Found live and at full
 // price: an emulator holding Expo Go 54.0.8, a project on SDK 57, and **119 seconds** spent to

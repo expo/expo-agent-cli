@@ -53,7 +53,7 @@ async function captureIfPossible(
   let backend = deviceBackend;
   if (device == null) {
     // The run's own device probe, so this phase never resolves a second one (F98).
-    const probe = await walk.deviceAsync();
+    const probe = await walk.deps.probeDevice();
     backend = probe.backend;
     if (probe.deviceId == null) {
       const skipped = noScreenshot(
