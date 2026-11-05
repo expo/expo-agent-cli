@@ -62,7 +62,8 @@ async function openAppAsync(
   // EAS's --open-url launches the app without opening an agent-device controller session.
   // Go through the normal open once for a session we created, even if Metro already sees the
   // app. This binds the controller for screenshots and makes a second reload unnecessary.
-  const needsCloudController = walk.report.cloudRoute === 'required' && environment.device === 'booted';
+  const needsCloudController =
+    walk.report.cloudRoute === 'required' && environment.device === 'booted';
   if (!appReplaced && first.appsConnected > 0 && !needsCloudController) {
     return { status: 'ok' as const, value: { connection: first, refused: null } };
   }
