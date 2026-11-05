@@ -20,14 +20,14 @@ import { deviceBoundByStart, START_DEV_SERVER_ARGV, startPortArgs } from './star
 import type { SmokeDepsContext } from './shared';
 
 /** What the start phase tells the stop phase: whether the device it found was already running. */
-export interface DevServerState {
+interface DevServerState {
   keepBoundDevice: boolean;
 }
 
 /** How long discovery may spend on each candidate port. Short: a dev server that is up answers. */
 const DISCOVERY_TIMEOUT_MS = 800;
 
-export function discoverDevServer(
+function discoverDevServer(
   ctx: SmokeDepsContext,
   explicitUrl: string | null
 ): ReturnType<SmokeDeps['discoverDevServer']> {
@@ -41,7 +41,7 @@ export function discoverDevServer(
 // The detach path of `@expo/agent-cli dev`, with the readiness wait on: a foreground start would never
 // return, and this run has seven more phases to perform (llp/0004 §Daemonization).
 // The argv is `START_DEV_SERVER_ARGV`, whose documentation says why it carries `--no-open`.
-export async function startDevServer(
+async function startDevServer(
   ctx: SmokeDepsContext,
   server: DevServerState
 ): ReturnType<SmokeDeps['startDevServer']> {
@@ -152,7 +152,7 @@ export async function startDevServer(
 // run prints one report and the stop is a line in it. Everything that makes the stop safe is
 // that command's — it signals the pid the project's lock names and refuses a dev server no
 // lock answers for, so a cleanup can never take down something this run did not start.
-export async function stopDevServer(
+async function stopDevServer(
   ctx: SmokeDepsContext,
   server: DevServerState
 ): ReturnType<SmokeDeps['stopDevServer']> {
@@ -190,7 +190,7 @@ export async function stopDevServer(
   };
 }
 
-export function waitForBundlerReady(
+function waitForBundlerReady(
   ctx: SmokeDepsContext,
   devServerUrl: string,
   timeoutMs: number
@@ -199,7 +199,7 @@ export function waitForBundlerReady(
   return waitForBundlerReadyAsync(devServerUrl, { timeoutMs, projectRoot });
 }
 
-export function checkEntryBundle(
+function checkEntryBundle(
   ctx: SmokeDepsContext,
   devServerUrl: string,
   timeoutMs: number
@@ -210,4 +210,17 @@ export function checkEntryBundle(
     timeoutMs,
     projectRoot,
   });
+}
+
+/** The dev-server deps of one run. `keepBoundDevice` is the start phase's note to the stop phase. */
+export function createDevServerDeps(ctx: SmokeDepsContext) {
+  const server: DevServerState = { keepBoundDevice: false };
+  return {
+    discoverDevServer: (explicitUrl) => discoverDevServer(ctx, explicitUrl),
+    startDevServer: () => startDevServer(ctx, server),
+    stopDevServer: () => stopDevServer(ctx, server),
+    waitForBundlerReady: (devServerUrl, timeoutMs) =>
+      waitForBundlerReady(ctx, devServerUrl, timeoutMs),
+    checkEntryBundle: (devServerUrl, timeoutMs) => checkEntryBundle(ctx, devServerUrl, timeoutMs),
+  } satisfies Partial<SmokeDeps>;
 }

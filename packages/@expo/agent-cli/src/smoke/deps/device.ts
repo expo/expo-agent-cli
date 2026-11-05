@@ -28,7 +28,7 @@ import { whatAndHow } from './reasons';
 import type { SmokeDepsContext } from './shared';
 
 /** The device this run acquired, for the release phase to check it is still the one bound. */
-export interface DeviceState {
+interface DeviceState {
   bootBinding: Binding | undefined;
 }
 
@@ -36,7 +36,7 @@ export interface DeviceState {
 // The EAS device's boot-and-install: the session in progress on this platform, or one started
 // with the app named. A development build needs a finished simulator build of this fingerprint
 // on EAS; the gate never compiles one — `dev --eas` does, and is named.
-export async function ensureEasSession(
+async function ensureEasSession(
   ctx: SmokeDepsContext,
   devServerUrl: string
 ): ReturnType<SmokeDeps['ensureEasSession']> {
@@ -61,7 +61,7 @@ export async function ensureEasSession(
   return smokeSessionResult(result);
 }
 
-export async function stopEasSession(
+async function stopEasSession(
   ctx: SmokeDepsContext,
   sessionId: string
 ): ReturnType<SmokeDeps['stopEasSession']> {
@@ -72,7 +72,7 @@ export async function stopEasSession(
     : { ok: false, target: sessionId, reason: release.reason };
 }
 
-export function readBoundDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['readBoundDevice']> {
+function readBoundDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['readBoundDevice']> {
   const binding = ctx.ownBinding();
   return binding && { id: deviceIdOf(binding.device), name: deviceNameOf(binding.device) };
 }
@@ -82,7 +82,7 @@ export function readBoundDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['re
 //
 // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke — a child-owned binding is released by
 // dev:stop; a binding acquired with a reused server is released by this hook.
-export async function releaseDevice(
+async function releaseDevice(
   ctx: SmokeDepsContext,
   bound: DeviceState
 ): ReturnType<SmokeDeps['releaseDevice']> {
@@ -109,7 +109,7 @@ export async function releaseDevice(
   };
 }
 
-export async function bootDevice(
+async function bootDevice(
   ctx: SmokeDepsContext,
   bound: DeviceState
 ): ReturnType<SmokeDeps['bootDevice']> {
@@ -156,7 +156,7 @@ export async function bootDevice(
 // may install, and has the device not got it. The first is the plan's `expo-go` rule, which
 // already means "the project fits in Expo Go and nothing overrode it to a development build".
 // The second is the same disk read the device choice makes (`installedApps.ts`).
-export async function installNeededOnDevice(
+async function installNeededOnDevice(
   ctx: SmokeDepsContext,
   deviceId: string,
   backend: DeviceBackend | null
@@ -216,7 +216,7 @@ export async function installNeededOnDevice(
 // download, or this project's own artefact to compile. The plan decides which
 // (@ref ./target §SmokeTarget.installWithKind), so this reads the answer rather than
 // forming a third opinion about which app the run is even about.
-export async function installApp(
+async function installApp(
   ctx: SmokeDepsContext,
   deviceId: string
 ): ReturnType<SmokeDeps['installApp']> {
@@ -261,7 +261,7 @@ export async function installApp(
 // gate reports rather than fails on. The answer keeps the refusal's How line: with no device
 // bound, that line is the `dev` command that binds one, and a skip row without it left a
 // reader with a booted simulator and no way forward [observed — issue #171].
-export async function probeDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['probeDevice']> {
+async function probeDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['probeDevice']> {
   const { device, reason } = await ctx.deviceAsync();
   return {
     deviceId: device?.deviceId ?? null,
@@ -282,7 +282,7 @@ export async function probeDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['
 // Only for a local device this CLI has a version reader for, and only when the app this run is
 // about is Expo Go: a development build that did not attach is this project's own artefact, and
 // there is no release of it for this to have an opinion about.
-export async function explainSilentApp(
+async function explainSilentApp(
   ctx: SmokeDepsContext,
   deviceId: string | null,
   backend: DeviceBackend | null
@@ -333,7 +333,7 @@ export async function explainSilentApp(
   );
 }
 
-export async function captureScreenshot(
+async function captureScreenshot(
   ctx: SmokeDepsContext,
   deviceId: string,
   backend: DeviceBackend | null
@@ -370,7 +370,7 @@ export function smokeSessionResult(
 }
 
 /** Whether the Expo Go on the device is built from the release line this project's SDK ships. */
-export async function checkExpoGoVersion(ctx: SmokeDepsContext, deviceId: string) {
+async function checkExpoGoVersion(ctx: SmokeDepsContext, deviceId: string) {
   return await checkExpoGoVersionAsync(
     deviceId,
     ctx.options.platform,
@@ -402,4 +402,21 @@ export async function expoGoVersionMismatch(
     kind: 'expo-go-version' as const,
     note: null,
   };
+}
+
+/** The device deps of one run. `bound` is the device this run acquired, for the release phase. */
+export function createDeviceDeps(ctx: SmokeDepsContext) {
+  const bound: DeviceState = { bootBinding: undefined };
+  return {
+    ensureEasSession: (devServerUrl) => ensureEasSession(ctx, devServerUrl),
+    stopEasSession: (sessionId) => stopEasSession(ctx, sessionId),
+    readBoundDevice: () => readBoundDevice(ctx),
+    releaseDevice: () => releaseDevice(ctx, bound),
+    bootDevice: () => bootDevice(ctx, bound),
+    installNeededOnDevice: (deviceId, backend) => installNeededOnDevice(ctx, deviceId, backend),
+    installApp: (deviceId) => installApp(ctx, deviceId),
+    probeDevice: () => probeDevice(ctx),
+    explainSilentApp: (deviceId, backend) => explainSilentApp(ctx, deviceId, backend),
+    captureScreenshot: (deviceId, backend) => captureScreenshot(ctx, deviceId, backend),
+  } satisfies Partial<SmokeDeps>;
 }

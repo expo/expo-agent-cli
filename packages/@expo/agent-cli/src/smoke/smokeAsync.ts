@@ -12,36 +12,9 @@ import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../follo
 import * as Log from '../log';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { describeSkippedApps } from '../runtime/targetSelection';
-import {
-  checkAppFitsProject,
-  collectErrors,
-  evaluate,
-  openRoute,
-  reloadApp,
-  waitForAppConnection,
-  waitForStableTargets,
-} from './deps/app';
-import {
-  bootDevice,
-  captureScreenshot,
-  ensureEasSession,
-  explainSilentApp,
-  installApp,
-  installNeededOnDevice,
-  probeDevice,
-  readBoundDevice,
-  releaseDevice,
-  stopEasSession,
-  type DeviceState,
-} from './deps/device';
-import {
-  checkEntryBundle,
-  discoverDevServer,
-  startDevServer,
-  stopDevServer,
-  waitForBundlerReady,
-  type DevServerState,
-} from './deps/devServer';
+import { createAppDeps, waitForStableTargets } from './deps/app';
+import { createDeviceDeps } from './deps/device';
+import { createDevServerDeps } from './deps/devServer';
 import { createSmokeDepsContext } from './deps/shared';
 import { startPortArgs } from './deps/startArgs';
 import { formatSmokeResult, smokeResultToJson } from './format';
@@ -183,6 +156,7 @@ function explainOutcome(run: SmokeRun): string {
 
 /**
  * The real dependencies: for each phase, the function the command that owns that question calls.
+ * Each `deps/*` module builds its own slice, with the state it alone reads and writes.
  *
  * Cited rather than reimplemented, and that is the point of the whole module — a second reading of
  * "is the bundle broken" or "which URL does this route deep-link to" is a second place for the
@@ -190,35 +164,10 @@ function explainOutcome(run: SmokeRun): string {
  */
 export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
   const ctx = createSmokeDepsContext(projectRoot, options);
-  const server: DevServerState = { keepBoundDevice: false };
-  const bound: DeviceState = { bootBinding: undefined };
   return {
-    discoverDevServer: (explicitUrl) => discoverDevServer(ctx, explicitUrl),
-    startDevServer: () => startDevServer(ctx, server),
-    stopDevServer: () => stopDevServer(ctx, server),
-    waitForBundlerReady: (devServerUrl, timeoutMs) =>
-      waitForBundlerReady(ctx, devServerUrl, timeoutMs),
-    checkEntryBundle: (devServerUrl, timeoutMs) => checkEntryBundle(ctx, devServerUrl, timeoutMs),
-
-    ensureEasSession: (devServerUrl) => ensureEasSession(ctx, devServerUrl),
-    stopEasSession: (sessionId) => stopEasSession(ctx, sessionId),
-    readBoundDevice: () => readBoundDevice(ctx),
-    releaseDevice: () => releaseDevice(ctx, bound),
-    bootDevice: () => bootDevice(ctx, bound),
-    installNeededOnDevice: (deviceId, backend) => installNeededOnDevice(ctx, deviceId, backend),
-    installApp: (deviceId) => installApp(ctx, deviceId),
-    probeDevice: () => probeDevice(ctx),
-    explainSilentApp: (deviceId, backend) => explainSilentApp(ctx, deviceId, backend),
-    captureScreenshot: (deviceId, backend) => captureScreenshot(ctx, deviceId, backend),
-
-    waitForAppConnection: (devServerUrl, timeoutMs) =>
-      waitForAppConnection(ctx, devServerUrl, timeoutMs),
-    openRoute: (route, devServerUrl, attachBudgetMs) =>
-      openRoute(ctx, route, devServerUrl, attachBudgetMs),
-    checkAppFitsProject: (devServerUrl) => checkAppFitsProject(ctx, devServerUrl),
-    reloadApp: (devServerUrl, timeoutMs) => reloadApp(ctx, devServerUrl, timeoutMs),
-    evaluate: (devServerUrl) => evaluate(ctx, devServerUrl),
-    collectErrors: (devServerUrl, windowMs) => collectErrors(ctx, devServerUrl, windowMs),
+    ...createDevServerDeps(ctx),
+    ...createDeviceDeps(ctx),
+    ...createAppDeps(ctx),
     waitForStableTargets,
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it

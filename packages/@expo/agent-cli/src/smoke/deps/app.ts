@@ -33,7 +33,7 @@ const TARGET_SETTLE_POLL_MS = 500;
 // Scoped to this run's platform: a `smoke --android` that counted the iOS simulator already
 // attached to this dev server would go on to read that simulator's runtime, and report the
 // verdict as Android's [friction run 6, F51].
-export async function waitForAppConnection(
+async function waitForAppConnection(
   ctx: SmokeDepsContext,
   devServerUrl: string,
   timeoutMs: number
@@ -59,7 +59,7 @@ export async function waitForAppConnection(
 // [observed — live cloud, 2026-08-27]. `flag` only when the caller really did name one.
 // The run's device choice, so the open and the waits after it are about one device. An earlier
 // lookup that failed is not kept, so this one looks again, and throws its own refusal.
-export async function openRoute(
+async function openRoute(
   ctx: SmokeDepsContext,
   ...[route, devServerUrl, attachBudgetMs]: Parameters<SmokeDeps['openRoute']>
 ): ReturnType<SmokeDeps['openRoute']> {
@@ -95,7 +95,7 @@ export async function openRoute(
 //
 // Scoped to this run's platform for the same reason every other read is (F51): an iOS Expo Go
 // attached to the same dev server must not decide an `--android` run's answer.
-export async function checkAppFitsProject(
+async function checkAppFitsProject(
   ctx: SmokeDepsContext,
   devServerUrl: string
 ): ReturnType<SmokeDeps['checkAppFitsProject']> {
@@ -168,7 +168,7 @@ export async function checkAppFitsProject(
 // The bundle mark is taken *before* the broadcast because that is what makes the log a proof:
 // `dev-server-bundle` says a bundle was served after this run acted, which is only readable
 // against a count from before it.
-export async function reloadApp(
+async function reloadApp(
   ctx: SmokeDepsContext,
   devServerUrl: string,
   timeoutMs: number
@@ -216,7 +216,7 @@ export async function reloadApp(
   };
 }
 
-export async function evaluate(
+async function evaluate(
   ctx: SmokeDepsContext,
   devServerUrl: string
 ): ReturnType<SmokeDeps['evaluate']> {
@@ -249,7 +249,7 @@ export async function evaluate(
   }
 }
 
-export async function collectErrors(
+async function collectErrors(
   ctx: SmokeDepsContext,
   devServerUrl: string,
   windowMs: number
@@ -309,4 +309,18 @@ function debuggerFailureReason(error: unknown): string {
       .join(' ');
   }
   return error instanceof Error ? firstLine(error.message) : String(error);
+}
+
+/** The app deps of one run: the connection, the route, the reload and the runtime reads. */
+export function createAppDeps(ctx: SmokeDepsContext) {
+  return {
+    waitForAppConnection: (devServerUrl, timeoutMs) =>
+      waitForAppConnection(ctx, devServerUrl, timeoutMs),
+    openRoute: (route, devServerUrl, attachBudgetMs) =>
+      openRoute(ctx, route, devServerUrl, attachBudgetMs),
+    checkAppFitsProject: (devServerUrl) => checkAppFitsProject(ctx, devServerUrl),
+    reloadApp: (devServerUrl, timeoutMs) => reloadApp(ctx, devServerUrl, timeoutMs),
+    evaluate: (devServerUrl) => evaluate(ctx, devServerUrl),
+    collectErrors: (devServerUrl, windowMs) => collectErrors(ctx, devServerUrl, windowMs),
+  } satisfies Partial<SmokeDeps>;
 }
