@@ -3,7 +3,7 @@
 // `@expo/agent-cli smoke`: the composite gate.
 //
 // This module holds the command run, its report and `buildSmokeDeps`, and nothing else. The
-// decisions are in `phases.ts`, which is given the deps rather than importing them, so the outcome
+// decisions are in `phases.ts` and `walk/*`, which are given the deps rather than importing them, so the outcome
 // table can be tested against fakes. The real deps are in `deps/*`, one function per phase question,
 // and each is the same function the command that owns the question already calls.
 

@@ -44,11 +44,11 @@
 import type { ReleasedDevice } from '../deviceBinding';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { firstLine } from '../utils/text';
-import type { SmokeDeps, SmokeReleaseResult, SmokeRun } from './contract';
+import type { RegisteredCleanup, SmokeDeps, SmokeRun, SmokeRunContext } from './contract';
 import { stopWithPicture } from './walk/capture';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';
-import type { SmokeCleanupJson, SmokeEnvironmentJson, SmokeOutcome, SmokeResource } from './types';
+import type { SmokeCleanupJson, SmokeEnvironmentJson, SmokeOutcome } from './types';
 import { appFitStep, appStep } from './walk/app';
 import { bundlerReadyStep, bundleStep } from './walk/bundle';
 import { prepareDeviceStep } from './walk/device';
@@ -133,14 +133,6 @@ export async function runSmokePhasesAsync(
   }
 }
 
-/** One resource this run started, and the call that puts it back. */
-export interface RegisteredCleanup {
-  resource: SmokeResource;
-  /** What it is, for a report written even when the release call answers nothing. */
-  target: string | null;
-  release(): Promise<SmokeReleaseResult>;
-}
-
 /**
  * Put back everything this run started, newest first, and report each one.
  *
@@ -199,15 +191,6 @@ async function releaseAsync(
     bound.released = device.released;
     bound.shutDown = device.shutDown;
   }
-}
-
-/** What {@link runSmokePhasesAsync} hands the phase walk, so the walk owns none of it. */
-export interface SmokeRunContext {
-  startedAt: number;
-  /** Appended to as resources are started, and read back by the cleanup. */
-  cleanups: RegisteredCleanup[];
-  /** Filled in as the run learns what it found and what it started. */
-  environment: SmokeEnvironmentJson;
 }
 
 /** The phases themselves, in order. Everything they start is registered with the context first. */

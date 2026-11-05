@@ -1,7 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
 // The contract of the smoke gate: what its dependencies answer and what one run hands back.
 //
-// Types only. `phases.ts` walks the phases against `SmokeDeps`, `deps/` implements it, and the
+// Types only. `walk/*` walks the phases against `SmokeDeps`, `deps/` implements it, and the
 // formatter and the follow-ups read `SmokeRun`; none of them has to import the walk to name a result.
 
 import type { ScreenshotResult } from '../device/screenshot';
@@ -15,7 +15,13 @@ import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { SkippedApp } from '../runtime/targetSelection';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
 import type { SmokeProgress } from './progress';
-import type { SmokeEnvironmentJson, SmokeOutcome, SmokePhase, SmokeReloadJson } from './types';
+import type {
+  SmokeEnvironmentJson,
+  SmokeOutcome,
+  SmokePhase,
+  SmokeReloadJson,
+  SmokeResource,
+} from './types';
 
 /** What starting a dev server amounted to. */
 export interface SmokeStartResult {
@@ -247,7 +253,7 @@ export interface SmokeDeps {
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
    * True only when the app is one this run may install *and* the device has not got it. The policy
-   * half lives with the caller, so this file stays a walk over phases rather than a second opinion
+   * half lives with the caller, so the walk stays a walk over phases rather than a second opinion
    * about which apps may be installed.
    *
    * Asked of the device this run settled on, however it got there — **not** only of one this run
@@ -357,8 +363,8 @@ export interface SmokeDeps {
    * Say which phase is starting, before it starts.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-   * A dependency rather than a `Log` call, for the same reason every other side effect in this
-   * file is one: the outcome table is tested against fakes, and a walk that printed for itself
+   * A dependency rather than a `Log` call, for the same reason every other side effect of the walk
+   * is one: the outcome table is tested against fakes, and a walk that printed for itself
    * would make those tests about prose. `silentProgress` is what they pass.
    */
   progress: SmokeProgress;
@@ -420,4 +426,21 @@ export interface SmokeRun {
   errors: RuntimeErrorRecord[];
   screenshot: ScreenshotResult;
   durationMs: number;
+}
+
+/** One resource this run started, and the call that puts it back. */
+export interface RegisteredCleanup {
+  resource: SmokeResource;
+  /** What it is, for a report written even when the release call answers nothing. */
+  target: string | null;
+  release(): Promise<SmokeReleaseResult>;
+}
+
+/** What `runSmokePhasesAsync` hands the phase walk, so the walk owns none of it. */
+export interface SmokeRunContext {
+  startedAt: number;
+  /** Appended to as resources are started, and read back by the cleanup. */
+  cleanups: RegisteredCleanup[];
+  /** Filled in as the run learns what it found and what it started. */
+  environment: SmokeEnvironmentJson;
 }

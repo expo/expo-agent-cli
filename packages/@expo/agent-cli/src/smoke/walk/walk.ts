@@ -1,5 +1,4 @@
-import type { SmokeDeps, SmokeRun } from '../contract';
-import type { SmokeRunContext } from '../phases';
+import type { SmokeDeps, SmokeRun, SmokeRunContext } from '../contract';
 import { coldWaitMs, type SmokeOptions } from '../resolveOptions';
 import { noReload, noScreenshot } from '../results';
 import { APP_ATTACH_TIMEOUT_MS } from '../timeouts';
