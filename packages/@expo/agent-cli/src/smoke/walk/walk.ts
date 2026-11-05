@@ -1,7 +1,7 @@
 import type { SmokeDeps, SmokeRun, SmokeRunContext } from '../phases';
 import { coldWaitMs, type SmokeOptions } from '../resolveOptions';
 import { noReload, noScreenshot } from '../results';
-import { APP_ATTACH_TIMEOUT_MS, CONDITIONAL_PHASES, PHASE_ORDER } from '../timeouts';
+import { APP_ATTACH_TIMEOUT_MS } from '../timeouts';
 import type { SmokeOutcome, SmokePhase, SmokePhaseId, SmokePhaseStatus } from '../types';
 import { AppSession } from './appSession';
 
@@ -26,6 +26,47 @@ export interface RecordOptions {
 
 /** Everything the run reports except the verdict and its duration, filled in as it is learned. */
 export type SmokeRunReport = Omit<SmokeRun, 'outcome' | 'durationMs'>;
+
+/** Every phase, in the order they are reported. */
+const PHASE_ORDER: SmokePhaseId[] = [
+  'start-dev-server',
+  'dev-server',
+  'bundler-ready',
+  'bundle',
+  // @ref llp/0027-everything-on-eas.rfc.md §smoke — the EAS device's counterpart of the boot.
+  'start-session',
+  'boot-device',
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it.
+  // After the boot and not before it: `simctl install` answers `Unable to lookup in current state:
+  // Shutdown` for a device that is not up [observed, 2026-09-03].
+  'install-app',
+  'app',
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk. Before
+  // `route` rather than after it: a reload sends the app back to its initial route, so a run that
+  // opened the route first would reload out of the screen it had just asked for.
+  'reload',
+  'route',
+  'runtime',
+  'errors',
+  'screenshot',
+];
+
+/**
+ * The phases that are reported only by a run that performed them.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+ * Every other phase is a question of every run, so a run that did not reach one owes the reader a
+ * `skipped` row saying why. These two are not questions; they are *acts*, and a machine that
+ * already had a dev server and a simulator did not skip them — there was nothing there to do. A
+ * `skipped start dev server` on a healthy run reads as work that was owed and not done. The same
+ * holds for the install: a machine that already had the app never had one to do.
+ */
+const CONDITIONAL_PHASES = new Set<SmokePhaseId>([
+  'start-dev-server',
+  'start-session',
+  'boot-device',
+  'install-app',
+]);
 
 /** The state every step shares: the phase list, the report, the budget, and the run's context. */
 export interface PhaseWalk extends SmokeRunContext {
@@ -117,7 +158,7 @@ export function createPhaseWalk(
    * and a `screenshot` marked skipped here and then attempted below would appear twice.
    *
    * The conditional phases are never filled in here: a run that stopped at the bundle did not skip
-   * a device boot, it had no device boot to do (@ref ../timeouts §CONDITIONAL_PHASES).
+   * a device boot, it had no device boot to do (@ref ./walk §CONDITIONAL_PHASES).
    */
   const skipRest = (from: SmokePhaseId, reason: string, stopBefore?: SmokePhaseId): void => {
     const end = stopBefore == null ? PHASE_ORDER.length : PHASE_ORDER.indexOf(stopBefore);

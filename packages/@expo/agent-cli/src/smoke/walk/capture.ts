@@ -1,8 +1,8 @@
-import type { ScreenshotResult } from '../device/screenshot';
-import type { DeviceBackend } from '../navigate/device';
-import { noScreenshot, showingReason } from './results';
-import type { SmokeOutcome, SmokePhaseStatus } from './types';
-import type { PhaseWalk, SmokeRunReport, WalkRun } from './walk/walk';
+import type { ScreenshotResult } from '../../device/screenshot';
+import type { DeviceBackend } from '../../navigate/device';
+import { noScreenshot, showingReason } from '../results';
+import type { SmokeOutcome, SmokePhaseStatus } from '../types';
+import type { PhaseWalk, SmokeRunReport, WalkRun } from './walk';
 
 /**
  * The picture, and the device it was taken on.
@@ -75,7 +75,7 @@ async function captureIfPossible(
   // before it and not before the capture.
   deps.progress('screenshot', null);
 
-  // @ref ./timeouts §APP_SETTLE_MS — friction run 6, F57. A no-op unless this run moved the app and
+  // @ref ../timeouts §APP_SETTLE_MS — friction run 6, F57. A no-op unless this run moved the app and
   // has not waited yet. Usually already done: the runtime read needs the same settle and asks for
   // it first, on every path that reaches it.
   await walk.app.settleAsync();

@@ -73,9 +73,6 @@ async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
 }
 
 /**
- * `--eas` named the device, and the device it named is not on this machine: booting a
- * simulator here would be answering a question about a session with a laptop (llp/0005 §Cloud simulator).
- *
  * The next value says whether the boot said its device has no app: a simulator the registry
  * created this run, whose disk holds nothing to read (llp/0035 §iOS smoke).
  */
@@ -244,6 +241,9 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
     const session = await startSessionStep(walk);
     if ('stop' in session) return session;
   } else {
+    // Not on `--eas`: `--eas` named the device, and the device it named is not on this machine, so
+    // booting a simulator here would be answering a question about a session with a laptop
+    // (llp/0005 §Cloud simulator).
     const booted = await bootStep(walk);
     if ('stop' in booted) return booted;
     ({ firstConnection, bootInstallNeeded } = booted.next);

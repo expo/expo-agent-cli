@@ -1,8 +1,3 @@
-import type { SmokePhaseId } from './types';
-
-/** The route opened when nothing was named and there is no app to read. */
-export const ROOT_ROUTE = '/';
-
 /** How long the first look for an attached app gets before the run opens one itself. */
 export const APP_PROBE_MS = 2_000;
 
@@ -139,44 +134,3 @@ export const START_SESSION_TIMEOUT_MS = 900_000;
  * window and the runtime read live on.
  */
 export const BUILD_DEV_SERVER_TIMEOUT_MS = 1_800_000;
-
-/** Every phase, in the order they are reported. */
-export const PHASE_ORDER: SmokePhaseId[] = [
-  'start-dev-server',
-  'dev-server',
-  'bundler-ready',
-  'bundle',
-  // @ref llp/0027-everything-on-eas.rfc.md §smoke — the EAS device's counterpart of the boot.
-  'start-session',
-  'boot-device',
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it.
-  // After the boot and not before it: `simctl install` answers `Unable to lookup in current state:
-  // Shutdown` for a device that is not up [observed, 2026-09-03].
-  'install-app',
-  'app',
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk. Before
-  // `route` rather than after it: a reload sends the app back to its initial route, so a run that
-  // opened the route first would reload out of the screen it had just asked for.
-  'reload',
-  'route',
-  'runtime',
-  'errors',
-  'screenshot',
-];
-
-/**
- * The phases that are reported only by a run that performed them.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
- * Every other phase is a question of every run, so a run that did not reach one owes the reader a
- * `skipped` row saying why. These two are not questions; they are *acts*, and a machine that
- * already had a dev server and a simulator did not skip them — there was nothing there to do. A
- * `skipped start dev server` on a healthy run reads as work that was owed and not done. The same
- * holds for the install: a machine that already had the app never had one to do.
- */
-export const CONDITIONAL_PHASES = new Set<SmokePhaseId>([
-  'start-dev-server',
-  'start-session',
-  'boot-device',
-  'install-app',
-]);

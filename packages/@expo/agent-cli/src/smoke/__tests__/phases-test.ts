@@ -2974,7 +2974,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
     await runAsync();
 
     // No `start-dev-server` and no `boot-device`: the default machine has both already, which is
-    // the same reason those rows are absent from the report (@ref ../timeouts §CONDITIONAL_PHASES).
+    // the same reason those rows are absent from the report (@ref ../walk/walk §CONDITIONAL_PHASES).
     expect(said).toEqual([
       'dev-server',
       'bundler-ready',
@@ -3036,7 +3036,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
 
   // And a machine that has both says neither, for the same reason the report has no row for them:
   // there was nothing to do, which is not the same as something skipped
-  // (@ref ../timeouts §CONDITIONAL_PHASES).
+  // (@ref ../walk/walk §CONDITIONAL_PHASES).
   it(`says nothing about an act it had no need to perform`, async () => {
     const { said, runAsync } = narrated({}, { bootstrap: true });
     await runAsync();

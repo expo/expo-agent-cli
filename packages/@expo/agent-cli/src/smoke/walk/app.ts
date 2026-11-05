@@ -1,12 +1,15 @@
 import { describeSkippedApps } from '../../runtime/targetSelection';
 import type { AppConnectionResult } from '../../runtime/waitReady';
-import { stopWithPicture } from '../capture';
+import { stopWithPicture } from './capture';
 import type { SmokeAppFit, SmokeRun } from '../phases';
 import { appendReason } from '../results';
-import { APP_PROBE_MS, ROOT_ROUTE } from '../timeouts';
+import { APP_PROBE_MS } from '../timeouts';
 import type { SmokePhase, SmokePhaseStatus } from '../types';
 import type { DeviceReady } from './device';
 import type { PhaseWalk, Step, WalkRun } from './walk';
+
+/** The route opened when nothing was named and there is no app to read. */
+const ROOT_ROUTE = '/';
 
 /** What the `app` phase came to, and what the device said if it refused the deep link. */
 interface AppOpen {

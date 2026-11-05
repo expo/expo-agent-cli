@@ -53,7 +53,7 @@ import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { SkippedApp } from '../runtime/targetSelection';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
 import { firstLine } from '../utils/text';
-import { stopWithPicture } from './capture';
+import { stopWithPicture } from './walk/capture';
 import type { SmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';

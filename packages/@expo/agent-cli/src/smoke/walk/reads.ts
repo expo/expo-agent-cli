@@ -1,4 +1,4 @@
-import { stopWithPicture } from '../capture';
+import { stopWithPicture } from './capture';
 import type { SmokeErrorsResult, SmokeEvaluateResult } from '../phases';
 import { isFailingRecord, noReload } from '../results';
 import {
