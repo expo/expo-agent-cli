@@ -170,6 +170,7 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       reason: null,
     }),
     stopEasSession: async (sessionId) => ({ ok: true, target: sessionId, reason: null }),
+    takeConfiguredEasRoute: () => {},
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
     installApp: async () => ({ ok: true, version: null, replaced: null, reason: null }),
@@ -3579,13 +3580,13 @@ describe('the start-session phase, on --eas', () => {
       starting
     );
     expect(startDevServer).toHaveBeenCalled();
-    expect(starting.cloud).toBe('required');
+    expect(run.cloudRoute).toBe('required');
     expect(statusOf(run, 'start-session')).toBe('ok');
 
     ensureEasSession.mockClear();
     const reusing = options({ bootstrap: true, configuredEas: true });
     const reused = await runSmokePhasesAsync(deps({ ensureEasSession }), reusing);
-    expect(reusing.cloud).toBe('fallback');
+    expect(reused.cloudRoute).toBe('fallback');
     expect(statusOf(reused, 'start-session')).toBeUndefined();
     expect(ensureEasSession).not.toHaveBeenCalled();
   });

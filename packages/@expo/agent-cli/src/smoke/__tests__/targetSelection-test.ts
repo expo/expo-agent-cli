@@ -68,7 +68,11 @@ function inventory() {
 
 it('reclassifies an unchanged target after a failed inventory read recovers', async () => {
   const url = await serverAsync(() => [target()]);
-  const selection = buildSmokeTargetSelection(projectRoot, resolveSmokeOptions(['--ios']));
+  const selection = buildSmokeTargetSelection(
+    projectRoot,
+    resolveSmokeOptions(['--ios']),
+    () => 'fallback'
+  );
   vi.mocked(spawnCaptureAsync).mockResolvedValue({
     exitCode: 1,
     stdout: '',
@@ -85,7 +89,11 @@ it('reclassifies an unchanged target after a failed inventory read recovers', as
 
 it('retries a failed device lookup, shares concurrent discovery, and retains the successful choice', async () => {
   seedIosBinding(projectRoot, 'IOS-1', 'My iPhone');
-  const selection = buildSmokeTargetSelection(projectRoot, resolveSmokeOptions(['--ios']));
+  const selection = buildSmokeTargetSelection(
+    projectRoot,
+    resolveSmokeOptions(['--ios']),
+    () => 'fallback'
+  );
   vi.mocked(spawnCaptureAsync).mockResolvedValue({
     exitCode: 1,
     stdout: '',

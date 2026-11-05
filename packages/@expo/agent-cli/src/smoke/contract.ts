@@ -6,7 +6,7 @@
 
 import type { ScreenshotResult } from '../device/screenshot';
 import type { AcquireAction, ReleasedDevice } from '../deviceBinding';
-import type { DeviceBackend } from '../navigate/device';
+import type { CloudPreference, DeviceBackend } from '../navigate/device';
 import type { OpenRouteResult } from '../navigate/openRoute';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
@@ -214,6 +214,8 @@ export interface SmokeDeps {
    * asks is "is it not running now", and a start that died on its own has answered it.
    */
   stopDevServer(): Promise<SmokeReleaseResult>;
+  /** Switch the deps to the EAS route. Called when the run starts its own dev server on a configured EAS device. */
+  takeConfiguredEasRoute(): void;
   /**
    * Make sure this project has an EAS Simulator session on this run's platform with the app on it.
    *
@@ -387,6 +389,8 @@ export interface SmokeRun {
   bundle: BundleCheckResult | null;
   route: string | null;
   routeCheck: RouteCheckJson | null;
+  /** The cloud route the run took. Starts as the request and becomes `required` on the configured EAS route. Not in the output. */
+  cloudRoute: CloudPreference;
   deviceId: string | null;
   deviceBackend: DeviceBackend | null;
   runtimeSupported: boolean | null;

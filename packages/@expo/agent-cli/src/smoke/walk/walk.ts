@@ -107,6 +107,7 @@ export function createPhaseWalk(
     bundle: null,
     route: options.route,
     routeCheck: null,
+    cloudRoute: options.cloud,
     deviceId: null,
     deviceBackend: null,
     runtimeSupported: null,

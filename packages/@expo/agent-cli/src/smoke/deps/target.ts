@@ -1,3 +1,4 @@
+import type { CloudPreference } from '../../navigate/device';
 import { PROGRAM_PREFIX } from '../../programName';
 import type { StartPlan } from '../../project/types';
 import type { SmokeOptions } from '../resolveOptions';
@@ -59,7 +60,8 @@ export interface SmokeTarget {
 /** Read the plan once, and answer both questions from it. Never throws. */
 export async function resolveSmokeTargetAsync(
   projectRoot: string,
-  options: SmokeOptions
+  options: SmokeOptions,
+  route: CloudPreference
 ): Promise<SmokeTarget> {
   const { probeProjectStateAsync } =
     require('../../project/probe') as typeof import('../../project/probe');
@@ -90,7 +92,7 @@ export async function resolveSmokeTargetAsync(
         lastBuild: readLastBuildRecord(projectRoot),
         // @ref llp/0027-everything-on-eas.rfc.md §smoke — the same plan `dev --eas` makes, so the
         // build this names is the simulator profile on EAS and the session can install it.
-        ...(options.cloud === 'required'
+        ...(route === 'required'
           ? { requestedBackend: 'eas' as const, deviceBackend: 'eas' as const }
           : {}),
       })
@@ -119,7 +121,7 @@ export async function resolveSmokeTargetAsync(
     // records for the plan's platform flag]; a development build is `dev`'s to make.
     installWith: expoGo
       ? `${PROGRAM_PREFIX} start --${options.platform}`
-      : `${PROGRAM_PREFIX} dev --${options.platform}${options.cloud === 'required' ? ' --eas' : ''}`,
+      : `${PROGRAM_PREFIX} dev --${options.platform}${route === 'required' ? ' --eas' : ''}`,
     installWithKind: expoGo ? 'expo-go' : 'native-build',
   };
 }

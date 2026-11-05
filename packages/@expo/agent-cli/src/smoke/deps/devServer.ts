@@ -103,7 +103,7 @@ async function startDevServer(
     // @ref llp/0027-everything-on-eas.rfc.md §smoke — the device is on EAS, so the dev server
     // is tunnelled and a build the plan needs is the simulator profile on EAS Build. `--no-open`
     // above keeps the session start this run's own (`ensureEasSession`).
-    ...(options.cloud === 'required' ? ['--eas'] : []),
+    ...(ctx.route === 'required' ? ['--eas'] : []),
     ...startPortArgs(options.devServerUrl),
   ];
   try {
@@ -158,7 +158,7 @@ async function stopDevServer(
 ): ReturnType<SmokeDeps['stopDevServer']> {
   const { projectRoot, options } = ctx;
   const captured: { report: DevStopResultJson | null } = { report: null };
-  const release = options.cloud !== 'required' && !server.keepBoundDevice;
+  const release = ctx.route !== 'required' && !server.keepBoundDevice;
   await devStopAsync(
     projectRoot,
     {

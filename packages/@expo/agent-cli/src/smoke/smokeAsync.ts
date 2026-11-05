@@ -114,7 +114,7 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     // `required` is `--eas`; `fallback` is a run that would only reach a session if this machine
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).
-    cloud: options.cloud === 'required',
+    cloud: run.cloudRoute === 'required',
   });
 }
 

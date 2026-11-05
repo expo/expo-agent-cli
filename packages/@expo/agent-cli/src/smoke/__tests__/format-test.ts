@@ -32,6 +32,7 @@ function options(overrides: Partial<SmokeOptions> = {}): SmokeOptions {
 
 function run(overrides: Partial<SmokeRun> = {}): SmokeRun {
   return {
+    cloudRoute: 'fallback',
     deviceBackend: null,
     outcome: 'passed',
     phases: [
