@@ -1,5 +1,6 @@
-import fs from 'fs';
 import path from 'path';
+
+import { findExecutableOnPath } from './pathLookup';
 
 // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md §Constraints — the Expo CLI family is invoked as
 // subprocesses, so how a platform starts a process is this package's problem.
@@ -30,8 +31,14 @@ export interface SpawnTarget {
  * from `shell: true`. Node then sets `windowsVerbatimArguments` and quotes **nothing**, so every
  * part is quoted here instead; `/s` strips the outer pair `cmd` is handed, leaving the quoted
  * program and the quoted arguments it needs to see.
+ *
+ * @param env the child's environment, so a bare name resolves on the `PATH` that child gets.
  */
-export function resolveSpawnTarget(command: string, args: string[]): SpawnTarget {
+export function resolveSpawnTarget(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv
+): SpawnTarget {
   if (process.platform !== 'win32') {
     return { command, args, shell: false };
   }
@@ -39,7 +46,9 @@ export function resolveSpawnTarget(command: string, args: string[]): SpawnTarget
   // A bare `npx` or `xcrun` is a `.cmd` shim once PATH/PATHEXT has answered. Resolve it here so
   // the batch-file rule below sees the shim, rather than leaving `spawn` to find it without a shell
   // and throw EINVAL (CVE-2024-27980).
-  const resolved = resolveBareCommandOnPath(command);
+  const resolved = /[\\/]/.test(command)
+    ? command
+    : (findExecutableOnPath(command, { env, platform: 'win32' }) ?? command);
   if (!BATCH_FILE.test(resolved)) {
     return { command: resolved, args, shell: false };
   }
@@ -49,39 +58,6 @@ export function resolveSpawnTarget(command: string, args: string[]): SpawnTarget
     args: args.map(escapeArgumentForCmd),
     shell: true,
   };
-}
-
-/**
- * The file PATH would start for a bare name, or the name itself when nothing matches.
- *
- * Kept here rather than imported from `subprocess.ts` so this module does not import the file that
- * imports it.
- */
-function resolveBareCommandOnPath(command: string): string {
-  if (/[\\/]/.test(command)) {
-    return command;
-  }
-  const pathEnv = process.env.PATH ?? process.env.Path ?? '';
-  const names =
-    BATCH_FILE.test(command) || /\.exe$/i.test(command)
-      ? [command]
-      : [`${command}.cmd`, `${command}.exe`, `${command}.bat`, command];
-  for (const dir of pathEnv.split(';')) {
-    if (!dir) {
-      continue;
-    }
-    for (const fileName of names) {
-      const candidate = path.win32.join(dir, fileName);
-      try {
-        if (fs.statSync(candidate).isFile()) {
-          return candidate;
-        }
-      } catch {
-        // Not there.
-      }
-    }
-  }
-  return command;
 }
 
 /**

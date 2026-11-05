@@ -44,14 +44,14 @@ describe(resolveCreateExpoCli, () => {
   it(`should prefer a create-expo on PATH`, () => {
     vol.fromJSON({ '/usr/local/bin/create-expo': '#!/bin/sh' });
 
-    expect(resolveCreateExpoCli({ pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateExpoCli({ env: { PATH: '/usr/local/bin' } })).toEqual({
       command: path.join('/usr/local/bin', 'create-expo'),
       args: [],
     });
   });
 
   it(`should fall back to npx create-expo@latest`, () => {
-    expect(resolveCreateExpoCli({ pathEnv: '/usr/local/bin' })).toEqual({
+    expect(resolveCreateExpoCli({ env: { PATH: '/usr/local/bin' } })).toEqual({
       command: expect.stringMatching(/^npx(\.cmd)?$/),
       args: ['create-expo@latest'],
     });

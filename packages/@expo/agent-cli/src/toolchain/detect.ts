@@ -9,7 +9,7 @@ import path from 'path';
 
 import type { NativePlatform } from '../plan/types';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
-import { findExecutableOnPath } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
 import { localRequirement } from './runsOn';
 import type { ToolchainProbe, ToolchainStatus } from './types';
 

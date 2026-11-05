@@ -11,7 +11,7 @@ import { planFixAsync } from '../fixPlan';
 import { metroFileMapPrefixes } from '../fixSteps';
 import type { FixTier } from '../fixTypes';
 import { dirtyTrackedPathsAsync as dirtyTrackedPathsAsyncFn } from '../../checkpoint/git';
-import { findExecutableOnPath as findExecutableOnPathFn } from '../../utils/subprocess';
+import { findExecutableOnPath as findExecutableOnPathFn } from '../../utils/pathLookup';
 
 const dirtyTrackedPathsAsync = vi.mocked(dirtyTrackedPathsAsyncFn);
 const findExecutableOnPath = vi.mocked(findExecutableOnPathFn);
@@ -24,7 +24,7 @@ vi.mock('os', async () => ({
   homedir: () => '/home/dev',
 }));
 vi.mock('../../checkpoint/git', () => ({ dirtyTrackedPathsAsync: vi.fn(async () => []) }));
-vi.mock('../../utils/subprocess', () => ({
+vi.mock('../../utils/pathLookup', () => ({
   findExecutableOnPath: vi.fn(() => '/bin/watchman'),
 }));
 

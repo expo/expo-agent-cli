@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 
 import { resolveSpawnTarget, windowsTaskkillCommand } from '../windowsShim';
@@ -10,17 +11,19 @@ describe(resolveSpawnTarget, () => {
     });
 
     it(`should spawn the command as it is`, () => {
-      expect(resolveSpawnTarget('/project/node_modules/.bin/expo', ['start', '--web'])).toEqual({
-        command: '/project/node_modules/.bin/expo',
-        args: ['start', '--web'],
-        shell: false,
-      });
+      expect(resolveSpawnTarget('/project/node_modules/.bin/expo', ['start', '--web'], {})).toEqual(
+        {
+          command: '/project/node_modules/.bin/expo',
+          args: ['start', '--web'],
+          shell: false,
+        }
+      );
     });
 
     it(`should not give a shell to a file that merely ends in .cmd`, () => {
       // A `.cmd` extension means nothing outside Windows, and a shell would only add a quoting
       // problem to a spawn that already works.
-      expect(resolveSpawnTarget('/project/weird.cmd', ['run'])).toEqual({
+      expect(resolveSpawnTarget('/project/weird.cmd', ['run'], {})).toEqual({
         command: '/project/weird.cmd',
         args: ['run'],
         shell: false,
@@ -37,7 +40,11 @@ describe(resolveSpawnTarget, () => {
       // Node sets `windowsVerbatimArguments` under `shell: true` and quotes nothing itself, so the
       // quoting is this function's job. `cmd /d /s /c` strips the outer pair it is handed.
       expect(
-        resolveSpawnTarget('C:\\project\\node_modules\\.bin\\expo.cmd', ['install', 'expo-camera'])
+        resolveSpawnTarget(
+          'C:\\project\\node_modules\\.bin\\expo.cmd',
+          ['install', 'expo-camera'],
+          {}
+        )
       ).toEqual({
         command: '"C:\\project\\node_modules\\.bin\\expo.cmd"',
         args: ['^"install^"', '^"expo-camera^"'],
@@ -46,7 +53,7 @@ describe(resolveSpawnTarget, () => {
     });
 
     it(`should run a .bat shim through a shell`, () => {
-      expect(resolveSpawnTarget('C:\\tools\\eas.bat', [])).toEqual({
+      expect(resolveSpawnTarget('C:\\tools\\eas.bat', [], {})).toEqual({
         command: '"C:\\tools\\eas.bat"',
         args: [],
         shell: true,
@@ -55,11 +62,11 @@ describe(resolveSpawnTarget, () => {
 
     it(`should keep a path with spaces in one piece`, () => {
       expect(
-        resolveSpawnTarget('C:\\Users\\Ada Lovelace\\app\\node_modules\\.bin\\expo.cmd', [
-          'export',
-          '--output-dir',
-          'C:\\Users\\Ada Lovelace\\app\\dist',
-        ])
+        resolveSpawnTarget(
+          'C:\\Users\\Ada Lovelace\\app\\node_modules\\.bin\\expo.cmd',
+          ['export', '--output-dir', 'C:\\Users\\Ada Lovelace\\app\\dist'],
+          {}
+        )
       ).toEqual({
         command: '"C:\\Users\\Ada Lovelace\\app\\node_modules\\.bin\\expo.cmd"',
         args: [
@@ -76,7 +83,7 @@ describe(resolveSpawnTarget, () => {
       // `@expo/agent-cli install` forwards whatever the caller typed, so an argument can contain
       // anything. The quote is `\"` for the program that is started and `^`-escaped so `cmd.exe`
       // never sees it as the end of a quoted run.
-      expect(resolveSpawnTarget('C:\\bin\\expo.cmd', ['install', 'a"b'])).toEqual({
+      expect(resolveSpawnTarget('C:\\bin\\expo.cmd', ['install', 'a"b'], {})).toEqual({
         command: '"C:\\bin\\expo.cmd"',
         args: ['^"install^"', '^"a\\^"b^"'],
         shell: true,
@@ -84,13 +91,13 @@ describe(resolveSpawnTarget, () => {
     });
 
     it(`should recognize the extension whatever its case`, () => {
-      expect(resolveSpawnTarget('C:\\bin\\EXPO.CMD', []).shell).toBe(true);
+      expect(resolveSpawnTarget('C:\\bin\\EXPO.CMD', [], {}).shell).toBe(true);
     });
 
     it(`should spawn a real executable directly`, () => {
       // `git.exe`, `adb.exe` and `node.exe` are images Windows can run: a shell would only be one
       // more process and one more quoting rule.
-      expect(resolveSpawnTarget('C:\\Program Files\\Git\\bin\\git.exe', ['init'])).toEqual({
+      expect(resolveSpawnTarget('C:\\Program Files\\Git\\bin\\git.exe', ['init'], {})).toEqual({
         command: 'C:\\Program Files\\Git\\bin\\git.exe',
         args: ['init'],
         shell: false,
@@ -98,7 +105,7 @@ describe(resolveSpawnTarget, () => {
     });
 
     it(`should spawn a bare command name directly, letting the resolver find it`, () => {
-      expect(resolveSpawnTarget('git', ['rev-parse'])).toEqual({
+      expect(resolveSpawnTarget('git', ['rev-parse'], {})).toEqual({
         command: 'git',
         args: ['rev-parse'],
         shell: false,
@@ -114,16 +121,31 @@ describe(resolveSpawnTarget, () => {
     it(`should not quote a bare .cmd name, so cmd.exe still searches PATH`, () => {
       // Quoting `"npx.cmd"` makes cmd.exe look in cwd rather than PATH, which printed
       // `'"npx.cmd"' is not recognized` on the Windows runner.
-      const originalPath = process.env.PATH;
-      process.env.PATH = 'C:\\no-such-npx';
+      expect(
+        resolveSpawnTarget('npx.cmd', ['--yes', 'eas-cli'], { PATH: 'C:\\no-such-npx' })
+      ).toEqual({
+        command: 'npx.cmd',
+        args: ['^"--yes^"', '^"eas-cli^"'],
+        shell: true,
+      });
+    });
+
+    it(`should resolve a bare name on the child's PATH, not on this process's`, () => {
+      const shims = new Set(['C:\\machine-npm\\npx.cmd', 'C:\\stub-bin\\npx.cmd']);
+      vi.spyOn(fs, 'statSync').mockImplementation((file) => {
+        if (shims.has(String(file))) {
+          return { isFile: () => true } as fs.Stats;
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      });
+      vi.stubEnv('PATH', 'C:\\machine-npm');
       try {
-        expect(resolveSpawnTarget('npx.cmd', ['--yes', 'eas-cli'])).toEqual({
-          command: 'npx.cmd',
-          args: ['^"--yes^"', '^"eas-cli^"'],
-          shell: true,
-        });
+        expect(resolveSpawnTarget('npx.cmd', ['--yes'], { PATH: 'C:\\stub-bin' }).command).toBe(
+          '"C:\\stub-bin\\npx.cmd"'
+        );
       } finally {
-        process.env.PATH = originalPath;
+        vi.unstubAllEnvs();
+        vi.restoreAllMocks();
       }
     });
   });
@@ -158,7 +180,7 @@ describe('Quoting an argument for cmd.exe', () => {
     ['a plain application id', 'com.example.demo'],
     ['a path with spaces', 'C:\\Users\\Ada Lovelace\\app\\dist'],
   ])('should round-trip %s back to the original value', (_label, value) => {
-    const { args } = resolveSpawnTarget('C:\\bin\\npx.cmd', [value]);
+    const { args } = resolveSpawnTarget('C:\\bin\\npx.cmd', [value], {});
 
     expect(readAsProgramWould(readAsCmdWould(args[0]!))).toBe(value);
   });
@@ -168,7 +190,7 @@ describe('Quoting an argument for cmd.exe', () => {
   it.each(['&', '|', '<', '>', '"'])(
     'should leave no unescaped %s for cmd.exe to read as syntax',
     (meta) => {
-      const { args } = resolveSpawnTarget('C:\\bin\\npx.cmd', [`a${meta}b"&calc&"`]);
+      const { args } = resolveSpawnTarget('C:\\bin\\npx.cmd', [`a${meta}b"&calc&"`], {});
 
       // Every metacharacter in the token carries its own `^`, so none of them toggles quoting or
       // separates a command.
@@ -177,7 +199,7 @@ describe('Quoting an argument for cmd.exe', () => {
   );
 
   it('should not let a crafted app id start a second command', () => {
-    const { args } = resolveSpawnTarget('C:\\bin\\npx.cmd', ['close', 'com.x"&calc&"']);
+    const { args } = resolveSpawnTarget('C:\\bin\\npx.cmd', ['close', 'com.x"&calc&"'], {});
 
     expect(readAsCmdWould(args[1]!)).toBe('"com.x\\"&calc&\\""');
     expect(args[1]).not.toContain('^&calc^& ');

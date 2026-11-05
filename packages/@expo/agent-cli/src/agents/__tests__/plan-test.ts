@@ -1,14 +1,14 @@
 import { vol } from 'memfs';
 import path from 'path';
 
-import { findExecutableOnPath } from '../../utils/subprocess';
+import { findExecutableOnPath } from '../../utils/pathLookup';
 import { findSetupProjectRoot, prepareSetupAsync } from '../plan';
 import type { SetupPrompt } from '../prompt';
 import type { SetupOptions } from '../types';
 
 vi.mock('os', () => ({ default: { homedir: () => '/home' }, homedir: () => '/home' }));
 
-vi.mock('../../utils/subprocess', () => ({ findExecutableOnPath: vi.fn(() => null) }));
+vi.mock('../../utils/pathLookup', () => ({ findExecutableOnPath: vi.fn(() => null) }));
 
 const options = (overrides: Partial<SetupOptions> = {}): SetupOptions => ({
   agents: ['claude-code'],

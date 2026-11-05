@@ -1,14 +1,13 @@
 import { vol } from 'memfs';
 
 import { getAllAgents } from '../../skills/agents';
-import { findExecutableOnPath, spawnSubprocessAsync } from '../../utils/subprocess';
+import { findExecutableOnPath } from '../../utils/pathLookup';
+import { spawnSubprocessAsync } from '../../utils/subprocess';
 import { installAgentAsync } from '../installAgentAsync';
 import { buildInstallerPlans } from '../installers';
 
-vi.mock('../../utils/subprocess', () => ({
-  findExecutableOnPath: vi.fn(),
-  spawnSubprocessAsync: vi.fn(),
-}));
+vi.mock('../../utils/pathLookup', () => ({ findExecutableOnPath: vi.fn() }));
+vi.mock('../../utils/subprocess', () => ({ spawnSubprocessAsync: vi.fn() }));
 
 const success = (data: unknown = {}) => ({ exitCode: 0, stdout: JSON.stringify(data), stderr: '' });
 const agents = [

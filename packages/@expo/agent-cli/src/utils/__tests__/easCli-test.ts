@@ -72,7 +72,9 @@ describe(resolveEasCliOrThrow, () => {
     // runner reuse its cache.
     project({ name: 'app', dependencies: { expo: '~54.0.0' } });
 
-    expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
+    expect(
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
+    ).toEqual({
       command: 'npx',
       prefixArgs: ['--yes', 'eas-cli'],
       source: 'npx --yes eas-cli',
@@ -87,7 +89,9 @@ describe(resolveEasCliOrThrow, () => {
     // the project's own copy and touches no network.
     project({ name: 'app', devDependencies: { 'eas-cli': '22.4.0' } });
 
-    expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
+    expect(
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
+    ).toEqual({
       command: 'npx',
       prefixArgs: ['--yes', 'eas-cli'],
       source: 'npx --yes eas-cli',
@@ -101,7 +105,7 @@ describe(resolveEasCliOrThrow, () => {
     project({ name: 'app', dependencies: { 'eas-cli': '^22.0.0' } });
 
     expect(
-      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
     ).toMatchObject({ prefixArgs: ['--yes', 'eas-cli'], pinned: true });
   });
 
@@ -111,7 +115,9 @@ describe(resolveEasCliOrThrow, () => {
       { [`${projectRoot}/bun.lock`]: '', '/usr/local/bin/bunx': '#!/bin/sh' }
     );
 
-    expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
+    expect(
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
+    ).toEqual({
       command: path.join('/usr/local/bin', 'bunx'),
       prefixArgs: ['eas-cli'],
       source: 'bunx eas-cli',
@@ -128,7 +134,7 @@ describe(resolveEasCliOrThrow, () => {
     );
 
     expect(
-      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: BUNX_ENV })
+      resolveEasCliOrThrow(projectRoot, { env: { ...BUNX_ENV, PATH: PATH_WITH_RUNNER } })
     ).toMatchObject({ runner: 'bunx', source: 'bunx eas-cli' });
   });
 
@@ -136,7 +142,7 @@ describe(resolveEasCliOrThrow, () => {
     project({ name: 'app' }, { [`${projectRoot}/bun.lockb`]: '' });
 
     expect(
-      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
     ).toMatchObject({ runner: 'npx', prefixArgs: ['--yes', 'eas-cli'] });
   });
 
@@ -151,7 +157,9 @@ describe(resolveEasCliOrThrow, () => {
       }
     );
 
-    const resolved = resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV });
+    const resolved = resolveEasCliOrThrow(projectRoot, {
+      env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER },
+    });
 
     expect(resolved.command).toBe('npx');
     expect(resolved.source).not.toContain('/eas');
@@ -163,7 +171,7 @@ describe(resolveEasCliOrThrow, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
     expect.assertions(6);
     try {
-      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV });
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } });
     } catch (error: any) {
       expect(error).toBeInstanceOf(CommandError);
       expect(error.code).toBe('EAS_CLI_MISSING');
@@ -194,7 +202,9 @@ describe(findGlobalEasCli, () => {
     project({ name: 'app' });
     globalEasCli('25.0.0');
 
-    expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
+    expect(
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
+    ).toEqual({
       command: path.join('/usr/local/bin', 'eas'),
       prefixArgs: [],
       source: 'eas',
@@ -208,9 +218,9 @@ describe(findGlobalEasCli, () => {
     project({ name: 'app' });
     globalEasCli('24.9.1');
 
-    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+    expect(findGlobalEasCli({ env: { PATH: PATH_WITH_RUNNER } })).toBeNull();
     expect(
-      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
     ).toMatchObject({ command: 'npx', prefixArgs: ['--yes', 'eas-cli'], global: false });
   });
 
@@ -218,7 +228,7 @@ describe(findGlobalEasCli, () => {
     project({ name: 'app' });
     globalEasCli('30.0.0', { name: 'not-eas-cli' });
 
-    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+    expect(findGlobalEasCli({ env: { PATH: PATH_WITH_RUNNER } })).toBeNull();
   });
 
   it(`should read only the first eas on PATH, the one the reader's shell runs`, () => {
@@ -226,8 +236,10 @@ describe(findGlobalEasCli, () => {
     globalEasCli('22.0.0', { binDir: '/opt/old/bin' });
     globalEasCli('25.1.0');
 
-    expect(findGlobalEasCli({ pathEnv: `/opt/old/bin${path.delimiter}/usr/local/bin` })).toBeNull();
-    expect(findGlobalEasCli({ pathEnv: `/usr/local/bin${path.delimiter}/opt/old/bin` })).toBe(
+    expect(
+      findGlobalEasCli({ env: { PATH: `/opt/old/bin${path.delimiter}/usr/local/bin` } })
+    ).toBeNull();
+    expect(findGlobalEasCli({ env: { PATH: `/usr/local/bin${path.delimiter}/opt/old/bin` } })).toBe(
       path.join('/usr/local/bin', 'eas')
     );
   });
@@ -237,7 +249,7 @@ describe(findGlobalEasCli, () => {
     globalEasCli('25.1.0');
 
     expect(
-      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+      resolveEasCliOrThrow(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
     ).toMatchObject({
       command: 'npx',
       prefixArgs: ['--yes', 'eas-cli'],
@@ -251,7 +263,7 @@ describe(findGlobalEasCli, () => {
     globalEasCli('25.1.0');
 
     expect(
-      mayDownloadEasCli(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV }))
+      mayDownloadEasCli(resolveEasCli(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } }))
     ).toBe(false);
   });
 
@@ -262,14 +274,16 @@ describe(findGlobalEasCli, () => {
     globalEasCli('25.1.0');
     mockPlatform('win32');
 
-    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+    expect(findGlobalEasCli({ env: { PATH: PATH_WITH_RUNNER } })).toBeNull();
   });
 
   it(`should answer the global install even with no runner on PATH`, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
     globalEasCli('25.1.0');
 
-    expect(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toMatchObject({
+    expect(
+      resolveEasCli(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
+    ).toMatchObject({
       command: path.join('/usr/local/bin', 'eas'),
       global: true,
     });
@@ -280,11 +294,11 @@ describe(resolveEasCli, () => {
   it(`should answer null when no runner is on PATH, and the invocation regardless`, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
 
-    expect(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toBeNull();
+    expect(resolveEasCli(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })).toBeNull();
     // `easCliInvocation` does not gate: the auth passthrough always has to answer with something to
     // spawn, and the runner's own ENOENT is a truer sentence than a guess.
     expect(
-      easCliInvocation(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+      easCliInvocation(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } })
     ).toMatchObject({ command: 'npx' });
   });
 });
@@ -305,13 +319,13 @@ describe(mayDownloadEasCli, () => {
   it(`should be true only for a project with no eas-cli of its own`, () => {
     project({ name: 'app' });
     expect(
-      mayDownloadEasCli(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV }))
+      mayDownloadEasCli(resolveEasCli(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } }))
     ).toBe(true);
 
     vol.reset();
     project({ name: 'app', devDependencies: { 'eas-cli': '22.4.0' } });
     expect(
-      mayDownloadEasCli(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV }))
+      mayDownloadEasCli(resolveEasCli(projectRoot, { env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER } }))
     ).toBe(false);
 
     expect(mayDownloadEasCli(null)).toBe(false);
@@ -325,7 +339,9 @@ describe(easCliLabel, () => {
       { '/usr/local/bin/bunx': '#!/bin/sh', [`${projectRoot}/bun.lock`]: '' }
     );
 
-    const easCli = resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV });
+    const easCli = resolveEasCliOrThrow(projectRoot, {
+      env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER },
+    });
 
     expect(easCli.command).toBe(path.join('/usr/local/bin', 'bunx'));
     expect(easCliLabel(easCli)).toBe('bunx eas-cli');
@@ -336,7 +352,9 @@ describe(easCliArgs, () => {
   it(`should put the runner's flags and the package spec before the eas command word`, () => {
     project({ name: 'app' });
 
-    const easCli = resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV });
+    const easCli = resolveEasCliOrThrow(projectRoot, {
+      env: { ...NPX_ENV, PATH: PATH_WITH_RUNNER },
+    });
 
     expect(easCliArgs(easCli, ['build:list', '--json'])).toEqual([
       '--yes',

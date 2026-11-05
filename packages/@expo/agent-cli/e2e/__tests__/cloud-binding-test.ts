@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { guardedCloudArgs } from '../../src/device/cloudCommand';
 import type { Binding } from '../../src/deviceBinding/types';
-import { easCliArgs, resolveEasCli } from '../../src/utils/easCli';
+import { easCliArgs, easCliInvocation } from '../../src/utils/easCli';
 import { spawnSubprocessAsync } from '../../src/utils/subprocess';
 import {
   cloudBindingFile,
@@ -353,8 +353,8 @@ it('round-trips guarded cloud target argv', async () => {
   const sessionId = 'argv-session';
   await writeCloudSessionFileAsync(root, sessionId);
   const env = envFor(root);
-  const easCli = resolveEasCli(root, { env });
-  expect(easCli).not.toBeNull();
+  const easCli = easCliInvocation(root, { env });
+  expect(easCli).toMatchObject({ global: false, runner: 'npx' });
 
   const targetArgs = [
     'space value',
@@ -372,11 +372,18 @@ it('round-trips guarded cloud target argv', async () => {
     ...targetArgs,
   ];
   const accepted = await spawnSubprocessAsync(
-    easCli!.command,
-    easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
-    { cwd: root, env }
+    easCli.command,
+    easCliArgs(easCli, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
+    { cwd: root, env, timeoutMs: 60_000 }
   );
-  expect(accepted.exitCode, accepted.stderr).toBe(0);
+  const output = `stdout: ${accepted.stdout}\nstderr: ${accepted.stderr}`;
+  expect(accepted.timedOut, output).toBeFalsy();
+  expect(accepted.exitCode, output).toBe(0);
+  // Only the stub eas writes this log, so the machine's own npx did not answer.
+  expect(
+    readStubEasInvocations(root).map(({ args }) => args[0]),
+    output
+  ).toEqual(['simulator:exec']);
   expect(JSON.parse(accepted.stdout)).toEqual(targetArgs);
 });
 // A STOPPED session is no longer listed as usable, so the probe asks for availability before it

@@ -1,7 +1,7 @@
 // @ref llp/0006-agent-native-cli-surface.rfc.md §Installation and scope
 
 import type { SkillsAgent } from '../skills/types';
-import { findExecutableOnPath } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
 import type { AgentInstallPlan, InstallCommand, SetupScope } from './types';
 
 export const CLAUDE_PLUGIN = 'expo@claude-plugins-official';

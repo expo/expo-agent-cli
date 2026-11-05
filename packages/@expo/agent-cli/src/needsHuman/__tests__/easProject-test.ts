@@ -3,10 +3,8 @@ import { vol } from 'memfs';
 import { spawnSubprocessAsync } from '../../utils/subprocess';
 import { assertEasProjectConfiguredAsync } from '../easProject';
 
-vi.mock('../../utils/subprocess', () => ({
-  spawnSubprocessAsync: vi.fn(),
-  findExecutableOnPath: () => null,
-}));
+vi.mock('../../utils/subprocess', () => ({ spawnSubprocessAsync: vi.fn() }));
+vi.mock('../../utils/pathLookup', () => ({ findExecutableOnPath: () => null }));
 vi.mock('../../utils/expoCli', () => ({
   resolveExpoCli: () => ({ command: 'expo', args: ['config', '--json'] }),
 }));

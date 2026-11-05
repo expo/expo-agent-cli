@@ -3,10 +3,8 @@
 // covers the ones `@expo/agent-cli` has to find for itself (`create-expo`, `eas`) and the two output modes
 // a command needs: hand the terminal over, or capture what the tool printed.
 import { spawn } from 'child_process';
-import path from 'path';
 
 import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/promptShape';
-import { fileExistsSync } from './dir';
 import { env } from './env';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
@@ -172,8 +170,11 @@ function spawnNowAsync(
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
   return new Promise<SubprocessResult>((resolve) => {
+    // Only when there is something to add: `undefined` is what makes the child inherit, and
+    // spelling out `process.env` here would freeze a copy for no reason.
+    const spawnEnv = childEnv ? { ...process.env, ...childEnv } : undefined;
     // `eas`, `create-expo` and `npx` all resolve to a batch shim on Windows, which needs `cmd.exe`.
-    const target = resolveSpawnTarget(command, args);
+    const target = resolveSpawnTarget(command, args, spawnEnv ?? process.env);
     const child = spawn(target.command, target.args, {
       cwd,
       stdio: stdioFor(output),
@@ -182,9 +183,7 @@ function spawnNowAsync(
       // spawns is usually a package runner, and the program that does the work is the runner's
       // child (`src/utils/processGroup.ts`).
       detached: USE_PROCESS_GROUP,
-      // Only when there is something to add: `undefined` is what makes the child inherit, and
-      // spelling out `process.env` here would freeze a copy for no reason.
-      ...(childEnv ? { env: { ...process.env, ...childEnv } } : null),
+      ...(spawnEnv ? { env: spawnEnv } : null),
     });
 
     let stdout = '';
@@ -376,50 +375,4 @@ function startPromptGuard({
 function stdioFor(output: SubprocessOutput): ('ignore' | 'inherit' | 'pipe')[] {
   // Anything that is captured has to be piped; only a fully inherited run hands the streams over.
   return output === 'inherit' ? ['ignore', 'inherit', 'inherit'] : ['ignore', 'pipe', 'pipe'];
-}
-
-/** Filename variants of one command, in the order a shell would try them on this platform. */
-function executableNames(name: string): string[] {
-  return process.platform === 'win32' ? [`${name}.cmd`, `${name}.exe`, name] : [name];
-}
-
-/**
- * Find a command on `PATH` without spawning anything.
- *
- * `which`/`where` would be a subprocess for a question two `stat` calls answer, and a command
- * that has to *report* which binary it is about to run (`@expo/agent-cli deploy` names the `eas` it
- * found) needs the path, not just a yes.
- *
- * An entry whose `stat` throws — a symlink loop (`ELOOP`), an unreadable directory (`EACCES`) — is
- * skipped like an entry that does not hold the executable, the way a shell skips it, so a later
- * entry can still answer. `throwIfNoEntry: false` covers only `ENOENT` [observed — Node 26.5,
- * 2026-10-16].
- *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
- * @returns the absolute path of the executable, or `null` when no entry of `PATH` holds it.
- */
-export function findExecutableOnPath(
-  name: string,
-  { pathEnv = process.env.PATH }: { pathEnv?: string } = {}
-): string | null {
-  for (const dir of (pathEnv ?? '').split(path.delimiter)) {
-    if (!dir) {
-      continue;
-    }
-    for (const fileName of executableNames(name)) {
-      const candidate = path.join(dir, fileName);
-      if (isFileSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return null;
-}
-
-function isFileSync(file: string): boolean {
-  try {
-    return fileExistsSync(file);
-  } catch {
-    return false;
-  }
 }

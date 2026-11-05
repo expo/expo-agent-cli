@@ -76,7 +76,7 @@ describe(resolveAuthCliAsync, () => {
   it(`should use the project's own expo CLI when it has one`, async () => {
     vol.fromJSON({ [expoBin]: '#!/bin/sh' });
 
-    await expect(resolveAuthCliAsync(projectRoot, { pathEnv: '' })).resolves.toEqual({
+    await expect(resolveAuthCliAsync(projectRoot, { env: { PATH: '' } })).resolves.toEqual({
       tool: 'expo',
       source: 'project-expo',
       command: expoBin,
@@ -97,7 +97,7 @@ describe(resolveAuthCliAsync, () => {
       [hoisted]: '#!/bin/sh',
     });
 
-    await expect(resolveAuthCliAsync(app, { pathEnv: '' })).resolves.toEqual({
+    await expect(resolveAuthCliAsync(app, { env: { PATH: '' } })).resolves.toEqual({
       tool: 'expo',
       source: 'project-expo',
       command: hoisted,
@@ -108,7 +108,7 @@ describe(resolveAuthCliAsync, () => {
   // The whole point: a directory with no expo package used to reach for `npx expo`, which
   // downloads the entire SDK to read a file the EAS CLI can read now.
   it(`should ask the EAS CLI through the package runner when there is no expo`, async () => {
-    await expect(resolveAuthCliAsync(projectRoot, { pathEnv: '' })).resolves.toEqual({
+    await expect(resolveAuthCliAsync(projectRoot, { env: { PATH: '' } })).resolves.toEqual({
       tool: 'eas',
       source: 'runner-eas',
       command: 'npx',
@@ -129,7 +129,7 @@ describe(resolveAuthCliAsync, () => {
       }),
     });
 
-    await expect(resolveAuthCliAsync(projectRoot, { pathEnv: '' })).resolves.toMatchObject({
+    await expect(resolveAuthCliAsync(projectRoot, { env: { PATH: '' } })).resolves.toMatchObject({
       source: 'runner-eas',
       prefixArgs: ['--yes', 'eas-cli'],
     });
@@ -138,7 +138,7 @@ describe(resolveAuthCliAsync, () => {
   it(`should prefer the project's expo over the EAS CLI`, async () => {
     vol.fromJSON({ [expoBin]: '#!/bin/sh', [easBin]: '#!/bin/sh' });
 
-    await expect(resolveAuthCliAsync(projectRoot, { pathEnv: '' })).resolves.toMatchObject({
+    await expect(resolveAuthCliAsync(projectRoot, { env: { PATH: '' } })).resolves.toMatchObject({
       tool: 'expo',
     });
   });
@@ -151,7 +151,7 @@ describe(resolveAuthCliAsync, () => {
     vol.fromJSON({ [easBin]: '#!/bin/sh', [pathEas]: '#!/bin/sh' });
     const probe = mockProbe({ exitCode: 0 });
 
-    const cli = await resolveAuthCliAsync(projectRoot, { pathEnv: pathDir });
+    const cli = await resolveAuthCliAsync(projectRoot, { env: { PATH: pathDir } });
 
     expect(cli).toMatchObject({ source: 'runner-eas', command: 'npx' });
     expect(cli.command).not.toBe(pathEas);
@@ -163,7 +163,7 @@ describe(resolveRegisterCli, () => {
   it(`should use the project's own expo CLI when it has one`, () => {
     vol.fromJSON({ [expoBin]: '#!/bin/sh' });
 
-    expect(resolveRegisterCli(projectRoot, { pathEnv: '' })).toEqual({
+    expect(resolveRegisterCli(projectRoot, { env: { PATH: '' } })).toEqual({
       tool: 'expo',
       source: 'project-expo',
       command: expoBin,
@@ -177,7 +177,7 @@ describe(resolveRegisterCli, () => {
   it(`should fall back to the expo package runner, not to any eas`, () => {
     vol.fromJSON({ [easBin]: '#!/bin/sh', [pathEas]: '#!/bin/sh' });
 
-    expect(resolveRegisterCli(projectRoot, { pathEnv: pathDir })).toEqual({
+    expect(resolveRegisterCli(projectRoot, { env: { PATH: pathDir } })).toEqual({
       tool: 'expo',
       source: 'runner-expo',
       command: 'npx',
@@ -190,10 +190,10 @@ describe(resolveRegisterCli, () => {
   it(`should ignore an eas the other auth commands would have used`, async () => {
     vol.fromJSON({ [easBin]: '#!/bin/sh' });
 
-    await expect(resolveAuthCliAsync(projectRoot, { pathEnv: '' })).resolves.toMatchObject({
+    await expect(resolveAuthCliAsync(projectRoot, { env: { PATH: '' } })).resolves.toMatchObject({
       source: 'runner-eas',
     });
-    expect(resolveRegisterCli(projectRoot, { pathEnv: '' })).toMatchObject({
+    expect(resolveRegisterCli(projectRoot, { env: { PATH: '' } })).toMatchObject({
       source: 'runner-expo',
     });
   });

@@ -10,6 +10,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { LAST_BUILD_FILE_NAME } from '../src/plan/lastBuild';
+import { pathFromEnv } from '../src/utils/pathLookup';
 
 /** The `@expo/agent-cli` bin, spawned as a subprocess in every e2e test. Requires `bun run build` first. */
 export const bin = path.resolve(__dirname, '../bin/cli.js');
@@ -240,7 +241,7 @@ export async function installStubFingerprintAsync(projectRoot: string): Promise<
 
 /** Environment that makes any bare `expo` spawn resolve to the fixture's stub bin. */
 export function stubExpoEnv(projectRoot: string): Record<string, string> {
-  const inherited = process.env.PATH ?? process.env.Path ?? '';
+  const inherited = pathFromEnv();
   const withStub = `${path.join(projectRoot, '.stub-bin')}${path.delimiter}${inherited}`;
   return pathEnvVars(withStub);
 }

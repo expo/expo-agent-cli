@@ -3,7 +3,7 @@
 // constraint 5), and with the arguments that make it answer its own prompts.
 
 import { resolvePackageRunner } from '../utils/packageRunner';
-import { findExecutableOnPath } from '../utils/subprocess';
+import { findExecutableOnPath } from '../utils/pathLookup';
 import type { NewOptions } from './resolveOptions';
 
 /** The `create-expo` invocation to spawn. */
@@ -21,14 +21,14 @@ export interface CreateExpoCli {
  * otherwise the npm registry provides it, which is how the tool is normally used and needs no
  * install step of its own.
  *
- * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
+ * @param env the environment to read `PATH` from, for tests that must not depend on the machine's own.
  */
-export function resolveCreateExpoCli({ pathEnv }: { pathEnv?: string } = {}): CreateExpoCli {
-  const localBin = findExecutableOnPath('create-expo', { pathEnv });
+export function resolveCreateExpoCli({ env }: { env?: NodeJS.ProcessEnv } = {}): CreateExpoCli {
+  const localBin = findExecutableOnPath('create-expo', { env });
   if (localBin) {
     return { command: localBin, args: [] };
   }
-  const { command } = resolvePackageRunner({ pathEnv });
+  const { command } = resolvePackageRunner({ env });
   return { command, args: ['create-expo@latest'] };
 }
 

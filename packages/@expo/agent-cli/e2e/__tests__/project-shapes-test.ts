@@ -23,6 +23,7 @@ import {
   setupFixtureAsync,
   waitForDevLockAsync,
 } from '../utils';
+import { pathFromEnv } from '../../src/utils/pathLookup';
 
 /** A fresh temporary directory whose own name holds a space. */
 async function temporaryDirWithSpaceAsync(): Promise<string> {
@@ -340,7 +341,7 @@ describe('a directory with no project in it', () => {
     await installStubEasRunnerAsync(binDir, easScript);
 
     const result = await executeAgentCliAsync(empty, ['whoami', '--help'], {
-      env: pathEnvVars([binDir, process.env.PATH ?? process.env.Path ?? ''].join(path.delimiter)),
+      env: pathEnvVars([binDir, pathFromEnv()].join(path.delimiter)),
       reject: false,
     });
 
@@ -473,7 +474,7 @@ describe('a package.json that is not an Expo app', () => {
     const env = {
       npm_config_user_agent: '',
       npm_execpath: '',
-      ...pathEnvVars([binDir, process.env.PATH ?? process.env.Path ?? ''].join(path.delimiter)),
+      ...pathEnvVars([binDir, pathFromEnv()].join(path.delimiter)),
     };
 
     for (const argv of [

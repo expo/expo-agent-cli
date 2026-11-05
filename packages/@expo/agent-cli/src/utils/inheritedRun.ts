@@ -66,7 +66,7 @@ function runInheritedNowAsync(
 ): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     // On Windows the resolved bin is a batch shim, which only `cmd.exe` can run.
-    const target = resolveSpawnTarget(command, args);
+    const target = resolveSpawnTarget(command, args, process.env);
     const child = spawn(target.command, target.args, {
       cwd,
       stdio: 'inherit',

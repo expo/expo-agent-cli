@@ -24,10 +24,8 @@ import {
 } from '../compare';
 import realDiff from './fixtures/notesapp-ios-diff.json';
 
-vi.mock('../../utils/subprocess', () => ({
-  spawnSubprocessAsync: vi.fn(),
-  findExecutableOnPath: () => null,
-}));
+vi.mock('../../utils/subprocess', () => ({ spawnSubprocessAsync: vi.fn() }));
+vi.mock('../../utils/pathLookup', () => ({ findExecutableOnPath: () => null }));
 vi.mock('../../plan/lastBuild', () => ({ readLastBuildRecord: vi.fn(() => ({})) }));
 vi.mock('../../project/fingerprint', async () => ({
   ...((await vi.importActual('../../project/fingerprint')) as object),

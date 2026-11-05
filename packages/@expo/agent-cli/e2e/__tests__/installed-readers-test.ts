@@ -22,6 +22,7 @@ import {
   installStubAdbAsync,
   installStubXcrunAsync,
 } from './installedAppStubs';
+import { pathFromEnv } from '../../src/utils/pathLookup';
 
 const APP_ID = 'com.example.installedapp';
 
@@ -110,7 +111,7 @@ describe('the simulator reader over a stub xcrun', () => {
   /** The stubs on `PATH`, and the registry in the fixture's own Expo home. */
   function useStubs(binDir: string): void {
     restore = withEnv({
-      ...pathEnvVars(`${binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`),
+      ...pathEnvVars(`${binDir}${path.delimiter}${pathFromEnv()}`),
       __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root),
     });
   }
@@ -172,9 +173,7 @@ describe('the phone probe over a stub devicectl', () => {
   async function stubPhoneAsync(phone: { fingerprint: string | null; postDelayMs?: number }) {
     const xcrun = await installStubXcrunAsync(root, { phone });
     restore = withEnv({
-      ...pathEnvVars(
-        `${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`
-      ),
+      ...pathEnvVars(`${xcrun.binDir}${path.delimiter}${pathFromEnv()}`),
       __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root),
     });
     return xcrun;
