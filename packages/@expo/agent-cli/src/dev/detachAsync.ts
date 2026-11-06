@@ -51,7 +51,7 @@ import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import type { BundlerReadyResult } from '../runtime/waitReady';
 import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
-import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
+import { fetchAdvertisedUrlAsync, readDevServerLog } from './advertisedUrl';
 import {
   isRelayedChildCode,
   parseDetachedChildPhase,
@@ -68,7 +68,7 @@ import {
 } from './detachEasProgress';
 import { recordLastDevRequest } from './lastRequest';
 import { explicitRequestOf } from './deviceOption';
-import { detachedLogPath, readDetachedLogSync, type DetachedLogRead } from './logFile';
+import { detachedLogPath, readDetachedLogFileSync, type DetachedLogRead } from './logFile';
 import { spawnDetachedCandidate, detachedStartupTimeout } from './detachedCandidate';
 import { isProcessAlive } from './processLiveness';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
@@ -189,7 +189,7 @@ export function buildDetachSpawn(binPath: string, argv: string[]): DetachSpawn {
 }
 
 export interface DevDetachOptions {
-  /** Capture the actual spawned child for owned cleanup. */
+  /** Capture the actual child before waiting, including starts that fail or lose ownership. */
   onSpawn?: (child: ChildProcess) => void;
   /**
    * Whether to print the report at all.
@@ -236,17 +236,17 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
+    const logFile = detachedLogPath(projectRoot);
     const hasExited = () => !isProcessAlive(running.pid);
     async function checkReuseFailureAsync(
       lock: DevServerLockInfo,
       statusAnswering: boolean | null = null
     ): Promise<void> {
-      const stopped = await waitFailureAsync(projectRoot, hasExited(), Date.parse(lock.startedAt));
+      const stopped = await waitFailureAsync(logFile, hasExited(), Date.parse(lock.startedAt));
       if (stopped || statusAnswering === false) {
         throw detachFailureError(stopped?.failure ?? 'not-answering', {
-          projectRoot,
           lock,
-          logFile: detachedLogPath(projectRoot),
+          logFile,
           verdict: stopped?.verdict ?? null,
           childExit: null,
           platform: options.platform,
@@ -267,21 +267,22 @@ export async function devDetachAsync(
       await checkReuseFailureAsync(checked.lock);
       throw notReadyError(
         checked.lock,
-        detachedLogPath(projectRoot),
+        logFile,
         checked.result,
-        readChildPhaseSync(projectRoot),
+        readChildPhaseSync(logFile),
         options.platform,
         detachEas(projectRoot, options)
       );
     }
     const lock = checked?.lock ?? running;
     // Reuse only reads the current tunnel; it does not wait for a new one to appear.
-    const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
+    const tunnelUrl = await currentTunnelUrlAsync(logFile, lock.url);
     // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a child still starting
     // its session is followed: a reopen would start a second one, or exit 1 on a queued one.
     const sessionPlatform = reuseBoundDevice ? easOpenPlatform(options) : null;
     const followsSession =
-      sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
+      sessionPlatform != null &&
+      childStartsSessionSync(projectRoot, lock, sessionPlatform, logFile);
     const easSessionId = followsSession
       ? options.waitReady
         ? await waitForEasSessionAsync(projectRoot, {
@@ -316,6 +317,7 @@ export async function devDetachAsync(
       tunnelUrl,
       device,
       smokePlatform,
+      log: readDetachedLogFileSync(logFile, WHOLE_LOG),
     });
   }
 
@@ -348,21 +350,14 @@ export async function devDetachAsync(
   if (!lock) {
     const childExit = run.exit();
     if (!hasExited()) throw detachedStartupTimeout(run);
-    // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
+    // A startup or device refusal reaches the caller unchanged, from this child's own log.
     const relayed = relayedChildError(
-      childExit ? await waitForChildVerdictAsync(projectRoot) : readChildVerdictSync(projectRoot)
+      childExit ? await waitForChildVerdictAsync(logFile) : readChildVerdictSync(logFile)
     );
     if (relayed) {
       throw relayed;
     }
-    throw notStartedError(
-      projectRoot,
-      logFile,
-      childExit,
-      run.pid,
-      Date.now() - startedAt,
-      options.platform
-    );
+    throw notStartedError(logFile, childExit, run.pid, Date.now() - startedAt, options.platform);
   }
 
   /**
@@ -394,10 +389,9 @@ export async function devDetachAsync(
     projectRootMatched = result.projectRootMatched;
     if (!result.ready || result.projectRootMatched === false) {
       // The child's own answer outranks this wait's. @ref ./detachAsync §waitFailureAsync
-      const stopped = await waitFailureAsync(projectRoot, childIsGone());
+      const stopped = await waitFailureAsync(logFile, childIsGone());
       if (stopped) {
         throw detachFailureError(stopped.failure, {
-          projectRoot,
           lock,
           logFile,
           verdict: stopped.verdict,
@@ -413,74 +407,15 @@ export async function devDetachAsync(
         lock,
         logFile,
         result,
-        readChildPhaseSync(projectRoot),
+        readChildPhaseSync(logFile),
         options.platform,
         detachEas(projectRoot, options)
       );
     }
   }
 
-  const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, childIsGone);
+  const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, logFile, options, childIsGone);
   const device = await boundDeviceAsync(projectRoot, options);
-
-  // The last thing before anything is claimed. Everything above is a fact about a moment that has
-  // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
-  // between left the caller with `Bundler ready` and exit 0 for a dev server that was gone
-  // [observed — friction run 7, F61; live run S4]. `ready: true` is only ever printed for a
-  // process that is alive and a `/status` that still answers, here, now.
-  // @ref llp/0021-honest-reports.rfc.md §The rules
-  // The probe can outlast the child. Read its state and log only after that await, so a handoff
-  // written while the probe was pending outranks the probe's generic "not answering" result.
-  const statusAnswering =
-    ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
-  // One read of the whole log, for the phase, the verdict and the report's port move.
-  const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
-  const phase = childPhaseOf(log);
-  let verdict = log == null ? null : parseDetachedChildVerdict(log.lines.slice(-VERDICT_LOG_LINES));
-  let failure = resolveDetachFailure({
-    exited: childIsGone(),
-    verdict,
-    statusAnswering,
-  });
-
-  // …and "here, now" was still not enough for one shape of run. @ref
-  // llp/0021-honest-reports.rfc.md §The rules — **F140**. A step that opens the app
-  // has work outstanding when the bundler answers, and the macOS Automation refusal that ends it
-  // arrives a quarter of a second later — after every check above has passed. So the claim is held
-  // open for a moment and the same three facts are asked again.
-  if (failure == null && needsOpenPlatformGrace({ ready, phase })) {
-    const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
-      hasExited: childIsGone,
-      budgetMs: Math.min(
-        OPEN_PLATFORM_GRACE_MS,
-        // Bounded by the budget the caller gave the whole run, never beyond it: a `--wait-ready`
-        // that has already spent its timeout must not spend a second one here.
-        Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt))
-      ),
-      // Only a run that waited for the bundler may be failed on the bundler.
-      watchStatus: ready === true,
-    });
-    failure = grace.failure;
-    verdict = grace.verdict ?? verdict;
-  }
-
-  if (failure) {
-    // Both the final probe and the grace window can observe an exit before the handoff is
-    // readable. Give either path the same bounded wait, once, and prefer the child's own verdict.
-    if (verdict?.scenario == null && childIsGone()) {
-      verdict = await waitForChildVerdictAsync(projectRoot);
-      failure = verdict?.scenario != null ? 'needs-human' : 'child-exited';
-    }
-    throw detachFailureError(failure, {
-      projectRoot,
-      lock,
-      logFile,
-      verdict,
-      childExit: run.exit(),
-      platform: options.platform,
-      eas: detachEas(projectRoot, options),
-    });
-  }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — with `--eas`, ready is the
   // session binding as well as the bundler.
@@ -496,9 +431,8 @@ export async function devDetachAsync(
       callerArgv: options.callerArgv,
     });
     if (sessionId == null) {
-      const stopped = await waitFailureAsync(projectRoot, true);
+      const stopped = await waitFailureAsync(logFile, true);
       throw detachFailureError(stopped?.failure ?? 'child-exited', {
-        projectRoot,
         lock,
         logFile,
         verdict: stopped?.verdict ?? null,
@@ -508,6 +442,79 @@ export async function devDetachAsync(
       });
     }
     eas = { sessionId };
+  }
+
+  // The last thing before anything is claimed. Everything above is a fact about a moment that has
+  // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
+  // between left the caller with `Bundler ready` and exit 0 for a dev server that was gone
+  // [observed — friction run 7, F61; live run S4]. `ready: true` is only ever printed for a
+  // process that is alive and a `/status` that still answers, here, now.
+  // @ref llp/0021-honest-reports.rfc.md §The rules
+  // The probe can outlast the child. Read its state and log only after that await, so a handoff
+  // written while the probe was pending outranks the probe's generic "not answering" result.
+  const statusAnswering =
+    ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
+  // One read of the whole log, for the phase, the verdict and the report's port move.
+  const log = readDetachedLogFileSync(logFile, WHOLE_LOG);
+  const phase = childPhaseOf(log);
+  let verdict = log == null ? null : parseDetachedChildVerdict(log.lines.slice(-VERDICT_LOG_LINES));
+  let failure = resolveDetachFailure({
+    exited: childIsGone(),
+    verdict,
+    statusAnswering,
+  });
+
+  // …and "here, now" was still not enough for one shape of run. @ref
+  // llp/0021-honest-reports.rfc.md §The rules — **F140**. A step that opens the app
+  // has work outstanding when the bundler answers, and the macOS Automation refusal that ends it
+  // arrives a quarter of a second later — after every check above has passed. So the claim is held
+  // open for a moment and the same three facts are asked again.
+  if (failure == null && needsOpenPlatformGrace({ ready, phase })) {
+    const grace = await watchOpenPlatformGraceAsync(projectRoot, logFile, lock.url, {
+      hasExited: childIsGone,
+      budgetMs: Math.min(
+        OPEN_PLATFORM_GRACE_MS,
+        // Bounded by the budget the caller gave the whole run, never beyond it: a `--wait-ready`
+        // that has already spent its timeout must not spend a second one here.
+        Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt))
+      ),
+      // Only a run that waited for the bundler may be failed on the bundler.
+      watchStatus: ready === true,
+    });
+    failure = grace.failure;
+    verdict = grace.verdict ?? verdict;
+  }
+
+  // Recheck after every awaited startup phase: another server can answer at the same URL.
+  const published = await readDevServerLockAsync(projectRoot);
+  if (failure == null && childIsGone()) failure = 'child-exited';
+
+  if (failure) {
+    // Both the final probe and the grace window can observe an exit before the handoff is
+    // readable. Give either path the same bounded wait, once, and prefer the child's own verdict.
+    if (verdict?.scenario == null && childIsGone()) {
+      verdict = await waitForChildVerdictAsync(logFile);
+      failure = verdict?.scenario != null ? 'needs-human' : 'child-exited';
+    }
+    throw detachFailureError(failure, {
+      lock,
+      logFile,
+      verdict,
+      childExit: run.exit(),
+      platform: options.platform,
+      eas: detachEas(projectRoot, options),
+    });
+  }
+
+  if (published?.pid !== childPid || published.url !== lock.url) {
+    const error = new CommandError(
+      'DEV_DETACH_OWNER_CHANGED',
+      `This run no longer owns the published dev server, so startup cannot be reported as successful. Inspect the current server with "${PROGRAM_PREFIX} status"; this child's log is ${logFile}.`
+    );
+    error.exitCode = EXIT_OUTCOME_FAILED;
+    error.suggestedCommand = `${PROGRAM_PREFIX} status`;
+    error.data = { pid: childPid, logFile };
+    throw error;
   }
 
   return reportDetached(projectRoot, options, {
@@ -595,6 +602,7 @@ export function needsOpenPlatformGrace({
  */
 async function watchOpenPlatformGraceAsync(
   projectRoot: string,
+  logFile: string,
   url: string,
   {
     hasExited,
@@ -617,14 +625,14 @@ async function watchOpenPlatformGraceAsync(
   }
 ): Promise<{ failure: DetachFailureKind | null; verdict: DetachedChildVerdict | null }> {
   const deadline = Date.now() + budgetMs;
-  let verdict = readChildVerdictSync(projectRoot);
+  let verdict = readChildVerdictSync(logFile);
   let failure: DetachFailureKind | null = null;
   while (Date.now() < deadline) {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.min(OPEN_PLATFORM_POLL_MS, deadline - Date.now()))
     );
     const statusAnswering = watchStatus ? await isOwnBundlerAnsweringAsync(projectRoot, url) : null;
-    verdict = readChildVerdictSync(projectRoot);
+    verdict = readChildVerdictSync(logFile);
     const seen = resolveDetachFailure({
       exited: hasExited(),
       verdict,
@@ -670,15 +678,15 @@ const VERDICT_WAIT_MS = 2_000;
  * @returns the last verdict read, which is null when the child wrote none at all.
  */
 async function waitForChildVerdictAsync(
-  projectRoot: string,
+  logFile: string,
   since?: number
 ): Promise<DetachedChildVerdict | null> {
-  let verdict = readChildVerdictSync(projectRoot, since);
+  let verdict = readChildVerdictSync(logFile, since);
   const deadline = Date.now() + VERDICT_WAIT_MS;
   // The code row is the last line `logCmdError` writes, so a verdict with one is complete.
   while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
-    verdict = readChildVerdictSync(projectRoot, since) ?? verdict;
+    verdict = readChildVerdictSync(logFile, since) ?? verdict;
   }
   return verdict;
 }
@@ -731,13 +739,13 @@ function relayedChildError(verdict: DetachedChildVerdict | null): CommandError |
  * @returns the failure and the verdict behind it, or null when the wait really was only a wait.
  */
 async function waitFailureAsync(
-  projectRoot: string,
+  logFile: string,
   exited: boolean,
   since?: number
 ): Promise<{ failure: DetachFailureKind; verdict: DetachedChildVerdict | null } | null> {
   const verdict = exited
-    ? await waitForChildVerdictAsync(projectRoot, since)
-    : readChildVerdictSync(projectRoot, since);
+    ? await waitForChildVerdictAsync(logFile, since)
+    : readChildVerdictSync(logFile, since);
   const failure = resolveDetachFailure({ exited, verdict, statusAnswering: null });
   return failure ? { failure, verdict } : null;
 }
@@ -792,17 +800,17 @@ export function resolveDetachFailure({
 }
 
 /** The child's verdict, read out of the log this run opened. */
-function readChildVerdictSync(projectRoot: string, since?: number): DetachedChildVerdict | null {
+function readChildVerdictSync(logFile: string, since?: number): DetachedChildVerdict | null {
   // A reused foreground server can have an earlier detached run's log beside it. Use the same
   // freshness rule as resolveDevServerReach, rechecking on each read for a newly written handoff.
   if (since != null) {
     try {
-      if (fs.statSync(detachedLogPath(projectRoot)).mtimeMs < since) return null;
+      if (fs.statSync(logFile).mtimeMs < since) return null;
     } catch {
       return null;
     }
   }
-  const read = readDetachedLogSync(projectRoot, VERDICT_LOG_LINES);
+  const read = readDetachedLogFileSync(logFile, VERDICT_LOG_LINES);
   return read == null ? null : parseDetachedChildVerdict(read.lines);
 }
 
@@ -814,8 +822,8 @@ function readChildVerdictSync(projectRoot: string, since?: number): DetachedChil
  * still short at the top, and a window that misses the table reads as `serving`, which is the
  * wording this has always had.
  */
-function readChildPhaseSync(projectRoot: string): DetachedChildPhase {
-  return childPhaseOf(readDetachedLogSync(projectRoot, WHOLE_LOG));
+function readChildPhaseSync(logFile: string): DetachedChildPhase {
+  return childPhaseOf(readDetachedLogFileSync(logFile, WHOLE_LOG));
 }
 
 /** The phase a whole read of the child's log names, or `serving` when there is no log. */
@@ -836,7 +844,6 @@ function childPhaseOf(log: DetachedLogRead | null): DetachedChildPhase {
 function detachFailureError(
   kind: DetachFailureKind,
   {
-    projectRoot,
     lock,
     logFile,
     verdict,
@@ -844,7 +851,6 @@ function detachFailureError(
     platform,
     eas,
   }: {
-    projectRoot: string;
     lock: DevServerLockInfo;
     logFile: string;
     verdict: DetachedChildVerdict | null;
@@ -886,7 +892,7 @@ function detachFailureError(
           } before this command could report it.`
         : `The dev server on ${lock.url} stopped answering before this command could report it.`,
       `Why: a detached run is two processes, and only this one is being read. The bundler answered while the other one was starting, and it is not there now — so "ready" would be a claim about a moment that has passed.`,
-      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --${platform}${easFlag} --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --${platform}${easFlag}" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${eas ? ` ${easKeptSentence(eas)}` : ''}${logTail(projectRoot)}`,
+      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --${platform}${easFlag} --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --${platform}${easFlag}" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${eas ? ` ${easKeptSentence(eas)}` : ''}${logTail(logFile)}`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_FAILED;
@@ -910,8 +916,8 @@ export const TUNNEL_URL_WAIT_MS = 20_000;
 const TUNNEL_URL_POLL_MS = 250;
 
 /** The tunnel this project's dev server currently advertises, or null. */
-function currentTunnelUrlSync(projectRoot: string): string | null {
-  const captured = readDevServerLogSync(projectRoot);
+function currentTunnelUrlSync(logFile: string): string | null {
+  const captured = readDevServerLog(readDetachedLogFileSync(logFile, WHOLE_LOG)?.lines ?? []);
   return captured?.advertised?.hostType === 'tunnel' ? captured.advertised.url : null;
 }
 
@@ -924,10 +930,10 @@ function currentTunnelUrlSync(projectRoot: string): string | null {
  * server this run already has a lock for carries the same address, one request away.
  */
 async function currentTunnelUrlAsync(
-  projectRoot: string,
+  logFile: string,
   devServerUrl: string
 ): Promise<string | null> {
-  const fromLog = currentTunnelUrlSync(projectRoot);
+  const fromLog = currentTunnelUrlSync(logFile);
   if (fromLog != null) {
     return fromLog;
   }
@@ -947,6 +953,7 @@ async function currentTunnelUrlAsync(
  */
 async function waitForTunnelUrlAsync(
   projectRoot: string,
+  logFile: string,
   options: DevOptions,
   hasExited: () => boolean = () => false
 ): Promise<string | null> {
@@ -957,9 +964,7 @@ async function waitForTunnelUrlAsync(
   const deadline = Date.now() + TUNNEL_URL_WAIT_MS;
   for (;;) {
     const url =
-      lock == null
-        ? currentTunnelUrlSync(projectRoot)
-        : await currentTunnelUrlAsync(projectRoot, lock.url);
+      lock == null ? currentTunnelUrlSync(logFile) : await currentTunnelUrlAsync(logFile, lock.url);
     if (url != null || hasExited() || Date.now() >= deadline) {
       return url;
     }
@@ -980,7 +985,7 @@ function reportDetached(
     print,
     tunnelUrl,
     device,
-    log = readDetachedLogSync(projectRoot, WHOLE_LOG),
+    log,
     smokePlatform,
     eas,
   }: {
@@ -1003,7 +1008,7 @@ function reportDetached(
      * read it to decide whether to hold its claim open (F140) hands it over rather than paying for
      * a second read of a log a compiler may have written thousands of lines into.
      */
-    log?: DetachedLogRead | null;
+    log: DetachedLogRead | null;
   }
 ): number {
   const report: DevDetachResultJson = {
@@ -1050,7 +1055,7 @@ function reportDetached(
     if (options.json) {
       Log.log(JSON.stringify(report, null, 2));
     } else {
-      printHumanReport(report, options.platform);
+      printHumanReport(report);
     }
     reportFollowUps('dev', report.followups, { json: options.json });
   }
@@ -1115,7 +1120,7 @@ async function boundDeviceAsync(
  * Every line of the child's log, for what the child prints before its first step: the plan table.
  *
  * A `run:*` step writes thousands of lines of compiler output after them, so a tail, which is what
- * `readDetachedLogSync` gives, would miss them on exactly the run they matter for. The whole file
+ * `readDetachedLogFileSync` gives, would miss them on exactly the run they matter for. The whole file
  * is read either way; the number only decides how much of it is handed back.
  */
 const WHOLE_LOG = Number.MAX_SAFE_INTEGER;
@@ -1136,7 +1141,7 @@ function plannedPortMove(log: DetachedLogRead | null, lock: DevServerLockInfo): 
   return lock.port === expected ? null : { from: expected, to: lock.port };
 }
 
-function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): void {
+function printHumanReport(report: DevDetachResultJson): void {
   const label = (name: string) => name.padEnd(13);
   // @ref llp/0004 §Implemented in v1 — F125. The URL stays on this line
   // because it is the one the dev server will answer on, and the words after it stop it being read
@@ -1175,7 +1180,7 @@ function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): 
       `${label('Session')}${
         report.eas.sessionId
           ? `${report.eas.sessionId} · bound to this worktree`
-          : `not bound yet · "${PROGRAM_PREFIX} dev --${platform} --eas --detach --wait-ready" waits for it`
+          : `not bound yet · "${PROGRAM_PREFIX} dev:logs" shows startup; "${PROGRAM_PREFIX} status" checks progress`
       }`
     );
   }
@@ -1314,8 +1319,8 @@ async function waitForLockAsync(
  * `console.error` calls, none of which are this CLI speaking, and a failing bundle can carry
  * whatever text a file in the project holds (llp/0008-guardrails.rfc.md §Untrusted-content marking).
  */
-function logTail(projectRoot: string): string {
-  const read = readDetachedLogSync(projectRoot, FAILURE_LOG_LINES);
+function logTail(logFile: string): string {
+  const read = readDetachedLogFileSync(logFile, FAILURE_LOG_LINES);
   return read?.lines.length
     ? `\n\nWhat the dev server printed:\n${wrapUntrustedAppOutput(read.lines.join('\n'))}`
     : '';
@@ -1323,7 +1328,6 @@ function logTail(projectRoot: string): string {
 
 /** The error for a detached child that never published a lock. */
 function notStartedError(
-  projectRoot: string,
   logFile: string,
   childExit: { code: number | null; signal: NodeJS.Signals | null } | null,
   pid: number | null,
@@ -1339,7 +1343,7 @@ function notStartedError(
     [
       `The detached dev server did not start${pid == null ? '' : ` (pid ${pid})`}.`,
       `Why: a dev server this CLI starts publishes its port on the project's lock as soon as it is listening, and ${how}. Without that lock nothing can find the dev server, so reporting one here would name a server no other command could reach.`,
-      `How: read what it printed in ${logFile}, or run "${PROGRAM_PREFIX} dev --${platform}" in this terminal to watch the same start happen in the foreground.${logTail(projectRoot)}`,
+      `How: read what it printed in ${logFile}, or run "${PROGRAM_PREFIX} dev --${platform}" in this terminal to watch the same start happen in the foreground.${logTail(logFile)}`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
