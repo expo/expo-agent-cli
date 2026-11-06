@@ -12,6 +12,15 @@ const posix = { platform: 'darwin' as NodeJS.Platform };
 const win32 = { platform: 'win32' as NodeJS.Platform };
 
 describe(lockAddressFor, () => {
+  it('preserves the published default address for a non-ASCII project root', () => {
+    // This fits the old character limit and macOS's 103 usable socket-path bytes.
+    const projectRoot = path.resolve(path.sep, 'é'.repeat(35));
+    const published = path.join(projectRoot, '.expo', DEV_LOCK_SOCKET_NAME);
+    expect(published.length).toBeLessThanOrEqual(100);
+    expect(Buffer.byteLength(published)).toBeGreaterThan(100);
+    expect(lockAddressFor(projectRoot, posix).address).toBe(published);
+  });
+
   it(`puts a socket file in the project's .expo on posix`, () => {
     const projectRoot = path.resolve(path.sep, 'a', 'project');
 

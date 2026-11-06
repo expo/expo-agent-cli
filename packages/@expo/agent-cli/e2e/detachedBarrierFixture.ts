@@ -12,7 +12,7 @@ import {
   waitForExitAsync,
 } from './utils';
 
-export async function detachedBarrierFixture() {
+export async function detachedBarrierFixture(platform: 'ios' | 'android' = 'ios') {
   const root = await setupFixtureAsync('go-app');
   const barrier = path.join(root, '.barrier');
   fs.mkdirSync(barrier);
@@ -35,7 +35,7 @@ export async function detachedBarrierFixture() {
       cwd,
       [
         'dev',
-        '--ios',
+        `--${platform}`,
         '--go',
         '--local',
         '--no-open',
