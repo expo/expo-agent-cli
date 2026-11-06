@@ -1,4 +1,5 @@
 import path from 'node:path';
+import net from 'node:net';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
@@ -262,3 +263,48 @@ it.each([['--force'], ['--eas'], ['--release'], ['--signal', 'SIGKILL'], ['--por
     }
   }
 );
+
+it('stop reports retained ownership when the observed owner dies before signal delivery', async () => {
+  const f = await detachedBarrierFixture();
+  let server: net.Server | undefined;
+  try {
+    const first = f.start();
+    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+    const directory = path.join(f.root, '.expo', 'dev', 'detached-run');
+    const marker = path.join(directory, fs.readdirSync(directory)[0]!);
+    const owner = JSON.parse(fs.readFileSync(marker, 'utf8'));
+    process.kill(owner.pid, 'SIGKILL');
+    await first.result;
+
+    // Deliver the final lock snapshot after its owner exited, then close the endpoint.
+    // This models a response already in flight when the owner's process disappears.
+    server = net.createServer((socket) => {
+      socket.end(
+        JSON.stringify({
+          projectRoot: f.root,
+          pid: owner.pid,
+          port: f.port,
+          url: `http://127.0.0.1:${f.port}`,
+          startedAt: new Date().toISOString(),
+        }) + '\n'
+      );
+      server!.close();
+    });
+    await new Promise<void>((resolve, reject) => {
+      server!.once('error', reject);
+      server!.listen(lockAddressFor(f.root).address, resolve);
+    });
+    const stopped = await executeAgentCliAsync(f.root, ['dev:stop', '--json']);
+    const report = JSON.parse(stopped.stdout);
+    expect(report).toMatchObject({ stopped: true, signal: null, processStillRunning: false });
+    expect(report.recoveryCommand).toContain(`--discard-run ${owner.id}`);
+    expect(report.followups.map((item: { id: string }) => item.id)).toEqual(['discard-run']);
+    expect(fs.existsSync(marker)).toBe(true);
+    const refused = await f.start().result;
+    expect(refused.exitCode, refused.all).toBe(20);
+    expect(refused.stdout).toContain(`--discard-run ${owner.id}`);
+  } finally {
+    if (server?.listening) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    await f.cleanup();
+  }
+});
