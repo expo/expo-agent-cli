@@ -31,6 +31,11 @@ Publication never exposes an owner whose endpoint is not yet listening. Removal 
 only the captured attempt; delayed cleanup cannot remove its replacement.
 Empty directories left by release do not prevent a later election.
 
+Observers use the endpoint published by the owner, even when their temporary directories
+differ. An unknown endpoint is uncertain evidence, not proof of absence or permission to
+discard. Invalid ancillary metadata does not change a known endpoint's liveness. Existing
+dev-server locks retain their published address across CLI versions.
+
 Repeated detached starts refuse even with identical options; changing options requires
 explicit stop/start. Observers report their own child and retain its private log.
 Each worktree has independent ownership. Fixed-name logs remain readable.
@@ -50,3 +55,8 @@ out of scope. Socket liveness does not imply that Metro is ready.
 | An unpublished attempt does not block admission | `death before publication leaves admission available`                             |
 
 These tests live in `e2e/__tests__/dev-detach-ownership-test.ts`.
+
+Cross-environment observation and interrupted recovery are enforced by
+`another TMPDIR cannot discard a live %s owner, but can recover its interrupted run`.
+`an unknown ownership endpoint (%s) never grants discard authority` covers malformed
+endpoint evidence. Both are process tests in `dev-detach-endpoint-test.ts`.
