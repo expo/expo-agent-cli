@@ -23,6 +23,7 @@ import { otherPlatformSessionError } from '../device/cloudErrors';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
 import fs from 'fs';
+import type { ChildProcess } from 'child_process';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import {
@@ -188,6 +189,8 @@ export function buildDetachSpawn(binPath: string, argv: string[]): DetachSpawn {
 }
 
 export interface DevDetachOptions {
+  /** Capture the actual spawned child for owned cleanup. */
+  onSpawn?: (child: ChildProcess) => void;
   /**
    * Whether to print the report at all.
    *
@@ -220,7 +223,7 @@ export interface DevDetachOptions {
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, reuseBoundDevice = false }: DevDetachOptions = {}
+  { print = true, reuseBoundDevice = false, onSpawn }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
 
@@ -332,7 +335,8 @@ export async function devDetachAsync(
   const run = spawnDetachedCandidate(
     projectRoot,
     buildDetachSpawn(resolveBinPath(), options.detachArgv),
-    options.callerArgv
+    options.callerArgv,
+    onSpawn
   );
   const { logFile, childGone, hasExited } = run;
 

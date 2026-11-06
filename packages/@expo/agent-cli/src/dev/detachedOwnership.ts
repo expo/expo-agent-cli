@@ -183,10 +183,8 @@ export async function discardDetachedRunAsync(root: string, id: string): Promise
       `Attempt ${id} has a ${state === 'live' ? 'live' : 'possibly live'} owner; its record was retained.`,
       state === 'live' ? 'DEV_START_BUSY' : 'DEV_START_UNCERTAIN'
     );
-  const removed = removeAttempt(root, id);
-  const endpoint = endpointOf(root, id);
-  if (endpoint.kind === 'unix') fs.rmSync(endpoint.address, { force: true });
-  return removed;
+  // Discard owns the marker only, not a socket path supplied by another process.
+  return removeAttempt(root, id);
 }
 
 /** Capture only from a live lock's PID; the caller must confirm its Windows tree stop. */
