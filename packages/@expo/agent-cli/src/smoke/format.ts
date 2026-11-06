@@ -9,7 +9,7 @@ import type { FollowUp } from '../followups';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import { bundleToJson } from '../runtime/bundleCheck';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
-import type { SmokeRun } from './phases';
+import type { SmokeRun } from './contract';
 import { isFailingRecord } from './results';
 import type { SmokeOptions } from './resolveOptions';
 import type { SmokeBoundDeviceJson, SmokePhase, SmokeResource, SmokeResultJson } from './types';

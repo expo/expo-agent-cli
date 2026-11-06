@@ -37,7 +37,7 @@ export async function devServerStep(walk: PhaseWalk): Promise<Step<null>> {
     if (options.configuredEas && options.cloud === 'fallback') {
       options.cloud = 'required';
     }
-    // @ref ../phases §RegisteredCleanup — registered **before** the start, so a start that got
+    // @ref ../contract §RegisteredCleanup — registered **before** the start, so a start that got
     // halfway is still put back: a detached child that published its lock and then died in the
     // readiness wait is a dev server this run is responsible for, and one it never saw succeed.
     cleanups.push({ resource: 'dev-server', target: null, release: () => deps.stopDevServer() });

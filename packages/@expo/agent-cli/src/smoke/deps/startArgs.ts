@@ -1,5 +1,5 @@
 import { deviceIdOf, deviceNameOf, type Binding } from '../../deviceBinding';
-import type { SmokeStartResult } from '../phases';
+import type { SmokeStartResult } from '../contract';
 
 /**
  * The command line `--start` runs `@expo/agent-cli dev` with, before the platform flag is added.

@@ -11,7 +11,7 @@ import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { waitForAppConnectionAsync } from '../../runtime/waitReady';
 import { CommandError } from '../../utils/errors';
 import { firstLine } from '../../utils/text';
-import type { SmokeDeps } from '../phases';
+import type { SmokeDeps } from '../contract';
 import { expoGoVersionMismatch } from './device';
 import type { SmokeDepsContext } from './shared';
 

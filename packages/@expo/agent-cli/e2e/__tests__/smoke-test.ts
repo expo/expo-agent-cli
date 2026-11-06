@@ -1274,7 +1274,7 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    // @ref src/smoke/phases §SmokeDeps.explainSilentApp
+    // @ref src/smoke/contract §SmokeDeps.explainSilentApp
     //
     // Found live and at full price: an emulator on Expo Go 54.0.8, a project on SDK 57, and 119
     // seconds spent to report `no app had attached when the budget ran out` — while the reason was

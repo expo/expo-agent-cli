@@ -425,7 +425,7 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
 // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 //
 // The **other** mismatch, and the reason `appMismatchKind` exists
-// (@ref src/smoke/phases §SmokeAppMismatchKind). Before it did, both kinds got the advice above —
+// (@ref src/smoke/contract §SmokeAppMismatchKind). Before it did, both kinds got the advice above —
 // which is right for a project Expo Go cannot run and wrong for a project it can: the answer to the
 // wrong *version* of Expo Go is the right version, which this gate installs for itself. Sending
 // that caller to a native build would cost twenty minutes to fix what a re-run fixes in seconds.

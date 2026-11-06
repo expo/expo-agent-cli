@@ -23,7 +23,7 @@ import { navigateDeviceOf, type DeviceBackend } from '../../navigate/device';
 import { PROGRAM_PREFIX } from '../../programName';
 import { readSdkVersionAsync } from '../../project/nodeModules';
 import { EAS_SIMULATOR_PROFILE } from '../../toolchain/runsOn';
-import type { SmokeAppFit, SmokeDeps, SmokeSessionResult } from '../phases';
+import type { SmokeAppFit, SmokeDeps, SmokeSessionResult } from '../contract';
 import { whatAndHow } from './reasons';
 import type { SmokeDepsContext } from './shared';
 
@@ -271,7 +271,7 @@ async function probeDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['probeDe
 }
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
-// @ref ../phases §SmokeDeps.explainSilentApp
+// @ref ../contract §SmokeDeps.explainSilentApp
 //
 // The same version question as above, asked of the **device** instead of the dev server's
 // target list — because on this path that list is empty, and its emptiness is the thing being

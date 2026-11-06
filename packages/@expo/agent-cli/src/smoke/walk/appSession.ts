@@ -1,5 +1,5 @@
 import type { OpenRouteResult } from '../../navigate/openRoute';
-import type { SmokeDeps } from '../phases';
+import type { SmokeDeps } from '../contract';
 import { APP_SETTLE_MS } from '../timeouts';
 import type { SmokeRunReport } from './walk';
 

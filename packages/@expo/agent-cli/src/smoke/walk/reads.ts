@@ -1,5 +1,5 @@
 import { stopWithPicture } from './capture';
-import type { SmokeErrorsResult, SmokeEvaluateResult } from '../phases';
+import type { SmokeErrorsResult, SmokeEvaluateResult } from '../contract';
 import { isFailingRecord, noReload } from '../results';
 import {
   RELOAD_TIMEOUT_MS,
