@@ -290,6 +290,7 @@ describe(runSmokePhasesAsync, () => {
   it(`names the device it photographed, even when it opened nothing`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
+        cloudRoute: { current: 'required' },
         probeDevice: async () => ({
           deviceId: 'sess-live',
           backend: 'cloud' as const,
@@ -764,6 +765,7 @@ describe(runSmokePhasesAsync, () => {
       const run = await runSmokePhasesAsync(
         deps({
           ...bareMachine(),
+          cloudRoute: { current: 'required' },
           bootDevice,
           probeDevice: async () => ({
             deviceId: 'sess-live',
@@ -781,6 +783,7 @@ describe(runSmokePhasesAsync, () => {
       );
 
       expect(bootDevice).not.toHaveBeenCalled();
+      expect(statusOf(run, 'start-session')).toBe('ok');
       expect(run.environment.device).toBe('reused');
     });
 

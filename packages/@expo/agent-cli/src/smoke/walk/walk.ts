@@ -173,7 +173,7 @@ export function createPhaseWalk(
     outcome,
     ...report,
     ...extra,
-    cloudRoute: ctx.cloudRoute.current,
+    cloudRoute: deps.cloudRoute.current,
   });
 
   /**

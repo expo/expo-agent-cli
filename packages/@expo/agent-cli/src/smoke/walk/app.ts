@@ -63,7 +63,7 @@ async function openAppAsync(
   // Go through the normal open once for a session we created, even if Metro already sees the
   // app. This binds the controller for screenshots and makes a second reload unnecessary.
   const needsCloudController =
-    walk.cloudRoute.current === 'required' && environment.device === 'booted';
+    walk.deps.cloudRoute.current === 'required' && environment.device === 'booted';
   if (!appReplaced && first.appsConnected > 0 && !needsCloudController) {
     return { status: 'ok' as const, value: { connection: first, refused: null } };
   }

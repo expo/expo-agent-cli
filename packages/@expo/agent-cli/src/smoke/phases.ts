@@ -108,7 +108,6 @@ export async function runSmokePhasesAsync(
   try {
     const run = await runPhasesAsync(deps, options, {
       startedAt,
-      cloudRoute: deps.cloudRoute,
       cleanups,
       environment,
     });

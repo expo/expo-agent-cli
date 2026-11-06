@@ -452,7 +452,6 @@ export interface CloudRouteCell {
 /** What `runSmokePhasesAsync` hands the phase walk, so the walk owns none of it. */
 export interface SmokeRunContext {
   startedAt: number;
-  cloudRoute: CloudRouteCell;
   /** Appended to as resources are started, and read back by the cleanup. */
   cleanups: RegisteredCleanup[];
   /** Filled in as the run learns what it found and what it started. */
