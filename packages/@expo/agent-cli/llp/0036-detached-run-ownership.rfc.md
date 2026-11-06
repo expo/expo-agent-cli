@@ -103,7 +103,11 @@ uncertain; the observer cannot invent an address and treat its absence as proof 
 
 Windows stop force-terminates the tree. Only successful delivery and confirmed termination
 allow the stop command to clear the record captured before signalling. Failed or uncertain
-stops retain it. Normal POSIX shutdown lets the owner release after awaited cleanup.
+stops retain it. A process that disappears before signal delivery may be reported stopped,
+but retained ownership must still be reported with its recovery action; process termination
+does not establish that another start is admitted. This is enforced by
+`stop reports retained ownership when the observed owner dies before signal delivery`.
+Normal POSIX shutdown lets the owner release after awaited cleanup.
 
 POSIX SIGKILL always retains the record: the CLI PID can die while Expo's process group
 survives. The report names the PID, port, possible surviving processes, and discard action.
