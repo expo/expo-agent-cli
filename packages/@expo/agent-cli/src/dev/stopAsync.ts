@@ -734,14 +734,15 @@ export function looksLikeDevServerProcess(listener: PortListener): boolean {
  * and it binds the session its start returns after this report.
  */
 export function buildFollowUps(report: DevStopResultJson, finishing = false): FollowUp[] {
-  if (report.recoveryCommand)
-    return [
-      {
-        id: 'discard-run',
-        command: report.recoveryCommand,
-        why: 'The interrupted record still blocks startup. Discarding it stops no processes or EAS sessions.',
-      },
-    ];
+  const recovery: FollowUp[] = report.recoveryCommand
+    ? [
+        {
+          id: 'discard-run',
+          command: report.recoveryCommand,
+          why: 'The interrupted record still blocks startup. Discarding it stops no processes or EAS sessions.',
+        },
+      ]
+    : [];
   const cloudRows = report.devices?.filter((d) => d.backend === 'cloud') ?? [];
   const kept = keptSessionFollowUp(report, cloudRows, finishing);
   const keptSession = kept ? [kept] : [];
@@ -755,9 +756,11 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
       followups.push({
         id: 'dev-stop-port',
         command: `${PROGRAM_PREFIX} dev:stop --port ${report.port}`,
-        why: `Port ${report.port} still answers, and it is not the process that was just stopped. This names what is on it, and stops it without --force only when it is the dev server a killed run of this project left.`,
+        why: `Port ${report.port} still answers and may be a surviving subprocess. This names the listener and stops it without --force only when it is the dev server a killed run of this project left.`,
       });
     }
+    followups.push(...keptSession, ...recovery);
+    if (report.recoveryCommand || report.portStillAnswering) return followups;
     // The run's own EAS platform, else the platform of a session this worktree has or had: a kept
     // session is reused by the next dev --eas.
     const easPlatform =
@@ -767,7 +770,7 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
       ...new Set(report.devices?.filter((d) => d.backend !== 'cloud').map((d) => d.platform)),
     ];
     const localPlatform = localPlatforms.length === 1 ? localPlatforms[0] : undefined;
-    followups.push(...keptSession, {
+    followups.push({
       id: 'dev',
       command: easPlatform
         ? devCommand(easPlatform, '--eas')
@@ -776,6 +779,7 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
     });
     return followups;
   }
+  if (recovery.length > 0) return [...keptSession, ...recovery];
   if (report.reason === 'foreign-dev-server') {
     return [
       {
