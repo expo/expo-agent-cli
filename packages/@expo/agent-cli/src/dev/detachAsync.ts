@@ -7,8 +7,8 @@
 // command timeout waiting for a command that never returns, and every step after it — `dev:wait`,
 // `navigate`, `runtime:errors` — needs a shell the dev server is not holding [F46, friction run 4].
 //
-// What is new here is only the *spawn*: the child is `@expo/agent-cli dev` again, unchanged, with its
-// output pointed at a file. Everything that makes the dev server discoverable afterwards already
+// The child runs `@expo/agent-cli dev` again, owning startup before any work, with its
+// output pointed at a private file. Everything that makes the dev server discoverable afterwards already
 // exists — the lock publishes its port (`src/devLock/`), `dev:wait` reports its readiness, and
 // `dev:stop` signals the pid the lock names. This is the reason the child is this CLI and not
 // `expo start` directly: the lock is taken by the wrapper, so a detached run has to *be* a wrapper.
@@ -22,7 +22,6 @@ import type { PlanPlatform } from '../plan/types';
 import { otherPlatformSessionError } from '../device/cloudErrors';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
-import { spawn } from 'child_process';
 import fs from 'fs';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
@@ -53,7 +52,7 @@ import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
-  isRelayedDeviceCode,
+  isRelayedChildCode,
   parseDetachedChildPhase,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
@@ -66,14 +65,10 @@ import {
   knownSessionIdSync,
   waitForEasSessionAsync,
 } from './detachEasProgress';
-import { CALLER_ARGV_ENV, explicitRequestOf } from './deviceOption';
-import { event } from './events';
-import {
-  detachedLogPath,
-  openDetachedLogSync,
-  readDetachedLogSync,
-  type DetachedLogRead,
-} from './logFile';
+import { recordLastDevRequest } from './lastRequest';
+import { explicitRequestOf } from './deviceOption';
+import { detachedLogPath, readDetachedLogSync, type DetachedLogRead } from './logFile';
+import { spawnDetachedCandidate, detachedStartupTimeout } from './detachedCandidate';
 import { isProcessAlive } from './processLiveness';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
@@ -306,6 +301,7 @@ export async function devDetachAsync(
         : null;
     // Read the verdict and PID after all probes: any can outlast the running server.
     await checkReuseFailureAsync(lock, statusAnswering);
+    if (reuseBoundDevice) recordLastDevRequest(projectRoot, options);
     return reportDetached(projectRoot, options, {
       lock,
       alreadyRunning: true,
@@ -333,59 +329,23 @@ export async function devDetachAsync(
   // The session bound before the spawn, expired or not, is the one the child reuses and renews.
   const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
-  const { logFile, fd } = openDetachedLogSync(projectRoot);
-  const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);
-
-  event('detach_spawn', { logFile, argv: args });
-  const child = spawn(command, args, {
-    cwd: projectRoot,
-    // Its own process group and session, so closing this terminal does not take the dev server
-    // with it — which is the whole point of detaching.
-    detached: true,
-    // Both streams into the log. `ignore` on stdin, because a detached process has no terminal to
-    // read one from, and an inherited stdin would keep this shell attached to it.
-    stdio: ['ignore', fd, fd],
-    // The parent command owns usage telemetry; this child only continues its work. The second
-    // variable makes the child's failures name their code in the log, which this process reads back.
-    env: {
-      ...process.env,
-      __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
-      __EXPO_AGENT_CLI_DETACHED: '1',
-      [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
-    },
-  });
-  // The child owns the file now; a descriptor left open here would keep the parent alive.
-  fs.closeSync(fd);
-  child.unref();
-
-  let childExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
-  /**
-   * Aborted when the child is gone, which ends every wait below.
-   *
-   * A wait for a bundler is a wait for the process that would start one, and this run started
-   * exactly one of those. Without it, `--wait-ready` spends its whole budget re-asking a port
-   * nothing can answer on again: the retry that exists so a cold `expo run:ios` build is waited out
-   * (`src/runtime/waitReady.ts`) cannot tell that build apart from a corpse, and both look like a
-   * refused connection.
-   */
-  const childGone = new AbortController();
-  child.once('exit', (code, signal) => {
-    childExit = { code, signal };
-    childGone.abort();
-  });
-  child.once('error', () => {
-    childExit = { code: null, signal: null };
-    childGone.abort();
-  });
-  const hasExited = () => childExit != null;
+  const run = spawnDetachedCandidate(
+    projectRoot,
+    buildDetachSpawn(resolveBinPath(), options.detachArgv),
+    options.callerArgv
+  );
+  const { logFile, childGone, hasExited } = run;
 
   let lock = await waitForLockAsync(projectRoot, {
-    timeoutMs: options.detachTimeoutMs,
+    pid: run.pid,
+    timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
     hasExited,
   });
   if (!lock) {
+    const childExit = run.exit();
+    if (!hasExited()) throw detachedStartupTimeout(run);
     // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
-    const relayed = relayedDeviceError(
+    const relayed = relayedChildError(
       childExit ? await waitForChildVerdictAsync(projectRoot) : readChildVerdictSync(projectRoot)
     );
     if (relayed) {
@@ -395,7 +355,7 @@ export async function devDetachAsync(
       projectRoot,
       logFile,
       childExit,
-      child.pid ?? null,
+      run.pid,
       Date.now() - startedAt,
       options.platform
     );
@@ -437,7 +397,7 @@ export async function devDetachAsync(
           lock,
           logFile,
           verdict: stopped.verdict,
-          childExit,
+          childExit: run.exit(),
           platform: options.platform,
           eas: detachEas(projectRoot, options),
         });
@@ -512,7 +472,7 @@ export async function devDetachAsync(
       lock,
       logFile,
       verdict,
-      childExit,
+      childExit: run.exit(),
       platform: options.platform,
       eas: detachEas(projectRoot, options),
     });
@@ -538,7 +498,7 @@ export async function devDetachAsync(
         lock,
         logFile,
         verdict: stopped?.verdict ?? null,
-        childExit,
+        childExit: run.exit(),
         platform: options.platform,
         eas,
       });
@@ -725,8 +685,8 @@ async function waitForChildVerdictAsync(
  * @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the agent's recovery is the
  * child's own `dev` or `dev:stop` command, not `dev:logs`.
  */
-function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError | null {
-  if (verdict == null || !isRelayedDeviceCode(verdict.code)) {
+function relayedChildError(verdict: DetachedChildVerdict | null): CommandError | null {
+  if (verdict == null || !isRelayedChildCode(verdict.code)) {
     return null;
   }
   const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
@@ -889,7 +849,7 @@ function detachFailureError(
     eas: DetachEas | null;
   }
 ): CommandError {
-  const relayed = relayedDeviceError(verdict);
+  const relayed = relayedChildError(verdict);
   if (relayed) {
     return relayed;
   }
@@ -1316,11 +1276,12 @@ function easKeptSentence(eas: DetachEas): string {
  */
 async function waitForLockAsync(
   projectRoot: string,
-  { timeoutMs, hasExited }: { timeoutMs: number; hasExited: () => boolean }
+  { timeoutMs, hasExited, pid }: { timeoutMs: number; hasExited: () => boolean; pid: number }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const lock = await readDevServerLockAsync(projectRoot);
+    const observed = await readDevServerLockAsync(projectRoot);
+    const lock = observed?.pid === pid ? observed : null;
     if (lock) {
       const spawnedAt = Date.parse(lock.startedAt);
       if (

@@ -1,13 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-//
-// `@expo/agent-cli dev --detach` through the published bin. Everything worth pinning here is what a unit
-// test cannot see: the parent process **returns** while a dev server it started is still running,
-// that server survives the parent's exit, its output lands in a file, and `dev:stop` takes the
-// whole tree down again.
-//
-// The dev server is the stub `expo` bin, which holds the lock exactly as the real one does — the
-// wrapper is what takes the lock, and the wrapper is real here.
+// Real CLI processes exercise detached lifetime, logs and stop with an external Expo stub.
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -25,7 +17,7 @@ import {
   waitForAsync,
 } from '../utils';
 
-/** Where a detached dev server writes, per `src/dev/logFile.ts`. Spelled out, as a wire contract. */
+/** Legacy fixed-name log fixture; new runs report their private log path. */
 const LOG_PATH = path.join('.expo', 'dev', 'logs', 'dev-detached.log');
 
 /** Long enough for a test to do its work against a running dev server, short enough to end. */
@@ -199,9 +191,9 @@ describe('@expo/agent-cli dev --detach', () => {
         ready: null,
       });
       expect(report.pid).toBeGreaterThan(0);
-      expect(report.logFile).toContain(LOG_PATH);
-      // Line 1 of the child's log names the child, before its plan, so a re-run can tell who wrote it.
-      const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+      expect(report.logFile).toContain(path.join('.expo', 'dev', 'logs', 'dev-detached-'));
+      // Line 1 of the child's log names the child, before its plan.
+      const log = await fs.promises.readFile(report.logFile, 'utf8');
       expect(log.split('\n')[0]).toBe(`Detached dev run, pid ${report.pid}.`);
 
       // The parent has exited — this test is running — and the child has not.
@@ -440,7 +432,7 @@ describe('@expo/agent-cli dev --detach', () => {
           ['run:ios', '--port', String(report.port)],
         ]);
         // Said once, by the plan, and not again by the step it moved.
-        const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+        const log = await fs.promises.readFile(report.logFile, 'utf8');
         expect(log.split('Port 8081 is busy; the dev server uses').length).toBe(2);
       } finally {
         await cleanUpAsync(projectRoot);
@@ -754,9 +746,7 @@ describe('@expo/agent-cli dev --detach', () => {
         // step only a person can complete. The child classified it and this parent relayed it.
         expect(
           result.exitCode,
-          `${result.all}\nDetached child log:\n${await fs.promises
-            .readFile(path.join(projectRoot, LOG_PATH), 'utf8')
-            .catch(() => '(unavailable)')}`
+          `${result.all}\nDetached child log:\n${(await executeAgentCliAsync(projectRoot, ['dev:logs'], { reject: false })).all}`
         ).toBe(7);
         const { error } = JSON.parse(result.stdout);
         expect(error.needsHuman).toMatchObject({
@@ -771,9 +761,6 @@ describe('@expo/agent-cli dev --detach', () => {
       }
     });
 
-    // The other half, and the one that keeps the grace honest: a `--ios` run whose dev server stays
-    // up still reports ready and still exits 0. A check that failed both would only have moved the
-    // dishonesty to the other side.
     it('still reports ready for a child that stays up', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
 
@@ -827,13 +814,17 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8394),
-      });
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8394),
+        }
+      );
       // The stub prints its start line as soon as it runs; the file is written by the child.
       await waitForAsync(
         () =>
-          (fs.readFileSync(path.join(projectRoot, LOG_PATH), 'utf8') || '').includes(
+          (fs.readFileSync(JSON.parse(started.stdout).logFile, 'utf8') || '').includes(
             'stub_expo_start'
           ),
         5000
@@ -845,7 +836,7 @@ describe('@expo/agent-cli dev:logs', () => {
 
       expect(result.exitCode).toBe(0);
       const report = JSON.parse(result.stdout);
-      expect(report.logFile).toContain(LOG_PATH);
+      expect(report.logFile).toContain(path.join('.expo', 'dev', 'logs', 'dev-detached-'));
       expect(report.lines.join('\n')).toContain('stub_expo_start');
       expect(report.devServer).toMatchObject({ port: 8394 });
     } finally {
@@ -857,10 +848,14 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8393),
-      });
-      await waitForAsync(() => fs.existsSync(path.join(projectRoot, LOG_PATH)), 5000);
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8393),
+        }
+      );
+      await waitForAsync(() => fs.existsSync(JSON.parse(started.stdout).logFile), 5000);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:logs'], {
         env: stubExpoEnv(projectRoot),

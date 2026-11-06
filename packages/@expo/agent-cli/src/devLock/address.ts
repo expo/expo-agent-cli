@@ -59,26 +59,35 @@ export interface DevLockAddress {
  */
 export function lockAddressFor(
   projectRoot: string,
-  { platform = process.platform }: { platform?: NodeJS.Platform } = {}
+  { platform = process.platform, name }: { platform?: NodeJS.Platform; name?: string } = {}
 ): DevLockAddress {
   // Every part of the address is derived from the canonical path, the length check included: two
   // processes that spell the project root differently must not pick two addresses.
   const canonical = canonicalProjectRoot(projectRoot);
+  const suffix = name == null ? '' : `-${name}`;
 
   if (platform === 'win32') {
     return {
       kind: 'pipe',
-      address: `\\\\.\\pipe\\${DEV_LOCK_PIPE_PREFIX}${digestOf(canonical)}`,
+      address: `\\\\.\\pipe\\${DEV_LOCK_PIPE_PREFIX}${digestOf(canonical)}${suffix}`,
     };
   }
 
-  const inProject = path.join(canonical, '.expo', DEV_LOCK_SOCKET_NAME);
-  if (inProject.length <= MAX_UNIX_SOCKET_PATH) {
+  const filename = name == null ? DEV_LOCK_SOCKET_NAME : `agent-cli-${name}.sock`;
+  const inProject = path.join(canonical, '.expo', filename);
+  // Preserve the published default-lock mapping; new attempt endpoints use byte-safe paths.
+  const length = name == null ? inProject.length : Buffer.byteLength(inProject);
+  if (length <= MAX_UNIX_SOCKET_PATH) {
     return { kind: 'unix', address: inProject };
   }
   return {
     kind: 'unix',
-    address: path.join(os.tmpdir(), `${DEV_LOCK_PIPE_PREFIX}${digestOf(canonical)}.sock`),
+    address: path.join(
+      os.tmpdir(),
+      name == null
+        ? `${DEV_LOCK_PIPE_PREFIX}${digestOf(canonical)}.sock`
+        : `agent-cli-${digestOf(`${canonical}:${name}`)}.sock`
+    ),
   };
 }
 
