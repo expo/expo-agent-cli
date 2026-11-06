@@ -1,6 +1,6 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // When the lock is published: at the spawn when the arguments name a port, else when the dev
-// server logs one. Against a real lock address and a real `start.log`.
+// server reports one. Against a real lock address.
 
 import fs from 'fs';
 import path from 'path';
@@ -23,12 +23,26 @@ afterEach(() => {
   cleanupTempProjects();
 });
 
-/** Append a `metro:instantiate` entry to the project's `start.log`, as `2g` writes it. */
-function logPort(projectRoot: string, port: number) {
-  const logs = path.join(projectRoot, '.expo', 'dev', 'logs');
-  fs.mkdirSync(logs, { recursive: true });
+/** The `LOG_EVENTS` file this process's `2g` writes, which the port watch reads Metro's report from. */
+const eventLog = vi.hoisted(() => ({ file: '' }));
+vi.mock('2g', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('2g')>()),
+  getEventLoggerInfo: () => ({
+    destination: 'file',
+    isUserVisibleOutput: false,
+    debug: true,
+    file: eventLog.file,
+  }),
+}));
+
+beforeEach(() => {
+  eventLog.file = path.join(makeTempProject(), 'events.jsonl');
+});
+
+/** Append Metro's report of `port` to the event log, as `2g` writes it. */
+function report(port: number) {
   fs.appendFileSync(
-    path.join(logs, 'start.log'),
+    eventLog.file,
     `${JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port })}\n`
   );
 }
@@ -46,7 +60,7 @@ async function eventuallyAsync<T>(read: () => Promise<T>, check: (value: T) => b
 }
 
 describe(holdDevServerLockAsync, () => {
-  it(`publishes the lock before any log line when the arguments name a port`, async () => {
+  it(`publishes the lock before any report when the arguments name a port`, async () => {
     const projectRoot = makeTempProject();
     const resolved: string[] = [];
     let running = true;
@@ -62,22 +76,23 @@ describe(holdDevServerLockAsync, () => {
       () => readDevServerLockAsync(projectRoot),
       (info) => info != null
     );
-    expect(answer).toMatchObject({ port: 8301, easPlatform: null });
+    expect(answer).toMatchObject({ port: 8301, portReported: false, easPlatform: null });
     expect(resolved).toEqual(['arg:8301']);
 
     // Metro reports later, on another port: told again, and the lock follows.
-    logPort(projectRoot, 8302);
+    report(8302);
     await lock;
-    expect(resolved).toEqual(['arg:8301', 'log:8302']);
+    expect(resolved).toEqual(['arg:8301', 'reported:8302']);
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
       port: 8302,
       url: 'http://127.0.0.1:8302',
+      portReported: true,
     });
     running = false;
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it(`answers easOpenFinished once the EAS open settles, and keeps it across the port update from the log`, async () => {
+  it(`answers easOpenFinished once the EAS open settles, and keeps it across the port update from the report`, async () => {
     const projectRoot = makeTempProject();
     let finishOpen!: () => void;
     const easOpenFinished = new Promise<void>((resolve) => (finishOpen = resolve));
@@ -105,16 +120,17 @@ describe(holdDevServerLockAsync, () => {
       )
     ).toMatchObject({ port: 8308, easOpenFinished: true });
 
-    logPort(projectRoot, 8309);
+    report(8309);
     await lock;
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
       port: 8309,
+      portReported: true,
       easPlatform: 'ios',
       easOpenFinished: true,
     });
   });
 
-  it(`waits for the log when the arguments name no port`, async () => {
+  it(`waits for the report when the arguments name no port`, async () => {
     const projectRoot = makeTempProject();
     const resolved: string[] = [];
 
@@ -129,13 +145,19 @@ describe(holdDevServerLockAsync, () => {
     expect(await readDevServerLockAsync(projectRoot)).toBeNull();
     expect(resolved).toEqual([]);
 
-    logPort(projectRoot, 8303);
+    report(8303);
     await lock;
-    expect(resolved).toEqual(['log:8303']);
-    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8303 });
+    expect(resolved).toEqual(['reported:8303']);
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
+      port: 8303,
+      portReported: true,
+    });
   });
 
-  it(`never publishes a named port that another project's dev server answers, and follows the log`, async () => {
+  // A Metro of another project on `*:8081` answered the port a run fell back to, and the lock
+  // published it [observed — live suite, 2026-10-05: `status` read `source: 'lock'` with
+  // `projectRootMatched: false`].
+  it(`never publishes a named port that another project's dev server answers, and waits for the report`, async () => {
     const projectRoot = makeTempProject();
     const resolved: string[] = [];
     let running = true;
@@ -153,10 +175,13 @@ describe(holdDevServerLockAsync, () => {
     expect(await readDevServerLockAsync(projectRoot)).toBeNull();
     expect(resolved).toEqual([]);
 
-    logPort(projectRoot, 8305);
+    report(8305);
     await lock;
-    expect(resolved).toEqual(['log:8305']);
-    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8305 });
+    expect(resolved).toEqual(['reported:8305']);
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
+      port: 8305,
+      portReported: true,
+    });
     running = false;
   });
 

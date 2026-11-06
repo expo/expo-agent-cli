@@ -149,10 +149,8 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
     return null;
   }
 
-  const { url, port, pid, startedAt, projectRoot, easPlatform, easOpenFinished } = parsed as Record<
-    string,
-    unknown
-  >;
+  const { url, port, portReported, pid, startedAt, projectRoot, easPlatform, easOpenFinished } =
+    parsed as Record<string, unknown>;
   if (
     typeof url !== 'string' ||
     typeof port !== 'number' ||
@@ -163,10 +161,12 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
   ) {
     return null;
   }
-  // Optional on the wire: a lock held by an older CLI names no EAS platform and no finished open.
+  // Optional on the wire: a lock held by an older CLI names no reported port, no EAS platform and no
+  // finished open.
   return {
     url,
     port,
+    portReported: portReported === true,
     pid,
     startedAt,
     projectRoot,

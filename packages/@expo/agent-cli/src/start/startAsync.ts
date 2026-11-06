@@ -113,7 +113,7 @@ export async function runDevServerAsync(
   const startedAt = Date.now();
   let running = true;
   let port: ResolvedDevServerPort | null = null;
-  // The lock answers `arg` at the spawn and `log` when Metro reports, so the open is guarded here.
+  // The lock answers `arg` at the spawn and `reported` when Metro reports, so the open is guarded here.
   let opened = false;
   const open = (server: { url: string; port: number }) => {
     if (!opened) {
@@ -144,12 +144,12 @@ export async function runDevServerAsync(
         return;
       }
       const server = { url: `http://127.0.0.1:${resolved.port}`, port: resolved.port };
-      // `log` is the dev server saying where it listens. `arg` is only the port the command line
+      // `reported` is the dev server saying where it listens. `arg` is only the port the command line
       // named, which `dev` always passes, so the open waits until `/status` answers there and
       // names no other project's root, and never comes when the dev server exits first. The lock
-      // tells `arg` at the spawn and `log` later, and `open` fires once. `default` is a
+      // tells `arg` at the spawn and `reported` later, and `open` fires once. `default` is a
       // guess, and an open aimed at a guessed port is the false green the lock exists to prevent.
-      if (resolved.source === 'log') {
+      if (resolved.source === 'reported') {
         open(server);
       } else if (resolved.source === 'arg') {
         void openWhenAnsweringAsync(server.url, projectRoot, () => running && !opened).then(

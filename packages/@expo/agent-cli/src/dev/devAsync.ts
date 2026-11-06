@@ -877,7 +877,7 @@ function portCollisionIn(
   spawnedAt: number
 ): PortCollision | null {
   if (
-    result.port?.source === 'log' ||
+    result.port?.source === 'reported' ||
     readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) != null
   ) {
     return null;
@@ -903,7 +903,7 @@ function planAsRun(plan: StartPlan, run: PlanRun): StartPlan {
   }
   const reported = run.devServer?.port;
   const port =
-    reported && (reported.source === 'log' || reported.source === 'arg')
+    reported && (reported.source === 'reported' || reported.source === 'arg')
       ? reported.port
       : plan.devServerPort.port;
   return {

@@ -16,6 +16,7 @@ import { formatGroupHelp, formatTopLevelHelp } from './help/listing';
 import * as Log from './log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import { configureColor } from './utils/color';
+import { DETACHED_EVENT_DEBUG_ENV } from './utils/eventLogEnv';
 import { argvRequestsJson, setJsonRequested } from './utils/jsonMode';
 
 // Dogfood tunnel v2 throughout the process tree, including detached dev servers.
@@ -95,6 +96,7 @@ installEventLogger({
         ? `${PROGRAM_NAME} ${resolution.name}`
         : `${PROGRAM_NAME} ${subcommand}`,
   metadata: { version },
+  debug: process.env[DETACHED_EVENT_DEBUG_ENV] === '1' ? true : undefined,
 });
 
 // Only registry-owned names enter remote telemetry. Raw arguments and local JSONL events
