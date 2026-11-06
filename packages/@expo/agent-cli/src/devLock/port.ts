@@ -2,9 +2,12 @@
 // Which port the dev server actually listens on.
 //
 // The wrapper cannot know: `expo start` walks past a taken port, and `expo run:ios` starts a dev
-// server the wrapper passed no port to at all. What it can do is read the port back out of the
-// dev server's own structured log, and only trust entries the current run wrote.
+// server the wrapper passed no port to at all. What it can do is read Metro's `metro:instantiate`
+// event, which the Expo CLI sends to this process's `2g` event log, and only trust events the
+// current run sent.
 
+import { getEventLoggerInfo } from '2g';
+import { tap } from '2g/api';
 import fs from 'fs';
 import path from 'path';
 
@@ -13,7 +16,7 @@ import { matchProjectRoot, readReportedProjectRootAsync } from '../runtime/proje
 /** Where `npx expo start` listens when nothing says otherwise. */
 export const DEFAULT_DEV_SERVER_PORT = 8081;
 
-/** How often the dev server's log is re-read while waiting for the port. */
+/** How often the event log is read again while waiting for the port. */
 export const PORT_WATCH_INTERVAL_MS = 500;
 
 /** How long the dev server gets to report its port before the fallbacks are used. */
@@ -24,6 +27,9 @@ const START_LOG_SEGMENTS = ['.expo', 'dev', 'logs', 'start.log'];
 
 /**
  * Last `metro:instantiate` port in `projectRoot/.expo/dev/logs/start.log`, or null.
+ *
+ * Only `@expo/cli` 57 writes this file. The dev-server lock does not read it; discovery and the
+ * port-collision check still do.
  *
  * The log outlives the dev server that wrote it, so an entry alone proves nothing: without
  * `since` the port is a candidate a caller still has to probe, and with `since` an entry from an
@@ -37,14 +43,64 @@ export function readLastLoggedDevServerPort(
   projectRoot: string,
   { since }: { since?: number } = {}
 ): number | null {
+  return portsInEventFile(path.join(projectRoot, ...START_LOG_SEGMENTS), since).at(-1) ?? null;
+}
+
+/**
+ * The ports Metro reports in this process's own `2g` event log at or after `since`, as they
+ * arrive, until `signal` aborts.
+ *
+ * The Expo CLI, a child of this process, sends its events to that log: a `2g` session, followed
+ * live through `2g/api`, or a `LOG_EVENTS` file, read again every `intervalMs`. A file can be shared
+ * with other runs, so a port from it is only a candidate; the caller checks whose dev server answers
+ * there. A log this process cannot read back (a file descriptor, or a parent's IPC socket) reports
+ * nothing.
+ */
+async function* reportedPorts(
+  since: number,
+  signal: AbortSignal,
+  intervalMs: number
+): AsyncGenerator<number> {
+  const info = getEventLoggerInfo();
+  if (info?.sessionDir) {
+    try {
+      const events = tap(info.sessionDir, {
+        since,
+        follow: true,
+        filter: 'metro:instantiate',
+        signal,
+      });
+      for await (const entry of events) {
+        if (typeof entry.port === 'number') {
+          yield entry.port;
+        }
+      }
+    } catch {
+      // A session that cannot be read reports nothing; the caller falls back.
+    }
+    return;
+  }
+  if (info?.file) {
+    let seen = 0;
+    while (!signal.aborted) {
+      const ports = portsInEventFile(info.file, since);
+      yield* ports.slice(seen);
+      seen = ports.length;
+      await waitAsync(intervalMs, signal);
+    }
+  }
+}
+
+/** The `metro:instantiate` ports in a `2g` JSONL file, in order, written at or after `since` when given. */
+function portsInEventFile(file: string, since: number | undefined): number[] {
   let contents: string;
   try {
-    contents = fs.readFileSync(path.join(projectRoot, ...START_LOG_SEGMENTS), 'utf8');
+    contents = fs.readFileSync(file, 'utf8');
   } catch {
-    return null;
+    return [];
   }
 
-  let port: number | null = null;
+  const ports: number[] = [];
   for (const line of contents.split('\n')) {
     if (!line.includes('"metro:instantiate"')) {
       continue;
@@ -62,9 +118,9 @@ export function readLastLoggedDevServerPort(
     if (since != null && (typeof entry._t !== 'number' || entry._t < since)) {
       continue;
     }
-    port = entry.port;
+    ports.push(entry.port);
   }
-  return port;
+  return ports;
 }
 
 /**
@@ -98,8 +154,8 @@ export function readPortArg(args: string[]): number | null {
 
 export interface ResolvedDevServerPort {
   port: number;
-  /** `log`: the dev server reported it. `arg`: the command line asked for it. `default`: neither. */
-  source: 'log' | 'arg' | 'default';
+  /** `reported`: Metro reported it in its event log. `arg`: the command line asked for it. `default`: neither. */
+  source: 'reported' | 'arg' | 'default';
 }
 
 export interface ResolveDevServerPortOptions {
@@ -138,13 +194,10 @@ const FOREIGN_CHECK_TIMEOUT_MS = 1000;
 /**
  * Wait for the dev server to report its port, then fall back to what the command line asked for.
  *
- * Polling, rather than watching the file: the log is truncated and appended to by another process,
- * and `fs.watch` reports those two operations differently on every platform. A re-read every half
- * second costs nothing next to a starting bundler.
- *
- * A fallback port whose `/status` names another project is never the answer: the log is watched
- * for as long as the dev server runs instead [observed — live suite, 2026-10-05: a lock on 8081
- * pointed at another project's Metro].
+ * A reported port whose `/status` names another project is never the answer: it is another run's
+ * report in a shared `LOG_EVENTS` file. Neither is such a fallback port [observed — live suite,
+ * 2026-10-05: a lock on 8081 pointed at another project's Metro]; the report is then waited for
+ * for as long as the dev server runs.
  *
  * @returns the port, or null when the dev server stopped and the only port left to name serves
  * another project.
@@ -162,41 +215,43 @@ export async function resolveDevServerPortAsync(
     servesAnotherProject = (port) => servesAnotherProjectAsync(projectRoot, port),
   }: ResolveDevServerPortOptions
 ): Promise<ResolvedDevServerPort | null> {
-  const deadline = Date.now() + timeoutMs;
   const answer = (resolved: ResolvedDevServerPort): ResolvedDevServerPort => {
     onResolved?.(resolved);
     return resolved;
   };
+  const done = new AbortController();
+  const untilStopped = (deadline: number) =>
+    whileRunningAsync({ deadline, isRunning, stopped, intervalMs, signal: done.signal });
 
-  for (;;) {
-    const logged = readLastLoggedDevServerPort(projectRoot, { since });
-    if (logged != null) {
-      return answer({ port: logged, source: 'log' });
-    }
-    // A dev server that is gone will never report a port, and neither will one that has taken
-    // longer than any start takes.
-    if (!isRunning() || Date.now() >= deadline) {
-      break;
-    }
-    await waitAsync(intervalMs, stopped);
-  }
+  try {
+    const reports = reportedPorts(since, done.signal, intervalMs);
+    const ownReport = (async () => {
+      for await (const port of reports) {
+        if (!(await servesAnotherProject(port))) {
+          return port;
+        }
+      }
+      return null;
+    })();
 
-  const requested = readPortArg(args);
-  const fallback: ResolvedDevServerPort =
-    requested != null
-      ? { port: requested, source: 'arg' }
-      : { port: DEFAULT_DEV_SERVER_PORT, source: 'default' };
-  if (!(await servesAnotherProject(fallback.port))) {
-    return answer(fallback);
-  }
-  while (isRunning()) {
-    await waitAsync(intervalMs, stopped);
-    const logged = readLastLoggedDevServerPort(projectRoot, { since });
-    if (logged != null) {
-      return answer({ port: logged, source: 'log' });
+    const reported = await Promise.race([ownReport, untilStopped(Date.now() + timeoutMs)]);
+    if (reported != null) {
+      return answer({ port: reported, source: 'reported' });
     }
+
+    const requested = readPortArg(args);
+    const fallback: ResolvedDevServerPort =
+      requested != null
+        ? { port: requested, source: 'arg' }
+        : { port: DEFAULT_DEV_SERVER_PORT, source: 'default' };
+    if (!(await servesAnotherProject(fallback.port))) {
+      return answer(fallback);
+    }
+    const late = await Promise.race([ownReport, untilStopped(Infinity)]);
+    return late != null ? answer({ port: late, source: 'reported' }) : null;
+  } finally {
+    done.abort();
   }
-  return null;
 }
 
 /** Whether another project's dev server answers on `port`, per the `/status` header; the default check. */
@@ -212,18 +267,48 @@ export async function servesAnotherProjectAsync(
 }
 
 /**
- * Wait out one interval, or until the dev server stops.
+ * Resolves null once the dev server stops, `deadline` passes, or `signal` aborts. `isRunning` is
+ * asked every `intervalMs`; `stopped` cuts that wait short.
+ */
+async function whileRunningAsync({
+  deadline,
+  isRunning,
+  stopped,
+  intervalMs,
+  signal,
+}: {
+  deadline: number;
+  isRunning: () => boolean;
+  stopped?: Promise<unknown>;
+  intervalMs: number;
+  signal: AbortSignal;
+}): Promise<null> {
+  let gone = false;
+  stopped?.then(
+    () => (gone = true),
+    () => (gone = true)
+  );
+  while (!gone && isRunning() && Date.now() < deadline && !signal.aborted) {
+    await waitAsync(Math.min(intervalMs, deadline - Date.now()), signal, stopped);
+  }
+  return null;
+}
+
+/**
+ * Wait out `ms`, or until `signal` aborts or `stopped` settles.
  *
  * The timer is deliberately not unref'd: the caller is awaiting this, and a process whose only
  * pending work is unref'd exits with the event loop instead of finishing it.
  */
-function waitAsync(ms: number, stopped?: Promise<unknown>): Promise<void> {
+function waitAsync(ms: number, signal: AbortSignal, stopped?: Promise<unknown>): Promise<void> {
   return new Promise<void>((resolve) => {
     const finish = () => {
       clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
       resolve();
     };
     const timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
     stopped?.then(finish, finish);
   });
 }

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
@@ -239,12 +240,15 @@ export async function installStubFingerprintAsync(projectRoot: string): Promise<
   return true;
 }
 
-/** Environment that makes any bare `expo` spawn resolve to the fixture's stub bin. */
+/** Environment that makes any bare `expo` spawn resolve to the fixture's stub bin, which reports through `2g`. */
 export function stubExpoEnv(projectRoot: string): Record<string, string> {
   const inherited = pathFromEnv();
   const withStub = `${path.join(projectRoot, '.stub-bin')}${path.delimiter}${inherited}`;
-  return pathEnvVars(withStub);
+  return { ...pathEnvVars(withStub), STUB_EXPO_2G: TWO_G_PATH };
 }
+
+/** The `2g` this package runs, for a stub `expo` that reports its port through it like the real one. */
+const TWO_G_PATH = createRequire(import.meta.url).resolve('2g');
 
 /**
  * `PATH`, and on Windows `Path` too, set to the same value.

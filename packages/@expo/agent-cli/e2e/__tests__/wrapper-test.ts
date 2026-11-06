@@ -351,7 +351,7 @@ describe('@expo/agent-cli start', () => {
           .map((line) => JSON.parse(line));
         expect(events.find((entry) => entry._e === 'cli:dev_lock_acquired')).toMatchObject({
           port: 8087,
-          portSource: 'log',
+          portSource: 'reported',
         });
       } finally {
         await killAsync(child);

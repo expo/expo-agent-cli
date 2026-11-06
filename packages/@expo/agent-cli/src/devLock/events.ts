@@ -14,7 +14,7 @@ declare module '2g' {
       url: string;
       port: number;
       /** How the port was resolved: the dev server's log, the `--port` argument, or the default. */
-      portSource: 'log' | 'arg' | 'default';
+      portSource: 'reported' | 'arg' | 'default';
       pid: number;
     };
     /**

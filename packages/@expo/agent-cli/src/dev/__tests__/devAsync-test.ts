@@ -320,7 +320,7 @@ describe(devAsync, () => {
     }
 
     it(`should name the port the dev server reported, not the one it was given`, async () => {
-      const commands = (await followUpsOfRunAsync({ port: 8099, source: 'log' })).map(
+      const commands = (await followUpsOfRunAsync({ port: 8099, source: 'reported' })).map(
         (followup) => followup.command
       );
 
@@ -417,7 +417,7 @@ describe(devAsync, () => {
         'a dev server that reported its port',
         devServerRun({
           stdout: 'Error: listen EADDRINUSE: address already in use :::8081',
-          port: { port: 8081, source: 'log' },
+          port: { port: 8081, source: 'reported' },
         }),
         mockProjectState,
       ],

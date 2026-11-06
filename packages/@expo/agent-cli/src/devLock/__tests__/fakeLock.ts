@@ -5,6 +5,7 @@ export function lockInfo(overrides: Partial<DevServerLockInfo> = {}): DevServerL
   return {
     url: 'http://127.0.0.1:8081',
     port: 8081,
+    portReported: true,
     pid: 4242,
     startedAt: '2026-08-23T00:00:00.000Z',
     projectRoot: '/project',

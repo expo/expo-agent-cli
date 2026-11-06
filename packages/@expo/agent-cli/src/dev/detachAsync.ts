@@ -36,7 +36,8 @@ import {
 import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
 import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
-import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
+import { PORT_WATCH_TIMEOUT_MS } from '../devLock/port';
+import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
@@ -348,7 +349,7 @@ export async function devDetachAsync(
     // The parent command owns usage telemetry; this child only continues its work. The second
     // variable makes the child's failures name their code in the log, which this process reads back.
     env: {
-      ...process.env,
+      ...detachedEventLogEnv(process.env),
       __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
       __EXPO_AGENT_CLI_DETACHED: '1',
       [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
@@ -1309,8 +1310,8 @@ function easKeptSentence(eas: DetachEas): string {
  *
  * The child publishes its lock at the spawn of a step that names a port, before Metro binds it,
  * and the busy-port retry can move the dev server after that with a new spawn and a new lock. So a
- * lock counts once Metro logged its port after the lock's `startedAt` (the spawn of the step that
- * holds it), or once {@link PORT_WATCH_TIMEOUT_MS} has passed since that spawn, the bound the port
+ * lock counts once its holder says Metro reported the port (`portReported`), or once
+ * {@link PORT_WATCH_TIMEOUT_MS} has passed since the lock's `startedAt`, the bound the port
  * watch itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not
  * confirmed when the child exits or the budget runs out is still the answer.
  */
@@ -1323,10 +1324,7 @@ async function waitForLockAsync(
     const lock = await readDevServerLockAsync(projectRoot);
     if (lock) {
       const spawnedAt = Date.parse(lock.startedAt);
-      if (
-        readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) === lock.port ||
-        Date.now() - spawnedAt >= PORT_WATCH_TIMEOUT_MS
-      ) {
+      if (lock.portReported || Date.now() - spawnedAt >= PORT_WATCH_TIMEOUT_MS) {
         return lock;
       }
     }

@@ -28,10 +28,9 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
  * When the arguments name a port, the lock is published at the spawn with `source: 'arg'`: `dev`
  * passes `--port` on every step that serves, and the Expo CLI either binds that port or exits. A
  * named port that another project's dev server already answers on is never published; the lock
- * then waits for the log, as with no port. The
- * log watch goes on, so `onResolved` is told again with `source: 'log'` when Metro reports, and a
- * logged port that differs from the named one updates the lock's answer. With no port in the
- * arguments, the lock waits for the log, or for the watch to give up.
+ * then waits for Metro's report, as with no port. The watch goes on, so `onResolved` is told again with `source: 'reported'` when Metro reports, and the
+ * lock then answers with the reported port and `portReported: true`. With no port in the
+ * arguments, the lock waits for the report, or for the watch to give up.
  *
  * Best effort by contract: the dev server is the product and the lock is a convenience, so every
  * failure resolves to `null` and the caller has nothing to handle. A caller still has to call
@@ -45,17 +44,24 @@ export async function holdDevServerLockAsync(
   options: HoldDevServerLockOptions
 ): Promise<DevServerLockHandle | null> {
   let easOpenFinished = false;
-  let port = 0;
-  // Attached after the publish: a settled promise still calls back, so an open that returned
-  // first is not lost.
+  /** Answer with `resolved` from now on; a no-op until a lock is held. */
+  let republish = (_resolved?: ResolvedDevServerPort) => {};
   const publishAndWatchAsync = async (resolved: ResolvedDevServerPort | null) => {
-    if (resolved) port = resolved.port;
     const lock = await publishAsync(projectRoot, options, resolved, easOpenFinished);
-    const finish = () => {
-      easOpenFinished = true;
-      lock?.update(lockInfo(projectRoot, options, port, true));
-    };
-    options.easOpenFinished?.then(finish, finish);
+    if (lock && resolved) {
+      let current = resolved;
+      republish = (next = current) => {
+        current = next;
+        lock.update(lockInfo(projectRoot, options, current, easOpenFinished));
+      };
+      // Attached after the publish: a settled promise still calls back, so an open that returned
+      // first is not lost.
+      const finish = () => {
+        easOpenFinished = true;
+        republish();
+      };
+      options.easOpenFinished?.then(finish, finish);
+    }
     return lock;
   };
 
@@ -73,26 +79,24 @@ export async function holdDevServerLockAsync(
     ...options,
     onResolved: undefined,
   });
-  if (watched?.source === 'log') {
+  if (watched?.source === 'reported') {
     options.onResolved?.(watched);
-    if (watched.port !== named) {
-      port = watched.port;
-      lock?.update(lockInfo(projectRoot, options, port, easOpenFinished));
-    }
+    republish(watched);
   }
   return lock;
 }
 
-/** The lock's answer for a dev server on `port`. */
+/** The lock's answer for a dev server on the `resolved` port. */
 function lockInfo(
   projectRoot: string,
-  options: HoldDevServerLockOptions,
-  port: number,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform'>,
+  { port, source }: ResolvedDevServerPort,
   easOpenFinished: boolean
 ): DevServerLockInfo {
   return {
     url: `http://127.0.0.1:${port}`,
     port,
+    portReported: source === 'reported',
     pid: process.pid,
     startedAt: new Date(options.since).toISOString(),
     projectRoot,
@@ -128,7 +132,7 @@ async function publishAsync(
     }
 
     const result = await acquireDevServerLockAsync(
-      lockInfo(projectRoot, options, port, easOpenFinished)
+      lockInfo(projectRoot, options, resolved, easOpenFinished)
     );
 
     switch (result.status) {
