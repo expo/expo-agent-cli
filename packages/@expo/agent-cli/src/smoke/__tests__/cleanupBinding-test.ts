@@ -81,25 +81,24 @@ it('a start whose device check did not answer keeps the bound device on cleanup'
   );
 });
 
-it('cloud smoke stops its server without releasing local devices', async () => {
-  await buildSmokeDeps(root, resolveSmokeOptions(['--ios', '--eas'])).stopDevServer();
-  expect(devStopAsync).toHaveBeenCalledWith(
-    root,
-    expect.objectContaining({ release: false }),
-    expect.anything()
-  );
-});
-
-it('deps read the route the walk sets after they are built', async () => {
-  const deps = buildSmokeDeps(root, resolveSmokeOptions(['--ios']));
-  deps.cloudRoute.current = 'required';
-  await deps.stopDevServer();
-  expect(devStopAsync).toHaveBeenCalledWith(
-    root,
-    expect.objectContaining({ release: false }),
-    expect.anything()
-  );
-});
+// The route is read when the server stops, so a route the walk sets after the deps are built
+// counts the same as `--eas`.
+it.each([
+  ['--eas', ['--ios', '--eas'], false],
+  ['the walk', ['--ios'], true],
+] as const)(
+  'cloud smoke stops its server without releasing local devices (route from %s)',
+  async (_, argv, setByWalk) => {
+    const deps = buildSmokeDeps(root, resolveSmokeOptions([...argv]));
+    if (setByWalk) deps.cloudRoute.current = 'required';
+    await deps.stopDevServer();
+    expect(devStopAsync).toHaveBeenCalledWith(
+      root,
+      expect.objectContaining({ release: false }),
+      expect.anything()
+    );
+  }
+);
 
 it('cloud smoke reports no device rows for the local devices dev:stop kept', async () => {
   const kept = {
