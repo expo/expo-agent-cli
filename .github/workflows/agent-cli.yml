@@ -141,6 +141,9 @@ jobs:
       - name: 🧪 E2E detached ownership
         run: bun run test:e2e -- dev-detach-ownership-test dev-detach-endpoint-test
         working-directory: packages/@expo/agent-cli
+      - name: 🧪 E2E detached recovery
+        run: bun run test:e2e -- dev-detach-recovery-test status-detached-recovery-test
+        working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.
   # The win32 e2e run — including the skills linker's directory-junction path, which nothing

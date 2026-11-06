@@ -60,3 +60,38 @@ Cross-environment observation and interrupted recovery are enforced by
 `another TMPDIR cannot discard a live %s owner, but can recover its interrupted run`.
 `an unknown ownership endpoint (%s) never grants discard authority` covers malformed
 endpoint evidence. Both are process tests in `dev-detach-endpoint-test.ts`.
+
+## Interrupted runs
+
+An unexplained death retains the record, even before startup work begins. Refusal and
+`dev:stop` name an attempt-specific `dev:stop --discard-run <attempt-id>` action.
+Discard removes that record, not processes or EAS sessions. It refuses a reachable or
+ambiguously reachable owner, and an outdated action cannot discard a replacement.
+Malformed records do not grant automatic admission. Discard probes the captured endpoint
+even when ancillary metadata is malformed. Unknown or invalid endpoint evidence remains
+uncertain; the observer cannot invent an address and treat its absence as proof of death.
+
+Windows stop force-terminates the tree. Only successful delivery and confirmed termination
+allow the stop command to clear the record captured before signalling. Failed or uncertain
+stops retain it. A process that disappears before signal delivery may be reported stopped,
+but retained ownership must still be reported with its recovery action; process termination
+does not establish that another start is admitted. This is enforced by
+`stop reports retained ownership when the observed owner dies before signal delivery`.
+Normal POSIX shutdown lets the owner release after awaited cleanup.
+
+POSIX SIGKILL always retains the record: the CLI PID can die while Expo's process group
+survives. The report names the PID, port, possible surviving processes, and discard action.
+Recovery reports compose surviving-port, session and record actions; no one action hides
+another. A retained record or occupied port prevents bare restart advice. A remaining
+listener may be a surviving subprocess, not necessarily another project's server.
+After discard, an answering server on that port still receives the existing unowned-server
+refusal. Preventing these survivors requires separate work and is outside this contract.
+
+| Contract                                                      | Enforcing process test in `dev-detach-recovery-test.ts`                         |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Interrupted ownership has explicit recovery                   | `a crashed detached run names an explicit discard command and can be restarted` |
+| Force-stop reporting does not promise subprocess termination  | `SIGKILL retains ownership independently of surviving work (server alive: %s)`  |
+| Delayed discard or confirmed stop cannot remove a replacement | `delayed %s cannot remove replacement ownership`                                |
+| Failed tree-stop delivery retains ownership                   | `a failed Windows tree stop retains ownership`                                  |
+| Discard checks liveness independently of record contents      | `discard refuses a live owner even with malformed contents (%s)`                |
+| Death before work still requires explicit recovery            | `death after publication but before work requires explicit discard`             |
