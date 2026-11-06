@@ -278,7 +278,7 @@ export async function devStopAsync(
       ? await stopLockedDevServerAsync(lock, options, startedAt)
       : { report: await stopUnlockedDevServerAsync(options, startedAt, lock), finishing: false };
 
-  if (!lock && report.reason === 'not-running') {
+  if ((report.stopped && !report.recoveryCommand) || (!lock && report.reason === 'not-running')) {
     const warning = await readDetachedRunWarning(projectRoot);
     if (warning) {
       report.reason = 'ownership-retained';
@@ -717,7 +717,12 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
       });
     }
     followups.push(...keptSession, ...recovery);
-    if (report.recoveryCommand || report.portStillAnswering) return followups;
+    if (
+      report.recoveryCommand ||
+      report.portStillAnswering ||
+      report.reason === 'ownership-retained'
+    )
+      return followups;
     // The run's own EAS platform, else the platform of a session this worktree has or had: a kept
     // session is reused by the next dev --eas.
     const easPlatform =
