@@ -77,6 +77,9 @@ stops retain it. Normal POSIX shutdown lets the owner release after awaited clea
 
 POSIX SIGKILL always retains the record: the CLI PID can die while Expo's process group
 survives. The report names the PID, port, possible surviving processes, and discard action.
+Recovery reports compose surviving-port, session and record actions; no one action hides
+another. A retained record or occupied port prevents bare restart advice. A remaining
+listener may be a surviving subprocess, not necessarily another project's server.
 After discard, an answering server on that port still receives the existing unowned-server
 refusal. Preventing these survivors requires separate work and is outside this contract.
 

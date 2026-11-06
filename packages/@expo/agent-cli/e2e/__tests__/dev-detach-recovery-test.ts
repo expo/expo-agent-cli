@@ -4,9 +4,16 @@ import { randomUUID } from 'node:crypto';
 
 import { lockAddressFor } from '../../src/devLock/address';
 import { canonicalizeExistingPath } from '../../src/utils/dir';
+import { writeCloudBindingAsync } from '../stubEas';
 import { detachedRunFixture } from '../detachedRunFixture';
 import { detachedBarrierFixture } from '../detachedBarrierFixture';
-import { executeAgentCliAsync, fixturesDir, readDevLockAsync, waitForAsync } from '../utils';
+import {
+  executeAgentCliAsync,
+  expoHomeOf,
+  fixturesDir,
+  readDevLockAsync,
+  waitForAsync,
+} from '../utils';
 
 // @ref llp/0036-detached-run-ownership.rfc.md
 it('death after publication but before work requires explicit discard', async () => {
@@ -109,12 +116,25 @@ it.skipIf(process.platform === 'win32').each([true, false])(
       expect(started.exitCode, started.all).toBe(0);
       const owner = JSON.parse(started.stdout);
       const id = path.basename(owner.logFile).slice('dev-detached-'.length, -'.log'.length);
-      const stopped = await f.run([
-        'dev:stop',
-        '--signal',
-        'SIGKILL',
-        survives ? '--json' : '--no-followups',
-      ]);
+      await writeCloudBindingAsync(expoHomeOf(f.root), f.root, {
+        id: 'retained-session',
+        platform: 'android',
+      });
+      const stopped = await executeAgentCliAsync(
+        f.root,
+        ['dev:stop', '--signal', 'SIGKILL', survives ? '--json' : '--no-followups'],
+        { env: { AGENT_CLI_NO_DEVICE: '0' } }
+      );
+      if (survives) {
+        const report = JSON.parse(stopped.stdout);
+        expect(report.followups.map((item: { id: string }) => item.id)).toEqual([
+          'dev-stop-port',
+          'stop-session',
+          'discard-run',
+        ]);
+        expect(report.followups[0].why).toContain('may be a surviving subprocess');
+        expect(report.followups[1].why).toContain('retained-session');
+      }
       expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
       expect(() => process.kill(f.serverPid(), 0)).not.toThrow();
       if (!survives) await f.stopServer();
