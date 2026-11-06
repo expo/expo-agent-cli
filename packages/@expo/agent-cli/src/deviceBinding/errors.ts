@@ -45,7 +45,7 @@ export function noBoundDeviceError(
   if (state === 'unreadable') {
     return refusal('NO_BOUND_DEVICE', 'unreadable', EXIT_NEEDS_HUMAN, [
       `The binding file ${path} does not parse; a newer CLI may have written it.`,
-      `How: run "rm -f '${path}'", then "${command}".`,
+      `How: run "rm -f '${path}'", then "${command}". If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop".`,
     ]);
   }
   if (state === 'unknown') {
@@ -65,9 +65,10 @@ export function noBoundDeviceError(
   const error = refusal('NO_BOUND_DEVICE', state, EXIT_OUTCOME_FAILED, [
     what,
     `Why: every verb drives the device "${PROGRAM_PREFIX} dev" bound to this worktree, and never the first booted one, so two worktrees never share a device.`,
-    `How: run "${command}", then this command again.`,
+    `How: run "${command}", then this command again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop".`,
   ]);
-  error.suggestedCommand = command;
+  // This synchronous error knows the binding, not whether a server is still starting.
+  error.suggestedCommand = `${PROGRAM_PREFIX} status`;
   return error;
 }
 
@@ -201,18 +202,27 @@ export function cloudBindingError(
   platform: DevicePlatform,
   fault: CloudBindingFault
 ): CommandError {
-  const command = deviceCommand(platform, { eas: true });
-  const error = new CommandError(
-    'NO_BOUND_DEVICE',
-    [
-      `The bound ${platform} EAS session is ${fault}.`,
-      `How: run "${command}" to bind a session again.`,
-    ].join('\n')
-  );
-  error.exitCode = EXIT_OUTCOME_FAILED;
-  error.data = { reason: 'gone' };
-  error.suggestedCommand = command;
-  return error;
+  return new CloudBindingError(platform, fault);
+}
+
+/** A lost cloud binding; command callers add recovery using their server context. */
+export class CloudBindingError extends CommandError {
+  constructor(
+    readonly platform: DevicePlatform,
+    fault: CloudBindingFault
+  ) {
+    const command = deviceCommand(platform, { eas: true });
+    super(
+      'NO_BOUND_DEVICE',
+      [
+        `The bound ${platform} EAS session is ${fault}.`,
+        `How: run "${command}" to bind a session again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop"; plain stop preserves its sessions.`,
+      ].join('\n')
+    );
+    this.exitCode = EXIT_OUTCOME_FAILED;
+    this.data = { reason: 'gone' };
+    this.suggestedCommand = `${PROGRAM_PREFIX} status`;
+  }
 }
 
 /** The EAS session this worktree drives is listed and pending. The platform is null when unknown. */

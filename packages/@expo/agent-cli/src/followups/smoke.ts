@@ -270,21 +270,13 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   const deviceBack: FollowUp[] =
     !input.deviceReleased || input.serverStopped || input.cloud
       ? []
-      : input.platform === 'ios'
-        ? [
-            {
-              id: 'dev-detach',
-              command: start,
-              why: "This run released the simulator it booted, and the dev server it found still runs without a device. The simulator keeps this worktree's binding, so this binds it again beside that dev server.",
-            },
-          ]
-        : [
-            {
-              id: 'dev-restart',
-              command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
-              why: "This run released the emulator it bound, which removes a spawned instance's binding, and the dev server it found still runs without a device, which dev refuses to bind a new device to. This restarts the dev server, which binds a device, and keeps both running.",
-            },
-          ];
+      : [
+          {
+            id: 'dev-restart',
+            command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
+            why: 'This run released its device, and the dev server it found still runs. Stop that server before starting a run that binds the device again.',
+          },
+        ];
 
   const lookAgain =
     input.appsConnected === 0 ||

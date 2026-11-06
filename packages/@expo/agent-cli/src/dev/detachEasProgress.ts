@@ -157,11 +157,11 @@ export async function waitForEasSessionAsync(
       ...(openReturned
         ? [
             `Why: the open of the detached run (pid ${lock.pid}) already returned without a session binding, so that run binds none later.`,
-            `How: run "${rerun}" again. It reopens the session. "${PROGRAM_PREFIX} dev:logs" shows the open. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
+            `How: inspect "${PROGRAM_PREFIX} dev:logs", then run "${PROGRAM_PREFIX} dev:stop" followed by "${rerun}" to bind the session. Plain dev:stop preserves existing sessions; "${PROGRAM_PREFIX} dev:stop --eas" ends them.`,
           ]
         : [
             `Why: the detached run (pid ${lock.pid}) starts the session after the dev server, and a start takes a few minutes. The run keeps going and binds the session to this worktree when it is up. The session bills from its start.`,
-            `How: run "${rerun}" again. It waits for this run's session and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the start. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
+            `How: read "${PROGRAM_PREFIX} dev:logs" and check "${PROGRAM_PREFIX} status" for progress. The original run continues. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
           ]),
     ].join('\n')
   );
@@ -173,6 +173,8 @@ export async function waitForEasSessionAsync(
     platform,
     waitedMs: Date.now() - waitStarted,
   };
-  error.suggestedCommand = rerun;
+  error.suggestedCommand = openReturned
+    ? `${PROGRAM_PREFIX} dev:stop`
+    : `${PROGRAM_PREFIX} dev:logs`;
   throw error;
 }

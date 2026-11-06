@@ -10,6 +10,9 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
+import { recordLastDevRequest } from '../../src/dev/lastRequest';
+import { resolveDevOptions } from '../../src/dev/resolveOptions';
+import { lockInfo } from '../../src/devLock/__tests__/fakeLock';
 import { detachedPidLine } from '../../src/dev/childVerdict';
 
 import {
@@ -597,8 +600,8 @@ describe('@expo/agent-cli status', () => {
             };
           },
           next: () => ({
-            command: `${dev} --eas --detach --wait-ready`,
-            why: `The dev server's EAS Simulator session for ${platform} is starting. This command waits for it, or reopens the app on the running Metro. No restart is needed.`,
+            command: `npx @expo/agent-cli dev:logs`,
+            why: `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`,
           }),
         },
         {
@@ -3324,24 +3327,39 @@ describe('@expo/agent-cli status', () => {
     });
 
     // A dev server that serves someone else is not this project's, so the plan still stands.
-    it('keeps the plan when the dev server belongs to another project', async () => {
+    it.each(['ios', 'android'] as const)('excludes a foreign port (%s)', async (platform) => {
       const projectRoot = await setupAsync('go-app');
-      const env = await bindDefaultDeviceAsync(projectRoot);
+      recordLastDevRequest(projectRoot, resolveDevOptions([`--${platform}`, '--local', '--go']));
       const stub = await startStubDevServerAsync({ projectRoot: '/somewhere/else', targets: [] });
+      // A build can publish its planned port before another project's Metro takes it.
+      const releaseLock = await holdDevLockAsync(
+        projectRoot,
+        lockInfo({
+          projectRoot,
+          url: stub.url,
+          port: Number(new URL(stub.url).port),
+          pid: process.pid,
+        })
+      );
 
       try {
-        const result = await executeAgentCliAsync(
-          projectRoot,
-          ['status', '--json', '--dev-server-url', stub.url],
-          { env }
-        );
+        const result = await executeAgentCliAsync(projectRoot, [
+          'status',
+          '--json',
+          '--dev-server-url',
+          stub.url,
+        ]);
 
         const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.devServer?.projectRootMatched).toBe(false);
         expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --${platform} --local --go --detach --wait-ready`
         );
-        expect(report.next?.why).toBeNull();
+        expect(report.next?.why).toBe(
+          'Stop the owned dev-server process before starting another run.'
+        );
       } finally {
+        releaseLock();
         await stub.close();
       }
     });
@@ -3485,7 +3503,7 @@ describe('@expo/agent-cli status', () => {
         const report: StatusReport = JSON.parse(result.stdout);
         expect(report.devServer).toMatchObject({ url: ownUrl, running: false, source: 'lock' });
         expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev --android --local --go --port ${ownPort} --detach --wait-ready`
+          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --local --go --port ${ownPort} --detach --wait-ready`
         );
       } finally {
         releaseLock();

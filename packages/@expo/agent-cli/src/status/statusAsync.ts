@@ -11,6 +11,7 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
+import { readDetachedRunWarning } from '../dev/detachedOwnership';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
@@ -390,7 +391,7 @@ export async function collectStatusReportAsync(
     // (K7(c)).
     const devBuildScheme = devBuildSchemeSync(projectRoot);
     applyOpenUrls(report.devServer, state, devBuildScheme);
-    const { platform, recoveryPort } = resolveNextTarget({
+    const { platform, requestedPort, recoveryPort } = resolveNextTarget({
       platform: options.platform,
       devServerUrl: options.devServerUrl,
       ownServer,
@@ -415,6 +416,7 @@ export async function collectStatusReportAsync(
       state,
       record,
       platform,
+      requestedPort,
       recoveryPort,
       devServer: report.devServer,
       device: report.device,
@@ -437,6 +439,15 @@ export async function collectStatusReportAsync(
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
+  }
+
+  if (!ownServer && report.next) {
+    const warning = await readDetachedRunWarning(projectRoot);
+    if (warning) {
+      report.next.command = warning.suggestedCommand ?? `${PROGRAM_PREFIX} dev:logs`;
+      report.next.steps = [];
+      report.next.why = warning.message;
+    }
   }
 
   if ('value' in skills) {

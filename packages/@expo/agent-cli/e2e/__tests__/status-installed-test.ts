@@ -314,15 +314,11 @@ describe('@expo/agent-cli status, the installed section', () => {
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding — the check reads local devices,
-  // so a platform whose app runs on a recorded EAS session was not checked; an expired lease names
-  // the command that binds a session again.
+  // so a platform whose app runs on a recorded EAS session was not checked. Recovery belongs
+  // to the status next action, which knows whether an owned server must stop first.
   it.each([
     ['a live', new Date(Date.now() + 3_600_000).toISOString(), []],
-    [
-      'an expired',
-      '2020-01-01T00:00:00.000Z',
-      ['npx @expo/agent-cli dev --android --eas --detach --wait-ready'],
-    ],
+    ['an expired', '2020-01-01T00:00:00.000Z', []],
   ])(
     'marks no-device as not checked beside %s EAS session binding',
     async (_case, expiresAt, commands) => {

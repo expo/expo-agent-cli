@@ -2,10 +2,10 @@
 // The `next` line of `status`: which platform it is for, which port a re-run keeps, and the command
 // that gets this worktree a device. Pure: `statusAsync` reads the facts, and this decides.
 
+import { loopbackPortOfUrl } from '../navigate/adbReverse';
 import type { DevServerLockInfo } from '../devLock';
-import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
+import { withDevServerPort } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
-import { deviceCommand } from '../deviceBinding/errors';
 import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevicePlatform } from '../deviceBinding/types';
 import type { LastBuildRecord } from '../plan/lastBuild';
@@ -82,7 +82,11 @@ export function resolveNextTarget({
   bindings,
   devServer,
   state,
-}: NextTargetFacts): { platform: PlanPlatform; recoveryPort: number | null } {
+}: NextTargetFacts): {
+  platform: PlanPlatform;
+  requestedPort: number | null;
+  recoveryPort: number | null;
+} {
   const boundPlatforms = [...new Set(bindings.map((entry) => entry.platform))];
   const platform =
     named ??
@@ -90,13 +94,15 @@ export function resolveNextTarget({
     request?.platform ??
     (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
   const requestedPort =
-    devServerUrl != null ? localPortOf(devServerUrl) : (ownServer?.port ?? request?.port ?? null);
+    devServerUrl != null
+      ? loopbackPortOfUrl(devServerUrl)
+      : (ownServer?.port ?? request?.port ?? null);
   // A selected address is a preference, not permission to take another project's port.
   const recoveryPort =
-    devServer?.projectRootMatched === false && requestedPort === localPortOf(devServer.url)
+    devServer?.projectRootMatched === false && requestedPort === loopbackPortOfUrl(devServer.url)
       ? null
       : requestedPort;
-  return { platform, recoveryPort };
+  return { platform, requestedPort, recoveryPort };
 }
 
 /** What the next line reads from the machine, kept out of the choice so the choice stays pure. */
@@ -112,6 +118,7 @@ export interface NextActionFacts {
   state: ProjectState;
   record: LastBuildRecord;
   platform: PlanPlatform;
+  requestedPort: number | null;
   recoveryPort: number | null;
   devServer: DevServerStatus | null;
   device: LocalDeviceStatus | null;
@@ -130,6 +137,7 @@ export function chooseNextAction({
   state,
   record,
   platform,
+  requestedPort,
   recoveryPort,
   devServer,
   device,
@@ -180,19 +188,24 @@ export function chooseNextAction({
     null,
     recoveryPlan
   );
-  const { backend, devArgs, devCommand } = devRerun(platform, request, recoveryPort, devNext);
+  const easServer = ownServer?.easPlatform === platform ? ownServer : null;
+  const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
+  const eas = !!(easServer || expiredSession);
+  const { devArgs, devCommand } = devRerun(platform, request, port, devNext, eas);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
       platform === 'web'
         ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
         : devCommand;
-  // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
-  const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-  if (expiredSession) {
+  // An unfinished session start is observed; rebinding after it finishes needs a deliberate restart.
+  const pendingSession =
+    easServer?.easPlatform && host.childStartsSession(easServer, easServer.easPlatform);
+  const stopFirst = ownServer ? `${PROGRAM_PREFIX} dev:stop && ` : '';
+  if (expiredSession && !pendingSession) {
     // @ref llp/0021-honest-reports.rfc.md §How they show up
     next = {
       ...devNext,
-      command: deviceCommand(expiredSession.platform, { eas: true }),
+      command: `${stopFirst}${devCommand}`,
       why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
     };
   } else if (
@@ -213,35 +226,43 @@ export function chooseNextAction({
       (deviceBackend !== 'eas' && !host.devicesDisabled && host.bindsPlatform(platform)))
   ) {
     // @ref llp/0021-honest-reports.rfc.md §How they show up
-    // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-    // A server that runs an EAS session is never stopped, for any platform.
-    const restart = ownServer != null && ownServer.easPlatform == null && bound.length === 0;
     const unreadable = host.unreadableBindingFile(platform);
-    // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
-    const command = easServer
-      ? rerunDevCommand(platform, ['--eas', ...withoutPortArgs(devArgs.slice(backend ? 1 : 0))])
-      : restart
-        ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}`
-        : devCommand;
+    const command = pendingSession ? `${PROGRAM_PREFIX} dev:logs` : `${stopFirst}${devCommand}`;
     const easWhy = easServer
-      ? `${
-          host.childStartsSession(easServer, platform)
-            ? `The dev server's EAS Simulator session for ${platform} is starting.`
-            : `The dev server's EAS Simulator session for ${platform} is not bound yet.`
-        } This command waits for it, or reopens the app on the running Metro. No restart is needed.`
+      ? pendingSession
+        ? `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`
+        : `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`
       : null;
     next = {
       ...devNext,
       command: unreadable ? `rm -f '${unreadable}' && ${command}` : command,
+      steps: pendingSession ? [] : devNext.steps,
       why: unreadable
         ? `The binding file ${unreadable} does not parse; a newer CLI may have written it.`
         : (easWhy ??
           (bound.length
-            ? `The lease on the bound ${platform} device expired.`
-            : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
+            ? `The lease on the bound ${platform} device expired.${ownServer ? ' Stop the running dev server before rebinding it.' : ''}`
+            : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`)),
     };
   }
-  return next;
+  return ownServer ? ownedServerNext(next, !!pendingSession) : next;
+}
+
+/** Bare starts are refused while an own lock exists, even with a live device binding. */
+function ownedServerNext(next: NextActionStatus, pendingSession: boolean): NextActionStatus {
+  if (!next.command.startsWith(`${PROGRAM_PREFIX} dev `)) return next;
+  return pendingSession
+    ? {
+        ...next,
+        command: `${PROGRAM_PREFIX} dev:logs`,
+        steps: [],
+        why: 'The EAS session is still starting. Read its logs and check status again.',
+      }
+    : {
+        ...next,
+        command: `${PROGRAM_PREFIX} dev:stop && ${next.command}`,
+        why: `${next.why ? `${next.why} ` : ''}Stop the owned dev-server process before starting another run.`,
+      };
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */
@@ -249,9 +270,12 @@ function devRerun(
   platform: PlanPlatform,
   request: LastDevRequest | null,
   recoveryPort: number | null,
-  devNext: NextActionStatus
+  devNext: NextActionStatus,
+  eas: boolean
 ): { backend: string | null; devArgs: string[]; devCommand: string } {
-  const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
+  const backend = eas
+    ? 'eas'
+    : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
   const devArgs = [
     ...(backend ? [`--${backend}`] : []),
     ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
@@ -263,16 +287,4 @@ function devRerun(
     backend === 'eas' ? undefined : request?.device
   );
   return { backend, devArgs, devCommand };
-}
-
-/** A remote URL's port is not a request to start a local Metro on that port. */
-function localPortOf(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) && parsed.port
-      ? Number(parsed.port)
-      : null;
-  } catch {
-    return null;
-  }
 }
