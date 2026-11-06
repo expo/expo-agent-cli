@@ -3,6 +3,9 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { ATTEMPT_ID, acquireDetachedRunAsync, ownershipError } from './detachedOwnership';
+import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
+import { otherPlatformSessionError } from '../device/cloudErrors';
+import { otherPlatformSessionAsync } from './openAppEas';
 import { publishDetachedLog } from './logFile';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { devServerRunningStopAsync } from './runningDevServer';
@@ -26,6 +29,17 @@ export async function withDetachedRunAsync(
         eas: easOpenPlatform(options) != null,
       });
     publishDetachedLog(root, logFile);
+    if (options.deviceBackend === 'eas') {
+      await assertEasProjectConfiguredAsync(root);
+      const platform = easOpenPlatform(options);
+      const other = platform ? await otherPlatformSessionAsync(root, platform) : null;
+      if (platform && other)
+        throw otherPlatformSessionError(other.platform, {
+          wanted: platform,
+          sessionId: other.sessionId,
+          devServerRunning: false,
+        });
+    }
     return await work();
   } finally {
     release();

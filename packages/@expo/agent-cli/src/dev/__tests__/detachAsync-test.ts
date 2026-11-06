@@ -20,7 +20,6 @@ import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
 import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
-import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { publishDetachedLog } from '../logFile';
@@ -44,10 +43,6 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../reopenEas', () => ({ reopenEasAsync: vi.fn() }));
-vi.mock('../openAppEas', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../openAppEas')>()),
-  otherPlatformSessionAsync: vi.fn(),
-}));
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
 vi.mock('../events', () => ({ event: vi.fn() }));
 vi.mock('../../events', () => ({ event: vi.fn() }));
@@ -66,9 +61,6 @@ vi.mock('crypto', async (original) => ({
 
 function fakeChild() {
   const child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
-  Promise.resolve().then(() =>
-    child.emit('message', { detachedRun: { id: attemptId, pid: child.pid, logFile } })
-  );
   return child;
 }
 const startLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
@@ -872,7 +864,6 @@ describe('the EAS session under --wait-ready', () => {
   };
 
   beforeEach(() => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
     vi.mocked(readDevServerLockAsync)
       .mockReset()
       .mockResolvedValueOnce(null)
