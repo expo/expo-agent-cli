@@ -66,10 +66,10 @@ export interface SmokeOptions {
    *
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
-  cloud: CloudPreference;
+  readonly cloud: CloudPreference;
   /**
    * The config puts this platform's device on EAS. Read only when the run starts its own dev
-   * server: then the phases move it to the EAS route, `cloud: 'required'` (llp/0015 §The device backend).
+   * server: then the run takes the EAS route, `cloudRoute: 'required'` (llp/0015 §The device backend).
    */
   configuredEas: boolean;
   /**

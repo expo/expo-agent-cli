@@ -18,7 +18,7 @@ import { createDevServerDeps } from './deps/devServer';
 import { createSmokeDepsContext } from './deps/shared';
 import { startPortArgs } from './deps/startArgs';
 import { formatSmokeResult, smokeResultToJson } from './format';
-import type { SmokeDeps, SmokeRun } from './contract';
+import type { CloudRouteCell, SmokeDeps, SmokeRun } from './contract';
 import { runSmokePhasesAsync, smokeExitCode } from './phases';
 import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
@@ -114,7 +114,7 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     // `required` is `--eas`; `fallback` is a run that would only reach a session if this machine
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).
-    cloud: options.cloud === 'required',
+    cloud: run.cloudRoute === 'required',
   });
 }
 
@@ -164,8 +164,10 @@ function explainOutcome(run: SmokeRun): string {
  * findings behind them to be forgotten.
  */
 export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
-  const ctx = createSmokeDepsContext(projectRoot, options);
+  const cloudRoute: CloudRouteCell = { current: options.cloud };
+  const ctx = createSmokeDepsContext(projectRoot, options, cloudRoute);
   return {
+    cloudRoute,
     ...createDevServerDeps(ctx),
     ...createDeviceDeps(ctx),
     ...createAppDeps(ctx),

@@ -236,8 +236,7 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
   }
   let firstConnection: AppConnectionResult | null = null;
   let bootInstallNeeded = false;
-  // Phase 1 may have changed `options.cloud`, so it is read only from here on.
-  if (options.cloud === 'required') {
+  if (walk.deps.cloudRoute.current === 'required') {
     const session = await startSessionStep(walk);
     if ('stop' in session) return session;
   } else {

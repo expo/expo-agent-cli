@@ -106,7 +106,11 @@ export async function runSmokePhasesAsync(
   // `4.2s` while spending eight seconds shutting a simulator down would be describing a moment
   // that had passed (llp/0021 §The rules).
   try {
-    const run = await runPhasesAsync(deps, options, { startedAt, cleanups, environment });
+    const run = await runPhasesAsync(deps, options, {
+      startedAt,
+      cleanups,
+      environment,
+    });
     // Whether a device was *reused* is read off the run rather than probed for, and that is what
     // keeps a healthy run free of device tools: the phase that decides about a boot only asks
     // about a device when no app is connected, so on the ordinary run nothing has asked yet when

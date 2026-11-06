@@ -1,5 +1,5 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
-import { resolveDeviceAsync, type NavigateDevice } from '../navigate/device';
+import { resolveDeviceAsync, type CloudPreference, type NavigateDevice } from '../navigate/device';
 import type { CdpTarget } from '../runtime/cdpClient';
 import { probeDevServerAsync } from '../runtime/devServer';
 import {
@@ -42,20 +42,21 @@ export interface SmokeTargetSelection {
  */
 export function buildSmokeTargetSelection(
   projectRoot: string,
-  options: SmokeOptions
+  options: SmokeOptions,
+  route: () => CloudPreference
 ): SmokeTargetSelection {
   let memo: Promise<SmokeDeviceLookup> | null = null;
   let observed: RungOneObservation | null = null;
   const scope = async () => ({
     projectRoot,
-    flags: { platform: options.platform, eas: options.cloud === 'required' },
+    flags: { platform: options.platform, eas: route() === 'required' },
     device: memo ? (await memo).device : null,
   });
   return {
     deviceAsync: () => {
       if (memo) return memo;
       const pending = resolveDeviceAsync(options.platform, {
-        cloud: options.cloud,
+        cloud: route(),
         projectRoot,
       }).then(
         (device): SmokeDeviceLookup => ({ device, reason: null }),

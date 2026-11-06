@@ -74,7 +74,7 @@ async function openRoute(
     devServerUrlSource: options.devServerUrl == null ? 'discovered' : 'flag',
     routeCheck: options.routeCheck,
     command: 'smoke',
-    cloud: options.cloud,
+    cloud: ctx.cloudRoute.current,
     // @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it. The
     // budget is what turns this open into a *load*: F123's launcher-first ladder is gated on
     // it, so without one a cold development build was handed `<scheme>://<route>` — the link

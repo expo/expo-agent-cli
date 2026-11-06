@@ -25,7 +25,7 @@ export interface RecordOptions {
 }
 
 /** Everything the run reports except the verdict and its duration, filled in as it is learned. */
-export type SmokeRunReport = Omit<SmokeRun, 'outcome' | 'durationMs'>;
+export type SmokeRunReport = Omit<SmokeRun, 'outcome' | 'durationMs' | 'cloudRoute'>;
 
 /** Every phase, in the order they are reported. */
 const PHASE_ORDER: SmokePhaseId[] = [
@@ -173,6 +173,7 @@ export function createPhaseWalk(
     outcome,
     ...report,
     ...extra,
+    cloudRoute: deps.cloudRoute.current,
   });
 
   /**

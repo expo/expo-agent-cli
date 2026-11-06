@@ -169,6 +169,7 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       started: false,
       reason: null,
     }),
+    cloudRoute: { current: 'fallback' },
     stopEasSession: async (sessionId) => ({ ok: true, target: sessionId, reason: null }),
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
@@ -289,6 +290,7 @@ describe(runSmokePhasesAsync, () => {
   it(`names the device it photographed, even when it opened nothing`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
+        cloudRoute: { current: 'required' },
         probeDevice: async () => ({
           deviceId: 'sess-live',
           backend: 'cloud' as const,
@@ -763,6 +765,7 @@ describe(runSmokePhasesAsync, () => {
       const run = await runSmokePhasesAsync(
         deps({
           ...bareMachine(),
+          cloudRoute: { current: 'required' },
           bootDevice,
           probeDevice: async () => ({
             deviceId: 'sess-live',
@@ -780,6 +783,7 @@ describe(runSmokePhasesAsync, () => {
       );
 
       expect(bootDevice).not.toHaveBeenCalled();
+      expect(statusOf(run, 'start-session')).toBe('ok');
       expect(run.environment.device).toBe('reused');
     });
 
@@ -3402,6 +3406,7 @@ describe(`${runSmokePhasesAsync.name} and an install it was told is needed`, () 
 describe('the start-session phase, on --eas', () => {
   const cloudDeps = (overrides: Partial<SmokeDeps> = {}) =>
     deps({
+      cloudRoute: { current: 'required' },
       probeDevice: async () => ({ deviceId: 'sess-up', backend: 'cloud' as const, reason: null }),
       waitForAppConnection: async () => ({
         appsConnected: 1,
@@ -3575,17 +3580,22 @@ describe('the start-session phase, on --eas', () => {
     }));
     const starting = options({ bootstrap: true, configuredEas: true });
     const run = await runSmokePhasesAsync(
-      cloudDeps({ ensureEasSession, discoverDevServer, startDevServer }),
+      cloudDeps({
+        cloudRoute: { current: 'fallback' },
+        ensureEasSession,
+        discoverDevServer,
+        startDevServer,
+      }),
       starting
     );
     expect(startDevServer).toHaveBeenCalled();
-    expect(starting.cloud).toBe('required');
+    expect(run.cloudRoute).toBe('required');
     expect(statusOf(run, 'start-session')).toBe('ok');
 
     ensureEasSession.mockClear();
     const reusing = options({ bootstrap: true, configuredEas: true });
     const reused = await runSmokePhasesAsync(deps({ ensureEasSession }), reusing);
-    expect(reusing.cloud).toBe('fallback');
+    expect(reused.cloudRoute).toBe('fallback');
     expect(statusOf(reused, 'start-session')).toBeUndefined();
     expect(ensureEasSession).not.toHaveBeenCalled();
   });

@@ -6,7 +6,7 @@
 
 import type { ScreenshotResult } from '../device/screenshot';
 import type { AcquireAction, ReleasedDevice } from '../deviceBinding';
-import type { DeviceBackend } from '../navigate/device';
+import type { CloudPreference, DeviceBackend } from '../navigate/device';
 import type { OpenRouteResult } from '../navigate/openRoute';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
@@ -205,6 +205,8 @@ export interface SmokeDeviceProbe {
 
 /** Everything the runner needs from the outside world, so none of it happens here. */
 export interface SmokeDeps {
+  /** The run's cloud route. The deps read it; the walk gets it from here. */
+  readonly cloudRoute: CloudRouteCell;
   discoverDevServer(explicitUrl: string | null): Promise<DevServerDiscovery>;
   startDevServer(): Promise<SmokeStartResult>;
   /**
@@ -387,6 +389,8 @@ export interface SmokeRun {
   bundle: BundleCheckResult | null;
   route: string | null;
   routeCheck: RouteCheckJson | null;
+  /** The route the run took, read off the {@link CloudRouteCell} when the run ended. Not in the output. */
+  cloudRoute: CloudPreference;
   deviceId: string | null;
   deviceBackend: DeviceBackend | null;
   runtimeSupported: boolean | null;
@@ -434,6 +438,15 @@ export interface RegisteredCleanup {
   /** What it is, for a report written even when the release call answers nothing. */
   target: string | null;
   release(): Promise<SmokeReleaseResult>;
+}
+
+/**
+ * The cloud route of one run. The deps and the walk share this one object.
+ *
+ * Starts as `SmokeOptions.cloud`. Phase 1 sets `required` when the run takes the configured EAS route.
+ */
+export interface CloudRouteCell {
+  current: CloudPreference;
 }
 
 /** What `runSmokePhasesAsync` hands the phase walk, so the walk owns none of it. */
