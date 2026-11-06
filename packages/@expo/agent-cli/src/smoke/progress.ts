@@ -53,7 +53,7 @@ export const silentProgress: SmokeProgress = () => {};
  *
  * `app` has two sentences and every other phase has one, because `app` is two things: a two-second
  * look for an app that is already attached, and — only when there is none — an open plus a wait
- * that is the longest thing this command ever does (@ref src/smoke/phases, the `app` phase). The
+ * that is the longest thing this command ever does (@ref src/smoke/walk/app §openAppAsync). The
  * budget is what tells them apart: the walk knows the bound for the second and not for the first.
  */
 function phaseSentence(

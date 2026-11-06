@@ -15,10 +15,6 @@ import type { BundleCheckResult } from '../../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../../runtime/devServer';
 import type { RuntimeErrorRecord } from '../../runtime/runtimeErrorCollector';
 import {
-  APP_ATTACH_TIMEOUT_MS,
-  APP_SETTLE_MS,
-  FIRST_BUNDLE_TIMEOUT_MS,
-  RUNTIME_UNSUPPORTED_GRACE_MS,
   runSmokePhasesAsync,
   smokeExitCode,
   type SmokeDeps,
@@ -27,6 +23,12 @@ import {
 } from '../phases';
 import { silentProgress } from '../progress';
 import type { SmokeOptions } from '../resolveOptions';
+import {
+  APP_ATTACH_TIMEOUT_MS,
+  APP_SETTLE_MS,
+  FIRST_BUNDLE_TIMEOUT_MS,
+  RUNTIME_UNSUPPORTED_GRACE_MS,
+} from '../timeouts';
 import type { SmokePhaseId, SmokePhaseStatus } from '../types';
 
 function options(overrides: Partial<SmokeOptions> = {}): SmokeOptions {
@@ -1413,7 +1415,7 @@ describe(runSmokePhasesAsync, () => {
     // An app that was already attached when this run arrived **and was not reloaded** is not one
     // this run is waiting on. Reading it once and reporting the answer is right, and `--no-reload`
     // is what puts the run in that state now: a reload leaves the app coming back, and an app that
-    // is coming back gets the poll (@ref ./phases §RUNTIME_READY_TIMEOUT_MS).
+    // is coming back gets the poll (@ref ../timeouts §RUNTIME_READY_TIMEOUT_MS).
     it(`asks once when the app was already there and nothing moved it`, async () => {
       let tries = 0;
       await runSmokePhasesAsync(
@@ -2174,7 +2176,7 @@ describe(`${runSmokePhasesAsync.name} and what the picture shows`, () => {
   });
 });
 
-// @ref ../phases §APP_SETTLE_MS — friction run 6, F57. A run that opened the app itself
+// @ref ../timeouts §APP_SETTLE_MS — friction run 6, F57. A run that opened the app itself
 // photographed it while it was still loading, so the picture the gate hands back — the half of
 // "does it work" that no exit code answers — was of a splash screen.
 describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
@@ -2200,7 +2202,7 @@ describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
     expect(waits[0]).toBeGreaterThan(0);
   });
 
-  // @ref ../phases §APP_SETTLE_MS — observed 2026-08-30, a cold-start run. The `app` phase
+  // @ref ../timeouts §APP_SETTLE_MS — observed 2026-08-30, a cold-start run. The `app` phase
   // answered `ok` and the `runtime` phase two seconds later got `No target found`, so a run whose
   // own picture shows the app rendered reported `22`. The debugger target list is still churning
   // while an app boots, and the wait that was buying an honest picture has to come first.
@@ -2463,7 +2465,7 @@ describe(`${runSmokePhasesAsync.name} and the code on disk`, () => {
 
   // A proved reload leaves the app re-registering exactly the way a cold launch does, so it owes
   // the same settle and the same runtime-ready poll — a single read landing in that gap answers
-  // "No target found" about an app that is coming back fine (@ref ./phases §APP_SETTLE_MS).
+  // "No target found" about an app that is coming back fine (@ref ../timeouts §APP_SETTLE_MS).
   it(`waits for the app to settle after a reload it proved`, async () => {
     const waitForStableTargets = vi.fn(async () => ({ stable: true }));
     await runSmokePhasesAsync(deps({ waitForStableTargets }), options());
@@ -2612,7 +2614,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   });
 });
 
-// @ref ./phases §SmokeDeps.checkAppFitsProject
+// @ref ../phases §SmokeDeps.checkAppFitsProject
 //
 // The dep answers two things, and this is the one that decides nothing: a finding worth printing on
 // the row it is about, which leaves the verdict alone. Nothing produces one today — the version
@@ -2805,7 +2807,7 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
   });
 });
 
-// @ref ./phases §SmokeInstallResult.replaced — an addition and a replacement are different things
+// @ref ../phases §SmokeInstallResult.replaced — an addition and a replacement are different things
 // to do to somebody's machine, and the row has to say which.
 describe(`${runSmokePhasesAsync.name} and what the install replaced`, () => {
   const needsInstall = {
@@ -2972,7 +2974,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
     await runAsync();
 
     // No `start-dev-server` and no `boot-device`: the default machine has both already, which is
-    // the same reason those rows are absent from the report (@ref ../phases §CONDITIONAL_PHASES).
+    // the same reason those rows are absent from the report (@ref ../walk/walk §CONDITIONAL_PHASES).
     expect(said).toEqual([
       'dev-server',
       'bundler-ready',
@@ -3034,7 +3036,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
 
   // And a machine that has both says neither, for the same reason the report has no row for them:
   // there was nothing to do, which is not the same as something skipped
-  // (@ref ../phases §CONDITIONAL_PHASES).
+  // (@ref ../walk/walk §CONDITIONAL_PHASES).
   it(`says nothing about an act it had no need to perform`, async () => {
     const { said, runAsync } = narrated({}, { bootstrap: true });
     await runAsync();
@@ -3082,7 +3084,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
-// @ref ./phases §SmokeDeps.explainSilentApp
+// @ref ../phases §SmokeDeps.explainSilentApp
 //
 // Nothing attached is a symptom, and the device often holds the cause. Found live and at full
 // price: an emulator holding Expo Go 54.0.8, a project on SDK 57, and **119 seconds** spent to

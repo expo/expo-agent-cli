@@ -62,11 +62,8 @@ import { buildSmokeTargetSelection } from './targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
 import {
-  isFailingRecord,
   runSmokePhasesAsync,
   smokeExitCode,
-  BUILD_DEV_SERVER_TIMEOUT_MS,
-  START_DEV_SERVER_TIMEOUT_MS,
   type SmokeDeps,
   type SmokeRun,
   type SmokeSessionResult,
@@ -74,6 +71,8 @@ import {
 } from './phases';
 import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
+import { isFailingRecord } from './results';
+import { BUILD_DEV_SERVER_TIMEOUT_MS, START_DEV_SERVER_TIMEOUT_MS } from './timeouts';
 import type { SmokeEnvironmentJson } from './types';
 
 /** How long discovery may spend on each candidate port. Short: a dev server that is up answers. */

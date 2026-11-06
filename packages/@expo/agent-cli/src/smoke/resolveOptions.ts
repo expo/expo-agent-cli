@@ -34,7 +34,7 @@ export const DEFAULT_SMOKE_TIMEOUT_MS = 60_000;
  * every first run of the day.
  *
  * **It does not contain the bootstrap itself.** Starting a dev server and booting a simulator each
- * get a budget of their own (`./phases.ts`), and the time they spend is taken off the clock this
+ * get a budget of their own (`./timeouts.ts`), and the time they spend is taken off the clock this
  * bounds — a minute spent waiting for a simulator to come up must not be a minute the error window
  * no longer has (llp/0005 §The run brings its own environment).
  */
