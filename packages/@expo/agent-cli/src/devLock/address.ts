@@ -75,7 +75,9 @@ export function lockAddressFor(
 
   const filename = name == null ? DEV_LOCK_SOCKET_NAME : `agent-cli-${name}.sock`;
   const inProject = path.join(canonical, '.expo', filename);
-  if (Buffer.byteLength(inProject) <= MAX_UNIX_SOCKET_PATH) {
+  // Preserve the published default-lock mapping; new attempt endpoints use byte-safe paths.
+  const length = name == null ? inProject.length : Buffer.byteLength(inProject);
+  if (length <= MAX_UNIX_SOCKET_PATH) {
     return { kind: 'unix', address: inProject };
   }
   return {

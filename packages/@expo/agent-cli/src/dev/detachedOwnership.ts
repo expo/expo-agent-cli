@@ -21,6 +21,17 @@ const directoryOf = (root: string) =>
 const endpointOf = (root: string, id: string) => lockAddressFor(root, { name: `detached-${id}` });
 export const discardRunCommand = (id: string) => `${PROGRAM_PREFIX} dev:stop --discard-run ${id}`;
 
+/** The record locates the owner; a reader's TMPDIR cannot relocate it. */
+function validatedEndpoint(root: string, id: string, value: unknown): string | null {
+  if (typeof value !== 'string' || value.includes('\0')) return null;
+  const expected = endpointOf(root, id);
+  const matches =
+    expected.kind === 'pipe'
+      ? value === expected.address
+      : path.isAbsolute(value) && path.basename(value) === path.basename(expected.address);
+  return matches ? value : null;
+}
+
 export function ownershipError(message: string, code = 'DEV_START_UNCERTAIN'): CommandError {
   return Object.assign(new CommandError(code, message), { exitCode: EXIT_OUTCOME_FAILED });
 }
@@ -70,7 +81,7 @@ function readOwner(root: string): Owner | null {
       !Number.isSafeInteger(owner.pid) ||
       owner.pid <= 0 ||
       typeof owner.logFile !== 'string' ||
-      owner.endpoint !== endpointOf(root, id).address
+      !validatedEndpoint(root, id, owner.endpoint)
     )
       throw new Error();
     return owner as Owner;
@@ -89,8 +100,16 @@ function readOwner(root: string): Owner | null {
 
 /** Only missing/refused endpoints prove absence. No payload, PID check, or age heuristic. */
 async function probe(root: string, id: string): Promise<'live' | 'absent' | 'uncertain'> {
+  let address: string | null;
+  try {
+    const marker = path.join(directoryOf(root), `owner-${id}.json`);
+    address = validatedEndpoint(root, id, JSON.parse(fs.readFileSync(marker, 'utf8'))?.endpoint);
+  } catch {
+    return 'uncertain';
+  }
+  if (!address) return 'uncertain';
   return new Promise((resolve) => {
-    const socket = net.connect(endpointOf(root, id).address);
+    const socket = net.connect(address);
     let settled = false;
     const finish = (state: 'live' | 'absent' | 'uncertain') => {
       if (settled) return;
