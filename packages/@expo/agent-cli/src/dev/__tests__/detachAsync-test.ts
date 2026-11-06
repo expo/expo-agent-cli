@@ -58,7 +58,6 @@ vi.mock('../advertisedUrl', async (importOriginal) => ({
 
 const projectRoot = '/project';
 const logFile = detachedLogPath(projectRoot);
-const startLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
 const servingPlan = '  1. expo run:ios  ~minutes\n› Installing on iPhone\n';
 
 function readiness(ready = true): BundlerReadyResult {
@@ -86,12 +85,6 @@ beforeEach(() => {
     });
   vi.mocked(spawn).mockImplementation(() => {
     fs.writeFileSync(logFile, servingPlan);
-    // Metro's own report of the port the lock names, which is when the parent reports it.
-    fs.mkdirSync(path.dirname(startLog), { recursive: true });
-    fs.writeFileSync(
-      startLog,
-      JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: 8393 })
-    );
     return Object.assign(new EventEmitter(), {
       pid: 4242,
       unref: vi.fn(),
@@ -431,11 +424,12 @@ describe('readiness belongs to this worktree', () => {
   );
 });
 
-// A `run:*` build has not reached Metro yet, so `start.log` names no port. The lock's own
+// A `run:*` build has not reached Metro yet, so the lock's port is not reported. The lock's own
 // `startedAt` (the step's spawn) bounds the wait, as the port watch is bounded.
-describe('a lock whose port Metro has not logged', () => {
+describe('a lock whose port Metro has not reported', () => {
   const pending = {
     ...lockInfo(),
+    portReported: false,
     url: 'http://127.0.0.1:8180',
     port: 8180,
     pid: 4242,
@@ -869,11 +863,6 @@ describe('the EAS session under --wait-ready', () => {
     vi.mocked(spawn).mockImplementation(() => {
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.writeFileSync(logFile, easChildLog(4242, '✔ Build finished'));
-      fs.mkdirSync(path.dirname(startLog), { recursive: true });
-      fs.writeFileSync(
-        startLog,
-        JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: 8082 })
-      );
       return Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() }) as any;
     });
   });

@@ -13,6 +13,11 @@ export interface DevServerLockInfo {
   url: string;
   /** Port of {@link url}, split out so a caller does not have to parse it back. */
   port: number;
+  /**
+   * Whether {@link port} is the one the dev server reported binding. False while it is only the
+   * port the run asked for, which the dev server has not confirmed yet.
+   */
+  portReported: boolean;
   /** PID of the `@expo/agent-cli` process holding the lock, for a report that names the owner. */
   pid: number;
   /** When the lock was taken, as an ISO 8601 timestamp. */
