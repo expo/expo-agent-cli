@@ -90,7 +90,6 @@ Cross-environment observation and interrupted recovery are enforced by
 `another TMPDIR cannot discard a live %s owner, but can recover its interrupted run`.
 `an unknown ownership endpoint (%s) never grants discard authority` covers malformed
 endpoint evidence. Both are process tests in `dev-detach-endpoint-test.ts`.
-||||||| parent of e380652f4 (Specify interrupted-run discard and POSIX force-stop recovery)
 
 ## Interrupted runs
 
@@ -98,8 +97,9 @@ An unexplained death retains the record, even before startup work begins. Refusa
 `dev:stop` name an attempt-specific `dev:stop --discard-run <attempt-id>` action.
 Discard removes that record, not processes or EAS sessions. It refuses a reachable or
 ambiguously reachable owner, and an outdated action cannot discard a replacement.
-Malformed records do not grant automatic admission. Explicit discard still checks the
-named attempt's endpoint independently of the record's contents.
+Malformed records do not grant automatic admission. Discard probes the captured endpoint
+even when ancillary metadata is malformed. Unknown or invalid endpoint evidence remains
+uncertain; the observer cannot invent an address and treat its absence as proof of death.
 
 Windows stop force-terminates the tree. Only successful delivery and confirmed termination
 allow the stop command to clear the record captured before signalling. Failed or uncertain
