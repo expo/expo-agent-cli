@@ -2,7 +2,16 @@ import { detachedBarrierFixture as fixture } from '../detachedBarrierFixture';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { executeAgentCliAsync, readStubExpoInvocations, waitForAsync } from '../utils';
+import {
+  collectOutput,
+  executeAgentCliAsync,
+  killAsync,
+  readStubExpoInvocations,
+  spawnAgentCli,
+  waitForAsync,
+  waitForDevLockAsync,
+  waitForExitAsync,
+} from '../utils';
 
 it.each([
   { name: 'same options', argv: [], alias: false },
@@ -45,3 +54,176 @@ it.each([
     }
   }
 );
+
+it('the starter times out without stopping its child, and another start refuses', async () => {
+  const f = await fixture();
+  try {
+    const expire = path.join(f.barrier, 'expire');
+    const first = f.start({ DETACH_TEST_EXPIRE: expire });
+    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+    fs.writeFileSync(expire, '');
+    const timedOut = await first.result;
+    expect(timedOut.exitCode, timedOut.all).toBe(22);
+    const owner = JSON.parse(timedOut.stdout).error.data;
+    expect(JSON.parse(timedOut.stdout).error.code).toBe('DEV_START_IN_PROGRESS');
+    const retry = await f.start().result;
+    expect(retry.exitCode, retry.all).toBe(20);
+    expect(JSON.parse(retry.stdout).error).toMatchObject({ code: 'DEV_START_BUSY', data: owner });
+    f.release();
+    expect(await waitForDevLockAsync(f.root, 15_000)).toMatchObject({ pid: owner.pid });
+    expect(
+      await waitForAsync(
+        () => readStubExpoInvocations(f.root).some((call) => call.args[0] === 'start'),
+        15_000
+      )
+    ).toBe(true);
+    const status = await executeAgentCliAsync(f.root, ['status', '--json']);
+    expect(JSON.parse(status.stdout).devServer.running).toBe(true);
+    expect(readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')).toHaveLength(
+      1
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it('a retry refuses while the surviving child owns startup after its parent dies', async () => {
+  const f = await fixture();
+  try {
+    const first = f.start();
+    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+    const ownerPid = Number(f.marks('blocked')[0]!.slice('blocked-'.length));
+    first.child.kill('SIGKILL'); // Only the parent, never the detached child's process group.
+    await first.result;
+    const result = await f.start().result;
+    expect(result.exitCode, result.all).toBe(20);
+    expect(JSON.parse(result.stdout).error).toMatchObject({
+      code: 'DEV_START_BUSY',
+      data: { pid: ownerPid },
+    });
+    expect(f.marks('blocked')).toHaveLength(1);
+    f.release();
+    expect(await waitForDevLockAsync(f.root, 15_000)).toMatchObject({ pid: ownerPid });
+    expect(
+      await waitForAsync(
+        () => readStubExpoInvocations(f.root).some((call) => call.args[0] === 'start'),
+        15_000
+      )
+    ).toBe(true);
+    expect(readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')).toHaveLength(
+      1
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it.each([false, true])(
+  'a delayed child loses to a published owner (parent killed: %s)',
+  async (killParent) => {
+    const f = await fixture();
+    try {
+      const first = f.start({ DETACH_TEST_BOOT_BARRIER: '1' });
+      expect(await waitForAsync(() => f.marks('child').length === 1, 15_000)).toBe(true);
+      if (killParent) {
+        first.child.kill('SIGKILL');
+        await first.result;
+      }
+      const second = f.start();
+      expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+      const ownerPid = Number(f.marks('blocked')[0]!.slice('blocked-'.length));
+      f.release();
+      const result = await second.result;
+      fs.writeFileSync(path.join(f.barrier, 'release-boot'), '');
+      expect(await waitForAsync(() => f.marks('exited').length === 1, 15_000)).toBe(true);
+      if (!killParent) {
+        const refused = await first.result;
+        expect(refused.exitCode, refused.all).toBe(20);
+        expect(JSON.parse(refused.stdout).error).toMatchObject({
+          code: 'DEV_START_BUSY',
+          data: { pid: ownerPid },
+        });
+      }
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout).pid).toBe(ownerPid);
+      expect(
+        readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')
+      ).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
+it('does not replace a live owner whose claim cannot be read', async () => {
+  const f = await fixture();
+  try {
+    f.start();
+    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+    const claim = path.join(f.root, '.expo', 'dev', 'detached-run');
+    const marker = fs.readdirSync(claim).find((name) => name.startsWith('owner-'))!;
+    fs.writeFileSync(path.join(claim, marker), '{');
+    const result = await f.start().result;
+    expect(result.exitCode, result.all).toBe(20);
+    expect(JSON.parse(result.stdout).error.code).toBe('DEV_START_UNCERTAIN');
+    expect(f.marks('blocked')).toHaveLength(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it('a blocked startup in one worktree does not prevent a second worktree from starting', async () => {
+  const a = await fixture();
+  const b = await fixture();
+  try {
+    const first = a.start();
+    expect(await waitForAsync(() => a.marks('blocked').length === 1, 15_000)).toBe(true);
+    b.release();
+    const second = await b.start().result;
+    expect(second.exitCode, second.all).toBe(0);
+    expect(readStubExpoInvocations(a.root).filter((call) => call.args[0] === 'start')).toHaveLength(
+      0
+    );
+    a.release();
+    const result = await first.result;
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout).pid).not.toBe(JSON.parse(second.stdout).pid);
+  } finally {
+    await Promise.all([a.cleanup(), b.cleanup()]);
+  }
+});
+
+it('releases ownership after a normal startup failure so another attempt can succeed', async () => {
+  const f = await fixture();
+  try {
+    f.release();
+    const failed = await f.start({ STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_DELAY_MS: '0' }).result;
+    expect(failed.exitCode, failed.all).not.toBe(0);
+    const retry = await f.start().result;
+    expect(retry.exitCode, retry.all).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it('stopping and starting again selects a new log without changing the previous run', async () => {
+  const f = await fixture();
+  try {
+    f.release();
+    const first = await f.start().result;
+    expect(first.exitCode, first.all).toBe(0);
+    const a = JSON.parse(first.stdout);
+    await executeAgentCliAsync(f.root, ['dev:stop', '--json']);
+    const previous = fs.readFileSync(a.logFile, 'utf8');
+    const second = await f.start().result;
+    expect(second.exitCode, second.all).toBe(0);
+    const b = JSON.parse(second.stdout);
+    expect(b.pid).not.toBe(a.pid);
+    expect(b.logFile).not.toBe(a.logFile);
+    expect(fs.readFileSync(a.logFile, 'utf8')).toBe(previous);
+    const logs = await executeAgentCliAsync(f.root, ['dev:logs', '--json']);
+    expect(JSON.parse(logs.stdout).logFile).toBe(b.logFile);
+  } finally {
+    await f.cleanup();
+  }
+});
