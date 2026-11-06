@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
+import { lockAddressFor } from '../../src/devLock/address';
 import { canonicalizeExistingPath } from '../../src/utils/dir';
 import { detachedRunFixture } from '../detachedRunFixture';
 import { detachedBarrierFixture } from '../detachedBarrierFixture';
@@ -155,7 +156,7 @@ it.each([false, true])(
       const id = path.basename(owner.logFile).slice('dev-detached-'.length, -'.log'.length);
       marker = path.join(f.root, '.expo', 'dev', 'detached-run', `owner-${id}.json`);
       saved = fs.readFileSync(marker, 'utf8');
-      if (malformed) fs.writeFileSync(marker, '{');
+      if (malformed) fs.writeFileSync(marker, JSON.stringify({ ...JSON.parse(saved), pid: -1 }));
       const result = await f.run(['dev:stop', '--discard-run', id, '--json']);
       expect(result.exitCode, result.all).toBe(20);
       expect(JSON.parse(result.stdout).error.code).toBe('DEV_START_BUSY');
@@ -187,8 +188,11 @@ it.for(['discard', 'Windows stop'])(
           .slice('dev-detached-'.length, -'.log'.length);
       } else {
         fs.mkdirSync(directory, { recursive: true });
-        // Old draft evidence is unreadable, but its filename still bounds explicit discard.
-        fs.writeFileSync(path.join(directory, `owner-${id}.json`), '{');
+        // Interrupted evidence has a known endpoint; delayed discard must remain attempt-specific.
+        fs.writeFileSync(
+          path.join(directory, `owner-${id}.json`),
+          JSON.stringify({ endpoint: lockAddressFor(f.root, { name: `detached-${id}` }).address })
+        );
       }
       delayed = executeAgentCliAsync(
         f.root,
