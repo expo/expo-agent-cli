@@ -135,8 +135,11 @@ jobs:
       - name: 🧪 E2E reload beside a local simulator
         run: bun run test:e2e -- runtime-target-selection-test
         working-directory: packages/@expo/agent-cli
+      - name: 🧪 E2E detached concurrency and device lifecycle
+        run: bun run test:e2e -- dev-detach-concurrency-test device-lifecycle-test
+        working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E detached ownership
-        run: bun run test:e2e -- dev-detach-ownership-test
+        run: bun run test:e2e -- dev-detach-ownership-test dev-detach-endpoint-test
         working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.
