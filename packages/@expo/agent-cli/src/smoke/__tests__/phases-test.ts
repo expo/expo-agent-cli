@@ -169,6 +169,7 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       started: false,
       reason: null,
     }),
+    cloudRoute: { current: 'fallback' },
     stopEasSession: async (sessionId) => ({ ok: true, target: sessionId, reason: null }),
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
@@ -3402,6 +3403,7 @@ describe(`${runSmokePhasesAsync.name} and an install it was told is needed`, () 
 describe('the start-session phase, on --eas', () => {
   const cloudDeps = (overrides: Partial<SmokeDeps> = {}) =>
     deps({
+      cloudRoute: { current: 'required' },
       probeDevice: async () => ({ deviceId: 'sess-up', backend: 'cloud' as const, reason: null }),
       waitForAppConnection: async () => ({
         appsConnected: 1,
@@ -3575,7 +3577,12 @@ describe('the start-session phase, on --eas', () => {
     }));
     const starting = options({ bootstrap: true, configuredEas: true });
     const run = await runSmokePhasesAsync(
-      cloudDeps({ ensureEasSession, discoverDevServer, startDevServer }),
+      cloudDeps({
+        cloudRoute: { current: 'fallback' },
+        ensureEasSession,
+        discoverDevServer,
+        startDevServer,
+      }),
       starting
     );
     expect(startDevServer).toHaveBeenCalled();

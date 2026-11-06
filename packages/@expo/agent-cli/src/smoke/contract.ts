@@ -205,6 +205,8 @@ export interface SmokeDeviceProbe {
 
 /** Everything the runner needs from the outside world, so none of it happens here. */
 export interface SmokeDeps {
+  /** The run's cloud route. The deps read it; the walk gets it from here. */
+  readonly cloudRoute: CloudRouteCell;
   discoverDevServer(explicitUrl: string | null): Promise<DevServerDiscovery>;
   startDevServer(): Promise<SmokeStartResult>;
   /**

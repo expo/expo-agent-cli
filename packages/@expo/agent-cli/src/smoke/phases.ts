@@ -44,13 +44,7 @@
 import type { ReleasedDevice } from '../deviceBinding';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { firstLine } from '../utils/text';
-import type {
-  CloudRouteCell,
-  RegisteredCleanup,
-  SmokeDeps,
-  SmokeRun,
-  SmokeRunContext,
-} from './contract';
+import type { RegisteredCleanup, SmokeDeps, SmokeRun, SmokeRunContext } from './contract';
 import { stopWithPicture } from './walk/capture';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';
@@ -94,8 +88,7 @@ export function smokeExitCode(outcome: SmokeOutcome): number {
  */
 export async function runSmokePhasesAsync(
   deps: SmokeDeps,
-  options: SmokeOptions,
-  cloudRoute: CloudRouteCell = { current: options.cloud }
+  options: SmokeOptions
 ): Promise<SmokeRun> {
   const startedAt = deps.now();
   const cleanups: RegisteredCleanup[] = [];
@@ -115,7 +108,7 @@ export async function runSmokePhasesAsync(
   try {
     const run = await runPhasesAsync(deps, options, {
       startedAt,
-      cloudRoute,
+      cloudRoute: deps.cloudRoute,
       cleanups,
       environment,
     });
