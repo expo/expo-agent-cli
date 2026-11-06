@@ -20,7 +20,6 @@
 
 import type { PlanPlatform } from '../plan/types';
 import { devServerRunningStopAsync } from './runningDevServer';
-import fs from 'fs';
 import type { ChildProcess } from 'child_process';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
@@ -95,7 +94,7 @@ export interface DevDetachResultJson {
   ready: boolean | null;
   /** Whether the dev server serves this project, when readiness was checked. */
   projectRootMatched: boolean | null;
-  /** A dev server was already running for this project, so nothing was started. */
+  /** Retained in the output schema; successful starts always report false. */
   alreadyRunning: boolean;
   /**
    * Which half of its plan the detached run is in: `building`, or `serving`.
@@ -404,9 +403,8 @@ export async function devDetachAsync(
     throw error;
   }
 
-  return reportDetached(projectRoot, options, {
+  return reportDetached(options, {
     lock,
-    alreadyRunning: false,
     eas,
     ready,
     projectRootMatched,
@@ -564,22 +562,19 @@ const VERDICT_WAIT_MS = 2_000;
  *
  * @returns the last verdict read, which is null when the child wrote none at all.
  */
-async function waitForChildVerdictAsync(
-  logFile: string,
-  since?: number
-): Promise<DetachedChildVerdict | null> {
-  let verdict = readChildVerdictSync(logFile, since);
+async function waitForChildVerdictAsync(logFile: string): Promise<DetachedChildVerdict | null> {
+  let verdict = readChildVerdictSync(logFile);
   const deadline = Date.now() + VERDICT_WAIT_MS;
   // The code row is the last line `logCmdError` writes, so a verdict with one is complete.
   while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
-    verdict = readChildVerdictSync(logFile, since) ?? verdict;
+    verdict = readChildVerdictSync(logFile) ?? verdict;
   }
   return verdict;
 }
 
 /**
- * A device refusal the child raised, rebuilt as the child raised it: code, exit and How line.
+ * A startup or device refusal rebuilt with the child's code, exit and recovery advice.
  *
  * @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the agent's recovery is the
  * child's own `dev` or `dev:stop` command, not `dev:logs`.
@@ -634,12 +629,9 @@ function relayedChildError(verdict: DetachedChildVerdict | null): CommandError |
  */
 async function waitFailureAsync(
   logFile: string,
-  exited: boolean,
-  since?: number
+  exited: boolean
 ): Promise<{ failure: DetachFailureKind; verdict: DetachedChildVerdict | null } | null> {
-  const verdict = exited
-    ? await waitForChildVerdictAsync(logFile, since)
-    : readChildVerdictSync(logFile, since);
+  const verdict = exited ? await waitForChildVerdictAsync(logFile) : readChildVerdictSync(logFile);
   const failure = resolveDetachFailure({ exited, verdict, statusAnswering: null });
   return failure ? { failure, verdict } : null;
 }
@@ -694,16 +686,7 @@ export function resolveDetachFailure({
 }
 
 /** The child's verdict, read out of the log this run opened. */
-function readChildVerdictSync(logFile: string, since?: number): DetachedChildVerdict | null {
-  // A reused foreground server can have an earlier detached run's log beside it. Use the same
-  // freshness rule as resolveDevServerReach, rechecking on each read for a newly written handoff.
-  if (since != null) {
-    try {
-      if (fs.statSync(logFile).mtimeMs < since) return null;
-    } catch {
-      return null;
-    }
-  }
+function readChildVerdictSync(logFile: string): DetachedChildVerdict | null {
   const read = readDetachedLogFileSync(logFile, VERDICT_LOG_LINES);
   return read == null ? null : parseDetachedChildVerdict(read.lines);
 }
@@ -868,11 +851,9 @@ async function waitForTunnelUrlAsync(
 
 /** Print the report of a detached run, in whichever form was asked for. */
 function reportDetached(
-  projectRoot: string,
   options: DevOptions,
   {
     lock,
-    alreadyRunning,
     ready,
     projectRootMatched,
     startedAt,
@@ -884,7 +865,6 @@ function reportDetached(
     eas,
   }: {
     lock: DevServerLockInfo;
-    alreadyRunning: boolean;
     /** Set when this run opens the app on EAS; `sessionId` when the command reached a session. */
     eas: DetachEas | null;
     ready: boolean | null;
@@ -909,17 +889,13 @@ function reportDetached(
     url: lock.url,
     port: lock.port,
     pid: lock.pid,
-    // The path only when the file is there. A dev server that was already running may have been
-    // started attached, and then its output went to somebody's terminal and there is no log.
     logFile: log?.logFile ?? '',
     ready,
     projectRootMatched,
-    alreadyRunning,
-    // Read from the child's own log, which is the only channel it has to this process (F125 and
-    // F48-4 both). The phase is read even for a run that started nothing: the question "is this
-    // project's dev server listening" is the same question whoever started it.
+    alreadyRunning: false,
+    // The child's log carries its phase and any port move.
     phase: childPhaseOf(log).phase,
-    portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
+    portMoved: plannedPortMove(log, lock),
     tunnelUrl,
     device,
     eas,
@@ -1011,9 +987,7 @@ function printHumanReport(report: DevDetachResultJson): void {
   const where =
     report.phase === 'building'
       ? ' · not listening yet — the plan is still building'
-      : report.alreadyRunning
-        ? ' · already running'
-        : ' · detached';
+      : ' · detached';
   const lines = [`${label('Dev server')}${report.url}${where}`, `${label('Process')}${report.pid}`];
   // Right under the URL, because that URL is the thing the move made stale: every command and
   // every link a caller had already written names the port that was asked for, not this one.
@@ -1047,14 +1021,6 @@ function printHumanReport(report: DevDetachResultJson): void {
     );
   }
   lines.push(`${label('Took')}${report.waitedMs}ms`);
-  if (report.alreadyRunning) {
-    const lead = report.eas?.sessionId
-      ? `This project already had a dev server; this run bound EAS Simulator session ${report.eas.sessionId}.`
-      : 'This project already had a dev server, so nothing was started.';
-    lines.push(
-      ` ${lead} One detached dev server per project: a second one could not hold the lock, and nothing would be able to find or stop it.`
-    );
-  }
   Log.log(lines.join('\n'));
 }
 
