@@ -41,7 +41,7 @@ export const DEFAULT_SMOKE_TIMEOUT_MS = 60_000;
 export const DEFAULT_SMOKE_START_TIMEOUT_MS = 180_000;
 
 /**
- * The budget an app opened onto a cold environment gets to attach (`./phases` §APP_ATTACH_TIMEOUT_MS),
+ * The budget an app opened onto a cold environment gets to attach (`./timeouts` §APP_ATTACH_TIMEOUT_MS),
  * or the one `AGENT_CLI_COLD_ATTACH_MS` names.
  *
  * A harness switch, like `AGENT_CLI_NO_DEVICE`: the stub tier's no-app cases boot a stub device

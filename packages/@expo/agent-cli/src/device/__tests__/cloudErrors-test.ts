@@ -1,6 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
 // @ref llp/0035-one-device-per-worktree.rfc.md §Session guard
-import { smokeSessionResult } from '../../smoke/smokeAsync';
+import { smokeSessionResult } from '../../smoke/deps/device';
 import { cloudPlatformMismatchError, otherPlatformSessionError } from '../cloudErrors';
 import { cloudSessionMismatchError } from '../cloudSimulator';
 

@@ -211,7 +211,8 @@ describe(resolveSmokeOptions, () => {
 // takes the dev server down with it on a Mac that has granted no Automation permission.
 describe('the command line --start uses', () => {
   it(`asks for a detached, ready dev server and nothing else`, () => {
-    const { START_DEV_SERVER_ARGV } = require('../smokeAsync') as typeof import('../smokeAsync');
+    const { START_DEV_SERVER_ARGV } =
+      require('../deps/startArgs') as typeof import('../deps/startArgs');
 
     expect([...START_DEV_SERVER_ARGV]).toEqual(['--detach', '--wait-ready', '--no-open']);
   });
@@ -220,14 +221,15 @@ describe('the command line --start uses', () => {
   // `--no-open` is what keeps it out of `expo start`, where it would open the app from inside
   // the start and die on a missing Automation grant.
   it(`carries --no-open, so the platform flag opens nothing from inside the start`, () => {
-    const { START_DEV_SERVER_ARGV } = require('../smokeAsync') as typeof import('../smokeAsync');
+    const { START_DEV_SERVER_ARGV } =
+      require('../deps/startArgs') as typeof import('../deps/startArgs');
 
     expect(START_DEV_SERVER_ARGV).toContain('--no-open');
   });
 });
 
 describe('the port --start asks for', () => {
-  const { startPortArgs } = require('../smokeAsync') as typeof import('../smokeAsync');
+  const { startPortArgs } = require('../deps/startArgs') as typeof import('../deps/startArgs');
 
   // A caller that named a port named the dev server it means, and a `--start` that ignored it
   // would answer a question about a different port than the one it was asked about.

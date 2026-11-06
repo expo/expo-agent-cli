@@ -140,7 +140,7 @@ describe('the flags this CLI writes onto a command line', () => {
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
-          "--detach  src/smoke/smokeAsync.ts",
+          "--detach  src/smoke/deps/startArgs.ts",
           "--device  src/device/installDevBuild.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
@@ -155,7 +155,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--no-bundler  src/device/installDevBuild.ts",
           "--no-followups  src/docs/autoSync.ts",
           "--no-install  src/new/createExpo.ts",
-          "--no-open  src/smoke/smokeAsync.ts",
+          "--no-open  src/smoke/deps/startArgs.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",
           "--platform  src/deploy/deployAsync.ts",
@@ -169,7 +169,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--type  src/config/introspectAsync.ts",
           "--type  src/impact/runtimeVersion.ts",
           "--verbose  src/doctor/checkAsync.ts",
-          "--wait-ready  src/smoke/smokeAsync.ts",
+          "--wait-ready  src/smoke/deps/startArgs.ts",
           "--yes  src/device/expoGoVersion.ts",
           "--yes  src/device/installExpoGo.ts",
           "--yes  src/new/createExpo.ts",

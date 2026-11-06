@@ -36,7 +36,8 @@ import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { resolveSmokeOptions } from '../resolveOptions';
-import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
+import { deviceBoundByStart } from '../deps/startArgs';
+import { buildSmokeDeps, cleanupLeft } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 

@@ -3330,7 +3330,7 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
 // Android project whose package the prebuild was about to write, the reading was `null`, so no
 // install ever fired and the deep link was refused [observed — Kudo, local run, 2026-09-04].
 //
-// The walk cannot see any of that: the target is the wiring's (`smokeAsync.ts`). What it *can*
+// The walk cannot see any of that: the target is the wiring's (`deps/target.ts`, `deps/shared.ts`). What it *can*
 // pin is the order the phases run in, which is what makes a re-read possible at all — the install
 // decision has to come after the start, not beside it.
 describe(`${runSmokePhasesAsync.name} and a start that changed the project`, () => {

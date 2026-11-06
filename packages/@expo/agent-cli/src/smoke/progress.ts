@@ -113,7 +113,7 @@ function phaseSentence(
  * One reader so far, and it is a *function* rather than a value because the answer is not known
  * when this is built: which kind of install the run would perform comes from the project's plan,
  * which is resolved lazily so that a run failing at the dev-server phase never reads it
- * (@ref src/smoke/smokeAsync §resolveSmokeTargetAsync). By the time the `install-app` line is said,
+ * (@ref src/smoke/deps/target §resolveSmokeTargetAsync). By the time the `install-app` line is said,
  * the phase that decided there was an install to do has already asked.
  */
 export interface SmokeProgressContext {
