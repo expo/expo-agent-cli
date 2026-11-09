@@ -1353,12 +1353,13 @@ function easKeptSentence(eas: DetachEas): string {
  * Poll the project's lock until it names the port the dev server took, the child dies, or the
  * budget runs out.
  *
- * The child publishes its lock at the spawn of a step that names a port, before Metro binds it,
- * and the busy-port retry can move the dev server after that with a new spawn and a new lock. So a
- * lock counts once its holder says Metro reported the port (`portReported`), or once
- * {@link PORT_WATCH_TIMEOUT_MS} has passed since the lock's `startedAt`, the bound the port
- * watch itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not
- * confirmed when the child exits or the budget runs out is still the answer.
+ * A child whose plan builds first takes its lock before its first step and says `building` until
+ * the dev-server step; that lock never ends the wait. The dev-server step serves on the same lock,
+ * before Metro binds the port, and the busy-port retry can move the dev server after that. So a
+ * serving lock counts once its holder says Metro reported the port (`portReported`), or once
+ * {@link PORT_WATCH_TIMEOUT_MS} has passed since the lock's `startedAt`, the bound the port watch
+ * itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not confirmed
+ * when the child exits or the budget runs out is still the answer, `building` included.
  */
 async function waitForLockAsync(
   projectRoot: string,

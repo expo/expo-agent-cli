@@ -1,6 +1,8 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 // The `dev` run's half of the lock: taken before a build step, and the stop between steps.
 
+import os from 'node:os';
+
 import { servesAnotherProjectAsync } from '../devLock/port';
 import { acquireDevServerLockAsync } from '../devLock/server';
 import type { DevServerLockHandle } from '../devLock/types';
@@ -30,6 +32,7 @@ export async function takeBuildingLockAsync(
   const result = await acquireDevServerLockAsync({
     url: `http://127.0.0.1:${port}`,
     port,
+    portReported: false,
     pid: process.pid,
     startedAt: new Date().toISOString(),
     projectRoot,
@@ -46,6 +49,6 @@ export function interruptedError(signal: NodeJS.Signals): CommandError {
     'DEV_INTERRUPTED',
     `The dev run stopped on ${signal}. The step it reached ended, and no later step ran. An EAS build that was already submitted keeps running on EAS; "eas build:cancel" ends it.`
   );
-  error.exitCode = 128 + (signal === 'SIGINT' ? 2 : 15);
+  error.exitCode = 128 + os.constants.signals[signal];
   return error;
 }
