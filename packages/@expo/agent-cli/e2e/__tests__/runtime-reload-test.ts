@@ -23,7 +23,7 @@ import {
   SIMULATOR_UDID,
 } from './installedAppStubs';
 
-/** The shape `reload --json` prints, per `src/reload/reloadAsync.ts`. */
+/** The shape `reload --json` prints, per `src/runtime/reload/reloadAsync.ts`. */
 type ReloadReport = {
   reloaded: boolean;
   method: 'dev-server' | 'runtime' | 'device' | null;
