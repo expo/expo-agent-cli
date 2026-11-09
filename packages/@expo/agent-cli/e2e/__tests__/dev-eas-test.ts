@@ -830,6 +830,46 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  it.skipIf(process.platform === 'win32')(
+    'reports a followed build that fails, and starts no second build',
+    async () => {
+      const projectRoot = await setupAsync();
+      await writeSchemeAsync(projectRoot, 'devclient');
+      const env = {
+        ...easRunEnv(projectRoot, 8590),
+        STUB_EAS_BUILD_DELAY_MS: '4000',
+        STUB_EAS_BUILD_EXIT: '1',
+        STUB_EAS_BUILD_STDERR: 'Build failed: e2e-followed',
+        AGENT_CLI_DETACH_TIMEOUT_MS: '1500',
+      };
+      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+      try {
+        const first = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(JSON.parse(first.stdout).error.code).toBe('DEV_DETACH_STILL_BUILDING');
+
+        const again = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          { env: { ...env, AGENT_CLI_DETACH_TIMEOUT_MS: '15000' }, reject: false }
+        );
+
+        expect(again.exitCode).not.toBe(0);
+        expect(JSON.parse(again.stdout).error.suggestedCommand).toMatch(/dev:logs$/);
+        expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
+          1
+        );
+        expect(fs.readFileSync(logFile, 'utf8')).toContain('Build failed: e2e-followed');
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    }
+  );
+
   it('starts a session running Expo Go for a project Expo Go can run, and builds nothing', async () => {
     const projectRoot = await setupAsync('go-app');
 

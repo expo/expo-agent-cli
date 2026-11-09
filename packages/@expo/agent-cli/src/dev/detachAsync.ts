@@ -249,11 +249,21 @@ export async function devDetachAsync(
       timeoutMs: options.detachTimeoutMs,
       hasExited: () => !isProcessAlive(followed.pid),
     });
-    if (running?.phase === 'building') {
-      if (isProcessAlive(running.pid)) {
-        throw stillBuildingOnLockError(running, options, Date.now() - startedAt);
-      }
-      running = null;
+    if (running?.phase === 'building' && isProcessAlive(running.pid)) {
+      throw stillBuildingOnLockError(running, options, Date.now() - startedAt);
+    }
+    // A followed run that ended in its build spawns nothing: its log says why.
+    if (!running || running.phase === 'building') {
+      const relayed = relayedDeviceError(await waitForChildVerdictAsync(projectRoot));
+      if (relayed) throw relayed;
+      throw notStartedError(
+        projectRoot,
+        detachedLogPath(projectRoot),
+        null,
+        followed.pid,
+        Date.now() - startedAt,
+        options.platform
+      );
     }
   }
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
