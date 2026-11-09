@@ -81,7 +81,7 @@ it('release-keeps-devices-when-own-server-runs-on-another-port', async () => {
     expect.objectContaining({
       reason: 'not-running',
       devices: [device],
-      deviceError: expect.stringContaining('still running'),
+      deviceError: expect.stringContaining('dev server is already running on port'),
     })
   );
   expect(reapDevicesAsync).toHaveBeenCalledTimes(1);
@@ -105,7 +105,7 @@ it.each([
     lock,
     false,
     [],
-    expect.stringContaining("this worktree's dev server is still running"),
+    expect.stringContaining('dev server is already running on port 8081'),
   ],
   [
     'keeps devices when the listener answers as an Expo dev server',

@@ -143,17 +143,14 @@ export async function takeDevServerLockAsync(
   port: number,
   options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'>
 ): Promise<DevServerLockHandle | null> {
-  return await publishAsync(
-    projectRoot,
-    { ...options, isRunning: () => true },
-    { port, source: 'arg' }
-  );
+  return await publishAsync(projectRoot, options, { port, source: 'arg' });
 }
 
-/** Take the lock for a dev server on the resolved port. */
+/** Take the lock for a dev server on the resolved port. With no `isRunning`, nothing has exited. */
 async function publishAsync(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform' | 'phase'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'> &
+    Partial<Pick<HoldDevServerLockOptions, 'isRunning'>>,
   resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able
@@ -169,7 +166,7 @@ async function publishAsync(
     }
     const { port, source } = resolved;
 
-    if (!options.isRunning()) {
+    if (options.isRunning?.() === false) {
       // The dev server exited before it said where it listens, so there is nothing to point at.
       debugEvent('dev_lock_skipped', { address, reason: 'dev-server-exited' });
       return null;

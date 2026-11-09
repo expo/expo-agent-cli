@@ -30,6 +30,12 @@ export class RunLock {
     this.#handle = handle;
   }
 
+  /** The step that built now serves: /status answers for this project. */
+  serve(): void {
+    const handle = this.#handle;
+    if (handle?.info.phase === 'building') handle.update({ ...handle.info, phase: 'serving' });
+  }
+
   /**
    * Metro exited after the EAS open started. While the open runs, the run binds the session it
    * returns, so the lock answers `finishing`; once it returned, the session cleanup needs no lock,

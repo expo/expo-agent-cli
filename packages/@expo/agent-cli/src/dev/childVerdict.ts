@@ -13,6 +13,8 @@
 // parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
 // below. The parent's report goes silently wrong the moment the two drift.
 
+import { buildsBeforeServing } from './forwardedArgs';
+
 /** How many lines of the child's log are searched for its verdict. */
 export const VERDICT_LOG_LINES = 400;
 
@@ -143,32 +145,6 @@ export function isRelayedDeviceCode(code: string | null): code is string {
 }
 
 /**
- * The dev-server step the detached child's plan runs, read from the plan table in its log.
- *
- * Whether the run still builds is not here: the run's own lock says that
- * (@ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock).
- */
-export interface DetachedChildStep {
-  /** The plan's dev-server step, as it was printed (`expo run:android`), or null for no plan. */
-  step: string | null;
-  /**
-   * Whether that step also asks the Expo CLI to open the app on a device.
-   *
-   * @ref llp/0021-honest-reports.rfc.md §The rules — **F140.** The dev server and
-   * the app-opening are one subprocess, and the opening is the half that can end it: `expo start
-   * --ios` drives Simulator.app through AppleScript, and a macOS Automation refusal reaches the
-   * Expo CLI as an **unhandled rejection** — `AppleDeviceManager.activateWindowAsync` is called and
-   * not awaited [reference — `@expo/cli` `src/start/platforms/PlatformManager.ts`], so it lands
-   * whenever it lands and kills the process. Measured 215ms, 252ms and 263ms after `/status` first
-   * answered [observed — 2026-08-28, three runs against `friction/run9/livecheck`].
-   *
-   * So a run whose step carries this has risky work still outstanding when the bundler answers, and
-   * {@link DevDetachResultJson.ready} is a claim about a moment that may not survive the exit.
-   */
-  opensPlatform: boolean;
-}
-
-/**
  * One numbered row of the plan table `formatStartPlan` prints: `  2. expo run:android  ~minutes`.
  *
  * The command runs to the end of the run of two-or-more spaces that separates it from the time
@@ -177,19 +153,6 @@ export interface DetachedChildStep {
  */
 const PLAN_STEP_ROW = /^\s*\d+\.\s+((?:expo|eas)(?:\s\S+)*?)(?:\s{2,}|\s*$)/;
 
-/** The plan steps that start a dev server, which is when the lock is taken (`devAsync.ts`). */
-const DEV_SERVER_COMMANDS = ['start', 'run:ios', 'run:android'];
-
-/** The dev-server steps that build the app first, and so hold the lock while a compiler runs. */
-const BUILDING_COMMANDS = ['run:ios', 'run:android'];
-
-/**
- * The `expo start` flags that make the CLI open the app on a device as well as serve it.
- *
- * The short forms are the Expo CLI's own (`-i`, `-a`, `-w`), and the plan never emits them — but the
- * plan appends whatever the caller typed after its own arguments (`src/dev/forwardedArgs.ts`), so
- * they reach the step table exactly as typed.
- */
 /**
  * Whether a dev-server step also opens the app on a device.
  *
@@ -204,38 +167,42 @@ const BUILDING_COMMANDS = ['run:ios', 'run:android'];
  * @param step the step as the plan table printed it, e.g. `expo run:ios`.
  */
 export function stepOpensPlatform(step: string): boolean {
-  const [, command] = step.trim().split(/\s+/);
-  return command != null && BUILDING_COMMANDS.includes(command);
+  return buildsBeforeServing(step.trim().split(/\s+/)[1]);
 }
 
 /**
- * Read the plan out of the child's log and name its dev-server step.
+ * Whether the detached child's dev-server step also opens the app, read from the plan table in
+ * its log (`src/plan/format.ts`).
  *
- * Pure over the lines, like {@link parseDetachedChildVerdict}, and reading the plan table of
- * `src/plan/format.ts`. The last dev-server step is the one that serves: a plan is a list run in
- * order. A `run:* --no-bundler` install serves nothing, so it names the step only when no step
- * serves.
+ * @ref llp/0021-honest-reports.rfc.md §The rules — **F140.** The dev server and the app-opening
+ * are one subprocess, and the opening is the half that can end it: a macOS Automation refusal
+ * reaches the Expo CLI as an unhandled rejection and kills the process, measured 215ms to 263ms
+ * after `/status` first answered [observed — 2026-08-28, `friction/run9/livecheck`]. So a run
+ * whose step opens the app has risky work outstanding when the bundler answers.
+ *
+ * The last step that serves is the dev-server step: a plan is a list run in order. A
+ * `run:* --no-bundler` install serves nothing, so it counts only when no step serves.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.
  */
-export function parseDetachedChildStep(rawLines: readonly string[]): DetachedChildStep {
+export function childOpensPlatform(rawLines: readonly string[]): boolean {
   let servingStep: string | null = null;
   let compilingStep: string | null = null;
   for (const line of rawLines.flatMap((entry) => entry.split('\n'))) {
-    const command = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
-    if (!command) {
+    const row = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
+    if (!row) {
       continue;
     }
-    const verb = command.split(/\s+/)[1] ?? '';
-    if (BUILDING_COMMANDS.includes(verb)) {
-      compilingStep = command;
+    const command = row.split(/\s+/)[1];
+    if (buildsBeforeServing(command)) {
+      compilingStep = row;
     }
-    if (DEV_SERVER_COMMANDS.includes(verb) && !command.includes('--no-bundler')) {
-      servingStep = command;
+    if ((command === 'start' || buildsBeforeServing(command)) && !row.includes('--no-bundler')) {
+      servingStep = row;
     }
   }
   const step = servingStep ?? compilingStep;
-  return { step, opensPlatform: step != null && stepOpensPlatform(step) };
+  return step != null && stepOpensPlatform(step);
 }
 
 /**
@@ -265,7 +232,7 @@ const PLAN_PORT_ROW = /^\s*Dev server:\s+port (\d+)(?:, because (\d+) is taken)?
 /**
  * The port the child's plan gave its dev server, and the busy port the plan moved it from.
  *
- * Pure over the lines, like {@link parseDetachedChildStep}, and read from the same table. The
+ * Pure over the lines, like {@link childOpensPlatform}, and read from the same table. The
  * first row is the plan's: the table is printed once, before any step runs.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.

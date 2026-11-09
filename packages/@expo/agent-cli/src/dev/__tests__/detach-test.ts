@@ -136,20 +136,14 @@ describe(resolveDetachFailure, () => {
 // is checked once, at the moment of return, and `expo start --ios` can die a quarter of a second
 // later. This decides which runs are re-checked for a while before the claim is printed.
 describe(needsOpenPlatformGrace, () => {
-  const serving = { step: 'expo start --go', opensPlatform: false } as const;
-  const openingIos = {
-    step: 'expo start --go --ios',
-    opensPlatform: true,
-  } as const;
-
   it(`re-checks a run whose dev-server step also opens the app`, () => {
-    expect(needsOpenPlatformGrace({ ready: true, step: openingIos })).toBe(true);
+    expect(needsOpenPlatformGrace({ ready: true, opensPlatform: true })).toBe(true);
   });
 
   // The whole cost of this is paid by the runs it is for: a plan that opens nothing has no late
   // rejection on its way, so it pays nothing.
   it(`does not re-check a run that opens nothing`, () => {
-    expect(needsOpenPlatformGrace({ ready: true, step: serving })).toBe(false);
+    expect(needsOpenPlatformGrace({ ready: true, opensPlatform: false })).toBe(false);
   });
 
   // @ref llp/0021-honest-reports.rfc.md §The rules — the correction of 2026-09-03.
@@ -166,12 +160,12 @@ describe(needsOpenPlatformGrace, () => {
   // What the grace checks for such a run is narrowed rather than the same — see
   // {@link resolveDetachFailure} and the `statusAnswering: null` it is given.
   it(`re-checks a run that claimed no readiness but printed a dev server`, () => {
-    expect(needsOpenPlatformGrace({ ready: null, step: openingIos })).toBe(true);
+    expect(needsOpenPlatformGrace({ ready: null, opensPlatform: true })).toBe(true);
   });
 
   // The failure has already been raised by then; a grace period on top of it would only delay it.
   it(`does not re-check a run whose bundler never answered`, () => {
-    expect(needsOpenPlatformGrace({ ready: false, step: openingIos })).toBe(false);
+    expect(needsOpenPlatformGrace({ ready: false, opensPlatform: true })).toBe(false);
   });
 });
 

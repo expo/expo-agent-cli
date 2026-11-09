@@ -83,6 +83,7 @@ export async function runDevServerAsync(
     easPlatform = null,
     easOpenFinished,
     runLock,
+    phase = 'serving',
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
@@ -98,7 +99,13 @@ export async function runDevServerAsync(
     runLock?: {
       handle: DevServerLockHandle | null;
       keep(handle: DevServerLockHandle | null): void;
+      serve(): void;
     };
+    /**
+     * What the lock says at the spawn: `building` for a step that compiles before it serves. The
+     * run's lock then says `serving` once /status answers. Only `dev` passes it, with its lock.
+     */
+    phase?: 'building' | 'serving';
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -137,13 +144,10 @@ export async function runDevServerAsync(
   ).finally(() => {
     running = false;
   });
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `expo run:*` builds
-  // before it serves, so its lock says `building` until /status answers for this project.
-  const builds = args[0] === 'run:ios' || args[0] === 'run:android';
   const lock = holdDevServerLockAsync(projectRoot, args, {
     since: startedAt,
     isRunning: () => running,
-    phase: builds ? 'building' : 'serving',
+    phase,
     easPlatform,
     easOpenFinished,
     held: runLock?.handle,
@@ -179,11 +183,15 @@ export async function runDevServerAsync(
     },
   });
 
-  if (builds) {
+  // The run holds the step's lock as soon as it exists, so it can change the phase during the step.
+  void lock.then((held) => runLock?.keep(held));
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a step that builds says
+  // `serving` once /status answers for this project.
+  if (phase === 'building' && runLock) {
     void lock.then(async (held) => {
       const stillBuilding = () => running && held?.info.phase === 'building';
       if (held && (await openWhenAnsweringAsync(held.info.url, projectRoot, stillBuilding))) {
-        if (stillBuilding()) held.update({ ...held.info, phase: 'serving' });
+        if (stillBuilding()) runLock.serve();
       }
     });
   }
@@ -197,8 +205,9 @@ export async function runDevServerAsync(
     return { ...result, port };
   } finally {
     clearTimeout(timer);
-    if (runLock) runLock.keep(await lock);
-    else (await lock)?.release();
+    const held = await lock;
+    if (runLock) runLock.keep(held);
+    else held?.release();
   }
 }
 

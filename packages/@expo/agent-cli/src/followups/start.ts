@@ -331,7 +331,7 @@ export function buildStartPlanFollowUps(
     return [
       {
         id: 'dev-server-running',
-        command: row.command(`${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`),
+        command: row.command ?? `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`,
         why: `${row.state({ port })}, so the plan has no steps. ${row.does}`,
       },
     ];

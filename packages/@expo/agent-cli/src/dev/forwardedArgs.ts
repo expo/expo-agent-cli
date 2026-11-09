@@ -92,7 +92,12 @@ export function isDevServerStep(step: PlanStep): boolean {
     return false;
   }
   const command = step.argv[1];
-  return command === 'start' || command === 'run:ios' || command === 'run:android';
+  return command === 'start' || buildsBeforeServing(command);
+}
+
+/** Whether an `expo` command compiles the app before it serves: `run:ios` and `run:android`. */
+export function buildsBeforeServing(command: string | undefined): boolean {
+  return command === 'run:ios' || command === 'run:android';
 }
 
 /**

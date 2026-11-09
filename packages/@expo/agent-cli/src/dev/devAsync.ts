@@ -69,6 +69,7 @@ import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
+  buildsBeforeServing,
   forwardedStepArgs,
   isDevServerStep,
   withDevice,
@@ -709,6 +710,7 @@ async function runPlanStepsAsync(
         agentSkills: options.agentSkills,
         output,
         runLock,
+        phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
         easOpenFinished: eas ? easOpenFinished : undefined,

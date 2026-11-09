@@ -58,11 +58,10 @@ import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
   isRelayedDeviceCode,
-  parseDetachedChildStep,
+  childOpensPlatform,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
   VERDICT_LOG_LINES,
-  type DetachedChildStep,
   type DetachedChildVerdict,
 } from './childVerdict';
 import {
@@ -234,16 +233,12 @@ export async function devDetachAsync(
   // project's own default. `smoke` requires a platform now, so a follow-up without one exits 1.
   const smokePlatform =
     statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
-
-  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
-  // lock, so nothing would be able to find it or stop it afterwards.
-  let running = await readDevServerLockAsync(projectRoot);
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
-  // followed, not given a second child.
-  if (running?.phase === 'building' && !options.waitReady && isProcessAlive(running.pid)) {
-    return reportDetached(projectRoot, options, {
-      lock: running,
-      alreadyRunning: true,
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that builds is
+  // reported at once, with the port its dev server will take, and nothing is waited for.
+  const reportBuildingRunAsync = async (lock: DevServerLockInfo, alreadyRunning: boolean) =>
+    reportDetached(projectRoot, options, {
+      lock,
+      alreadyRunning,
       eas: detachEas(projectRoot, options),
       ready: null,
       projectRootMatched: null,
@@ -253,6 +248,14 @@ export async function devDetachAsync(
       device: await boundDeviceAsync(projectRoot, options),
       smokePlatform,
     });
+
+  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
+  // lock, so nothing would be able to find it or stop it afterwards.
+  let running = await readDevServerLockAsync(projectRoot);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
+  // followed, not given a second child.
+  if (running?.phase === 'building' && !options.waitReady && isProcessAlive(running.pid)) {
+    return await reportBuildingRunAsync(running, true);
   }
   if (running?.phase === 'building') {
     const followed = running;
@@ -432,22 +435,10 @@ export async function devDetachAsync(
     hasExited,
     acceptBuilding: !options.waitReady,
   });
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that builds is
-  // reported as building, and only --wait-ready waits for its dev server.
+  // Only --wait-ready waits for the dev server of a run that builds.
   if (lock?.phase === 'building' && !hasExited()) {
     if (options.waitReady) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
-    return reportDetached(projectRoot, options, {
-      lock,
-      alreadyRunning: false,
-      eas: detachEas(projectRoot, options),
-      ready: null,
-      projectRootMatched: null,
-      startedAt,
-      print,
-      tunnelUrl: null,
-      device: await boundDeviceAsync(projectRoot, options),
-      smokePlatform,
-    });
+    return await reportBuildingRunAsync(lock, false);
   }
   // A run that ended in its build holds no lock any more, and its log says why.
   if (lock?.phase === 'building') lock = null;
@@ -532,7 +523,7 @@ export async function devDetachAsync(
     ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // One read of the whole log, for the phase, the verdict and the report's port move.
   const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
-  const step = childStepOf(log);
+  const opensPlatform = log != null && childOpensPlatform(log.lines);
   let verdict = log == null ? null : parseDetachedChildVerdict(log.lines.slice(-VERDICT_LOG_LINES));
   let failure = resolveDetachFailure({
     exited: childIsGone(),
@@ -545,7 +536,7 @@ export async function devDetachAsync(
   // has work outstanding when the bundler answers, and the macOS Automation refusal that ends it
   // arrives a quarter of a second later — after every check above has passed. So the claim is held
   // open for a moment and the same three facts are asked again.
-  if (failure == null && needsOpenPlatformGrace({ ready, step })) {
+  if (failure == null && needsOpenPlatformGrace({ ready, opensPlatform })) {
     const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
       hasExited: childIsGone,
       budgetMs: Math.min(
@@ -672,12 +663,12 @@ async function isOwnBundlerAnsweringAsync(projectRoot: string, url: string): Pro
  */
 export function needsOpenPlatformGrace({
   ready,
-  step,
+  opensPlatform,
 }: {
   ready: boolean | null;
-  step: DetachedChildStep;
+  opensPlatform: boolean;
 }): boolean {
-  return ready !== false && step.opensPlatform;
+  return ready !== false && opensPlatform;
 }
 
 /**
@@ -901,11 +892,6 @@ function readChildVerdictSync(projectRoot: string, since?: number): DetachedChil
   }
   const read = readDetachedLogSync(projectRoot, VERDICT_LOG_LINES);
   return read == null ? null : parseDetachedChildVerdict(read.lines);
-}
-
-/** The dev-server step a whole read of the child's log names; none when there is no log. */
-function childStepOf(log: DetachedLogRead | null): DetachedChildStep {
-  return log == null ? { step: null, opensPlatform: false } : parseDetachedChildStep(log.lines);
 }
 
 /**

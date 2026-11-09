@@ -75,7 +75,7 @@ export function devServerRunningError(
       `How: ${row.how({ smoke, navigate })}`,
     ].join('\n')
   );
-  error.suggestedCommand = row.command(smoke);
+  error.suggestedCommand = row.command ?? smoke;
   error.exitCode = EXIT_OUTCOME_FAILED;
   error.data = { port, pid, phase };
   return error;

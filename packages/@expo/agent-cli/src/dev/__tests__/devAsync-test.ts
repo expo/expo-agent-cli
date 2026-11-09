@@ -261,6 +261,7 @@ describe(devAsync, () => {
         easPlatform: null,
         // A real lock on Windows, where a named pipe needs no file system; none under the fake one.
         runLock: expect.any(Object),
+        phase: 'building',
       });
     });
 

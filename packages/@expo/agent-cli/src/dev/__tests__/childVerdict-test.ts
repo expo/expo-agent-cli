@@ -13,7 +13,7 @@ import {
 } from '../../utils/errors';
 import {
   detachedPidLine,
-  parseDetachedChildStep,
+  childOpensPlatform,
   parseDetachedChildPid,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
@@ -155,7 +155,7 @@ describe(parseDetachedChildVerdict, () => {
 
 // The plan table is a format of this CLI's own (`src/plan/format.ts`), so it round-trips the same
 // way the verdict does: the log is built by `formatStartPlan` and read back here.
-describe(parseDetachedChildStep, () => {
+describe(childOpensPlatform, () => {
   /** The child's log, as `formatStartPlan` writes it, for a plan of the given steps. */
   function planLog(steps: { argv: string[]; reason: string }[], ...after: string[]): string[] {
     const plan: StartPlan = {
@@ -182,37 +182,21 @@ describe(parseDetachedChildStep, () => {
     reason: 'Serves the project and opens it on a booted iOS simulator.',
   };
 
-  it(`names the build step of a plan that serves from it, as one that opens the app`, () => {
-    expect(parseDetachedChildStep(planLog([PREBUILD, RUN_ANDROID], 'Building app...'))).toEqual({
-      step: 'expo run:android',
-      opensPlatform: true,
-    });
-  });
-
-  it(`names a plan whose only step is the dev server`, () => {
-    expect(parseDetachedChildStep(planLog([START]))).toEqual({
-      step: 'expo start --dev-client',
-      opensPlatform: false,
-    });
-  });
-
-  it(`names no step for a log with no plan in it`, () => {
-    expect(parseDetachedChildStep(['Starting project at /project'])).toEqual({
-      step: null,
-      opensPlatform: false,
-    });
-  });
-
-  // @ref llp/0021-honest-reports.rfc.md §The rules — F140. The step that
-  // opens the app is the step that can kill the dev server after it has answered `/status`, and it
-  // is named in the plan table like every other step.
-  // An `expo start` step opens nothing any more: `dev` performs the open itself, from its own
-  // process, so a refused Automation grant cannot take the dev server down (llp/0026).
-  it(`reads a start step as one that opens nothing itself`, () => {
-    expect(parseDetachedChildStep(planLog([START_IOS]))).toEqual({
-      step: 'expo start --go --ios --port 9201',
-      opensPlatform: false,
-    });
+  // @ref llp/0021-honest-reports.rfc.md §The rules — F140. The step that opens the app is the step
+  // that can kill the dev server after it has answered `/status`. An `expo start` step opens nothing
+  // any more: `dev` performs the open itself, from its own process (llp/0026).
+  it.each([
+    ['a plan that serves from its build step', planLog([PREBUILD, RUN_ANDROID]), true],
+    [
+      'an install before a start step',
+      planLog([{ ...RUN_ANDROID, argv: [...RUN_ANDROID.argv, '--no-bundler'] }, START]),
+      false,
+    ],
+    ['a plan whose only step is the dev server', planLog([START]), false],
+    ['a start step with a platform flag', planLog([START_IOS]), false],
+    ['a log with no plan in it', ['Starting project at /project'], false],
+  ] as const)(`reads %s`, (_name, lines, opens) => {
+    expect(childOpensPlatform(lines)).toBe(opens);
   });
 });
 
