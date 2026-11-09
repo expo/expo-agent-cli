@@ -259,7 +259,8 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
-        runLock: { lock: null },
+        // A real lock on Windows, where a named pipe needs no file system; none under the fake one.
+        runLock: expect.any(Object),
       });
     });
 

@@ -1222,11 +1222,9 @@ describe('@expo/agent-cli dev', () => {
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — F125.
     //
-    // The lock is what every other command finds a dev server by, and it names a port. The install
-    // step serves nothing — that is what `--no-bundler` says — so a lock taken for it would name a
-    // port nothing will listen on for as long as the install takes, and `status`, `smoke` and
-    // `dev:stop` would all be answering about a dev server that does not exist.
-    it('publishes no dev-server lock while the install runs, and one when it serves', async () => {
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the install step
+    // serves nothing (`--no-bundler`), so the run's lock says `building` until the step that serves.
+    it('says building on the lock while the install runs, and serving when it serves', async () => {
       const { projectRoot, env } = await setupInstallAsync();
       // Long enough that the read below lands inside the install by a wide margin, and paid only
       // once: the run is killed as soon as the dev server it is waiting for has published.
@@ -1243,10 +1241,19 @@ describe('@expo/agent-cli dev', () => {
             30_000
           )
         ).toBe(true);
-        expect(await readDevLockAsync(projectRoot)).toBeNull();
+        expect(await readDevLockAsync(projectRoot)).toMatchObject({
+          pid: child.pid,
+          phase: 'building',
+        });
 
-        // And the step that does serve takes it, which is the same lock a plain `dev` run takes.
-        expect(await waitForDevLockAsync(projectRoot, 30_000)).toMatchObject({
+        const deadline = Date.now() + 30_000;
+        let lock = await readDevLockAsync(projectRoot);
+        while (lock?.phase !== 'serving' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          lock = await readDevLockAsync(projectRoot);
+        }
+        expect(lock).toMatchObject({
+          phase: 'serving',
           url: 'http://127.0.0.1:8097',
           port: 8097,
           pid: child.pid,

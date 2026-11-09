@@ -1726,7 +1726,7 @@ describe('@expo/agent-cli status', () => {
     }
 
     // A run with no dev server still holds the lock, and plain `dev:stop` would reach it too.
-    for (const phase of ['finishing'] as const) {
+    for (const phase of ['building', 'finishing'] as const) {
       const releaseRunLock = await holdDevLockAsync(projectRoot, {
         url: 'http://127.0.0.1:1',
         port: 1,

@@ -636,7 +636,13 @@ async function executePlanAsync(
   options: DevOptions,
   acquired: AcquireResult | null
 ): Promise<PlanRun> {
-  const runLock: RunLock = { lock: await takeBuildingLockAsync(projectRoot, plan) };
+  const runLock: RunLock = {
+    lock: await takeBuildingLockAsync(
+      projectRoot,
+      plan,
+      shouldOpenApp(options) ? easOpenPlatform(options) : null
+    ),
+  };
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
   // reaches, and the run starts no later step.
   let signal: NodeJS.Signals | null = null;
@@ -784,6 +790,9 @@ async function runPlanStepsAsync(
 
     let spawnedAt = Date.now();
     let result = await runStep(args);
+    // A signal ends a step with exit 0, so a step before the dev server counts for nothing after
+    // one. The dev-server step goes on: a stop there is its normal end, and its exit work follows.
+    if (!devServerStep) assertNotInterrupted();
 
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — the port carve-out. Checked
     // before the classifier below, because a busy port is the one stop in the Expo CLI's prompt

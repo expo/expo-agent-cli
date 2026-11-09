@@ -19,7 +19,8 @@ export type RunLock = { lock: DevServerLockHandle | null };
  */
 export async function takeBuildingLockAsync(
   projectRoot: string,
-  plan: StartPlan
+  plan: StartPlan,
+  easPlatform: 'ios' | 'android' | null
 ): Promise<DevServerLockHandle | null> {
   const port = plan.devServerPort?.port;
   const serving = plan.steps.findIndex(isDevServerStep);
@@ -32,7 +33,7 @@ export async function takeBuildingLockAsync(
     pid: process.pid,
     startedAt: new Date().toISOString(),
     projectRoot,
-    easPlatform: null,
+    easPlatform,
     easOpenFinished: false,
     phase: 'building',
   });

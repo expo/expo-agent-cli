@@ -801,7 +801,13 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           reject: false,
         });
         expect(stop.exitCode).toBe(0);
-        expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: true, pid, lockHeld: true });
+        // The building run's lock names its EAS platform, so the stop names the session follow-up.
+        expect(JSON.parse(stop.stdout)).toMatchObject({
+          stopped: true,
+          pid,
+          lockHeld: true,
+          easPlatform: 'ios',
+        });
         expect(
           await waitForAsync(() => {
             try {
@@ -814,6 +820,10 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         ).toBe(true);
         // The interrupted build ended the plan: no dev server started after it.
         expect(expoInvocationArgs(projectRoot).filter((args) => args[0] === 'start')).toEqual([]);
+        // It also stopped before the lookup of the build it would have used.
+        expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build:list')).toEqual(
+          []
+        );
       } finally {
         await cleanUpAsync(projectRoot);
       }
