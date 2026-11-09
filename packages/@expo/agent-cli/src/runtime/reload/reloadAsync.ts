@@ -67,7 +67,7 @@ import {
   type RungOneOutcome,
 } from './rungOne';
 import { reloadOverRuntimeAsync } from './runtimeReload';
-import { reloadOnDeviceAsync, openRouteAsync } from './deviceReload';
+import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
 import { printHumanReport, explainReloadFailure } from './report';
 
 /**
@@ -232,17 +232,35 @@ interface Preflight {
   refusal: 'bundle-broken' | 'bundle-timeout' | null;
 }
 
-interface LadderOutcome {
+/** The bundle gate refused, so no mechanism ran and nothing was prepared. */
+interface RefusedLadder {
+  kind: 'refused';
+  attempts: ReloadAttempt[];
+  method: null;
+  device: null;
+  cloudUrl: null;
+  rungOne: null;
+  observedApps: number;
+  mechanismProof: null;
+  actionConnection: RuntimeConnection;
+}
+
+interface ClimbedLadder {
+  kind: 'climbed';
   attempts: ReloadAttempt[];
   method: ReloadResultJson['method'];
   device: NavigateDevice | null;
   cloudUrl: string | null;
-  prepared: PreparedRungOne | null;
+  prepared: PreparedRungOne;
   rungOne: RungOneOutcome | null;
-  bundleMark: BundleSignalMark | null;
+  bundleMark: BundleSignalMark;
   observedApps: number;
   mechanismProof: ReloadResultJson['verifiedBy'];
+  /** The connection the mechanisms act on: the prepared observation's. */
+  actionConnection: RuntimeConnection;
 }
+
+type LadderOutcome = RefusedLadder | ClimbedLadder;
 
 interface Observation {
   connection: Omit<ReloadEvidence, 'bundle'> & { bundle: BundleSignalObservation | null };
@@ -274,7 +292,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // second billed verb for a link the app is already on.
   const landing =
     route != null && ladder.method != null && ladder.cloudUrl == null && observation.observed
-      ? await openRouteAsync(projectRoot, options, preflight.devServerUrl, ladder.device)
+      ? await openRouteAfterReloadAsync(projectRoot, options, preflight.devServerUrl, ladder.device)
       : null;
   const device = landing?.device ?? ladder.device;
 
@@ -439,14 +457,6 @@ async function preflightAsync(
   };
 }
 
-/** The connection the mechanisms act on: the prepared observation's, once rung 1 prepared it. */
-function actionConnectionOf(
-  devServer: RuntimeConnection,
-  prepared: PreparedRungOne | null
-): RuntimeConnection {
-  return prepared ? { ...devServer, ...prepared } : devServer;
-}
-
 async function climbLadderAsync(
   projectRoot: string,
   options: ReloadOptions,
@@ -461,15 +471,15 @@ async function climbLadderAsync(
     .read.length;
   if (refusal != null) {
     return {
+      kind: 'refused',
       attempts: [],
       method: null,
       device: null,
       cloudUrl: null,
-      prepared: null,
       rungOne: null,
-      bundleMark: null,
       observedApps,
       mechanismProof: null,
+      actionConnection: devServer,
     };
   }
 
@@ -481,7 +491,7 @@ async function climbLadderAsync(
     budgetMs: remainingMs(),
     preflight: devServer,
   });
-  const actionConnection = actionConnectionOf(devServer, prepared);
+  const actionConnection: RuntimeConnection = { ...devServer, ...prepared };
   // One inventory for the run: the prepared observation's. Only the whole list's `read` group is
   // this run's: a fresh page, a count or a relaunch id of another app is not.
   const own = (targets: CdpTarget[]) =>
@@ -572,7 +582,7 @@ async function climbLadderAsync(
   // It costs the app's JavaScript state, and `auto` used to refuse rather than spend it — "never
   // force-stop an app the dev server can see" (K2). That rule protected a cheaper alternative,
   // and in neither state above is there one. What replaces the caller's consent is a report the
-  // cost is visible in (`describeRelaunchCost`). A **pinned** `--method dev-server` never climbs:
+  // cost is visible in (`withRelaunchCost`). A **pinned** `--method dev-server` never climbs:
   // a caller who named one rung excluded the others, cost and all.
   const relaunchRung =
     options.method === 'device' || (options.method === 'auto' && relaunchWhy != null);
@@ -604,6 +614,7 @@ async function climbLadderAsync(
   }
 
   return {
+    kind: 'climbed',
     attempts,
     method,
     device,
@@ -613,14 +624,15 @@ async function climbLadderAsync(
     bundleMark,
     observedApps,
     mechanismProof,
+    actionConnection,
   };
 }
 
 async function observeAsync(
   projectRoot: string,
   options: ReloadOptions,
-  { devServer, devServerUrl }: Preflight,
-  { method, prepared, bundleMark, mechanismProof, rungOne, attempts, observedApps }: LadderOutcome,
+  { devServerUrl }: Preflight,
+  ladder: LadderOutcome,
   remainingMs: RemainingMs
 ): Promise<Observation> {
   // The app has to come back with a JavaScript runtime the rest of the CLI can read, so the wait is
@@ -636,19 +648,19 @@ async function observeAsync(
   // id it had before, so on both of those the bundle the dev server finished is the observation that
   // is left (`./bundleSignal.ts`).
   const seen =
-    method != null && prepared != null && bundleMark != null
+    ladder.kind === 'climbed' && ladder.method != null
       ? await observeReloadAsync(devServerUrl, projectRoot, {
-          prepared,
-          mechanismProof,
-          churn: rungOne?.churn ?? CHURN_NOT_ASKED,
-          attempts,
-          bundleMark,
+          prepared: ladder.prepared,
+          mechanismProof: ladder.mechanismProof,
+          churn: ladder.rungOne?.churn ?? CHURN_NOT_ASKED,
+          attempts: ladder.attempts,
+          bundleMark: ladder.bundleMark,
           timeoutMs: remainingMs(),
         })
       : null;
   const unwatched: Unwatched | null = seen?.unwatched ?? null;
   const connection = seen?.evidence ?? {
-    appsConnected: observedApps,
+    appsConnected: ladder.observedApps,
     freshTargets: 0,
     timedOut: false,
     waitedMs: 0,
@@ -677,11 +689,7 @@ async function observeAsync(
   const reconnectBudget = Math.min(APP_RECONNECT_GRACE_MS, remainingMs());
   const appsConnected =
     observed && connection.appsConnected === 0
-      ? await countConnectedAppsAsync(
-          devServerUrl,
-          reconnectBudget,
-          actionConnectionOf(devServer, prepared)
-        )
+      ? await countConnectedAppsAsync(devServerUrl, reconnectBudget, ladder.actionConnection)
       : connection.appsConnected;
 
   if (bundleObservation != null) {
@@ -723,7 +731,7 @@ function exitCodeOf(
 function buildReport({
   options,
   preflight: { devServer, devServerUrl, routeCheck, bundles, bundle, bundlePlatformSource },
-  ladder: { method, rungOne, prepared, attempts },
+  ladder: { method, rungOne, attempts, actionConnection },
   observation: { connection, unwatched, verifiedBy, appsConnected },
   device,
   url,
@@ -780,7 +788,7 @@ function buildReport({
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
-    skippedApps: skippedAppsOf(actionConnectionOf(devServer, prepared).classifiedTargets),
+    skippedApps: skippedAppsOf(actionConnection.classifiedTargets),
     scope: scopeJson(devServer.targetSelection),
     route: options.route,
     routeCheck,
