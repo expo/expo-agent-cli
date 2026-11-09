@@ -134,9 +134,13 @@ export async function runDevServerAsync(
   ).finally(() => {
     running = false;
   });
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `expo run:*` builds
+  // before it serves, so its lock says `building` until /status answers for this project.
+  const builds = args[0] === 'run:ios' || args[0] === 'run:android';
   const lock = holdDevServerLockAsync(projectRoot, args, {
     since: startedAt,
     isRunning: () => running,
+    phase: builds ? 'building' : 'serving',
     easPlatform,
     easOpenFinished,
     held: runLock?.lock,
@@ -171,6 +175,15 @@ export async function runDevServerAsync(
       }
     },
   });
+
+  if (builds) {
+    void lock.then(async (held) => {
+      const stillBuilding = () => running && held?.info.phase === 'building';
+      if (held && (await openWhenAnsweringAsync(held.info.url, projectRoot, stillBuilding))) {
+        if (stillBuilding()) held.update({ ...held.info, phase: 'serving' });
+      }
+    });
+  }
 
   try {
     const result = await run;

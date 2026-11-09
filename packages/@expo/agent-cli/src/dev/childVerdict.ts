@@ -13,8 +13,6 @@
 // parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
 // below. The parent's report goes silently wrong the moment the two drift.
 
-import { appReachedDevice } from './buildEvidence';
-
 /** How many lines of the child's log are searched for its verdict. */
 export const VERDICT_LOG_LINES = 400;
 
@@ -145,29 +143,12 @@ export function isRelayedDeviceCode(code: string | null): code is string {
 }
 
 /**
- * Which half of its plan the detached child is in.
+ * The dev-server step the detached child's plan runs, read from the plan table in its log.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
- * **F125.** The dev-server lock is taken by the wrapper at the *start* of its dev-server step, and
- * for `expo run:ios` or `expo run:android` that step is one subprocess that builds, installs and
- * only then serves. So the lock answers a second in, publishing a port nothing is listening on for
- * the next ten minutes — and the parent reported `The dev server started on http://127.0.0.1:8081
- * (pid 29996)` for a run that had started no dev server at all
- * [observed — wave 29, `evidence/10-dev-detach-android.json`].
- *
- * "The lock is held" and "a dev server is listening" are two facts, and this is the second one, read
- * off the same channel as the child's verdict rather than out of a second one: the child's log holds
- * the plan it printed before it ran anything.
+ * Whether the run still builds is not here: the run's own lock says that
+ * (@ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock).
  */
-export interface DetachedChildPhase {
-  /**
-   * `building` while the plan's dev-server step is still compiling, `serving` otherwise.
-   *
-   * `serving` is the answer whenever nothing says otherwise — a log with no plan in it, and a plan
-   * whose dev-server step is a plain `expo start`. Guessing `building` would put a sentence about a
-   * compiler into the report of a dev server that never had one.
-   */
-  phase: 'building' | 'serving';
+export interface DetachedChildStep {
   /** The plan's dev-server step, as it was printed (`expo run:android`), or null for no plan. */
   step: string | null;
   /**
@@ -228,29 +209,19 @@ export function stepOpensPlatform(step: string): boolean {
 }
 
 /**
- * Read the plan out of the child's log and say which half of it is running.
+ * Read the plan out of the child's log and name its dev-server step.
  *
- * Pure over the lines, like {@link parseDetachedChildVerdict}, and reading the same two formats
- * this CLI owns: the plan table of `src/plan/format.ts`, and the install marker of
- * `./buildEvidence.ts` — the one that already decides whether a `run:*` step got its app onto a
- * device (F121). Together they answer the only question the parent has: is the compiler still
- * running, or is what follows it.
+ * Pure over the lines, like {@link parseDetachedChildVerdict}, and reading the plan table of
+ * `src/plan/format.ts`. The last dev-server step is the one that serves: a plan is a list run in
+ * order. A `run:* --no-bundler` install serves nothing, so it names the step only when no step
+ * serves.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.
  */
-export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedChildPhase {
-  const lines = rawLines.flatMap((line) => line.split('\n'));
-
-  // Two rows matter, and they are not always the same row. The last dev-server step is the one the
-  // lock belongs to: a plan is a list run in order, and only its last step serves. The last
-  // *compiling* step is the one that decides the phase — in a stale plan they are one `expo run:*`
-  // row, but an `*-install` plan (llp/0004 §A current build is not an installed app) puts a
-  // `run:* --no-bundler` install ahead of an `expo start` that serves, and reading only the serving
-  // row there reported `serving` while the install was still compiling a cold cache — the exact
-  // F125 misreport this parser exists to prevent.
+export function parseDetachedChildStep(rawLines: readonly string[]): DetachedChildStep {
   let servingStep: string | null = null;
   let compilingStep: string | null = null;
-  for (const line of lines) {
+  for (const line of rawLines.flatMap((entry) => entry.split('\n'))) {
     const command = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
     if (!command) {
       continue;
@@ -263,16 +234,8 @@ export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedCh
       servingStep = command;
     }
   }
-
-  // The install is what says the compiler finished: it is the next thing `expo run:*` does, and it
-  // is the marker F121 already reads for exactly that reason. After it, what remains of the plan is
-  // a dev server, and a bundler that has not answered yet is about the wait rather than a build.
-  if (compilingStep != null && !appReachedDevice(lines.join('\n'))) {
-    return { phase: 'building', step: compilingStep, opensPlatform: true };
-  }
-
   const step = servingStep ?? compilingStep;
-  return { phase: 'serving', step, opensPlatform: step != null && stepOpensPlatform(step) };
+  return { step, opensPlatform: step != null && stepOpensPlatform(step) };
 }
 
 /**
@@ -302,7 +265,7 @@ const PLAN_PORT_ROW = /^\s*Dev server:\s+port (\d+)(?:, because (\d+) is taken)?
 /**
  * The port the child's plan gave its dev server, and the busy port the plan moved it from.
  *
- * Pure over the lines, like {@link parseDetachedChildPhase}, and read from the same table. The
+ * Pure over the lines, like {@link parseDetachedChildStep}, and read from the same table. The
  * first row is the plan's: the table is printed once, before any step runs.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.

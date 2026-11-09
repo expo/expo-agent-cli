@@ -270,16 +270,9 @@ describe('@expo/agent-cli dev --detach', () => {
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  // F125. The dev-server lock is taken at the *start* of the dev-server step, and for `expo run:*`
-  // that step builds the app before it serves anything — so a plan whose compiler is still running
-  // publishes a port nothing listens on, and this command used to report it as a dev server that
-  // had started [observed — wave 29, `evidence/10-dev-detach-android.json`].
-  //
   // `bare-app`, whose plan is the single step `expo run:ios` (`plan-test.ts`), and a stub that
-  // stays alive without ever logging a port — which is what a compiler looks like from here. The
-  // lock lands on its fallback port `PORT_WATCH_TIMEOUT_MS` in, and that wait is why this test is
-  // the slow one in this file: it is the wait the finding is about. The fallback is the `--port`
-  // passed here, so a Metro of the developer's own on 8081 changes nothing (llp/0004 §Discovery ladder).
+  // stays alive without ever serving, which is what a compiler looks like from here. The run's lock
+  // says `building`, so the detach reports the run at once, with the port the dev server will take.
   it('says the plan is building rather than that a dev server started', async () => {
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
@@ -453,7 +446,8 @@ describe('@expo/agent-cli dev --detach', () => {
 
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--local', '--detach', '--json'],
+          // The run builds first, so only --wait-ready waits for the port it serves on.
+          ['dev', '--ios', '--local', '--detach', '--wait-ready', '--json'],
           { env: servingEnv(projectRoot), reject: false }
         );
 
@@ -517,7 +511,7 @@ describe('@expo/agent-cli dev --detach', () => {
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--local', '--detach', '--json'],
+          ['dev', '--ios', '--local', '--detach', '--wait-ready', '--json'],
           {
             env: {
               ...servingEnv(projectRoot),

@@ -21,10 +21,12 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
   /** Settles when the run's EAS open returns; the lock then answers `easOpenFinished: true`. */
   easOpenFinished?: Promise<unknown>;
   /**
-   * The lock the `dev` run already holds. The step answers on it with phase `serving` instead of
+   * The lock the `dev` run already holds. The step answers on it with its own phase instead of
    * taking a new one, so a port retry leaves no gap. A port of another project releases it.
    */
   held?: DevServerLockHandle | null;
+  /** What the lock answers at the spawn: `building` for a step that compiles before it serves. */
+  phase?: 'building' | 'serving';
 };
 
 /**
@@ -92,7 +94,7 @@ export async function holdDevServerLockAsync(
 /** The lock's answer for a dev server on the `resolved` port, spawned at `options.since`. */
 function lockInfo(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'>,
   { port, source }: ResolvedDevServerPort,
   easOpenFinished: boolean
 ): DevServerLockInfo {
@@ -105,7 +107,7 @@ function lockInfo(
     projectRoot,
     easPlatform: options.easPlatform ?? null,
     easOpenFinished,
-    phase: 'serving',
+    phase: options.phase ?? 'serving',
   };
 }
 
@@ -117,7 +119,7 @@ function lockInfo(
  */
 function republish(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform' | 'phase'>,
   held: DevServerLockHandle,
   resolved: ResolvedDevServerPort | null
 ): DevServerLockHandle | null {
@@ -135,7 +137,7 @@ function republish(
 /** Take the lock for a dev server on the resolved port. */
 async function publishAsync(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform' | 'phase'>,
   resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able

@@ -159,6 +159,45 @@ describe('@expo/agent-cli dev', () => {
       expect(run!.isTTY).toBe(false);
     });
 
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `expo run:*` builds before
+    // it serves, so its lock says `building` until Metro answers /status for this project.
+    it.each(['ios', 'android'] as const)(
+      'says building on the lock while run:%s compiles, and serving once Metro answers',
+      async (platform) => {
+        // Bare native directories, so the plan is the one `run:*` step and nothing waits before it.
+        const projectRoot = await setupAsync('bare-app');
+        const child = spawnAgentCli(projectRoot, ['dev', `--${platform}`, '--local'], {
+          env: {
+            STUB_EXPO_LISTEN: '1',
+            STUB_EXPO_BUILD_DELAY_MS: '4000',
+            STUB_EXPO_DELAY_MS: '30000',
+          },
+        });
+        try {
+          expect(
+            await waitForAsync(
+              () => invocationArgs(projectRoot).some((args) => args[0] === `run:${platform}`),
+              30_000
+            )
+          ).toBe(true);
+          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
+            pid: child.pid,
+            phase: 'building',
+          });
+
+          const deadline = Date.now() + 20_000;
+          let lock = await readDevLockAsync(projectRoot);
+          while (lock?.phase !== 'serving' && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            lock = await readDevLockAsync(projectRoot);
+          }
+          expect(lock).toMatchObject({ pid: child.pid, phase: 'serving' });
+        } finally {
+          await killAsync(child);
+        }
+      }
+    );
+
     it('emits the plan before the first step runs', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
@@ -1263,19 +1302,18 @@ describe('@expo/agent-cli dev', () => {
       }
     });
 
-    // @ref ./childVerdict.ts §parseDetachedChildPhase — the other side of F125. The child's log
-    // holds a `run:android` row for the whole run, and a parser that read it alone would report
-    // `building` about a dev server that is up and answering. What ends the building half is the
-    // install's own marker, which is the same evidence F121 reads.
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the run's lock says
+    // `building` through the install and `serving` once the dev-server step answers.
     it('reports a detached install plan as serving once the app is on the device', async () => {
       const { projectRoot, env } = await setupInstallAsync();
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--android', '--local', '--detach', '--json'],
+        ['dev', '--android', '--local', '--detach', '--wait-ready', '--json'],
         {
           env: {
             ...env,
+            STUB_EXPO_LISTEN: '1',
             // The install prints what it installed and then fails its launch, which is the shape
             // that leaves a `run:android` row above a dev server that is serving.
             STUB_EXPO_RUN_LAUNCH_FAILS: '1',

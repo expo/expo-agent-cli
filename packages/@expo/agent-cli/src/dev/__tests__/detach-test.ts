@@ -136,21 +136,20 @@ describe(resolveDetachFailure, () => {
 // is checked once, at the moment of return, and `expo start --ios` can die a quarter of a second
 // later. This decides which runs are re-checked for a while before the claim is printed.
 describe(needsOpenPlatformGrace, () => {
-  const serving = { phase: 'serving', step: 'expo start --go', opensPlatform: false } as const;
+  const serving = { step: 'expo start --go', opensPlatform: false } as const;
   const openingIos = {
-    phase: 'serving',
     step: 'expo start --go --ios',
     opensPlatform: true,
   } as const;
 
   it(`re-checks a run whose dev-server step also opens the app`, () => {
-    expect(needsOpenPlatformGrace({ ready: true, phase: openingIos })).toBe(true);
+    expect(needsOpenPlatformGrace({ ready: true, step: openingIos })).toBe(true);
   });
 
   // The whole cost of this is paid by the runs it is for: a plan that opens nothing has no late
   // rejection on its way, so it pays nothing.
   it(`does not re-check a run that opens nothing`, () => {
-    expect(needsOpenPlatformGrace({ ready: true, phase: serving })).toBe(false);
+    expect(needsOpenPlatformGrace({ ready: true, step: serving })).toBe(false);
   });
 
   // @ref llp/0021-honest-reports.rfc.md §The rules — the correction of 2026-09-03.
@@ -167,23 +166,12 @@ describe(needsOpenPlatformGrace, () => {
   // What the grace checks for such a run is narrowed rather than the same — see
   // {@link resolveDetachFailure} and the `statusAnswering: null` it is given.
   it(`re-checks a run that claimed no readiness but printed a dev server`, () => {
-    expect(needsOpenPlatformGrace({ ready: null, phase: openingIos })).toBe(true);
+    expect(needsOpenPlatformGrace({ ready: null, step: openingIos })).toBe(true);
   });
 
   // The failure has already been raised by then; a grace period on top of it would only delay it.
   it(`does not re-check a run whose bundler never answered`, () => {
-    expect(needsOpenPlatformGrace({ ready: false, phase: openingIos })).toBe(false);
-  });
-
-  // A plan still compiling has started no dev server, so `--wait-ready` has not returned true and
-  // this question does not arise — pinned so the two conditions cannot be conflated.
-  it(`does not re-check a plan that is still building`, () => {
-    expect(
-      needsOpenPlatformGrace({
-        ready: true,
-        phase: { phase: 'building', step: 'expo run:ios', opensPlatform: true },
-      })
-    ).toBe(false);
+    expect(needsOpenPlatformGrace({ ready: false, step: openingIos })).toBe(false);
   });
 });
 
@@ -345,63 +333,6 @@ describe(notReadyError, () => {
     const message = notReadyError(lock, '/project/.expo/dev.log', readyResult()).message;
 
     expect(message).toContain('smoke --ios');
-  });
-
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  // F125. The lock is taken at the *start* of the dev-server step, and for `expo run:android` that
-  // step is a ten-minute Gradle build — so the port it publishes is not a port anything listens on
-  // yet. Every sentence of the report above was then false at once: nothing was started, nothing
-  // was on 8081, and "the dev server is still running" described a compiler
-  // [observed — wave 29, `evidence/10-dev-detach-android.json`].
-  describe('a plan that is still building', () => {
-    const building = { phase: 'building', step: 'expo run:android', opensPlatform: true } as const;
-
-    it(`does not say a dev server started`, () => {
-      const message = notReadyError(
-        lock,
-        '/project/.expo/dev.log',
-        readyResult(),
-        building
-      ).message;
-
-      expect(message).not.toContain('The dev server started on');
-      expect(message).not.toContain('The dev server is still running');
-    });
-
-    it(`says what the plan is doing, and which step is doing it`, () => {
-      const message = notReadyError(
-        lock,
-        '/project/.expo/dev.log',
-        readyResult(),
-        building
-      ).message;
-
-      expect(message).toContain('expo run:android');
-      expect(message).toContain('still building');
-      // The reason the port is published at all, which is the part nothing else can explain.
-      expect(message).toContain('builds the app, installs it, and only then starts the dev server');
-    });
-
-    // The split-stack note is about two listeners on one port, and nothing is listening here. On
-    // this path it would send the reader to `lsof` for a socket that does not exist yet.
-    it(`leaves out the note about two listeners on one port`, () => {
-      const message = notReadyError(
-        lock,
-        '/project/.expo/dev.log',
-        readyResult(),
-        building
-      ).message;
-
-      expect(message).not.toContain('lsof -nP');
-    });
-
-    // `smoke` cannot measure a bundler that has not started. What the reader can do is watch the
-    // build, which is the one thing that is actually happening.
-    it(`recovers into the log the build is being written to`, () => {
-      expect(
-        notReadyError(lock, '/project/.expo/dev.log', readyResult(), building).suggestedCommand
-      ).toBe('npx @expo/agent-cli dev:logs');
-    });
   });
 });
 

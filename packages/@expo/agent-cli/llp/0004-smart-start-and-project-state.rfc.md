@@ -467,15 +467,17 @@ reads to the close. A refused connection or a timeout is "no dev server".
 
 Phase. The lock says what its run does now, so a reader reads it and does not infer it:
 
-| `phase`     | The run                                                                      | `url` and `port`                      | `startedAt`                                               |
-| ----------- | ---------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------- |
-| `building`  | runs a step before its dev-server step (`eas build`, an install, a prebuild) | the planned port; nothing listens yet | the start of the run                                      |
-| `serving`   | runs its dev-server step; `/status` says whether Metro answers               | as below                              | the spawn of the dev-server step, renewed at a port retry |
-| `finishing` | its dev-server step exited, and its EAS open has not returned                | the last port; nothing listens        | unchanged                                                 |
+| `phase`     | The run                                                                                                                                                               | `url` and `port`                      | `startedAt`                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| `building`  | runs a step before its dev-server step (`eas build`, an install, a prebuild), or an `expo run:*` dev-server step whose `/status` does not answer for this project yet | the planned port; nothing listens yet | the start of the run, or the spawn of the `expo run:*` step |
+| `serving`   | runs its dev-server step: an `expo start` from its spawn, an `expo run:*` once `/status` answers; `/status` says whether Metro answers                                | as below                              | the spawn of the dev-server step, renewed at a port retry   |
+| `finishing` | its dev-server step exited, and its EAS open has not returned                                                                                                         | the last port; nothing listens        | unchanged                                                   |
 
-`start` always answers `serving`. Only a run whose EAS open still runs when Metro exits
-has `finishing`, and it releases the lock when that open returns. Any other run releases
-the lock when its dev-server step exits, also before the cleanup of a session it started,
+`start` always answers `serving`. `expo run:*` builds, starts Metro, and then installs
+and launches the app (`@expo/cli` 58), so `/status` is the first sign that its build ended,
+in every output mode. Only a run whose EAS open still runs when Metro exits has
+`finishing`, and it releases the lock when that open returns. Any other run releases the
+lock when its dev-server step exits, also before the cleanup of a session it started,
 which needs no lock. A run whose open started makes no busy-port retry. A busy-port retry updates
 the same lock, so the lock does not go away between the two spawns. A reader treats a
 line without `phase` as `serving`. A lock answers `building` only for a plan with a
@@ -483,16 +485,16 @@ dev-server step: a plan that serves nothing takes no lock.
 
 What each reader does with the phase:
 
-| Reader                           | `building`                                                  | `serving`                                                            | `finishing`                                                                          |
-| -------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `dev:stop`                       | signals the pid; the run stops before its next step         | signals the pid, waits for it and the lock to go, or for `finishing` | no signal; reports the dev server stopped, the pid alive, and `dev:stop --eas` first |
-| `dev --detach` parent and re-run | waits; at the deadline exits 22 `DEV_DETACH_STILL_BUILDING` | as §Daemonization                                                    | refuses: the run still binds a session                                               |
-| foreground `dev`                 | stops with `DEV_SERVER_RUNNING`, worded for the phase       | same                                                                 | same                                                                                 |
-| `status`                         | next step `dev:logs`                                        | as today                                                             | next step `dev:stop --eas`                                                           |
+| Reader                           | `building`                                                                                                                                | `serving`                                                            | `finishing`                                                                          |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `dev:stop`                       | signals the pid; the run stops before its next step                                                                                       | signals the pid, waits for it and the lock to go, or for `finishing` | no signal; reports the dev server stopped, the pid alive, and `dev:stop --eas` first |
+| `dev --detach` parent and re-run | reports the run at once, exit 0, `phase: "building"`; with `--wait-ready` waits, and at the deadline exits 22 `DEV_DETACH_STILL_BUILDING` | as §Daemonization                                                    | refuses: the run still binds a session                                               |
+| foreground `dev`                 | stops with `DEV_SERVER_RUNNING`, worded for the phase                                                                                     | same                                                                 | same                                                                                 |
+| `status`                         | next step `dev:logs`                                                                                                                      | as today                                                             | next step `dev:stop --eas`                                                           |
 
 Tests: lock-test (`phase` on the wire, a line without it), stopAsync-test and
-dev-eas-test (each `dev:stop` column), dev-eas-test and detachAsync-test (the detached
-column).
+dev-eas-test (each `dev:stop` column), dev-eas-test and dev-detach-test (the detached
+column), dev-test (`building` through an `expo run:*` build on iOS and Android).
 
 Acquisition. `EADDRINUSE` on posix means either a live owner or an orphaned socket file.
 Only a connection tells them apart. An answer means another `@expo/agent-cli` owns the
@@ -583,17 +585,11 @@ fenced as untrusted per [[0008-guardrails]]. A dev server started attached has n
 all, and the command says that.
 
 A detached run may not say "the dev server started on `<url>`" while the plan is still
-compiling. Two sources say so. The lock says `building` while a step before the
-dev-server step runs. The child's own log covers a dev-server step that is
-`expo run:*`, which compiles while the lock says `serving`: `building` names the step,
-`serving` means started. Whether that build has finished is the install marker below. `serving` is the
-answer whenever nothing says otherwise, such as a plan whose dev-server step is a plain
-`expo start`.
-
-A `--wait-ready` failure of a building plan recovers into
-`npx @expo/agent-cli dev:logs`. The exit code stays 1, because the wait really did give
-up. `dev --detach --json` carries `phase`. See [[0021-honest-reports]] for the window
-after a `--wait-ready` claim when the step also opens the app.
+compiling. The run's lock is the one source: `building` while a step before the
+dev-server step runs, and through an `expo run:*` dev-server step until `/status`
+answers. `dev --detach --json` carries that `phase`. The child's log names only the
+dev-server step, which decides the window after a claim when the step also opens the
+app ([[0021-honest-reports]]).
 
 The child prints `Detached dev run, pid <n>.` as line 1 of its log, before anything
 else. Only line 1 is read, so later output cannot fake it. A re-run reads it to tell
@@ -608,14 +604,17 @@ A build is recorded when the app reaches the device, whatever the launch then do
 a build that died before the install, and anything in `inherit` output mode, where
 nothing is captured.
 
-A plan that builds before it serves, such as `eas build` then `expo start`, can build
-for longer than the parent waits. The parent waits while its child's lock says
-`building`. At the deadline, with the child alive and still `building`, it exits 22
-`DEV_DETACH_STILL_BUILDING` with the pid, the log file and the same command as the next
-step. It never says that the dev server did not start. A re-run of the same command
-beside a `building` lock spawns nothing: it follows that run with the same wait and the
-same 22, and reports the server when the lock says `serving`. A re-run beside a
-`finishing` lock spawns nothing and refuses with `dev:stop --eas`. The budget is 120 s
+A plan that builds, such as `eas build` then `expo start` or a cold `expo run:*`, builds
+for minutes. Without `--wait-ready`, the parent reports its child as soon as the lock
+says `building`: exit 0, `phase: "building"`, the pid and the URL the dev server will
+take. With `--wait-ready`, it waits while the lock says `building`. At the deadline,
+with the child alive and still `building`, it exits 22 `DEV_DETACH_STILL_BUILDING` with
+the pid, the log file and the same command as the next step. It never says that the dev
+server did not start. A re-run of the same command beside a `building` lock spawns
+nothing: without `--wait-ready` it reports that run, and with it it follows that run with
+the same wait and the same 22. A followed run that ends in its build is reported as not
+started, with `dev:logs`, and no second child starts. A re-run beside a `finishing` lock
+spawns nothing and refuses with `dev:stop --eas`. The budget is 120 s
 (`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
 
 A run stops on SIGINT or SIGTERM between steps. The step that was running gets the
@@ -624,12 +623,14 @@ signal and ends, and the run starts no later step and exits 130 or 143. So a pla
 build. An `eas build` that was already submitted keeps running on EAS; `eas build:cancel`
 ends it. On Windows `dev:stop` ends the process tree at once, with the same result.
 
-Tests: dev-eas-test (the 22, the follow by a re-run, the stop of a building run).
+Tests: dev-eas-test (the report, the 22, the follow by a re-run, a followed build that
+fails, the stop of a building run), dev-detach-test (a building `expo run:*` plan).
 
 Exit codes. `dev --detach` exits 0 when a dev server is up, whether it started one or
-found one. Exit 1 when the child never published a lock, and 1 when `--wait-ready` gave
-up. In that last case the server is still running, which the message says, unless the
-plan is still compiling. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
+found one, and for a run that builds, without `--wait-ready`. Exit 1 when the child never
+published a lock, and 1 when `--wait-ready` gave up on a serving dev server, which is
+still running, as the message says. Exit 22 (`DEV_DETACH_STILL_BUILDING`) when
+`--wait-ready` ends while the run builds. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
 runs out before the session is bound ([[0035-one-device-per-worktree]] §Preserved sessions). 22 means: run
 the same command again. The command has no `--port` that the caller did not type: a
 re-run finds the run through its log and the lock, and the lock names its port.

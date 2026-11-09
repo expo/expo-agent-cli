@@ -185,7 +185,7 @@ Every call to `assertWithOptionsArgs` states `positionalArgs: 'none' | 'own'`, w
 | `7`                                          | `Ask the user <…>`, under `Needs a human <scenario>` | `error.needsHuman`       |
 | `20`, `22`                                   | the report's `Suggested next:` list                  | the report's `followups` |
 
-`logCmdError` prints the needs-human block instead of `Try:`. An outcome failure is not an error: it prints its report and calls `exitWithCodeAsync`. A `20`-band failure a command _raises_ still carries a `Try:` (`stillBuildingError`).
+`logCmdError` prints the needs-human block instead of `Try:`. An outcome failure is not an error: it prints its report and calls `exitWithCodeAsync`. A `20`-band failure a command _raises_ still carries a `Try:` (`detachFailureError`).
 
 ## Suggestions are pasted, so they have to be runnable
 

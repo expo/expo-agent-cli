@@ -761,7 +761,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
   it.skipIf(process.platform === 'win32')(
-    'reports a detached run that still builds on EAS, and a plain dev:stop stops it before Metro',
+    'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro',
     async () => {
       const projectRoot = await setupAsync();
       await writeSchemeAsync(projectRoot, 'devclient');
@@ -777,21 +777,35 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           { env, reject: false }
         );
 
-        expect(result.exitCode).toBe(22);
-        const { error } = JSON.parse(result.stdout);
-        expect(error.code).toBe('DEV_DETACH_STILL_BUILDING');
-        expect(error.message).not.toContain('did not start');
-        const pid: number = error.data.pid;
+        // Reported at once, as a run that builds: no wait for a dev server that is minutes away.
+        expect(result.exitCode).toBe(0);
+        const report = JSON.parse(result.stdout);
+        expect(report).toMatchObject({ phase: 'building', alreadyRunning: false, ready: null });
+        const pid: number = report.pid;
         expect(process.kill(pid, 0)).toBe(true);
 
-        // A second detach follows the building run and spawns no second child.
+        // A second detach reports the same run and spawns no second child.
         const again = await executeAgentCliAsync(
           projectRoot,
           ['dev', '--ios', '--eas', '--detach', '--json'],
           { env, reject: false }
         );
-        expect(again.exitCode).toBe(22);
-        expect(JSON.parse(again.stdout).error.data.pid).toBe(pid);
+        expect(again.exitCode).toBe(0);
+        expect(JSON.parse(again.stdout)).toMatchObject({
+          phase: 'building',
+          alreadyRunning: true,
+          pid,
+        });
+
+        // --wait-ready follows the build, and its budget ends while the build runs: exit 22.
+        const waited = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+          { env, reject: false }
+        );
+        expect(waited.exitCode).toBe(22);
+        const { error } = JSON.parse(waited.stdout);
+        expect(error).toMatchObject({ code: 'DEV_DETACH_STILL_BUILDING', data: { pid } });
         expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
           1
         );
@@ -850,11 +864,11 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           ['dev', '--ios', '--eas', '--detach', '--json'],
           { env, reject: false }
         );
-        expect(JSON.parse(first.stdout).error.code).toBe('DEV_DETACH_STILL_BUILDING');
+        expect(JSON.parse(first.stdout).phase).toBe('building');
 
         const again = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
+          ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
           { env: { ...env, AGENT_CLI_DETACH_TIMEOUT_MS: '15000' }, reject: false }
         );
 
