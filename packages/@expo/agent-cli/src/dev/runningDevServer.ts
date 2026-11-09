@@ -10,6 +10,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
+import { RUN_PHASE } from './runPhase';
 
 /** This project's live dev-server lock, and what its run does. */
 export type RunningDevServer = { lock: DevServerLockInfo; phase: RunningDevServerPhase };
@@ -46,11 +47,8 @@ export async function devServerRunningStopAsync(
 
 /** One sentence for the plan's `Why` list, when the run stops instead of starting a second server. */
 export function devServerRunningReason({ lock, phase }: RunningDevServer): string {
-  if (phase === 'finishing') {
-    return `This project's last dev run (pid ${lock.pid}) is finishing its EAS session start; the run stops instead of starting a second session.`;
-  }
-  const state = phase === 'serving' ? 'already running' : 'starting';
-  return `This project's dev server is ${state} on port ${lock.port} (pid ${lock.pid}); the run stops instead of starting a second one.`;
+  const row = RUN_PHASE[phase];
+  return `${row.state(lock)}; the run stops instead of starting a second ${row.second}.`;
 }
 
 /**
@@ -68,32 +66,16 @@ export function devServerRunningError(
   // A run whose device is on EAS reads the running server on the session.
   const smoke = `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`;
   const navigate = `${PROGRAM_PREFIX} navigate /${eas ? ' --eas' : ''}`;
-  const stopAndRetry = `or stop it with "${PROGRAM_PREFIX} dev:stop" and run this command again.`;
-  const lines =
-    phase === 'finishing'
-      ? [
-          `This project's last dev run (pid ${pid}) is finishing its EAS session start, so nothing was started.`,
-          `Why: its dev server exited, and it binds the session its start returns to this worktree. A second run now would start a second session.`,
-          `How: run "${PROGRAM_PREFIX} dev:stop --eas", which waits for that start and stops the session, then run this command again. Or wait until "${PROGRAM_PREFIX} status" shows no dev run.`,
-        ]
-      : phase === 'serving'
-        ? [
-            `This project's dev server is already running on port ${port} (pid ${pid}), so nothing was started.`,
-            `Why: one project has one dev server. A second one could not hold this project's lock, so "${PROGRAM_PREFIX} status" and "${PROGRAM_PREFIX} dev:stop" could not see it.`,
-            `How: use the running server ("${smoke}" checks its bundle and its app, "${navigate}" opens a route), ${stopAndRetry}`,
-          ]
-        : [
-            `This project's dev server is starting on port ${port} (pid ${pid}), so nothing was started.`,
-            `Why: its lock is published, and /status on port ${port} does not answer for this project yet: a run:* build that has not reached Metro, a Metro that is not up, or another project's Metro on that port, which this project's server moves off.`,
-            `How: wait for it ("${PROGRAM_PREFIX} status" says when it answers), ${stopAndRetry}`,
-          ];
-  const error = new CommandError('DEV_SERVER_RUNNING', lines.join('\n'));
-  error.suggestedCommand =
-    phase === 'finishing'
-      ? `${PROGRAM_PREFIX} dev:stop --eas`
-      : phase === 'serving'
-        ? smoke
-        : `${PROGRAM_PREFIX} status`;
+  const row = RUN_PHASE[phase];
+  const error = new CommandError(
+    'DEV_SERVER_RUNNING',
+    [
+      `${row.state(lock)}, so nothing was started.`,
+      `Why: ${row.why(lock)}`,
+      `How: ${row.how({ smoke, navigate })}`,
+    ].join('\n')
+  );
+  error.suggestedCommand = row.command(smoke);
   error.exitCode = EXIT_OUTCOME_FAILED;
   error.data = { port, pid, phase };
   return error;

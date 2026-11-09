@@ -105,28 +105,45 @@ describe(devServerRunningError, () => {
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios --eas');
     expect(error.message).toContain('"npx @expo/agent-cli navigate / --eas" opens a route');
   });
+});
 
-  it(`says what runs, and on which port`, () => {
-    expect(devServerRunningError(serving, 'ios').message).toMatch(
-      /^This project's dev server is already running on port 8081 \(pid 4242\), so nothing was started\.\nWhy: .*\nHow: /
-    );
-    expect(devServerRunningError(starting, 'ios').message).toMatch(
-      /^This project's dev server is starting on port 8082 \(pid 4242\), so nothing was started\./
-    );
-  });
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — one row per phase, read by
+// the refusal, the plan's reason, its follow-up and `status` alike.
+describe('the phase table', () => {
+  it.each([
+    [
+      'serving',
+      "This project's dev server is already running on port 8081 (pid 4242)",
+      'one',
+      'npx @expo/agent-cli smoke --ios',
+    ],
+    [
+      'starting',
+      "This project's dev server is starting on port 8081 (pid 4242)",
+      'one',
+      'npx @expo/agent-cli status',
+    ],
+    [
+      'finishing',
+      "This project's last dev run (pid 4242) is finishing its EAS session start",
+      'session',
+      'npx @expo/agent-cli dev:stop --eas',
+    ],
+  ] as const)(`names a %s run, and suggests what it needs`, (phase, state, second, command) => {
+    const running: RunningDevServer = { lock: lockOn(8081), phase };
+    const error = devServerRunningError(running, 'ios');
 
-  it.each([serving, starting])(`never suggests the dev command that just failed`, (running) => {
-    expect(devServerRunningError(running, 'ios').message).not.toContain('dev --');
+    expect(error.message).toMatch(
+      new RegExp(`^${escape(state)}, so nothing was started\\.\\nWhy: .*\\nHow: `)
+    );
+    expect(error.message).not.toContain('dev --');
+    expect(error.suggestedCommand).toBe(command);
+    expect(devServerRunningReason(running)).toBe(
+      `${state}; the run stops instead of starting a second ${second}.`
+    );
   });
 });
 
-describe(devServerRunningReason, () => {
-  it(`names the port and the pid`, () => {
-    expect(devServerRunningReason({ lock: lockOn(8081), phase: 'serving' })).toBe(
-      "This project's dev server is already running on port 8081 (pid 4242); the run stops instead of starting a second one."
-    );
-    expect(devServerRunningReason({ lock: lockOn(8081), phase: 'starting' })).toBe(
-      "This project's dev server is starting on port 8081 (pid 4242); the run stops instead of starting a second one."
-    );
-  });
-});
+function escape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

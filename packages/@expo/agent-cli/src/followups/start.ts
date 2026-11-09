@@ -12,6 +12,7 @@ import type { ToolchainStatus } from '../toolchain/types';
 import { capFollowUps, type FollowUp } from './types';
 import { rerunDevCommand } from '../plan/rerun';
 import { withoutDeviceArgs } from '../dev/deviceOption';
+import { RUN_PHASE } from '../dev/runPhase';
 import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo start` listens when the command line names no port. */
@@ -326,24 +327,13 @@ export function buildStartPlanFollowUps(
       requestedPlatform === 'ios' || requestedPlatform === 'android'
         ? requestedPlatform
         : defaultSmokePlatform(state.nativeDirs);
+    const row = RUN_PHASE[phase];
     return [
-      phase === 'finishing'
-        ? {
-            id: 'dev-server-running',
-            command: `${PROGRAM_PREFIX} dev:stop --eas`,
-            why: `This project's last dev run is finishing its EAS session start, so the plan has no steps. This waits for that start and stops the session.`,
-          }
-        : phase === 'serving'
-          ? {
-              id: 'dev-server-running',
-              command: `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`,
-              why: `This project's dev server is already running on port ${port}, so the plan has no steps. This checks its bundle and its app; "${PROGRAM_PREFIX} dev:stop" stops it.`,
-            }
-          : {
-              id: 'dev-server-running',
-              command: `${PROGRAM_PREFIX} status`,
-              why: `This project's dev server is starting on port ${port}, so the plan has no steps. This says when it answers; "${PROGRAM_PREFIX} dev:stop" stops it.`,
-            },
+      {
+        id: 'dev-server-running',
+        command: row.command(`${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`),
+        why: `${row.state({ port })}, so the plan has no steps. ${row.does}`,
+      },
     ];
   }
 

@@ -5,6 +5,7 @@
 import type { DevServerLockInfo } from '../devLock';
 import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
+import { RUN_PHASE } from '../dev/runPhase';
 import { deviceCommand } from '../deviceBinding/errors';
 import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevicePlatform } from '../deviceBinding/types';
@@ -255,13 +256,9 @@ function unservedRunNext(
   run: DevServerLockInfo,
   devNext: NextActionStatus
 ): NextActionStatus | null {
-  if (run.phase === 'finishing')
-    return {
-      ...devNext,
-      command: `${PROGRAM_PREFIX} dev:stop --eas`,
-      why: `The last dev run (pid ${run.pid}) has no dev server any more and is finishing its EAS Simulator session start. This waits for that start and stops the session; the run also exits by itself, and a later dev --eas reuses the session.`,
-    };
-  return null;
+  if (run.phase !== 'finishing') return null;
+  const row = RUN_PHASE[run.phase];
+  return { ...devNext, command: row.command(''), why: `${row.state(run)}. ${row.does}` };
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */
