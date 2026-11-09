@@ -154,23 +154,6 @@ export function isRelayedDeviceCode(code: string | null): code is string {
 const PLAN_STEP_ROW = /^\s*\d+\.\s+((?:expo|eas)(?:\s\S+)*?)(?:\s{2,}|\s*$)/;
 
 /**
- * Whether a dev-server step also opens the app on a device.
- *
- * Pure, and exported for the test table, because it is the whole of the F140 decision: which runs
- * have work outstanding that can kill the dev server after it has answered `/status`.
- *
- * `run:ios` and `run:android` do — launching the app is the last thing they do, and their launch
- * still runs through the AppleScript a Mac without the Automation grant refuses. An `expo start`
- * step never does any more: `dev` keeps the platform flags away from it and opens the app itself,
- * from its own process, where a refusal cannot take the dev server down (llp/0026).
- *
- * @param step the step as the plan table printed it, e.g. `expo run:ios`.
- */
-export function stepOpensPlatform(step: string): boolean {
-  return buildsBeforeServing(step.trim().split(/\s+/)[1]);
-}
-
-/**
  * Whether the detached child's dev-server step also opens the app, read from the plan table in
  * its log (`src/plan/format.ts`).
  *
@@ -180,29 +163,28 @@ export function stepOpensPlatform(step: string): boolean {
  * after `/status` first answered [observed — 2026-08-28, `friction/run9/livecheck`]. So a run
  * whose step opens the app has risky work outstanding when the bundler answers.
  *
- * The last step that serves is the dev-server step: a plan is a list run in order. A
+ * `run:ios` and `run:android` open it: launching the app is the last thing they do. An
+ * `expo start` step never does: `dev` keeps the platform flags away from it and opens the app
+ * itself, from its own process (llp/0026). The last step that serves is the dev-server step; a
  * `run:* --no-bundler` install serves nothing, so it counts only when no step serves.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.
  */
 export function childOpensPlatform(rawLines: readonly string[]): boolean {
-  let servingStep: string | null = null;
-  let compilingStep: string | null = null;
+  let servingCommand: string | undefined;
+  let sawBuild = false;
   for (const line of rawLines.flatMap((entry) => entry.split('\n'))) {
     const row = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
     if (!row) {
       continue;
     }
     const command = row.split(/\s+/)[1];
-    if (buildsBeforeServing(command)) {
-      compilingStep = row;
-    }
+    sawBuild ||= buildsBeforeServing(command);
     if ((command === 'start' || buildsBeforeServing(command)) && !row.includes('--no-bundler')) {
-      servingStep = row;
+      servingCommand = command;
     }
   }
-  const step = servingStep ?? compilingStep;
-  return step != null && stepOpensPlatform(step);
+  return servingCommand != null ? buildsBeforeServing(servingCommand) : sawBuild;
 }
 
 /**

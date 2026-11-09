@@ -83,7 +83,6 @@ export async function runDevServerAsync(
     easPlatform = null,
     easOpenFinished,
     runLock,
-    phase = 'serving',
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
@@ -94,18 +93,20 @@ export async function runDevServerAsync(
     /**
      * The lock of the `dev` run this step belongs to. The step answers on it, or takes it into
      * it, and leaves the release to the run (llp/0004 §Dev-server lock). Without it, the step
-     * takes its own lock and releases it when the dev server exits.
+     * takes its own lock, says `serving`, and releases the lock when the dev server exits.
      */
     runLock?: {
-      handle: DevServerLockHandle | null;
-      keep(handle: DevServerLockHandle | null): void;
-      serve(): void;
+      lock: {
+        handle: DevServerLockHandle | null;
+        keep(handle: DevServerLockHandle | null): void;
+        serve(): void;
+      };
+      /**
+       * What the lock says at the spawn: `building` for a step that compiles before it serves.
+       * The run's lock then says `serving` once /status answers for this project.
+       */
+      phase: 'building' | 'serving';
     };
-    /**
-     * What the lock says at the spawn: `building` for a step that compiles before it serves. The
-     * run's lock then says `serving` once /status answers. Only `dev` passes it, with its lock.
-     */
-    phase?: 'building' | 'serving';
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -147,10 +148,10 @@ export async function runDevServerAsync(
   const lock = holdDevServerLockAsync(projectRoot, args, {
     since: startedAt,
     isRunning: () => running,
-    phase,
+    phase: runLock?.phase ?? 'serving',
     easPlatform,
     easOpenFinished,
-    held: runLock?.handle,
+    held: runLock?.lock.handle,
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(
@@ -183,15 +184,16 @@ export async function runDevServerAsync(
     },
   });
 
-  // The run holds the step's lock as soon as it exists, so it can change the phase during the step.
-  void lock.then((held) => runLock?.keep(held));
+  // The run holds the step's lock once `holdDevServerLockAsync` resolves, at the end of its port
+  // watch, so `serve()` below and the run's EAS exit work act on that lock.
+  void lock.then((held) => runLock?.lock.keep(held));
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a step that builds says
   // `serving` once /status answers for this project.
-  if (phase === 'building' && runLock) {
+  if (runLock?.phase === 'building') {
     void lock.then(async (held) => {
       const stillBuilding = () => running && held?.info.phase === 'building';
       if (held && (await openWhenAnsweringAsync(held.info.url, projectRoot, stillBuilding))) {
-        if (stillBuilding()) runLock.serve();
+        if (stillBuilding()) runLock.lock.serve();
       }
     });
   }
@@ -205,9 +207,9 @@ export async function runDevServerAsync(
     return { ...result, port };
   } finally {
     clearTimeout(timer);
+    // The run's lock already has it: the `keep` above ran before this await on the same promise.
     const held = await lock;
-    if (runLock) runLock.keep(held);
-    else held?.release();
+    if (!runLock) held?.release();
   }
 }
 

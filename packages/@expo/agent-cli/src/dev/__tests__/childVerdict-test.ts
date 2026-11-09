@@ -17,7 +17,6 @@ import {
   parseDetachedChildPid,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
-  stepOpensPlatform,
 } from '../childVerdict';
 
 vi.mock('../../log');
@@ -194,6 +193,13 @@ describe(childOpensPlatform, () => {
     ],
     ['a plan whose only step is the dev server', planLog([START]), false],
     ['a start step with a platform flag', planLog([START_IOS]), false],
+    ['a run:ios step', planLog([{ argv: ['expo', 'run:ios'], reason: 'Builds it.' }]), true],
+    [
+      'a start step with the short platform flag',
+      planLog([{ argv: ['expo', 'start', '--go', '-i'], reason: 'Serves it.' }]),
+      false,
+    ],
+    ['a plan that only prebuilds', planLog([PREBUILD]), false],
     ['a log with no plan in it', ['Starting project at /project'], false],
   ] as const)(`reads %s`, (_name, lines, opens) => {
     expect(childOpensPlatform(lines)).toBe(opens);
@@ -258,24 +264,5 @@ describe(parseDetachedChildPort, () => {
   it(`should answer null for a log with no dev-server port`, () => {
     expect(parseDetachedChildPort(portLog(undefined))).toBeNull();
     expect(parseDetachedChildPort([])).toBeNull();
-  });
-});
-
-describe(stepOpensPlatform, () => {
-  it.each([
-    ['expo start --go --ios --port 9201', false],
-    ['expo start --android', false],
-    ['expo start --go -i', false],
-    ['expo start --web', false],
-    // Always: `run:*` builds, installs and launches, and the launch drives the same device tools.
-    ['expo run:ios', true],
-    ['expo run:android --device', true],
-    ['expo start', false],
-    ['expo start --dev-client', false],
-    ['expo start --go --tunnel', false],
-    // Not a dev-server step at all, so it holds no lock this question is about.
-    ['expo prebuild --platform ios', false],
-  ])('%s → %s', (step, opens) => {
-    expect(stepOpensPlatform(step)).toBe(opens);
   });
 });

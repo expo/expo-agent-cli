@@ -254,20 +254,17 @@ export async function devDetachAsync(
   let running = await readDevServerLockAsync(projectRoot);
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
   // followed, not given a second child.
-  if (running?.phase === 'building' && !options.waitReady && isProcessAlive(running.pid)) {
-    return await reportBuildingRunAsync(running, true);
-  }
   if (running?.phase === 'building') {
     const followed = running;
-    running = await waitForLockAsync(projectRoot, {
-      timeoutMs: options.detachTimeoutMs,
-      hasExited: () => !isProcessAlive(followed.pid),
-    });
-    if (running?.phase === 'building' && isProcessAlive(running.pid)) {
-      throw stillBuildingOnLockError(running, options, Date.now() - startedAt);
-    }
+    const wait = await waitPastBuildingAsync(
+      projectRoot,
+      options,
+      startedAt,
+      () => !isProcessAlive(followed.pid)
+    );
+    if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, true);
     // A followed run that ended in its build spawns nothing: its log says why.
-    if (!running || running.phase === 'building') {
+    if (wait.kind === 'ended') {
       const relayed = relayedDeviceError(await waitForChildVerdictAsync(projectRoot));
       if (relayed) throw relayed;
       throw notStartedError(
@@ -279,6 +276,7 @@ export async function devDetachAsync(
         options.platform
       );
     }
+    running = wait.lock;
   }
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
   // EAS session start has no server to report, and a second child would start a second session.
@@ -430,18 +428,10 @@ export async function devDetachAsync(
   });
   const hasExited = () => childExit != null;
 
-  let lock = await waitForLockAsync(projectRoot, {
-    timeoutMs: options.detachTimeoutMs,
-    hasExited,
-    acceptBuilding: !options.waitReady,
-  });
-  // Only --wait-ready waits for the dev server of a run that builds.
-  if (lock?.phase === 'building' && !hasExited()) {
-    if (options.waitReady) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
-    return await reportBuildingRunAsync(lock, false);
-  }
+  const wait = await waitPastBuildingAsync(projectRoot, options, startedAt, hasExited);
+  if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, false);
   // A run that ended in its build holds no lock any more, and its log says why.
-  if (lock?.phase === 'building') lock = null;
+  let lock = wait.kind === 'up' ? wait.lock : null;
   if (!lock) {
     // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
     const relayed = relayedDeviceError(
@@ -1405,6 +1395,37 @@ function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandEr
   );
   error.suggestedCommand = command;
   return error;
+}
+
+/** What a wait for this project's lock came to, for a run that may still build. */
+type BuildingWait =
+  | { kind: 'building'; lock: DevServerLockInfo }
+  | { kind: 'up'; lock: DevServerLockInfo }
+  | { kind: 'ended' };
+
+/**
+ * Wait for this project's lock, past a run that builds.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — without --wait-ready a run
+ * that builds is reported at once (`building`). With it the wait goes on, and a run still building
+ * at the deadline is exit 22. A run that ended in its build, or no lock, is `ended`.
+ */
+async function waitPastBuildingAsync(
+  projectRoot: string,
+  options: DevOptions,
+  startedAt: number,
+  hasExited: () => boolean
+): Promise<BuildingWait> {
+  const lock = await waitForLockAsync(projectRoot, {
+    timeoutMs: options.detachTimeoutMs,
+    hasExited,
+    acceptBuilding: !options.waitReady,
+  });
+  if (!lock) return { kind: 'ended' };
+  if (lock.phase !== 'building') return { kind: 'up', lock };
+  if (hasExited() || !isProcessAlive(lock.pid)) return { kind: 'ended' };
+  if (options.waitReady) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
+  return { kind: 'building', lock };
 }
 
 /**
