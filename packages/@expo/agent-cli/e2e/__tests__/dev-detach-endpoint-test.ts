@@ -1,6 +1,5 @@
 // @ref llp/0036-detached-run-ownership.rfc.md
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { detachedBarrierFixture } from '../detachedBarrierFixture';
@@ -10,7 +9,9 @@ it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
   'another TMPDIR cannot discard a live %s owner, but can recover its interrupted run',
   async (platform) => {
     const f = await detachedBarrierFixture(platform);
-    const readerTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'reader-'));
+    // A nested macOS TMPDIR can make the dev-lock fallback exceed the Unix socket limit.
+    // Keep this POSIX-only fixture short while still giving the reader a distinct TMPDIR.
+    const readerTmp = fs.mkdtempSync('/tmp/agent-cli-reader-');
     const env = { TMPDIR: readerTmp };
     try {
       const first = f.start();
@@ -44,8 +45,13 @@ it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
       const restarted = await f.start(env).result;
       expect(restarted.exitCode, restarted.all).toBe(0);
     } finally {
-      await f.cleanup();
-      fs.rmSync(readerTmp, { recursive: true, force: true });
+      try {
+        // The restarted server published its dev lock under the reader's TMPDIR too.
+        await executeAgentCliAsync(f.root, ['dev:stop', '--json'], { env, reject: false });
+      } finally {
+        await f.cleanup();
+        fs.rmSync(readerTmp, { recursive: true, force: true });
+      }
     }
   }
 );
