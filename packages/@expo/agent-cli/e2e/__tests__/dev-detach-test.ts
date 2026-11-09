@@ -535,6 +535,50 @@ describe('@expo/agent-cli dev --detach', () => {
         await cleanUpDetachedAsync(projectRoot);
       }
     });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a plain detach of a run
+    // that builds reports at once, so its port is the plan's, not the one a busy-port retry takes
+    // later. A re-run once the lock says `serving` reports where the dev server is.
+    it('reports a building run at once, and a re-run reports the port the retry took', async () => {
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
+      const env = {
+        ...servingEnv(projectRoot),
+        RCT_METRO_PORT: '8473',
+        STUB_EXPO_PORT_BUSY: '8473',
+        STUB_EXPO_BUILD_DELAY_MS: '2000',
+      };
+
+      try {
+        const first = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(first.exitCode, first.all).toBe(0);
+        expect(JSON.parse(first.stdout)).toMatchObject({ phase: 'building', ready: null });
+
+        const deadline = Date.now() + 20_000;
+        let lock = await readDevLockAsync(projectRoot);
+        while (lock?.phase !== 'serving' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          lock = await readDevLockAsync(projectRoot);
+        }
+        expect(lock).toMatchObject({ phase: 'serving' });
+
+        const again = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(again.exitCode, again.all).toBe(0);
+        const report = JSON.parse(again.stdout);
+        expect(report).toMatchObject({ phase: 'serving', alreadyRunning: true, port: lock!.port });
+        expect(report.port).not.toBe(8473);
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    });
   });
 
   it('reports no move when the dev server took the port it was asked for', async () => {
