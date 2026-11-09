@@ -226,13 +226,13 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
 // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
 function readOrphanSessions(
   projectRoot: string,
-  { ownServer }: { ownServer: boolean }
+  { ownRun }: { ownRun: boolean }
 ): OrphanSessionStatus[] {
   return deletedWorktreeSessions(projectRoot, new Date()).map(({ device, projectRoot: root }) => ({
     platform: device.platform,
     id: device.id,
     projectRoot: root,
-    command: ownServer ? cloudStopCommand(device.id) : `${PROGRAM_PREFIX} dev:stop`,
+    command: ownRun ? cloudStopCommand(device.id) : `${PROGRAM_PREFIX} dev:stop`,
   }));
 }
 
@@ -308,9 +308,9 @@ export async function collectStatusReportAsync(
 
   if ('error' in binding) errors.binding = binding.error;
   try {
-    // Plain `dev:stop` reaps them and keeps this worktree's sessions, but it also stops this
-    // worktree's own dev server, which the session command leaves running.
-    report.orphanSessions = readOrphanSessions(projectRoot, { ownServer: ownServer != null });
+    // Plain `dev:stop` reaps them and keeps this worktree's sessions, but it also reaches this
+    // worktree's own dev run in any phase, which the session command leaves running.
+    report.orphanSessions = readOrphanSessions(projectRoot, { ownRun: ownLock != null });
   } catch (error) {
     errors.binding ??= error instanceof Error ? error.message : String(error);
   }

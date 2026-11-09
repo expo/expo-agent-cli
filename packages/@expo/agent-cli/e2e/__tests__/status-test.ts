@@ -1724,6 +1724,24 @@ describe('@expo/agent-cli status', () => {
       releaseLock();
       await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
     }
+
+    // A run with no dev server still holds the lock, and plain `dev:stop` would reach it too.
+    for (const phase of ['finishing'] as const) {
+      const releaseRunLock = await holdDevLockAsync(projectRoot, {
+        url: 'http://127.0.0.1:1',
+        port: 1,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        projectRoot,
+        phase,
+      });
+      try {
+        const withRun = await reportInAsync(projectRoot);
+        expect(withRun.orphanSessions[0]!.command).toMatch(/ simulator:stop --id sess-orphan$/);
+      } finally {
+        releaseRunLock();
+      }
+    }
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed — a new
