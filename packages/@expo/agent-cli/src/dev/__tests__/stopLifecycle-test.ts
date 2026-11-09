@@ -24,9 +24,12 @@ vi.mock('../../devLock', () => {
   const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
   return {
     readDevServerLockAsync,
-    isDevServerLockHeldAsync: vi.fn(
-      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
-    ),
+    // The address is the project root, and a probe is held when the mocked read answers.
+    lockAddressFor: (projectRoot: string) => ({ address: projectRoot }),
+    probeDevServerLockAsync: vi.fn(async (address: string) => {
+      const info = await readDevServerLockAsync(address);
+      return { connected: info != null, info };
+    }),
   };
 });
 vi.mock('../portListener', () => ({

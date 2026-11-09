@@ -33,7 +33,8 @@ import chalk from 'chalk';
 import type { CloudPlatform } from '../device/cloudSimulator';
 import type { ReleasedDevice } from '../deviceBinding';
 import {
-  isDevServerLockHeldAsync,
+  lockAddressFor,
+  probeDevServerLockAsync,
   readDevServerLockAsync,
   type DevServerLockInfo,
 } from '../devLock';
@@ -547,11 +548,12 @@ interface StopOutcome {
 async function waitForStopAsync(lock: DevServerLockInfo, timeoutMs: number): Promise<StopOutcome> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const [lockGone, current, portFree] = await Promise.all([
-      isDevServerLockHeldAsync(lock.projectRoot).then((held) => !held),
-      readDevServerLockAsync(lock.projectRoot),
+    const [probe, portFree] = await Promise.all([
+      probeDevServerLockAsync(lockAddressFor(lock.projectRoot).address),
       isPortFreeAsync(lock.port),
     ]);
+    const lockGone = !probe.connected;
+    const current = probe.info;
     const processGone = !isProcessAlive(lock.pid);
     const atDeadline = Date.now() + POLL_INTERVAL_MS >= deadline;
     const finishing = current?.pid === lock.pid && current.phase === 'finishing';

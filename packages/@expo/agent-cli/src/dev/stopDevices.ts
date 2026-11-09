@@ -59,7 +59,7 @@ async function stopLocalDevicesAsync(
           "Devices were kept because this worktree's dev server is still running.";
       } else if (
         // A `finishing` run has no dev server left (llp/0035 §Preserved sessions).
-        ((await readDevServerLockAsync(projectRoot))?.phase ?? 'finishing') !== 'finishing'
+        await holdsUnfinishedLockAsync(projectRoot)
       ) {
         report.deviceError = `Devices were kept because this worktree's dev server is still running.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" with no --port.`;
       } else if (stop.reason === 'foreign-dev-server' && stop.url != null) {
@@ -112,4 +112,9 @@ async function releaseDevicesAsync(
     }
   }
   return { released, error };
+}
+
+async function holdsUnfinishedLockAsync(projectRoot: string): Promise<boolean> {
+  const lock = await readDevServerLockAsync(projectRoot);
+  return lock != null && lock.phase !== 'finishing';
 }

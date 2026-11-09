@@ -664,11 +664,7 @@ async function runPlanStepsAsync(
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS open of the
   // plan, said on the run's lock.
   let markEasOpenFinished!: () => void;
-  let easOpenDone = false;
   const easOpenFinished = new Promise<void>((resolve) => (markEasOpenFinished = resolve));
-  void easOpenFinished.then(() => {
-    easOpenDone = true;
-  });
   // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
   // installs: the one the plan found, or the one this run's `eas build` step makes below.
   let easBuildId: string | null = plan.easBuild?.id ?? null;
@@ -742,8 +738,9 @@ async function runPlanStepsAsync(
         stepRunning = false;
         // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone,
         // and the run binds the session its open returns: `dev:stop` reads that here.
-        if (easOpened && !easOpenDone) {
-          runLock.lock?.update({ ...runLock.lock.info, phase: 'finishing' });
+        const lock = runLock.lock;
+        if (easOpened && lock && !lock.info.easOpenFinished) {
+          lock.update({ ...lock.info, phase: 'finishing' });
         }
         await eas?.finishAsync();
       });

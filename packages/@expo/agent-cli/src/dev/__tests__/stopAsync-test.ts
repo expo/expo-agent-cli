@@ -1,4 +1,4 @@
-import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
+import { probeDevServerLockAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
@@ -25,10 +25,12 @@ vi.mock('../../devLock', () => {
   const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
   return {
     readDevServerLockAsync,
-    // Held when the mocked read answers, so a test sets one answer for both.
-    isDevServerLockHeldAsync: vi.fn(
-      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
-    ),
+    // The address is the project root, and a probe is held when the mocked read answers.
+    lockAddressFor: (projectRoot: string) => ({ address: projectRoot }),
+    probeDevServerLockAsync: vi.fn(async (address: string) => {
+      const info = await readDevServerLockAsync(address);
+      return { connected: info != null, info };
+    }),
   };
 });
 vi.mock('../portListener', () => ({
@@ -81,9 +83,10 @@ let livePids = new Set<number>();
 let signalKills = true;
 
 beforeEach(() => {
-  vi.mocked(isDevServerLockHeldAsync).mockImplementation(
-    async (root) => (await readDevServerLockAsync(root)) != null
-  );
+  vi.mocked(probeDevServerLockAsync).mockImplementation(async (address) => {
+    const info = await readDevServerLockAsync(address);
+    return { connected: info != null, info };
+  });
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -271,7 +274,7 @@ describe(devStopAsync, () => {
       vi.mocked(readDevServerLockAsync)
         .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
         .mockResolvedValue(null as never);
-      vi.mocked(isDevServerLockHeldAsync).mockResolvedValue(true);
+      vi.mocked(probeDevServerLockAsync).mockResolvedValue({ connected: true, info: null });
       globalThis.fetch = (async () => {
         throw new DOMException('timed out', 'TimeoutError');
       }) as unknown as typeof fetch;
