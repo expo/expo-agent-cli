@@ -95,7 +95,10 @@ export async function runDevServerAsync(
      * it, and leaves the release to the run (llp/0004 §Dev-server lock). Without it, the step
      * takes its own lock and releases it when the dev server exits.
      */
-    runLock?: { lock: DevServerLockHandle | null };
+    runLock?: {
+      handle: DevServerLockHandle | null;
+      keep(handle: DevServerLockHandle | null): void;
+    };
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -143,7 +146,7 @@ export async function runDevServerAsync(
     phase: builds ? 'building' : 'serving',
     easPlatform,
     easOpenFinished,
-    held: runLock?.lock,
+    held: runLock?.handle,
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(
@@ -194,7 +197,7 @@ export async function runDevServerAsync(
     return { ...result, port };
   } finally {
     clearTimeout(timer);
-    if (runLock) runLock.lock = await lock;
+    if (runLock) runLock.keep(await lock);
     else (await lock)?.release();
   }
 }

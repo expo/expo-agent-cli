@@ -11,7 +11,7 @@ import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
 import type { DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
-import { interruptedError, takeBuildingLockAsync, type RunLock } from './runLock';
+import { withRunLockAsync, type RunLock } from './runLock';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -636,30 +636,13 @@ async function executePlanAsync(
   options: DevOptions,
   acquired: AcquireResult | null
 ): Promise<PlanRun> {
-  const runLock: RunLock = {
-    lock: await takeBuildingLockAsync(
-      projectRoot,
-      plan,
-      shouldOpenApp(options) ? easOpenPlatform(options) : null
-    ),
-  };
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
-  // reaches, and the run starts no later step.
-  let signal: NodeJS.Signals | null = null;
-  const onSignal = (received: NodeJS.Signals) => {
-    signal ??= received;
-  };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
-  try {
-    return await runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, () => {
-      if (signal) throw interruptedError(signal);
-    });
-  } finally {
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
-    runLock.lock?.release();
-  }
+  return await withRunLockAsync(
+    projectRoot,
+    plan,
+    shouldOpenApp(options) ? easOpenPlatform(options) : null,
+    (runLock, assertNotInterrupted) =>
+      runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, assertNotInterrupted)
+  );
 }
 
 // oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
@@ -755,20 +738,7 @@ async function runPlanStepsAsync(
       }).finally(async () => {
         stepRunning = false;
         // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone.
-        // While the open runs, the run binds the session it returns, and `dev:stop` reads that
-        // here. After it, the session cleanup needs no lock, and a lock left as `serving` would
-        // send `dev:stop` to signal a run that is ending its session.
-        const lock = runLock.lock;
-        const release = () => {
-          lock?.release();
-          runLock.lock = null;
-        };
-        if (easOpened && lock && !lock.info.easOpenFinished) {
-          lock.update({ ...lock.info, phase: 'finishing' });
-          void eas?.finished.then(release);
-        } else if (easOpened) {
-          release();
-        }
+        if (easOpened && eas) runLock.finish(eas.finished);
         await eas?.finishAsync();
       });
     };

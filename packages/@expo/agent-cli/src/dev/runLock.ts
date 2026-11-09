@@ -3,23 +3,93 @@
 
 import os from 'node:os';
 
+import { takeDevServerLockAsync, type DevServerLockHandle } from '../devLock';
 import { servesAnotherProjectAsync } from '../devLock/port';
-import { acquireDevServerLockAsync } from '../devLock/server';
-import type { DevServerLockHandle } from '../devLock/types';
 import { isDevServerStep } from './forwardedArgs';
 import type { StartPlan } from '../project/types';
 import { CommandError } from '../utils/errors';
 
-/** The run's dev-server lock, once the run or a step took it. */
-export type RunLock = { lock: DevServerLockHandle | null };
+/**
+ * The `dev` run's lock. It is taken before a build step, the dev-server step answers on it, and it
+ * is released when the run ends, so it answers through a port retry and the EAS exit work.
+ */
+export class RunLock {
+  #handle: DevServerLockHandle | null;
+
+  constructor(handle: DevServerLockHandle | null) {
+    this.#handle = handle;
+  }
+
+  /** The lock a dev-server step answers on, or null when the step takes its own. */
+  get handle(): DevServerLockHandle | null {
+    return this.#handle;
+  }
+
+  /** Keep the lock a dev-server step left: the same one, a new one, or none. */
+  keep(handle: DevServerLockHandle | null): void {
+    this.#handle = handle;
+  }
+
+  /**
+   * Metro exited after the EAS open started. While the open runs, the run binds the session it
+   * returns, so the lock answers `finishing`; once it returned, the session cleanup needs no lock,
+   * and a lock left as `serving` would send `dev:stop` to signal a run that is ending its session.
+   */
+  finish(openReturned: Promise<unknown>): void {
+    const handle = this.#handle;
+    if (!handle?.info.easOpenFinished && handle) {
+      handle.update({ ...handle.info, phase: 'finishing' });
+      void openReturned.then(() => {
+        if (this.#handle === handle) this.release();
+      });
+    } else {
+      this.release();
+    }
+  }
+
+  release(): void {
+    this.#handle?.release();
+    this.#handle = null;
+  }
+}
 
 /**
- * Take the run's lock with phase `building` when a step runs before the dev-server step.
+ * Run `run` under the run's lock, and stop it between steps on SIGINT or SIGTERM.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
+ * reaches, and the run starts no later step.
+ */
+export async function withRunLockAsync<T>(
+  projectRoot: string,
+  plan: StartPlan,
+  easPlatform: 'ios' | 'android' | null,
+  run: (lock: RunLock, assertNotInterrupted: () => void) => Promise<T>
+): Promise<T> {
+  const lock = new RunLock(await takeBuildingLockAsync(projectRoot, plan, easPlatform));
+  let signal: NodeJS.Signals | null = null;
+  const onSignal = (received: NodeJS.Signals) => {
+    signal ??= received;
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  try {
+    return await run(lock, () => {
+      if (signal) throw interruptedError(signal);
+    });
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    lock.release();
+  }
+}
+
+/**
+ * The run's lock with phase `building`, when a step runs before the dev-server step.
  *
  * Null when the plan serves first or serves nothing, when its planned port answers for another
  * project, or when the lock cannot be taken: the dev-server step then takes it as before.
  */
-export async function takeBuildingLockAsync(
+async function takeBuildingLockAsync(
   projectRoot: string,
   plan: StartPlan,
   easPlatform: 'ios' | 'android' | null
@@ -29,22 +99,15 @@ export async function takeBuildingLockAsync(
   if (port == null || serving <= 0 || (await servesAnotherProjectAsync(projectRoot, port))) {
     return null;
   }
-  const result = await acquireDevServerLockAsync({
-    url: `http://127.0.0.1:${port}`,
-    port,
-    portReported: false,
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    projectRoot,
+  return await takeDevServerLockAsync(projectRoot, port, {
+    since: Date.now(),
     easPlatform,
-    easOpenFinished: false,
     phase: 'building',
   });
-  return result.status === 'acquired' ? result.lock : null;
 }
 
 /** The stop of a run that a signal reached between steps. */
-export function interruptedError(signal: NodeJS.Signals): CommandError {
+function interruptedError(signal: NodeJS.Signals): CommandError {
   const error = new CommandError(
     'DEV_INTERRUPTED',
     `The dev run stopped on ${signal}. The step it reached ended, and no later step ran. An EAS build that was already submitted keeps running on EAS; "eas build:cancel" ends it.`

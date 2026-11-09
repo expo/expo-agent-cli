@@ -134,6 +134,22 @@ function republish(
   return held;
 }
 
+/**
+ * Take the lock before any step serves, on the port the plan gave the dev server: the `dev` run's
+ * lock while it builds. Null when the lock cannot be taken, as for every lock here.
+ */
+export async function takeDevServerLockAsync(
+  projectRoot: string,
+  port: number,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'>
+): Promise<DevServerLockHandle | null> {
+  return await publishAsync(
+    projectRoot,
+    { ...options, isRunning: () => true },
+    { port, source: 'arg' }
+  );
+}
+
 /** Take the lock for a dev server on the resolved port. */
 async function publishAsync(
   projectRoot: string,
