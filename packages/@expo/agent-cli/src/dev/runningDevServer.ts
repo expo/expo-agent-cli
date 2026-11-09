@@ -18,9 +18,9 @@ export type RunningDevServer = { lock: DevServerLockInfo; phase: RunningDevServe
 /**
  * The lock's phase, and for a `serving` lock one `/status` probe of its URL, picks the word.
  *
- * `starting` covers a `run:*` build that has not reached Metro, a Metro that is not up, and another
- * project's Metro on the lock's port while this project's busy-port retry moves off it: in each,
- * this project's server is on its way and there is nothing to open against yet.
+ * `starting` covers a Metro that is not up, and another project's Metro on the lock's port while
+ * this project's busy-port retry moves off it: in each, this project's server is on its way and
+ * there is nothing to open against yet. An `expo run:*` build is `building` on the lock.
  */
 export async function runningDevServerAsync(
   projectRoot: string,

@@ -59,7 +59,7 @@ export const RUN_PHASE: Record<RunningDevServerPhase, RunPhase> = {
     command: () => `${PROGRAM_PREFIX} status`,
     does: `This says when it answers; "${PROGRAM_PREFIX} dev:stop" stops it.`,
     why: ({ port }) =>
-      `its lock is published, and /status on port ${port} does not answer for this project yet: a run:* build that has not reached Metro, a Metro that is not up, or another project's Metro on that port, which this project's server moves off.`,
+      `its lock is published, and /status on port ${port} does not answer for this project yet: a Metro that is not up, or another project's Metro on that port, which this project's server moves off.`,
     how: () => `wait for it ("${PROGRAM_PREFIX} status" says when it answers), ${stopAndRetry}`,
   },
   finishing: {
