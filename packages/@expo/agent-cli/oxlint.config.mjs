@@ -16,7 +16,6 @@ const longFunctionFiles = {
   'src/followups/smoke.ts': 277,
   'src/plan/decide.ts': 468,
   'src/runtime/discoverDevServer.ts': 194,
-  'src/runtime/reload/reloadAsync.ts': 388,
 };
 
 export default {
