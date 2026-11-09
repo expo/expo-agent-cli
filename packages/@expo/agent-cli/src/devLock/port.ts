@@ -225,13 +225,16 @@ export async function resolveDevServerPortAsync(
 
   try {
     const reports = reportedPorts(since, done.signal, intervalMs);
+    // Settles only on a report: a stream that ends first (`2g` gives up on a session's live
+    // socket silently) is no answer, and the deadline and the dev server decide as if there
+    // were no stream.
     const ownReport = (async () => {
       for await (const port of reports) {
         if (!(await servesAnotherProject(port))) {
           return port;
         }
       }
-      return null;
+      return new Promise<never>(() => {});
     })();
 
     const reported = await Promise.race([ownReport, untilStopped(Date.now() + timeoutMs)]);

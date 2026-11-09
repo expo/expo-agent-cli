@@ -15,25 +15,33 @@ import {
 
 const projectRoot = path.join(path.sep, 'project');
 
-/** The `LOG_EVENTS` file this process's `2g` writes, which the port watch reads Metro's report from. */
-const eventLog = vi.hoisted(
-  () => require('path').join(require('path').sep, 'events.jsonl') as string
-);
+/**
+ * Where this process's `2g` writes, which the port watch reads Metro's report from: the `LOG_EVENTS`
+ * file by default, or a session whose stream of reports ends at once (the mocked `tap` below).
+ */
+const eventLog = vi.hoisted(() => ({
+  file: require('path').join(require('path').sep, 'events.jsonl') as string,
+  sessionDir: null as string | null,
+}));
 vi.mock('2g', async (importOriginal) => ({
   ...(await importOriginal<typeof import('2g')>()),
-  getEventLoggerInfo: () => ({
-    destination: 'file',
-    isUserVisibleOutput: false,
-    debug: true,
-    file: eventLog,
-  }),
+  getEventLoggerInfo: () =>
+    eventLog.sessionDir
+      ? {
+          destination: 'session',
+          isUserVisibleOutput: false,
+          debug: false,
+          sessionDir: eventLog.sessionDir,
+        }
+      : { destination: 'file', isUserVisibleOutput: false, debug: true, file: eventLog.file },
 }));
+vi.mock('2g/api', () => ({ tap: async function* () {} }));
 
 /** Append Metro's report of `port` to the event log, as `2g` writes it. */
 function report(port: number) {
-  const previous = vol.existsSync(eventLog) ? String(vol.readFileSync(eventLog)) : '';
+  const previous = vol.existsSync(eventLog.file) ? String(vol.readFileSync(eventLog.file)) : '';
   vol.writeFileSync(
-    eventLog,
+    eventLog.file,
     previous + JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port }) + '\n'
   );
 }
@@ -48,7 +56,10 @@ function writeStartLog(entries: { port: number; at: number }[]) {
   });
 }
 
-beforeEach(() => vol.reset());
+beforeEach(() => {
+  vol.reset();
+  eventLog.sessionDir = null;
+});
 
 describe(readPortArg, () => {
   it.each([
@@ -170,6 +181,33 @@ describe(resolveDevServerPortAsync, () => {
         servesAnotherProject: async (port) => port === 8096,
       })
     ).resolves.toEqual({ port: 8097, source: 'reported' });
+  });
+
+  // `2g` follows a session through its live socket and gives up silently when it cannot connect,
+  // so the stream of reports can end while the dev server runs. The wait then goes on without it,
+  // for as long as it would with no report at all.
+  it(`keeps waiting when the stream of reports ends before the dev server does`, async () => {
+    eventLog.sessionDir = path.join(path.sep, 'session');
+    let running = true;
+    let stop!: () => void;
+    const stopped = new Promise<void>((resolve) => (stop = resolve));
+    const result = resolveDevServerPortAsync(projectRoot, ['start'], {
+      since: 1000,
+      intervalMs: 1,
+      timeoutMs: 10,
+      isRunning: () => running,
+      stopped,
+      servesAnotherProject: async () => true,
+    });
+    let settled = false;
+    void result.then(() => (settled = true));
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
+
+    running = false;
+    stop();
+    await expect(result).resolves.toBeNull();
   });
 
   it(`stops waiting as soon as the dev server is gone`, async () => {
