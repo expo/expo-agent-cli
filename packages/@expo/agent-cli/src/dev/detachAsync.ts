@@ -1444,9 +1444,9 @@ function stillBuildingOnLockError(
   const error = new CommandError(
     'DEV_DETACH_STILL_BUILDING',
     [
-      `The detached dev run (pid ${lock.pid}) is still building after ${Math.round(waitedMs / 1000)} s, so its dev server is not up yet.`,
+      `This project's dev run (pid ${lock.pid}) is still building after ${Math.round(waitedMs / 1000)} s, so its dev server is not up yet.`,
       `Why: its plan builds before it serves, and its lock says that it builds. The run keeps going and starts the dev server on ${lock.url} when the build ends.`,
-      `How: run "${rerun}" again. It follows this run and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the build. "${PROGRAM_PREFIX} dev:stop" stops the run.`,
+      `How: run "${rerun}" again. It follows this run and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the build of a detached run. "${PROGRAM_PREFIX} dev:stop" stops the run.`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_TIMEOUT;

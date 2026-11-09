@@ -55,7 +55,8 @@ async function stopLocalDevicesAsync(
     if (options.release) {
       // A requested port may be idle while this worktree's server runs on another port.
       // Read again after stopping: a replacement server may now hold the same lock.
-      const activeRun = await activeRunLockAsync(projectRoot);
+      const activeRun =
+        stop.reason === 'still-running' ? null : await activeRunLockAsync(projectRoot);
       if (stop.reason === 'still-running') {
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";

@@ -760,20 +760,20 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   );
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  it.skipIf(process.platform === 'win32')(
-    'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro',
-    async () => {
+  it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
+    'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro (%s)',
+    async (platform) => {
       const projectRoot = await setupAsync();
       await writeSchemeAsync(projectRoot, 'devclient');
       const env = {
-        ...easRunEnv(projectRoot, 8586),
+        ...easRunEnv(projectRoot, platform === 'ios' ? 8586 : 8606),
         STUB_EAS_BUILD_DELAY_MS: '60000',
         AGENT_CLI_DETACH_TIMEOUT_MS: '3000',
       };
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
           { env, reject: false }
         );
 
@@ -787,7 +787,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         // A second detach reports the same run and spawns no second child.
         const again = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
           { env, reject: false }
         );
         expect(again.exitCode).toBe(0);
@@ -800,7 +800,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         // --wait-ready follows the build, and its budget ends while the build runs: exit 22.
         const waited = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--wait-ready', '--json'],
           { env, reject: false }
         );
         expect(waited.exitCode).toBe(22);
@@ -820,7 +820,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           stopped: true,
           pid,
           lockHeld: true,
-          easPlatform: 'ios',
+          easPlatform: platform,
         });
         expect(
           await waitForAsync(() => {
@@ -845,13 +845,13 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   );
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  it.skipIf(process.platform === 'win32')(
-    'reports a followed build that fails, and starts no second build',
-    async () => {
+  it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
+    'reports a followed build that fails, and starts no second build (%s)',
+    async (platform) => {
       const projectRoot = await setupAsync();
       await writeSchemeAsync(projectRoot, 'devclient');
       const env = {
-        ...easRunEnv(projectRoot, 8590),
+        ...easRunEnv(projectRoot, platform === 'ios' ? 8590 : 8610),
         STUB_EAS_BUILD_DELAY_MS: '4000',
         STUB_EAS_BUILD_EXIT: '1',
         STUB_EAS_BUILD_STDERR: 'Build failed: e2e-followed',
@@ -861,14 +861,14 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       try {
         const first = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
           { env, reject: false }
         );
         expect(JSON.parse(first.stdout).phase).toBe('building');
 
         const again = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--wait-ready', '--json'],
           { env: { ...env, AGENT_CLI_DETACH_TIMEOUT_MS: '15000' }, reject: false }
         );
 

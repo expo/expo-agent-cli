@@ -73,8 +73,17 @@ export async function withRunLockAsync<T>(
 ): Promise<T> {
   const lock = new RunLock(await takeBuildingLockAsync(projectRoot, plan, easPlatform));
   let signal: NodeJS.Signals | null = null;
+  const others = {
+    SIGINT: process.listenerCount('SIGINT'),
+    SIGTERM: process.listenerCount('SIGTERM'),
+  };
   const onSignal = (received: NodeJS.Signals) => {
     signal ??= received;
+    // A step or the EAS lifecycle that listens ends first, and the run stops after it. With no
+    // other listener, nothing is running to wait for: end now, as Node does without a listener.
+    if (process.listenerCount(received) === others[received as 'SIGINT' | 'SIGTERM'] + 1) {
+      process.exit(128 + os.constants.signals[received]);
+    }
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);

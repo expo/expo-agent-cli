@@ -672,7 +672,6 @@ async function runPlanStepsAsync(
   let serving: PlanRun['serving'] = null;
 
   for (const [index, step] of plan.steps.entries()) {
-    assertNotInterrupted();
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
     planEvent('start_plan_step', {
       id: step.id,
