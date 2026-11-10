@@ -9,7 +9,7 @@ import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
-import type { DevServerLockInfo } from '../devLock/types';
+import type { DevServerLockHandle, DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
   acquireDeviceAsync,
@@ -622,13 +622,38 @@ interface PlanRun {
   serving: { index: number; args: string[] } | null;
 }
 
-// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
+/** The run's dev-server lock, once a step took it. */
+type RunLock = { lock: DevServerLockHandle | null };
+
+/**
+ * Run the plan's steps under one dev-server lock, and release it when the run ends.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the lock belongs to the
+ * run, so it answers through a port retry and through the run's EAS exit work.
+ */
 async function executePlanAsync(
   projectRoot: string,
   plan: StartPlan,
   state: ProjectState,
   options: DevOptions,
   acquired: AcquireResult | null
+): Promise<PlanRun> {
+  const runLock: RunLock = { lock: null };
+  try {
+    return await runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock);
+  } finally {
+    runLock.lock?.release();
+  }
+}
+
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
+async function runPlanStepsAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  state: ProjectState,
+  options: DevOptions,
+  acquired: AcquireResult | null,
+  runLock: RunLock
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
@@ -637,7 +662,7 @@ async function executePlanAsync(
   // retry does: the second bind is the same dev server, not a second app to open.
   let openArmed = false;
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS open of the
-  // plan, said on the lock of every dev-server step: a port retry takes a new lock.
+  // plan, said on the run's lock.
   let markEasOpenFinished!: () => void;
   const easOpenFinished = new Promise<void>((resolve) => (markEasOpenFinished = resolve));
   // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
@@ -678,9 +703,11 @@ async function executePlanAsync(
             },
           })
         : null;
+      let easOpened = false;
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
+        runLock,
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
         easOpenFinished: eas ? easOpenFinished : undefined,
@@ -693,6 +720,7 @@ async function executePlanAsync(
               // Open alongside Metro. A failed open must not stop it.
               const stillWanted = () => stepRunning;
               if (eas) {
+                easOpened = true;
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
                 void eas.finished.then(markEasOpenFinished);
               } else
@@ -708,6 +736,21 @@ async function executePlanAsync(
           : undefined,
       }).finally(async () => {
         stepRunning = false;
+        // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone.
+        // While the open runs, the run binds the session it returns, and `dev:stop` reads that
+        // here. After it, the session cleanup needs no lock, and a lock left as `serving` would
+        // send `dev:stop` to signal a run that is ending its session.
+        const lock = runLock.lock;
+        const release = () => {
+          lock?.release();
+          runLock.lock = null;
+        };
+        if (easOpened && lock && !lock.info.easOpenFinished) {
+          lock.update({ ...lock.info, phase: 'finishing' });
+          void eas?.finished.then(release);
+        } else if (easOpened) {
+          release();
+        }
         await eas?.finishAsync();
       });
     };
@@ -745,7 +788,11 @@ async function executePlanAsync(
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
-        const retry = await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
+        // None after the open started: a retry gets no open, and the run let go of its lock when
+        // that open returned (llp/0035 §Preserved sessions).
+        const retry = openArmed
+          ? null
+          : await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
         if (retry) {
           args = retry.args;
           result = retry.result;

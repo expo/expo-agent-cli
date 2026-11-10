@@ -1,5 +1,5 @@
-import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
-import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
+import { probeDevServerLockAsync, readDevServerLockAsync } from '../../devLock';
+import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
@@ -25,10 +25,12 @@ vi.mock('../../devLock', () => {
   const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
   return {
     readDevServerLockAsync,
-    // Held when the mocked read answers, so a test sets one answer for both.
-    isDevServerLockHeldAsync: vi.fn(
-      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
-    ),
+    // The address is the project root, and a probe is held when the mocked read answers.
+    lockAddressFor: (projectRoot: string) => ({ address: projectRoot }),
+    probeDevServerLockAsync: vi.fn(async (address: string) => {
+      const info = await readDevServerLockAsync(address);
+      return { connected: info != null, info };
+    }),
   };
 });
 vi.mock('../portListener', () => ({
@@ -81,9 +83,10 @@ let livePids = new Set<number>();
 let signalKills = true;
 
 beforeEach(() => {
-  vi.mocked(isDevServerLockHeldAsync).mockImplementation(
-    async (root) => (await readDevServerLockAsync(root)) != null
-  );
+  vi.mocked(probeDevServerLockAsync).mockImplementation(async (address) => {
+    const info = await readDevServerLockAsync(address);
+    return { connected: info != null, info };
+  });
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -271,7 +274,7 @@ describe(devStopAsync, () => {
       vi.mocked(readDevServerLockAsync)
         .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
         .mockResolvedValue(null as never);
-      vi.mocked(isDevServerLockHeldAsync).mockResolvedValue(true);
+      vi.mocked(probeDevServerLockAsync).mockResolvedValue({ connected: true, info: null });
       globalThis.fetch = (async () => {
         throw new DOMException('timed out', 'TimeoutError');
       }) as unknown as typeof fetch;
@@ -284,87 +287,44 @@ describe(devStopAsync, () => {
       expect(JSON.parse(printed())).toMatchObject({ stopped: false, reason: 'still-running' });
     });
 
-    it(`should not call a slow /status a free port for a finishing dev --eas run`, async () => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
-        .mockResolvedValue(null as never);
-      globalThis.fetch = (async () => {
-        throw new DOMException('timed out', 'TimeoutError');
-      }) as unknown as typeof fetch;
-      livePids.add(4242);
-      signalKills = false;
-
-      await expect(devStopAsync(projectRoot, options({ timeoutMs: 2_500 }))).resolves.toBe(
-        EXIT_OUTCOME_FAILED
-      );
-      expect(JSON.parse(printed())).toMatchObject({ stopped: false });
-    });
-
-    describe('the finishing grace period', () => {
-      beforeEach(() => {
-        vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+    it.each([
+      ['at the first read', 'finishing', null],
+      ['after the signal', 'serving', 'SIGTERM'],
+    ] as const)(
+      `should report a dev --eas run whose lock says finishing %s as stopped, without SIGKILL`,
+      async (_when, firstPhase, signal) => {
         vi.mocked(readDevServerLockAsync)
-          .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
-          .mockResolvedValue(null as never);
+          .mockResolvedValueOnce(lock({ easPlatform: 'android', phase: firstPhase }) as never)
+          .mockResolvedValue(lock({ easPlatform: 'android', phase: 'finishing' }) as never);
         mockPort({ answering: false });
         livePids.add(4242);
         signalKills = false;
-      });
-      afterEach(() => vi.useRealTimers());
 
-      it(`should end the wait of a finishing dev --eas run after the grace period, not the timeout`, async () => {
-        const code = devStopAsync(projectRoot, options({ timeoutMs: 60_000 }));
-        await vi.advanceTimersByTimeAsync(3_000);
+        await expect(
+          devStopAsync(projectRoot, options({ timeoutMs: 60_000, followups: true }))
+        ).resolves.toBe(EXIT_OK);
 
-        await expect(code).resolves.toBe(EXIT_OK);
         const report = JSON.parse(printed());
-        expect(report).toMatchObject({ stopped: true, processStillRunning: true });
-        expect(report.waitedMs).toBeGreaterThanOrEqual(2_000);
-        expect(report.waitedMs).toBeLessThan(3_000);
-      });
+        expect(report).toMatchObject({ stopped: true, signal, processStillRunning: true });
+        expect(killed.map((k) => k.signal)).toEqual(signal ? [signal] : []);
+        expect(report.waitedMs).toBeLessThan(5_000);
+        expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['stop-session', 'dev']);
+        expect(report.followups[0].command).toBe(`${PROGRAM_PREFIX} dev:stop --eas`);
+        expect(report.followups[1].command).toBe(`${PROGRAM_PREFIX} dev --android --eas`);
+      }
+    );
 
-      it(`should report a dev --eas process that exits inside the grace period as gone`, async () => {
-        setTimeout(() => livePids.delete(4242), 500);
-        const code = devStopAsync(projectRoot, options({ timeoutMs: 60_000 }));
-        await vi.advanceTimersByTimeAsync(3_000);
-
-        await expect(code).resolves.toBe(EXIT_OK);
-        const report = JSON.parse(printed());
-        expect(report).toMatchObject({ stopped: true, processStillRunning: false });
-        expect(report.waitedMs).toBeLessThan(2_000);
-      });
-    });
-
-    it(`should keep the run's EAS platform and --eas on the next dev while the process finishes`, async () => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValueOnce(lock({ easPlatform: 'android' }) as never)
-        .mockResolvedValue(null as never);
+    it(`should say the dev --eas run is finishing its session start`, async () => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(
+        lock({ easPlatform: 'ios', phase: 'finishing' }) as never
+      );
       mockPort({ answering: false });
       livePids.add(4242);
-      signalKills = false;
 
-      await expect(
-        devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }))
-      ).resolves.toBe(EXIT_OK);
+      await devStopAsync(projectRoot, options({ json: false, followups: true }));
 
-      const report = JSON.parse(printed());
-      expect(report).toMatchObject({ stopped: true, processStillRunning: true });
-      expect(report.easPlatform).toBe('android');
-      expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['stop-session', 'dev']);
-      expect(report.followups[1].command).toBe(`${PROGRAM_PREFIX} dev --android --eas`);
-    });
-
-    it(`should say the stopped dev --eas run's process is finishing its exit work`, async () => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
-        .mockResolvedValue(null as never);
-      mockPort({ answering: false });
-      livePids.add(4242);
-      signalKills = false;
-
-      await devStopAsync(projectRoot, options({ timeoutMs: 200, json: false, followups: true }));
-
-      expect(printed()).toContain('finishing its exit work');
+      expect(printed()).toContain('finishing its EAS session start');
       expect(printed()).not.toContain('SIGKILL');
     });
   });
@@ -568,6 +528,62 @@ describe('dev:stop --eas', () => {
   beforeEach(() => {
     vi.spyOn(cloud(), 'probeCloudSessionAsync');
     vi.spyOn(eas(), 'stopEasSessionAsync');
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing run binds its
+  // session when its start returns, so the stop waits for that start; a silent holder still holds.
+  describe('beside a finishing run', () => {
+    const finishingLock = lock({
+      easPlatform: 'ios',
+      phase: 'finishing',
+      startedAt: new Date(0).toISOString(),
+    });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+      vi.setSystemTime(0);
+      livePids.add(4242);
+      mockPort({ answering: false });
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(finishingLock as never);
+      vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+        cloudProbe.active({ id: 'sess-1', platform: 'ios' })
+      );
+      vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+    });
+
+    it(`waits past a silent holder until the open returns, then stops the session`, async () => {
+      vi.mocked(probeDevServerLockAsync).mockImplementation(async () =>
+        Date.now() < 30_000
+          ? { connected: true, info: null }
+          : { connected: true, info: { ...finishingLock, easOpenFinished: true } }
+      );
+
+      const code = devStopAsync(projectRoot, options({ eas: true }));
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(code).resolves.toBe(EXIT_OK);
+      expect(JSON.parse(printed()).session).toMatchObject({ id: 'sess-1', stopped: true });
+    });
+
+    it(`exits 22 and stops nothing while the start outlasts the wait`, async () => {
+      vi.mocked(probeDevServerLockAsync).mockResolvedValue({
+        connected: true,
+        info: finishingLock,
+      });
+
+      const code = devStopAsync(projectRoot, options({ eas: true, followups: true }));
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      await expect(code).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
+      const report = JSON.parse(printed());
+      expect(report.session).toMatchObject({ id: null, stopped: false });
+      expect(report.followups[0].command).toBe(`${PROGRAM_PREFIX} dev:stop --eas`);
+      expect(eas().stopEasSessionAsync).not.toHaveBeenCalled();
+    });
   });
 
   it(`exits 20 when the session would not stop — it is still billing`, async () => {

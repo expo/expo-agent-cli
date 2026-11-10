@@ -473,8 +473,10 @@ Phase. The lock says what its run does now, so a reader reads it and does not in
 | `serving`   | runs its dev-server step; `/status` says whether Metro answers               | as below                              | the spawn of the dev-server step, renewed at a port retry |
 | `finishing` | its dev-server step exited, and its EAS open has not returned                | the last port; nothing listens        | unchanged                                                 |
 
-`start` always answers `serving`. Only a run with an EAS open has `finishing`; a run
-without one releases the lock when its dev-server step exits. A busy-port retry updates
+`start` always answers `serving`. Only a run whose EAS open still runs when Metro exits
+has `finishing`, and it releases the lock when that open returns. Any other run releases
+the lock when its dev-server step exits, also before the cleanup of a session it started,
+which needs no lock. A run whose open started makes no busy-port retry. A busy-port retry updates
 the same lock, so the lock does not go away between the two spawns. A reader treats a
 line without `phase` as `serving`. A lock answers `building` only for a plan with a
 dev-server step: a plan that serves nothing takes no lock.

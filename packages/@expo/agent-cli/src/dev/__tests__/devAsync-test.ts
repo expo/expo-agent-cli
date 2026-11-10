@@ -259,6 +259,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
     });
 
@@ -728,42 +729,20 @@ describe('EAS session lifecycle of the dev-server step', () => {
     expect(opts!.easPlatform).toBe('ios');
   });
 
-  it(`passes the finish of the plan's one EAS open to the lock of a port retry`, async () => {
-    let finishOpen!: () => void;
-    const opened = {
-      ...lifecycle,
-      open: vi.fn(),
-      finished: new Promise<void>((resolve) => (finishOpen = resolve)),
-    };
-    const retried = { ...lifecycle, open: vi.fn() };
-    vi.mocked(easRunLifecycle).mockReturnValueOnce(opened).mockReturnValueOnce(retried);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the run lets go of its
+  // lock when its open returns, so a retry after the open started would serve without one.
+  it(`makes no busy-port retry after its EAS open started`, async () => {
     vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
       port: 8180,
       movedFrom: null,
       bindable: true,
     });
-    vi.mocked(runDevServerAsync)
-      .mockImplementationOnce(async (_root, _args, opts) => {
-        opts?.onDevServer?.({ url: 'http://127.0.0.1:8180', port: 8180 });
-        return portTakenOn(8180);
-      })
-      .mockImplementationOnce(async (_root, _args, opts) => {
-        opts?.onDevServer?.({ url: 'http://127.0.0.1:8181', port: 8181 });
-        return devServerRun();
-      });
+    vi.mocked(runDevServerAsync).mockImplementationOnce(async (_root, _args, opts) => {
+      opts?.onDevServer?.({ url: 'http://127.0.0.1:8180', port: 8180 });
+      return portTakenOn(8180);
+    });
 
-    await devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']));
-
-    expect(opened.open).toHaveBeenCalledTimes(1);
-    expect(retried.open).not.toHaveBeenCalled();
-    const retryFinished = vi.mocked(runDevServerAsync).mock.calls[1]![2]!.easOpenFinished!;
-    let settled = false;
-    void retryFinished.then(() => (settled = true));
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(settled).toBe(false);
-
-    finishOpen();
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(settled).toBe(true);
+    await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']))).rejects.toThrow();
+    expect(runDevServerAsync).toHaveBeenCalledTimes(1);
   });
 });

@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import type { DevServerPort, StartPlan, TimeClass } from '../project/types';
 import { EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE, RUNS_ON_LABELS } from '../toolchain/runsOn';
 import type { PlanBuildLocation } from '../toolchain/types';
+import { RUN_PHASE } from '../dev/runPhase';
 
 const TIME_CLASS_LABELS: Record<TimeClass, string> = {
   seconds: '~seconds',
@@ -128,6 +129,6 @@ function devServerPortState(devServerPort: DevServerPort): string {
     case 'named':
       return devServerPort.taken ? ', as named, which is taken' : ', as named';
     case 'running':
-      return devServerPort.phase === 'serving' ? ', already running' : ', still starting';
+      return RUN_PHASE[devServerPort.phase].portState;
   }
 }

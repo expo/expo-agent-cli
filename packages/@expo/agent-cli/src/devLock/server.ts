@@ -106,10 +106,15 @@ export async function acquireDevServerLockAsync(
     debugEvent('dev_lock_server_error', { address, error: debugEvent.error(serverError) });
   });
 
+  let current = info;
   const update = (next: DevServerLockInfo) => {
+    current = next;
     answer = `${JSON.stringify(next)}\n`;
   };
-  return { status: 'acquired', lock: createHandle(server, kind, address, replacedStale, update) };
+  return {
+    status: 'acquired',
+    lock: createHandle(server, kind, address, replacedStale, update, () => current),
+  };
 }
 
 /** Wrap the listening server in the handle its holder releases. */
@@ -118,7 +123,8 @@ function createHandle(
   kind: 'unix' | 'pipe',
   address: string,
   replacedStale: boolean,
-  update: (info: DevServerLockInfo) => void
+  update: (info: DevServerLockInfo) => void,
+  current: () => DevServerLockInfo
 ): DevServerLockHandle {
   let released = false;
 
@@ -150,6 +156,9 @@ function createHandle(
     address,
     replacedStale,
     release,
+    get info() {
+      return current();
+    },
     update: (info: DevServerLockInfo) => {
       if (!released) update(info);
     },

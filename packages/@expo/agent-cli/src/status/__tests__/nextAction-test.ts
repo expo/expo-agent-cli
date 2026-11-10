@@ -105,6 +105,7 @@ const defaults: Facts = {
   devBuildScheme: null,
   bindings: [],
   ownServer: null,
+  unservedRun: null,
   request: null,
   deviceBackend: 'local',
   plan: null,

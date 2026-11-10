@@ -22,6 +22,8 @@ import type { PlanPlatform } from '../plan/types';
 import { otherPlatformSessionError } from '../device/cloudErrors';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
+import { devServerRunningStopAsync } from './runningDevServer';
+import { RUN_PHASE } from './runPhase';
 import { spawn } from 'child_process';
 import fs from 'fs';
 
@@ -238,6 +240,11 @@ export async function devDetachAsync(
   // Asked before anything is spawned. A second detached dev server for one project cannot hold the
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
+  // EAS session start has no server to report, and a second child would start a second session.
+  if (running?.phase === 'finishing') {
+    throw await devServerRunningStopAsync(projectRoot, running, options.platform);
+  }
   if (running) {
     const hasExited = () => !isProcessAlive(running.pid);
     async function checkReuseFailureAsync(
@@ -266,6 +273,9 @@ export async function devDetachAsync(
           hasExited,
         })
       : null;
+    if (checked?.lock.phase === 'finishing') {
+      throw lostDevServerError(checked.lock, detachedLogPath(projectRoot));
+    }
     if (checked && (!checked.result.ready || checked.result.projectRootMatched === false)) {
       await checkReuseFailureAsync(checked.lock);
       throw notReadyError(
@@ -426,6 +436,9 @@ export async function devDetachAsync(
       signal: childGone.signal,
     });
     lock = checked.lock;
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exited during
+    // the wait, and the child still binds its session: there is no dev server to call not ready.
+    if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
     const { result } = checked;
     ready = result.ready;
     projectRootMatched = result.projectRootMatched;
@@ -1352,6 +1365,22 @@ function logTail(projectRoot: string): string {
   return read?.lines.length
     ? `\n\nWhat the dev server printed:\n${wrapUntrustedAppOutput(read.lines.join('\n'))}`
     : '';
+}
+
+/** The detach's stop for a child whose dev server exited while its EAS open still runs. */
+function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandError {
+  const row = RUN_PHASE.finishing;
+  const command = row.command('');
+  const error = new CommandError(
+    'DEV_DETACH_FAILED',
+    [
+      `The detached dev server exited, and its run (pid ${lock.pid}) is finishing its EAS session start.`,
+      `Why: ${row.why(lock)}`,
+      `How: run "${command}". ${row.does} What the run printed is in ${logFile}.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = command;
+  return error;
 }
 
 /** The error for a detached child that never published a lock. */

@@ -584,24 +584,54 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
-  it('cleans up its EAS session when the dev server exits normally', async () => {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the session cleanup
+  // needs no lock, so a dev:stop during it finds no dev server to signal.
+  it('cleans up its EAS session when the dev server exits normally, holding no lock meanwhile', async () => {
     const projectRoot = await setupAsync('go-app');
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
-      env: easRunEnv(projectRoot, 8589),
+    const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
+      env: {
+        ...easRunEnv(projectRoot, 8589),
+        STUB_EXPO_DELAY_MS: '4000',
+        STUB_SIM_STOP_DELAY_MS: '5000',
+      },
     });
-    expect(easInvocationArgs(projectRoot)).toContainEqual([
-      'simulator:stop',
-      '--id',
-      'sess-e2e-started',
-      '--non-interactive',
-    ]);
-    expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
-    expect(result.stderr).toContain(
-      'Opened the app on EAS Simulator session sess-e2e-started, started by this run. Watch it at ' +
-        'https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/sess-e2e-started.'
-    );
-    expect(result.stderr).toContain('This run stops the session when the dev server exits');
-    expect(result.stderr).toContain('Stopped EAS Simulator session sess-e2e-started');
+    const output = collectOutput(child);
+    const exited = waitForExitAsync(child, output);
+    try {
+      expect(
+        await waitForAsync(
+          () => easInvocationArgs(projectRoot).some((args) => args[0] === 'simulator:stop'),
+          20_000
+        )
+      ).toBe(true);
+      const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+        env: stubExpoEnv(projectRoot),
+        reject: false,
+      });
+      expect(stop.exitCode).toBe(0);
+      expect(JSON.parse(stop.stdout)).toMatchObject({
+        reason: 'not-running',
+        lockHeld: false,
+        signal: null,
+      });
+
+      const result = await exited;
+      expect(easInvocationArgs(projectRoot)).toContainEqual([
+        'simulator:stop',
+        '--id',
+        'sess-e2e-started',
+        '--non-interactive',
+      ]);
+      expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
+      expect(result.stderr).toContain(
+        'Opened the app on EAS Simulator session sess-e2e-started, started by this run. Watch it at ' +
+          'https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/sess-e2e-started.'
+      );
+      expect(result.stderr).toContain('This run stops the session when the dev server exits');
+      expect(result.stderr).toContain('Stopped EAS Simulator session sess-e2e-started');
+    } finally {
+      await killAsync(child);
+    }
   });
 
   it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
