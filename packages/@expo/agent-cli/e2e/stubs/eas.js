@@ -101,6 +101,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const LOG_NAME = 'stub-eas-invocations.jsonl';
+/** A verb that finishes on a timer; the unhandled-command exit below must not end it first. */
+let deferred = false;
 /** Where sessions this stub started are remembered for `simulator:list`, under the cwd. */
 const SESSIONS_NAME = 'stub-eas-sessions.json';
 /** Where a finished `build` is remembered for `build:list`, under the cwd. */
@@ -203,19 +205,8 @@ function stubBuild() {
   };
 }
 
-if (command === 'build') {
-  if (process.env.STUB_EAS_BUILD_STDERR) {
-    process.stderr.write(process.env.STUB_EAS_BUILD_STDERR + '\n');
-  }
-  if (process.env.STUB_EAS_BUILD_DELAY_MS) {
-    process.stdout.write('Waiting for build to complete.\n');
-    Atomics.wait(
-      new Int32Array(new SharedArrayBuffer(4)),
-      0,
-      0,
-      Number(process.env.STUB_EAS_BUILD_DELAY_MS)
-    );
-  }
+/** Finish the build the argv names: fail, or remember it and print it the way the CLI does. */
+function finishBuild() {
   const exitCode = Number(process.env.STUB_EAS_BUILD_EXIT || 0);
   if (exitCode !== 0) {
     process.stdout.write('Build failed\n');
@@ -239,6 +230,21 @@ if (command === 'build') {
   }
   process.stdout.write(`Build finished\n\n🍎 iOS app:\n${build.artifacts.applicationArchiveUrl}\n`);
   process.exit(0);
+}
+
+if (command === 'build') {
+  if (process.env.STUB_EAS_BUILD_STDERR) {
+    process.stderr.write(process.env.STUB_EAS_BUILD_STDERR + '\n');
+  }
+  const delayMs = Number(process.env.STUB_EAS_BUILD_DELAY_MS || 0);
+  if (delayMs > 0) {
+    process.stdout.write('Waiting for build to complete.\n');
+    // A timer, so a SIGTERM ends the wait at once, as it ends a real `eas build`.
+    deferred = true;
+    setTimeout(finishBuild, delayMs);
+  } else {
+    finishBuild();
+  }
 }
 
 if (command === 'build:list') {
@@ -583,4 +589,4 @@ if (command === 'simulator:exec') {
   exitWith(process.stdout, 'opened', 0);
 }
 
-exitWith(process.stderr, 'stub eas: unhandled command ' + args.join(' '), 1);
+if (!deferred) exitWith(process.stderr, 'stub eas: unhandled command ' + args.join(' '), 1);
