@@ -59,7 +59,7 @@ import {
 } from './freshness';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync, withCloudSessions } from './installed';
-import { chooseNextAction, cloudBindings, resolveNextTarget } from './nextAction';
+import { chooseNextAction, cloudBindings, endedRunSession, resolveNextTarget } from './nextAction';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -411,6 +411,9 @@ export async function collectStatusReportAsync(
       deviceBackend,
       readBuildsOnceAsync
     );
+    if (report.devServer && endedRunSession(ownLock, report.devServer, sessions.cloud, platform)) {
+      report.devServer.ownerEnded = true;
+    }
     report.next = chooseNextAction({
       state,
       record,
