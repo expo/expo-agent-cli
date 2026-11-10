@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // Which port the lock publishes. The dev server picks it, not the wrapper, so the wrapper reads
-// it back out of the dev server's own log — and must not read the previous run's answer.
+// it back out of the dev server's report. `start.log` is the `@expo/cli` 57 report, which discovery
+// still reads, and must not give the previous run's answer.
 
 import { vol } from 'memfs';
 import path from 'path';
@@ -13,6 +14,37 @@ import {
 } from '../port';
 
 const projectRoot = path.join(path.sep, 'project');
+
+/**
+ * Where this process's `2g` writes, which the port watch reads Metro's report from: the `LOG_EVENTS`
+ * file by default, or a session whose stream of reports ends at once (the mocked `tap` below).
+ */
+const eventLog = vi.hoisted(() => ({
+  file: require('path').join(require('path').sep, 'events.jsonl') as string,
+  sessionDir: null as string | null,
+}));
+vi.mock('2g', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('2g')>()),
+  getEventLoggerInfo: () =>
+    eventLog.sessionDir
+      ? {
+          destination: 'session',
+          isUserVisibleOutput: false,
+          debug: false,
+          sessionDir: eventLog.sessionDir,
+        }
+      : { destination: 'file', isUserVisibleOutput: false, debug: true, file: eventLog.file },
+}));
+vi.mock('2g/api', () => ({ tap: async function* () {} }));
+
+/** Append Metro's report of `port` to the event log, as `2g` writes it. */
+function report(port: number) {
+  const previous = vol.existsSync(eventLog.file) ? String(vol.readFileSync(eventLog.file)) : '';
+  vol.writeFileSync(
+    eventLog.file,
+    previous + JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port }) + '\n'
+  );
+}
 const startLogPath = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
 
 /** Write a `start.log` from `metro:instantiate` entries, as `2g` serializes them (`_e`, `_t`). */
@@ -24,7 +56,10 @@ function writeStartLog(entries: { port: number; at: number }[]) {
   });
 }
 
-beforeEach(() => vol.reset());
+beforeEach(() => {
+  vol.reset();
+  eventLog.sessionDir = null;
+});
 
 describe(readPortArg, () => {
   it.each([
@@ -110,45 +145,69 @@ describe(resolveDevServerPortAsync, () => {
     servesAnotherProject: async () => false,
   };
 
-  it(`resolves the port the dev server logged`, async () => {
-    writeStartLog([{ port: 8090, at: 2000 }]);
+  // `expo start` walks past a taken port, so the port it asked for is not the port it got.
+  it.each([[['start']], [['start', '--port', '8082']]])(
+    `resolves the port the dev server reported, whatever %p asked for`,
+    async (args) => {
+      report(8090);
+
+      await expect(
+        resolveDevServerPortAsync(projectRoot, args, { since: 1000, ...watch })
+      ).resolves.toEqual({ port: 8090, source: 'reported' });
+    }
+  );
+
+  it.each([
+    [['start', '--port', '8082'], { port: 8082, source: 'arg' }],
+    [['start'], { port: DEFAULT_DEV_SERVER_PORT, source: 'default' }],
+  ])(
+    `falls back to what %p asked for when the dev server reports nothing`,
+    async (args, expected) => {
+      await expect(
+        resolveDevServerPortAsync(projectRoot, args, { since: 1000, ...watch })
+      ).resolves.toEqual(expected);
+    }
+  );
+
+  // One `LOG_EVENTS` file can serve two runs at once, so a report in it can be the other run's.
+  it(`skips a reported port another project's dev server answers`, async () => {
+    report(8096);
+    report(8097);
 
     await expect(
-      resolveDevServerPortAsync(projectRoot, ['start'], { since: 1000, ...watch })
-    ).resolves.toEqual({ port: 8090, source: 'log' });
+      resolveDevServerPortAsync(projectRoot, ['start'], {
+        since: 1000,
+        ...watch,
+        servesAnotherProject: async (port) => port === 8096,
+      })
+    ).resolves.toEqual({ port: 8097, source: 'reported' });
   });
 
-  it(`waits for the log entry to appear`, async () => {
-    const resolved = resolveDevServerPortAsync(projectRoot, ['start'], {
+  // `2g` follows a session through its live socket and gives up silently when it cannot connect,
+  // so the stream of reports can end while the dev server runs. The wait then goes on without it,
+  // for as long as it would with no report at all.
+  it(`keeps waiting when the stream of reports ends before the dev server does`, async () => {
+    eventLog.sessionDir = path.join(path.sep, 'session');
+    let running = true;
+    let stop!: () => void;
+    const stopped = new Promise<void>((resolve) => (stop = resolve));
+    const result = resolveDevServerPortAsync(projectRoot, ['start'], {
       since: 1000,
-      isRunning: () => true,
       intervalMs: 1,
-      timeoutMs: 5000,
+      timeoutMs: 10,
+      isRunning: () => running,
+      stopped,
+      servesAnotherProject: async () => true,
     });
-    setTimeout(() => writeStartLog([{ port: 8091, at: 2000 }]), 20);
+    let settled = false;
+    void result.then(() => (settled = true));
 
-    await expect(resolved).resolves.toEqual({ port: 8091, source: 'log' });
-  });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(settled).toBe(false);
 
-  it(`falls back to the --port argument when the log never answers`, async () => {
-    await expect(
-      resolveDevServerPortAsync(projectRoot, ['start', '--port', '8082'], { since: 1000, ...watch })
-    ).resolves.toEqual({ port: 8082, source: 'arg' });
-  });
-
-  it(`falls back to the default port when nothing answers`, async () => {
-    await expect(
-      resolveDevServerPortAsync(projectRoot, ['start'], { since: 1000, ...watch })
-    ).resolves.toEqual({ port: DEFAULT_DEV_SERVER_PORT, source: 'default' });
-  });
-
-  it(`prefers the logged port over the requested one`, async () => {
-    // `expo start` walks past a taken port, so the port it asked for is not the port it got.
-    writeStartLog([{ port: 8083, at: 2000 }]);
-
-    await expect(
-      resolveDevServerPortAsync(projectRoot, ['start', '--port', '8082'], { since: 1000, ...watch })
-    ).resolves.toEqual({ port: 8083, source: 'log' });
+    running = false;
+    stop();
+    await expect(result).resolves.toBeNull();
   });
 
   it(`stops waiting as soon as the dev server is gone`, async () => {
@@ -164,43 +223,6 @@ describe(resolveDevServerPortAsync, () => {
       })
     ).resolves.toEqual({ port: DEFAULT_DEV_SERVER_PORT, source: 'default' });
     expect(Date.now() - startedAt).toBeLessThan(1000);
-  });
-
-  // A Metro of another project on `*:8081` answered the port this run fell back to, and the lock
-  // published it [observed — live suite, 2026-10-05: `status` read `source: 'lock'` with
-  // `projectRootMatched: false`].
-  it(`never falls back to a port another project's dev server answers, and keeps watching the log`, async () => {
-    let running = true;
-    const servesAnotherProject = vi.fn(async (port: number) => port === 8081);
-    const resolved = resolveDevServerPortAsync(projectRoot, ['start', '--port', '8081'], {
-      since: 1000,
-      intervalMs: 1,
-      timeoutMs: 10,
-      isRunning: () => running,
-      servesAnotherProject,
-    });
-    setTimeout(() => writeStartLog([{ port: 8095, at: 2000 }]), 40);
-
-    await expect(resolved).resolves.toEqual({ port: 8095, source: 'log' });
-    expect(servesAnotherProject).toHaveBeenCalledWith(8081);
-    running = false;
-  });
-
-  it(`publishes nothing when the dev server stops with only a foreign port to name`, async () => {
-    let running = true;
-    const onResolved = vi.fn();
-    const resolved = resolveDevServerPortAsync(projectRoot, ['start'], {
-      since: 1000,
-      intervalMs: 1,
-      timeoutMs: 10,
-      isRunning: () => running,
-      servesAnotherProject: async () => true,
-      onResolved,
-    });
-    setTimeout(() => (running = false), 40);
-
-    await expect(resolved).resolves.toBeNull();
-    expect(onResolved).not.toHaveBeenCalled();
   });
 
   it(`reads another project's root off the /status header of the fallback port`, async () => {

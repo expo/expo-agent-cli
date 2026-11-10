@@ -13,8 +13,8 @@ declare module '2g' {
       address: string;
       url: string;
       port: number;
-      /** How the port was resolved: the dev server's log, the `--port` argument, or the default. */
-      portSource: 'log' | 'arg' | 'default';
+      /** How the port was resolved: Metro reported it, the `--port` argument named it, or the default. */
+      portSource: 'reported' | 'arg' | 'default';
       pid: number;
     };
     /**

@@ -477,8 +477,16 @@ leftover socket file answers nothing. The next acquisition removes it.
 Never load-bearing. An address that cannot be taken produces one warning and a
 `cli:dev_lock_skipped` event with reason `in-use`, never a failure. When the arguments name a port, the lock
 is published at the spawn with that port: `dev` passes `--port` on every step that
-serves, and the Expo CLI either binds it or exits. The log watch goes on, and a port the
-dev server reports in `start.log` after the spawn timestamp updates the lock's answer.
+serves, and the Expo CLI either binds it or exits. The watch goes on, and a port the
+dev server reports after the spawn timestamp updates the lock's answer and sets its
+`portReported`. The report is Metro's `metro:instantiate` event, which the Expo CLI sends
+to this process's `2g` event log: its session, followed live through `2g/api`, or its
+`LOG_EVENTS` file (`wrapper-test` "answers with the port the dev server reported"). One
+`LOG_EVENTS` file can serve two runs, so a reported port whose `/status` names another
+project is skipped (`port-test` "skips a reported port another project's dev server
+answers"). An event log this process cannot read back (`LOG_EVENTS` naming a file
+descriptor, or a `2g` parent over IPC) gives no report to a foreground run, and its lock
+falls back after the watch's 20 s.
 With no port in the arguments, the port published is the one the dev server reported,
 falling back to 8081. A `--port` or default port whose `/status` names another project
 root is never published [observed — live suite, 2026-10-05: a lock on 8081 pointed at
@@ -499,7 +507,12 @@ own and gives the terminal back. `@expo/agent-cli dev:logs` reads what it printe
 
 `--detach` spawns this CLI, not `expo start`:
 `spawn(process.execPath, [bin, 'dev', ...argv], { detached: true, stdio: ['ignore', logFd, logFd] })`
-then `unref()`. The wrapper is what takes the lock. A detached server that published no
+then `unref()`. The child gets no `2g` IPC variables from the parent: a detached run
+outlives the parent, and events sent to the parent's IPC socket would be lost when it
+exits. The child writes to the parent's `LOG_EVENTS` file when there is one, and opens its
+own `2g` session otherwise; `expo start` logs to the child (`dev-detach-test` "returns once
+the dev server reports its port through 2g"). The wrapper is what takes the lock. A
+detached server that published no
 lock would be a process nothing could find, wait on, or stop. The lock names its port
 and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
 `expo` child exactly as the foreground one does.
@@ -713,9 +726,9 @@ process looks like one, and otherwise the pid to stop.
 
 A `--detach` run moves in the child, so the parent computes the move: from the plan it
 reads from the child's log and the lock the child publishes. The lock is published at the
-spawn, before Metro binds, so the parent reports it once `start.log` names its port after
-the lock's `startedAt` (the spawn of the step that holds it), or once the port watch's
-20 s have passed since that spawn. A lock that is not confirmed when the child exits or
+spawn, before Metro binds, so the parent reports it once the lock answers
+`portReported: true`, or once the port watch's 20 s have passed since the lock's
+`startedAt` (the spawn of the step that holds it). The parent reads no log for this. A lock that is not confirmed when the child exits or
 the budget ends is still the answer, and the checks after it judge the child. The port
 the caller expected is the plan's `movedFrom`, or its planned port when the plan did not
 move. A lock on any other port is `portMoved`. The move message the child prints is for

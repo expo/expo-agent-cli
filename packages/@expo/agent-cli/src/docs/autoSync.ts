@@ -6,6 +6,7 @@ import fs from 'fs';
 import * as Log from '../log';
 import { projectSdkVersionAsync } from '../project/nodeModules';
 import { env } from '../utils/env';
+import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { versionMajor, versionNames, type VersionBundleName } from './bundle';
 import { docsCacheDir, readManifestAsync, versionDir } from './cache';
 import { docsBaseUrl, syncDocsAsync } from './sync';
@@ -72,7 +73,8 @@ export function startBackgroundDocsSync(version: VersionBundleName): boolean {
       {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1' },
+        // The sync outlives this process, so its events must not go to this process's `2g` socket.
+        env: { ...detachedEventLogEnv(process.env), __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1' },
       }
     );
     child.on('error', () => {});

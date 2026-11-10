@@ -431,7 +431,7 @@ describe(runDevServerAsync, () => {
 
       expect(onDevServer).not.toHaveBeenCalled();
       onResolved?.({ port: 8082, source: 'default' });
-      onResolved?.({ port: 8082, source: 'log' });
+      onResolved?.({ port: 8082, source: 'reported' });
       expect(onDevServer).toHaveBeenCalledTimes(1);
     });
 
@@ -447,7 +447,7 @@ describe(runDevServerAsync, () => {
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
-      onResolved?.({ port: 8082, source: 'log' });
+      onResolved?.({ port: 8082, source: 'reported' });
       await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
 
       expect(onDevServer).toHaveBeenCalledTimes(1);
@@ -471,7 +471,7 @@ describe(runDevServerAsync, () => {
       await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 2);
       expect(onDevServer).not.toHaveBeenCalled();
 
-      onResolved?.({ port: 8082, source: 'log' });
+      onResolved?.({ port: 8082, source: 'reported' });
       expect(onDevServer).toHaveBeenCalledTimes(1);
       expect(onDevServer).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8082', port: 8082 });
 

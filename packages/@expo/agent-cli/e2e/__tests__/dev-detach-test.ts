@@ -13,32 +13,22 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 
+import { list as listSessions, tap } from '2g/api';
+
+import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
+  readEvents,
   readStubExpoInvocations,
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
-
-/** Where a detached dev server writes, per `src/dev/logFile.ts`. Spelled out, as a wire contract. */
-const LOG_PATH = path.join('.expo', 'dev', 'logs', 'dev-detached.log');
-
-/** Long enough for a test to do its work against a running dev server, short enough to end. */
-const STUB_ALIVE_MS = '20000';
-
-/** Environment for a detached run whose stub dev server stays up and publishes a port. */
-function detachEnv(projectRoot: string, port: number): Record<string, string> {
-  return {
-    ...stubExpoEnv(projectRoot),
-    STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
-    STUB_EXPO_DEV_SERVER_PORT: String(port),
-  };
-}
+import { DETACHED_LOG_PATH, cleanUpDetachedAsync, detachEnv, STUB_ALIVE_MS } from '../detachUtils';
 
 /** A port nothing listens on now, read back from a server bound to port 0. */
 async function freePortAsync(): Promise<number> {
@@ -57,14 +47,6 @@ function isAlive(pid: number): boolean {
   } catch {
     return false;
   }
-}
-
-/** Stop whatever the test started, so a failed assertion never leaves a process behind. */
-async function cleanUpAsync(projectRoot: string): Promise<void> {
-  await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
-    env: stubExpoEnv(projectRoot),
-    reject: false,
-  });
 }
 
 describe('@expo/agent-cli dev --detach', () => {
@@ -94,7 +76,7 @@ describe('@expo/agent-cli dev --detach', () => {
           fs.readFileSync(path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'), 'utf8')
         )
       ).toMatchObject({ platform: 'android', port, buildBackend: 'local', runTarget: 'expo-go' });
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
       const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env,
         reject: false,
@@ -110,7 +92,7 @@ describe('@expo/agent-cli dev --detach', () => {
         source: 'last-request',
       });
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
   it.each(['foreign', 'hanging'] as const)(
@@ -199,18 +181,62 @@ describe('@expo/agent-cli dev --detach', () => {
         ready: null,
       });
       expect(report.pid).toBeGreaterThan(0);
-      expect(report.logFile).toContain(LOG_PATH);
+      expect(report.logFile).toContain(DETACHED_LOG_PATH);
       // Line 1 of the child's log names the child, before its plan, so a re-run can tell who wrote it.
-      const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+      const log = await fs.promises.readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8');
       expect(log.split('\n')[0]).toBe(`Detached dev run, pid ${report.pid}.`);
 
       // The parent has exited — this test is running — and the child has not.
       expect(isAlive(report.pid)).toBe(true);
       expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: 8399, pid: report.pid });
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // `@expo/cli` 58 reports its port only through `2g`. The detached run owns a `2g` session that
+  // outlives this command, and the command returns once that report reaches the lock, not after
+  // the `PORT_WATCH_TIMEOUT_MS` fallback.
+  it.each(['a 2g session of its own', 'the LOG_EVENTS file of the caller'] as const)(
+    'returns once the dev server reports its port through 2g, and keeps its events in %s',
+    async (destination) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const port = await freePortAsync();
+      const eventsFile = path.join(projectRoot, 'events.jsonl');
+      const logEnv = destination === 'a 2g session of its own' ? {} : { LOG_EVENTS: eventsFile };
+      try {
+        const startedAt = Date.now();
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--detach', '--json'],
+          { env: { ...detachEnv(projectRoot, port), ...logEnv } }
+        );
+        const elapsedMs = Date.now() - startedAt;
+
+        expect(result.exitCode, result.all).toBe(0);
+        const report = JSON.parse(result.stdout);
+        expect(report.port).toBe(port);
+        expect(elapsedMs).toBeLessThan(PORT_WATCH_TIMEOUT_MS - 5_000);
+
+        const reported: number[] = [];
+        if (destination === 'a 2g session of its own') {
+          const session = (await listSessions()).find((s) => s.pid === report.pid);
+          expect(session?.alive).toBe(true);
+          for await (const entry of tap(session!.sessionDir, { filter: 'metro:instantiate' })) {
+            reported.push(entry.port as number);
+          }
+        } else {
+          for (const entry of readEvents(eventsFile)) {
+            if (entry._e === 'metro:instantiate') reported.push(entry.port);
+          }
+        }
+        expect(reported).toEqual([port]);
+      } finally {
+        await cleanUpDetachedAsync(projectRoot);
+      }
+    }
+  );
 
   it('prints one JSON object with a stable set of keys', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
@@ -239,7 +265,7 @@ describe('@expo/agent-cli dev --detach', () => {
         'waitedMs',
       ]);
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -281,7 +307,7 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(report.ready).toBeNull();
       expect(report.url).toBe(`http://127.0.0.1:${port}`);
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -297,7 +323,7 @@ describe('@expo/agent-cli dev --detach', () => {
 
       expect(JSON.parse(result.stdout).phase).toBe('serving');
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -332,7 +358,7 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(report.port).not.toBe(8180);
       expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: report.port });
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -352,7 +378,7 @@ describe('@expo/agent-cli dev --detach', () => {
 
       expect(result.stdout).toContain('moved · 8180 was busy, so it took');
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -440,10 +466,10 @@ describe('@expo/agent-cli dev --detach', () => {
           ['run:ios', '--port', String(report.port)],
         ]);
         // Said once, by the plan, and not again by the step it moved.
-        const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+        const log = await fs.promises.readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8');
         expect(log.split('Port 8081 is busy; the dev server uses').length).toBe(2);
       } finally {
-        await cleanUpAsync(projectRoot);
+        await cleanUpDetachedAsync(projectRoot);
         await new Promise((resolve) => (held ? held.close(resolve) : resolve(null)));
       }
     });
@@ -477,7 +503,7 @@ describe('@expo/agent-cli dev --detach', () => {
         );
         expect(starts.map(({ args }) => args.at(-1))).toEqual(['8482', String(report.port)]);
       } finally {
-        await cleanUpAsync(projectRoot);
+        await cleanUpDetachedAsync(projectRoot);
         await new Promise((resolve) => (held ? held.close(resolve) : resolve(null)));
       }
     });
@@ -512,7 +538,7 @@ describe('@expo/agent-cli dev --detach', () => {
           ['run:ios', '--port', String(report.port)],
         ]);
       } finally {
-        await cleanUpAsync(projectRoot);
+        await cleanUpDetachedAsync(projectRoot);
       }
     });
   });
@@ -529,7 +555,7 @@ describe('@expo/agent-cli dev --detach', () => {
 
       expect(JSON.parse(result.stdout)).toMatchObject({ port: 8393, portMoved: null });
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -567,7 +593,7 @@ describe('@expo/agent-cli dev --detach', () => {
       });
       expect(human.stdout).toContain('so nothing was started');
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -628,7 +654,7 @@ describe('@expo/agent-cli dev --detach', () => {
         'dev-server-running',
       ]);
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -703,7 +729,7 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(result.stdout).not.toContain('"ready": true');
       expect(result.all).not.toContain('Bundler      ready');
     } finally {
-      await cleanUpAsync(projectRoot);
+      await cleanUpDetachedAsync(projectRoot);
     }
   });
 
@@ -755,7 +781,7 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(
           result.exitCode,
           `${result.all}\nDetached child log:\n${await fs.promises
-            .readFile(path.join(projectRoot, LOG_PATH), 'utf8')
+            .readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8')
             .catch(() => '(unavailable)')}`
         ).toBe(7);
         const { error } = JSON.parse(result.stdout);
@@ -767,7 +793,7 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(result.stdout).not.toContain('"ready": true');
         expect(result.all).not.toContain('Bundler      ready');
       } finally {
-        await cleanUpAsync(projectRoot);
+        await cleanUpDetachedAsync(projectRoot);
       }
     });
 
@@ -796,7 +822,7 @@ describe('@expo/agent-cli dev --detach', () => {
           phase: 'serving',
         });
       } finally {
-        await cleanUpAsync(projectRoot);
+        await cleanUpDetachedAsync(projectRoot);
       }
     });
   });
@@ -819,157 +845,5 @@ describe('@expo/agent-cli dev --detach', () => {
 
     expect(result.all).toContain('This command blocks');
     expect(result.all).toContain('--detach');
-  });
-});
-
-describe('@expo/agent-cli dev:logs', () => {
-  it('reads what the detached dev server printed', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-
-    try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8394),
-      });
-      // The stub prints its start line as soon as it runs; the file is written by the child.
-      await waitForAsync(
-        () =>
-          (fs.readFileSync(path.join(projectRoot, LOG_PATH), 'utf8') || '').includes(
-            'stub_expo_start'
-          ),
-        5000
-      );
-
-      const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--json'], {
-        env: stubExpoEnv(projectRoot),
-      });
-
-      expect(result.exitCode).toBe(0);
-      const report = JSON.parse(result.stdout);
-      expect(report.logFile).toContain(LOG_PATH);
-      expect(report.lines.join('\n')).toContain('stub_expo_start');
-      expect(report.devServer).toMatchObject({ port: 8394 });
-    } finally {
-      await cleanUpAsync(projectRoot);
-    }
-  });
-
-  it('fences the log as untrusted content in the human report', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-
-    try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8393),
-      });
-      await waitForAsync(() => fs.existsSync(path.join(projectRoot, LOG_PATH)), 5000);
-
-      const result = await executeAgentCliAsync(projectRoot, ['dev:logs'], {
-        env: stubExpoEnv(projectRoot),
-      });
-
-      expect(result.stdout).toContain('BEGIN UNTRUSTED APP OUTPUT');
-      expect(result.stdout).toContain('END UNTRUSTED APP OUTPUT');
-    } finally {
-      await cleanUpAsync(projectRoot);
-    }
-  });
-
-  it('caps the read at --tail lines and says how many there are', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const logPath = path.join(projectRoot, LOG_PATH);
-    await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.promises.writeFile(
-      logPath,
-      Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join('\n') + '\n'
-    );
-
-    const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--tail', '3', '--json']);
-
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      lines: ['line 38', 'line 39', 'line 40'],
-      totalLines: 40,
-      truncated: true,
-      // Nothing is running, so the log is what the last detached run left.
-      devServer: null,
-    });
-  });
-
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Where a device reaches the dev server
-  //
-  // The lines are the real ones: `Waiting on <tunnel>` is what `expo start` prints for a tunnelled
-  // run [observed — live, 2026-08-25], and that URL is the only address a device off this machine
-  // can use — `devServer.url` is where it listens here.
-  describe('the address a device reaches', () => {
-    async function writeLogAsync(projectRoot: string, lines: string[]): Promise<void> {
-      const logPath = path.join(projectRoot, LOG_PATH);
-      await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
-      await fs.promises.writeFile(logPath, lines.join('\n') + '\n');
-    }
-
-    it('names the tunnel a device would use', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
-      await writeLogAsync(projectRoot, [
-        'Using src/app as the root directory for Expo Router.',
-        'Waiting on http://znakdiwe5j2n5o0.boltexpo.dev',
-      ]);
-
-      const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--json']);
-
-      expect(JSON.parse(result.stdout).advertised).toEqual({
-        url: 'http://znakdiwe5j2n5o0.boltexpo.dev',
-        hostType: 'tunnel',
-      });
-    });
-
-    // The reason the reading is over the whole file and not the tail that was asked for: the line
-    // is near the top, and a `--tail` that hid it would hide the one address that is useful.
-    it('finds the URL even when the requested tail does not include it', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
-      await writeLogAsync(projectRoot, [
-        'Waiting on http://znakdiwe5j2n5o0.boltexpo.dev',
-        ...Array.from({ length: 30 }, (_, index) => `line ${index + 1}`),
-      ]);
-
-      const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--tail', '3', '--json']);
-
-      const report = JSON.parse(result.stdout);
-      expect(report.lines).toEqual(['line 28', 'line 29', 'line 30']);
-      expect(report.advertised?.hostType).toBe('tunnel');
-    });
-
-    it('reports a local run as local, so nothing claims a tunnel that is not there', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
-      await writeLogAsync(projectRoot, ['Waiting on http://localhost:8081']);
-
-      const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--json']);
-
-      expect(JSON.parse(result.stdout).advertised).toEqual({
-        url: 'http://localhost:8081',
-        hostType: 'localhost',
-      });
-    });
-  });
-
-  it('exits 1 and says how to get one when the project has no log', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-
-    const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--json'], {
-      reject: false,
-    });
-
-    expect(result.exitCode).toBe(1);
-    const { error } = JSON.parse(result.stdout);
-    expect(error.code).toBe('NO_DEV_LOG');
-    expect(error.suggestedCommand).toBe(
-      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
-    );
-  });
-
-  it('appears in the top-level help, next to the command that writes it', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-
-    const result = await executeAgentCliAsync(projectRoot, ['--help']);
-
-    expect(result.all).toContain('dev:logs');
-    expect(result.all).toContain('dev blocks this terminal');
   });
 });

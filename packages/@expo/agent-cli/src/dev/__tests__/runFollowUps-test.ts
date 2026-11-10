@@ -36,7 +36,7 @@ describe(runFollowUpRequest, () => {
     [
       'after the run, the port the dev server logged',
       withPort,
-      ran({ port: 8099, source: 'log' }),
+      ran({ port: 8099, source: 'reported' }),
       8099,
     ],
     [
