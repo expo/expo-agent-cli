@@ -229,8 +229,9 @@ function holdInRun(
   if (runLock.phase !== 'building') return;
   const stillBuilding = () => isRunning() && runLock.lock.handle?.info.phase === 'building';
   const url = () => runLock.lock.handle?.info.url ?? held.info.url;
-  // Past another project's answer: it may be a dev server that leaves before this Metro binds.
-  void openWhenAnsweringAsync(url, projectRoot, stillBuilding, { pastForeign: true }).then(
+  // Another project's dev server may answer on this port for a while, for example one that stops
+  // before this project's Metro starts. Keep polling until this project's Metro answers.
+  void openWhenAnsweringAsync(url, projectRoot, stillBuilding, { keepWaitingOnForeign: true }).then(
     (answered) => {
       if (answered && stillBuilding()) runLock.lock.serve();
     }
@@ -246,9 +247,9 @@ export const STATUS_POLL_INTERVAL_MS = 500;
  *
  * A port named on the command line can be held by another project's Metro, which answers `/status`
  * as well as this one would. Its project root header tells them apart: a foreign root ends the
- * poll without an open, and the busy-port retry of `dev` handles the step. With `pastForeign`, the
- * poll goes on past it instead, for a caller that waits for this Metro whoever answers first. A dev
- * server that names
+ * poll without an open, and the busy-port retry of `dev` handles the step. With
+ * `keepWaitingOnForeign`, the poll ignores that answer and goes on until this project's Metro
+ * answers. A dev server that names
  * no root is this one: this process spawned it on that port. A root that contains this project is
  * this one too when it is in the same checkout (`matchProjectRoot`, for a monorepo
  * `metro.config.js`).
@@ -257,7 +258,7 @@ async function openWhenAnsweringAsync(
   url: () => string,
   projectRoot: string,
   isRunning: () => boolean,
-  { pastForeign = false }: { pastForeign?: boolean } = {}
+  { keepWaitingOnForeign = false }: { keepWaitingOnForeign?: boolean } = {}
 ): Promise<boolean> {
   while (isRunning()) {
     const probe = await probeBundlerAsync(url(), {
@@ -265,7 +266,7 @@ async function openWhenAnsweringAsync(
       projectRoot,
     });
     if (probe.projectRootMatched === false) {
-      if (!pastForeign) return false;
+      if (!keepWaitingOnForeign) return false;
     } else if (probe.answering) {
       return true;
     }
