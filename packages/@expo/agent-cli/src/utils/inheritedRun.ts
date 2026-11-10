@@ -33,7 +33,8 @@ const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
  * paths: a run that owns the terminal has no deadline to spend, and a person watching a queued
  * `npx expo start` is watching the runner ahead of it finish rather than a hang with no cause.
  *
- * @throws the raw spawn error, for a caller that knows what a missing binary means in its case.
+ * @throws the raw spawn error, for a caller that knows what a missing binary means in its case;
+ * the reason of `signal` when it was aborted before the spawn, which then never happens.
  */
 export function runInheritedAsync(
   command: string,
@@ -42,12 +43,15 @@ export function runInheritedAsync(
     cwd: string;
     onExit?: (code: number, signal: NodeJS.Signals | null) => void;
     onSpawnError?: (error: NodeJS.ErrnoException) => void;
+    signal?: AbortSignal;
   }
 ): Promise<number> {
   const key = runnerSpawnKey(command, args);
   return key == null
     ? runInheritedNowAsync(command, args, options)
-    : withRunnerLockAsync(key, () => runInheritedNowAsync(command, args, options));
+    : withRunnerLockAsync(key, () => runInheritedNowAsync(command, args, options), {
+        signal: options.signal,
+      });
 }
 
 /** Spawn now, with no regard for what else is running. The body of the function above. */
@@ -58,12 +62,15 @@ function runInheritedNowAsync(
     cwd,
     onExit,
     onSpawnError,
+    signal,
   }: {
     cwd: string;
     onExit?: (code: number, signal: NodeJS.Signals | null) => void;
     onSpawnError?: (error: NodeJS.ErrnoException) => void;
+    signal?: AbortSignal;
   }
 ): Promise<number> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
   return new Promise<number>((resolve, reject) => {
     // On Windows the resolved bin is a batch shim, which only `cmd.exe` can run.
     const target = resolveSpawnTarget(command, args, process.env);

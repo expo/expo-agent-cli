@@ -39,7 +39,6 @@ import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
 import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS } from '../devLock/port';
-import { RUN_PHASE } from './runPhase';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
@@ -266,16 +265,10 @@ export async function devDetachAsync(
     if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, true);
     // A followed run that ended in its build spawns nothing: its log says why.
     if (wait.kind === 'ended') {
-      const relayed = relayedDeviceError(await waitForChildVerdictAsync(projectRoot));
+      const verdict = await waitForChildVerdictAsync(projectRoot);
+      const relayed = relayedDeviceError(verdict);
       if (relayed) throw relayed;
-      throw notStartedError(
-        projectRoot,
-        detachedLogPath(projectRoot),
-        null,
-        followed.pid,
-        Date.now() - startedAt,
-        options.platform
-      );
+      throw buildEndedError(followed, verdict?.exitCode ?? null);
     }
     running = wait.lock;
   }
@@ -435,11 +428,17 @@ export async function devDetachAsync(
   let lock = wait.kind === 'up' ? wait.lock : null;
   if (!lock) {
     // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
-    const relayed = relayedDeviceError(
-      childExit ? await waitForChildVerdictAsync(projectRoot) : readChildVerdictSync(projectRoot)
-    );
+    const verdict = childExit
+      ? await waitForChildVerdictAsync(projectRoot)
+      : readChildVerdictSync(projectRoot);
+    const relayed = relayedDeviceError(verdict);
     if (relayed) {
       throw relayed;
+    }
+    if (wait.kind === 'ended' && wait.building) {
+      // Read through a cast: the `exit` callback sets it, which the narrowing here cannot see.
+      const exit = childExit as { code: number | null } | null;
+      throw buildEndedError(wait.building, exit?.code ?? verdict?.exitCode ?? null);
     }
     throw notStartedError(
       projectRoot,
@@ -1349,8 +1348,11 @@ async function waitForLockAsync(
   }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
+  // A run that ends in its build lets go of its lock; its last `building` answer says it built.
+  let building: DevServerLockInfo | null = null;
   for (;;) {
     const lock = await readDevServerLockAsync(projectRoot);
+    if (lock?.phase === 'building') building = lock;
     // A `building` lock has no dev server yet. It ends the wait only for a caller that reports it.
     if (lock?.phase === 'building' && acceptBuilding) return lock;
     if (lock && lock.phase !== 'building') {
@@ -1362,7 +1364,7 @@ async function waitForLockAsync(
     // Checked after the read, not before: a child that started the dev server and exited in the
     // same instant still published a lock, and that lock is the answer.
     if (hasExited()) {
-      return lock;
+      return lock ?? building;
     }
     if (Date.now() + LOCK_POLL_INTERVAL_MS >= deadline) {
       return lock;
@@ -1385,27 +1387,12 @@ function logTail(projectRoot: string): string {
     : '';
 }
 
-/** The detach's stop for a child whose dev server exited while its EAS open still runs. */
-function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandError {
-  const row = RUN_PHASE.finishing;
-  const command = row.command('');
-  const error = new CommandError(
-    'DEV_DETACH_FAILED',
-    [
-      `The detached dev server exited, and its run (pid ${lock.pid}) is finishing its EAS session start.`,
-      `Why: ${row.why(lock)}`,
-      `How: run "${command}". ${row.does} What the run printed is in ${logFile}.`,
-    ].join('\n')
-  );
-  error.suggestedCommand = command;
-  return error;
-}
-
 /** What a wait for this project's lock came to, for a run that may still build. */
 type BuildingWait =
   | { kind: 'building'; lock: DevServerLockInfo }
   | { kind: 'up'; lock: DevServerLockInfo }
-  | { kind: 'ended' };
+  /** The run is gone; `building` is its last `building` lock, null when it published none. */
+  | { kind: 'ended'; building: DevServerLockInfo | null };
 
 /**
  * Wait for this project's lock, past a run that builds.
@@ -1425,19 +1412,13 @@ async function waitPastBuildingAsync(
     hasExited,
     acceptBuilding: !options.waitReady,
   });
-  if (!lock) return { kind: 'ended' };
+  if (!lock) return { kind: 'ended', building: null };
   if (lock.phase !== 'building') return { kind: 'up', lock };
-  if (hasExited() || !isProcessAlive(lock.pid)) return { kind: 'ended' };
+  if (hasExited() || !isProcessAlive(lock.pid)) return { kind: 'ended', building: lock };
   if (options.waitReady) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
   return { kind: 'building', lock };
 }
 
-/**
- * The error for a detached run whose lock still says `building` when the wait ends.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
- * and the same command follows it.
- */
 /** The detach's stop for a child whose dev server exited while its EAS open still runs. */
 function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandError {
   const row = RUN_PHASE.finishing;
@@ -1453,6 +1434,12 @@ function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandEr
   return error;
 }
 
+/**
+ * The error for a detached run whose lock still says `building` when the wait ends.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
+ * and the same command follows it.
+ */
 function stillBuildingOnLockError(
   lock: DevServerLockInfo,
   options: DevOptions,
@@ -1471,6 +1458,27 @@ function stillBuildingOnLockError(
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
   error.data = { pid: lock.pid, url: lock.url, logFile, waitedMs };
   error.suggestedCommand = rerun;
+  return error;
+}
+
+/**
+ * The error for a detached run that held a `building` lock and ended before it served.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the run is gone, so the
+ * build failed or was stopped: the log says which.
+ */
+function buildEndedError(lock: DevServerLockInfo, exitCode: number | null): CommandError {
+  const logFile = detachedLogPath(lock.projectRoot);
+  const error = new CommandError(
+    'DEV_DETACH_FAILED',
+    [
+      `The detached dev run (pid ${lock.pid}) ended during its build${exitCode == null ? '' : ` with exit code ${exitCode}`}, so no dev server started.`,
+      `Why: its lock said that it was building, and the run is gone. A step before its dev server failed or was stopped.`,
+      `How: read what it printed in ${logFile} with "${PROGRAM_PREFIX} dev:logs", fix what stopped it, then run the same command again.${logTail(lock.projectRoot)}`,
+    ].join('\n')
+  );
+  error.data = { pid: lock.pid, exitCode, logFile };
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
   return error;
 }
 

@@ -106,7 +106,9 @@ describe(startAsync, () => {
     const promise = startAsync(projectRoot, resolveStartOptions(['--web']));
     await settleFollowUps();
 
-    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start', '--web']);
+    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start', '--web'], {
+      signal: undefined,
+    });
 
     end(0);
     await promise;
@@ -233,7 +235,7 @@ describe(startAsync, () => {
 
     expect(Log.log).not.toHaveBeenCalled();
     // The flag is @expo/agent-cli's own, so `expo start` never sees it.
-    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start']);
+    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start'], { signal: undefined });
 
     end(0);
     await promise;
@@ -257,7 +259,7 @@ describe(runDevServerAsync, () => {
     const end = mockLongRunningStart();
     const promise = runDevServerAsync(projectRoot, ['run:ios'], { agentSkills: true });
 
-    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios']);
+    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], { signal: undefined });
     vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS);
     expect(autoSyncSkillsAsync).toHaveBeenCalledWith(projectRoot, { silent: false });
 
@@ -271,7 +273,7 @@ describe(runDevServerAsync, () => {
     const promise = runDevServerAsync(projectRoot, ['run:ios'], { agentSkills: false });
 
     expect(withLeaseExtendedAsync).toHaveBeenCalledWith(projectRoot, expect.any(Function));
-    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios']);
+    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], { signal: undefined });
 
     end(0);
     await promise;

@@ -102,6 +102,16 @@ describe(spawnSubprocessAsync, () => {
     await expect(promise).resolves.toMatchObject({ exitCode: null, spawnError: error });
   });
 
+  it(`should spawn nothing when the signal aborted before the spawn`, async () => {
+    const abort = new AbortController();
+    abort.abort(new Error('stopped'));
+
+    await expect(spawnSubprocessAsync('eas', ['build'], { signal: abort.signal })).rejects.toThrow(
+      'stopped'
+    );
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it(`should treat an interrupt as a clean stop, like the expo wrapper does`, async () => {
     const child = mockSpawnChild();
 

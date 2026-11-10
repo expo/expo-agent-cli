@@ -83,6 +83,7 @@ export async function runDevServerAsync(
     easPlatform = null,
     easOpenFinished,
     runLock,
+    signal,
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
@@ -96,6 +97,8 @@ export async function runDevServerAsync(
      * takes its own lock, says `serving`, and releases the lock when the dev server exits.
      */
     runLock?: StepRunLock;
+    /** Aborted before the spawn, no dev server starts and the call rejects with its reason. */
+    signal?: AbortSignal;
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -130,7 +133,7 @@ export async function runDevServerAsync(
     }
   };
   const run = withLeaseExtendedAsync(projectRoot, () =>
-    spawnDevServerAsync(projectRoot, args, output)
+    spawnDevServerAsync(projectRoot, args, output, signal)
   ).finally(() => {
     running = false;
   });
@@ -284,13 +287,14 @@ async function openWhenAnsweringAsync(
 async function spawnDevServerAsync(
   projectRoot: string,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  signal: AbortSignal | undefined
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   if (output === 'inherit') {
-    return { exitCode: await runExpoAsync(projectRoot, args), stdout: '', stderr: '' };
+    return { exitCode: await runExpoAsync(projectRoot, args, { signal }), stdout: '', stderr: '' };
   }
 
-  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false });
+  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false, signal });
   if (result.spawnError) {
     throw new CommandError(
       'EXPO_CLI_NOT_FOUND',

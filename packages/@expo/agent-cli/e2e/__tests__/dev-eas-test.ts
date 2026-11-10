@@ -913,7 +913,11 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         );
 
         expect(again.exitCode).not.toBe(0);
-        expect(JSON.parse(again.stdout).error.suggestedCommand).toMatch(/dev:logs$/);
+        const { error } = JSON.parse(again.stdout);
+        expect(error.suggestedCommand).toMatch(/dev:logs$/);
+        // The followed run held a building lock, so the report says its build ended.
+        expect(error.message).toContain('ended during its build');
+        expect(error.message).not.toContain('still running');
         expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
           1
         );

@@ -49,6 +49,8 @@ export interface SpawnExpoOptions {
    * that turns it off. See {@link spawnExpoAsync} for why.
    */
   ci?: boolean;
+  /** Aborted before the spawn, nothing runs. See `SubprocessOptions.signal`. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -81,7 +83,7 @@ export interface SpawnExpoOptions {
 export async function spawnExpoAsync(
   projectRoot: string,
   args: string[],
-  { output = 'capture', promptGuard, ci = true }: SpawnExpoOptions = {}
+  { output = 'capture', promptGuard, ci = true, signal }: SpawnExpoOptions = {}
 ): Promise<{ cli: ExpoCliCommand; result: SubprocessResult }> {
   const cli = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command: cli.command, args: cli.args });
@@ -90,6 +92,7 @@ export async function spawnExpoAsync(
     cwd: projectRoot,
     output,
     promptGuard,
+    signal,
     // Nothing rather than `CI=0`: a machine whose own environment says `CI` is a machine where the
     // frozen bundler is the right behaviour, and overriding it here would be this wrapper deciding
     // something about the caller's environment that it was never told.
@@ -110,13 +113,19 @@ export async function spawnExpoAsync(
  * stop the dev server, which matters for agents that drive the CLI programmatically.
  * An interrupt then resolves as a clean exit, because the stop was asked for.
  */
-export function runExpoAsync(projectRoot: string, args: string[]): Promise<number> {
+export function runExpoAsync(
+  projectRoot: string,
+  args: string[],
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<number> {
   const { command, args: commandArgs } = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command, args: commandArgs });
 
   return runInheritedAsync(command, commandArgs, {
     cwd: projectRoot,
-    onExit: (code, signal) => debugEvent('expo_exit', { code, signal: signal ?? undefined }),
+    signal,
+    onExit: (code, exitSignal) =>
+      debugEvent('expo_exit', { code, signal: exitSignal ?? undefined }),
     onSpawnError: (error) =>
       debugEvent('expo_spawn_failed', { command, error: debugEvent.error(error) }),
   }).catch((error: NodeJS.ErrnoException) => {

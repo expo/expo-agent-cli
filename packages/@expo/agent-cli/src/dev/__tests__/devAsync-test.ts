@@ -254,11 +254,14 @@ describe(devAsync, () => {
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
-      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios'], {
+        signal: expect.any(AbortSignal),
+      });
       expect(spawnExpoAsync).not.toHaveBeenCalled();
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        signal: expect.any(AbortSignal),
         easPlatform: null,
         runLock: { lock: expect.any(RunLock), phase: 'building' },
       });

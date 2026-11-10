@@ -685,10 +685,10 @@ async function runPlanStepsAsync(
     // itself, and a build step serves nothing to open.
     const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
     let stepRunning = false;
-    const runOneStep = async (stepArgs: string[]) => {
+    const runOneStep = async (stepArgs: string[], signal: AbortSignal) => {
       if (!devServerStep) {
         return await withLeaseExtendedAsync(projectRoot, () =>
-          runStepAsync(projectRoot, step, stepArgs, output)
+          runStepAsync(projectRoot, step, stepArgs, output, signal)
         );
       }
       stepRunning = true;
@@ -705,6 +705,7 @@ async function runPlanStepsAsync(
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
+        signal,
         runLock: {
           lock: runLock,
           phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
@@ -743,7 +744,8 @@ async function runPlanStepsAsync(
       });
     };
     // The port retry runs it again; a signal during either run waits for that run to end.
-    const runStep = (stepArgs: string[]) => steps.stepAsync(() => runOneStep(stepArgs));
+    const runStep = (stepArgs: string[]) =>
+      steps.stepAsync((signal) => runOneStep(stepArgs, signal));
 
     if (step.id === 'eas-build') {
       // A remembered "no build" for this platform is about to be wrong.
@@ -1139,17 +1141,18 @@ async function runStepAsync(
   projectRoot: string,
   step: PlanStep,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  signal: AbortSignal
 ): Promise<StepResult> {
   if (step.argv[0] === 'eas') {
-    return await runEasStepAsync(projectRoot, args, output);
+    return await runEasStepAsync(projectRoot, args, output, signal);
   }
   if (output === 'inherit') {
     // Nothing is captured, so there is nothing for the wrapper-crash guard to read either.
-    const exitCode = await runExpoAsync(projectRoot, args);
+    const exitCode = await runExpoAsync(projectRoot, args, { signal });
     return { exitCode, stdout: '', stderr: '', binPath: null };
   }
-  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output });
+  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output, signal });
   return {
     exitCode: result.exitCode ?? 1,
     stdout: result.stdout,
@@ -1174,7 +1177,8 @@ async function runStepAsync(
 async function runEasStepAsync(
   projectRoot: string,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  signal: AbortSignal
 ): Promise<StepResult> {
   const { resolveEasCliOrThrow, easCliArgs } =
     require('../utils/easCli') as typeof import('../utils/easCli');
@@ -1185,6 +1189,7 @@ async function runEasStepAsync(
   const result = await spawnSubprocessAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
     output,
+    signal,
   });
   return {
     exitCode: result.exitCode ?? 1,

@@ -35,4 +35,17 @@ describe(withRunLockAsync, () => {
     ).rejects.toMatchObject({ code: 'DEV_INTERRUPTED', exitCode: 130 });
     expect(exit).not.toHaveBeenCalled();
   });
+
+  // The spawn checks this signal after the runner queue: a step whose child is not spawned yet
+  // has nothing to forward the signal to, so the child must never start.
+  it(`aborts the step's signal with DEV_INTERRUPTED before its child exists`, async () => {
+    await expect(
+      withRunLockAsync('/project', plan, null, (_lock, steps) =>
+        steps.stepAsync(async (signal) => {
+          process.emit('SIGTERM', 'SIGTERM');
+          signal.throwIfAborted();
+        })
+      )
+    ).rejects.toMatchObject({ code: 'DEV_INTERRUPTED', exitCode: 143 });
+  });
 });

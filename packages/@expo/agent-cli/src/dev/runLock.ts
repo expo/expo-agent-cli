@@ -63,8 +63,10 @@ export class RunLock {
 export interface RunSteps {
   /**
    * Run one step, with its EAS exit work. A signal while it runs reaches its child, which ends it.
+   * `work` passes `signal` to the spawn: a signal that comes before the child exists aborts it, so
+   * the child never starts and the step rejects with `DEV_INTERRUPTED`.
    */
-  stepAsync<T>(work: () => Promise<T>): Promise<T>;
+  stepAsync<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** Whether a signal arrived during the run. */
   readonly interrupted: boolean;
   /** Throw `DEV_INTERRUPTED` when a signal arrived during the run. */
@@ -86,8 +88,10 @@ export async function withRunLockAsync<T>(
   const lock = new RunLock(await takeBuildingLockAsync(projectRoot, plan, easPlatform));
   let signal: NodeJS.Signals | null = null;
   let running = 0;
+  const abort = new AbortController();
   const onSignal = (received: NodeJS.Signals) => {
     signal ??= received;
+    abort.abort(interruptedError(signal));
     // A running step ends first, and the run stops after it. Between steps nothing runs to wait
     // for: end now, as Node does without a listener.
     if (running === 0) process.exit(128 + os.constants.signals[received]);
@@ -96,7 +100,7 @@ export async function withRunLockAsync<T>(
     async stepAsync(work) {
       running++;
       try {
-        return await work();
+        return await work(abort.signal);
       } finally {
         running--;
       }

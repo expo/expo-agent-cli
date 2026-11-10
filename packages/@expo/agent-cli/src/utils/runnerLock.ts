@@ -185,7 +185,7 @@ export function tryAcquireRunnerLock(key: string): RunnerLock | null {
  */
 export function acquireRunnerLockAsync(
   key: string,
-  { timeoutMs }: { timeoutMs?: number } = {}
+  { timeoutMs, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<RunnerLock | null> {
   const free = tryAcquireRunnerLock(key);
   if (free) {
@@ -208,20 +208,24 @@ export function acquireRunnerLockAsync(
     };
 
     queue.waiting.push(grant);
+    const giveUp = () => {
+      // Out of the queue first, so the holder's `release` never hands the baton to a waiter that
+      // has already given up — which would leave the lock held by nobody.
+      const index = queue.waiting.indexOf(grant);
+      if (index >= 0) {
+        queue.waiting.splice(index, 1);
+      }
+      grant(false);
+    };
 
     if (timeoutMs != null) {
-      timer = setTimeout(() => {
-        // Out of the queue first, so the holder's `release` never hands the baton to a waiter that
-        // has already given up — which would leave the lock held by nobody.
-        const index = queue.waiting.indexOf(grant);
-        if (index >= 0) {
-          queue.waiting.splice(index, 1);
-        }
-        grant(false);
-      }, timeoutMs);
+      timer = setTimeout(giveUp, timeoutMs);
       // An unreferenced timer never keeps this process alive on its own.
       timer.unref?.();
     }
+    // An aborted spawn leaves the queue at once instead of waiting for the runner ahead.
+    if (signal?.aborted) giveUp();
+    else signal?.addEventListener('abort', giveUp, { once: true });
   });
 }
 
@@ -231,13 +235,20 @@ export function acquireRunnerLockAsync(
  * The unbounded form, for a caller with nothing to report a timeout as. A caller that has a deadline
  * uses {@link acquireRunnerLockAsync} and reports the null.
  */
-export function withRunnerLockAsync<T>(key: string, work: () => Promise<T>): Promise<T> {
+export function withRunnerLockAsync<T>(
+  key: string,
+  work: () => Promise<T>,
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<T> {
   // The free case starts `work` in this tick, for the reason `tryAcquireRunnerLock` gives.
   const free = tryAcquireRunnerLock(key);
   if (free) {
     return runAndRelease(free, work);
   }
-  return acquireRunnerLockAsync(key).then((lock) => runAndRelease(lock!, work));
+  // With no timeout, only an aborted `signal` gives up the wait, and then `work` never runs.
+  return acquireRunnerLockAsync(key, { signal }).then((lock) =>
+    lock ? runAndRelease(lock, work) : Promise.reject(signal?.reason)
+  );
 }
 
 async function runAndRelease<T>(lock: RunnerLock, work: () => Promise<T>): Promise<T> {
