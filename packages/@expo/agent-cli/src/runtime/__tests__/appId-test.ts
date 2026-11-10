@@ -72,7 +72,7 @@ describe(resolveAppId, () => {
 
   // F101's second half, at the chokepoint. The preflight now hands `runtime:stop` a platform-scoped
   // target list, but `runtime:reload`'s device rung resolves an id from a list it read for its own
-  // purposes (`reloadAsync.ts`) — so the guard belongs here too, where it costs nothing and cannot
+  // purposes (`deviceReload.ts`) — so the guard belongs here too, where it costs nothing and cannot
   // be forgotten by the next caller.
   //
   // Only the *other platform's Expo Go id* is rejected, and only when the list holds something else.

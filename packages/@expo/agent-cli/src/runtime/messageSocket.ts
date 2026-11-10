@@ -89,7 +89,7 @@ export interface GetPeersOptions {
  * A connection to the dev server's client command socket.
  *
  * Deliberately thin: it sends two kinds of frame and reads one. Everything that decides what a
- * reload *means* lives in `src/reload/`.
+ * reload *means* lives in `src/runtime/reload/`.
  */
 export class DevServerMessageSocket {
   private nextRequestId = 0;

@@ -5,7 +5,6 @@ const codeLines = { skipBlankLines: true, skipComments: true };
 const longFiles = {
   'src/dev/detachAsync.ts': 921,
   'src/dev/devAsync.ts': 1042,
-  'src/runtime/reload/reloadAsync.ts': 860,
 };
 
 // Known debt: files that hold a function over the 100-line limit and have room under 800. The
@@ -17,6 +16,7 @@ const longFunctionFiles = {
   'src/followups/smoke.ts': 277,
   'src/plan/decide.ts': 468,
   'src/runtime/discoverDevServer.ts': 194,
+  'src/runtime/reload/reloadAsync.ts': 388,
 };
 
 export default {
