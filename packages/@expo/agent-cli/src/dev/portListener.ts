@@ -10,6 +10,9 @@
 // cannot run answers null, and the caller says "a process this machine would not name" rather than
 // inventing one.
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { isPortBindableAsync } from './portCollision';
 
@@ -67,7 +70,22 @@ async function findPosixListenerAsync(port: number): Promise<PortListener | null
   if (spawnError || exitCode !== 0) {
     return null;
   }
-  return parseLsofFields(stdout);
+  const listener = parseLsofFields(stdout);
+  return listener && process.platform === 'linux' ? withExecutableName(listener) : listener;
+}
+
+/**
+ * Linux `lsof` names a process by its main thread, and Node 24 names that thread `MainThread`
+ * [observed — tier0-e2e on ubuntu-24.04, Node 24]. The executable in `/proc/<pid>/cmdline` names
+ * the process itself, so a dev server reads as `node` again.
+ */
+function withExecutableName(listener: PortListener): PortListener {
+  try {
+    const executable = fs.readFileSync(`/proc/${listener.pid}/cmdline`, 'utf8').split('\0')[0];
+    return executable ? { ...listener, command: path.posix.basename(executable) } : listener;
+  } catch {
+    return listener;
+  }
 }
 
 /**
