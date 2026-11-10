@@ -2,7 +2,7 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
 import type { AcquireResult } from '../deviceBinding';
 import type { RunLock } from '../devLock';
-import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
+import { readPortArg } from '../devLock/port';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { Log } from '../log';
 import { event as planEvent } from '../plan/events';
@@ -31,7 +31,6 @@ type RunScope = { lock: RunLock; steps: RunSteps };
 
 interface DevServerAttempt {
   args: string[];
-  spawnedAt: number;
   result: DevServerRun;
 }
 
@@ -65,7 +64,7 @@ export class DevServerStepRunner {
     const first = await runAttempt(args);
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol
     // `expo run:*` can exit 0 after skipping its dev server.
-    const collision = portCollisionIn(this.projectRoot, first);
+    const collision = portCollisionIn(first);
     if (!collision) {
       return { args: first.args, result: first.result };
     }
@@ -82,7 +81,7 @@ export class DevServerStepRunner {
       ? null
       : await retryOnFreePortAsync(collision, args, this.plan.devServerPort, runAttempt);
     const last = retry ?? first;
-    if (portCollisionIn(this.projectRoot, last) != null) {
+    if (portCollisionIn(last) != null) {
       planEvent('start_plan_step_exit', { id: step.id, code: last.result.exitCode });
       throw await portTakenAfterRetryError({
         step,
@@ -106,7 +105,6 @@ export class DevServerStepRunner {
     const { projectRoot, plan, options, acquired, output } = this;
     // `expo run:*` installs and launches the app itself.
     const openPlatform = step.argv[1] === 'start' ? this.openPlatform : null;
-    const spawnedAt = Date.now();
     // Session cleanup stays inside the active step so interruption waits for it.
     const result = await steps.stepAsync(async (signal) => {
       let attemptActive = true;
@@ -153,31 +151,25 @@ export class DevServerStepRunner {
         await eas?.finishAsync();
       });
     });
-    return { args, spawnedAt, result };
+    return { args, result };
   }
 }
 
 /**
  * The collision a dev-server step's output reports, or null.
  *
- * A dev server that reported or logged where it listens bound its port, so nothing in its output
- * is a bind collision. The port watch follows the step for as long as it runs, so a report after a
- * `run:*` build counts; `start.log` is what `@expo/cli` 57 and older write instead.
+ * A dev server that reported where it listens bound its port, so nothing in its output is a bind
+ * collision. The port watch follows the step for as long as it runs, so a report after a `run:*`
+ * build counts.
  *
  * A collision that names another port is not this step's: a `run:*` step's output carries Gradle
  * and Xcode output too, and an `EADDRINUSE` there is some other listener. A collision that names no
  * port (`Use port N instead?` alone) still counts.
  *
- * @param attempt The arguments, output, and start time of the same spawn.
+ * @param attempt The arguments and output of the same spawn.
  */
-function portCollisionIn(
-  projectRoot: string,
-  { args, result, spawnedAt }: DevServerAttempt
-): PortCollision | null {
-  if (
-    result.port?.source === 'reported' ||
-    readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) != null
-  ) {
+function portCollisionIn({ args, result }: DevServerAttempt): PortCollision | null {
+  if (result.port?.source === 'reported') {
     return null;
   }
   const collision = detectPortCollision(`${result.stderr}\n${result.stdout}`);
