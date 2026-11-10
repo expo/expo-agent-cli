@@ -11,10 +11,11 @@ afterEach(() => {
 });
 
 describe(withRunLockAsync, () => {
-  it(`ends the process at once on a signal nothing else handles`, async () => {
+  it(`ends the process at once on a signal between steps`, async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
-    await withRunLockAsync('/project', plan, null, async () => {
+    await withRunLockAsync('/project', plan, null, async (_lock, steps) => {
+      await steps.stepAsync(async () => {});
       process.emit('SIGTERM', 'SIGTERM');
     });
 
@@ -23,16 +24,13 @@ describe(withRunLockAsync, () => {
 
   it(`lets a running step end first, then stops the run`, async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
-    // Registered before the run and removed by Node as the signal arrives, as `2g`'s exit cleanup is.
-    process.once('SIGINT', () => {});
-    // A step's own forwarder, which `spawnAsync` installs while its child runs.
-    const step = () => {};
+
     await expect(
-      withRunLockAsync('/project', plan, null, async (_lock, assertNotInterrupted) => {
-        process.on('SIGINT', step);
-        process.emit('SIGINT', 'SIGINT');
-        process.off('SIGINT', step);
-        assertNotInterrupted();
+      withRunLockAsync('/project', plan, null, async (_lock, steps) => {
+        await steps.stepAsync(async () => {
+          process.emit('SIGINT', 'SIGINT');
+        });
+        steps.assertNotInterrupted();
       })
     ).rejects.toMatchObject({ code: 'DEV_INTERRUPTED', exitCode: 130 });
     expect(exit).not.toHaveBeenCalled();

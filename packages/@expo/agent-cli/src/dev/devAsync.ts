@@ -11,7 +11,7 @@ import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
 import type { DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
-import { withRunLockAsync, type RunLock } from './runLock';
+import { withRunLockAsync, type RunLock, type RunSteps } from './runLock';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -641,8 +641,8 @@ async function executePlanAsync(
     projectRoot,
     plan,
     shouldOpenApp(options) ? easOpenPlatform(options) : null,
-    (runLock, assertNotInterrupted) =>
-      runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, assertNotInterrupted)
+    (runLock, steps) =>
+      runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, steps)
   );
 }
 
@@ -654,7 +654,7 @@ async function runPlanStepsAsync(
   options: DevOptions,
   acquired: AcquireResult | null,
   runLock: RunLock,
-  assertNotInterrupted: () => void
+  steps: RunSteps
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
@@ -685,7 +685,7 @@ async function runPlanStepsAsync(
     // itself, and a build step serves nothing to open.
     const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
     let stepRunning = false;
-    const runStep = async (stepArgs: string[]) => {
+    const runOneStep = async (stepArgs: string[]) => {
       if (!devServerStep) {
         return await withLeaseExtendedAsync(projectRoot, () =>
           runStepAsync(projectRoot, step, stepArgs, output)
@@ -745,6 +745,8 @@ async function runPlanStepsAsync(
         await eas?.finishAsync();
       });
     };
+    // The port retry runs it again; a signal during either run waits for that run to end.
+    const runStep = (stepArgs: string[]) => steps.stepAsync(() => runOneStep(stepArgs));
 
     if (step.id === 'eas-build') {
       // A remembered "no build" for this platform is about to be wrong.
@@ -765,7 +767,7 @@ async function runPlanStepsAsync(
     let result = await runStep(args);
     // A signal ends a step with exit 0, so a step before the dev server counts for nothing after
     // one. The dev-server step goes on: a stop there is its normal end, and its exit work follows.
-    if (!devServerStep) assertNotInterrupted();
+    if (!devServerStep) steps.assertNotInterrupted();
 
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — the port carve-out. Checked
     // before the classifier below, because a busy port is the one stop in the Expo CLI's prompt

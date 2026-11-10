@@ -59,6 +59,16 @@ export class RunLock {
   }
 }
 
+/** How a run marks its steps, so a signal knows whether a step has to end first. */
+export interface RunSteps {
+  /**
+   * Run one step, with its EAS exit work. A signal while it runs reaches its child, which ends it.
+   */
+  stepAsync<T>(work: () => Promise<T>): Promise<T>;
+  /** Throw `DEV_INTERRUPTED` when a signal arrived during the run. */
+  assertNotInterrupted(): void;
+}
+
 /**
  * Run `run` under the run's lock, and stop it between steps on SIGINT or SIGTERM.
  *
@@ -69,35 +79,34 @@ export async function withRunLockAsync<T>(
   projectRoot: string,
   plan: StartPlan,
   easPlatform: 'ios' | 'android' | null,
-  run: (lock: RunLock, assertNotInterrupted: () => void) => Promise<T>
+  run: (lock: RunLock, steps: RunSteps) => Promise<T>
 ): Promise<T> {
   const lock = new RunLock(await takeBuildingLockAsync(projectRoot, plan, easPlatform));
   let signal: NodeJS.Signals | null = null;
-  const before = {
-    SIGINT: new Set(process.listeners('SIGINT')),
-    SIGTERM: new Set(process.listeners('SIGTERM')),
-  };
+  let running = 0;
   const onSignal = (received: NodeJS.Signals) => {
     signal ??= received;
-    // A step or the EAS lifecycle that listens ends first, and the run stops after it. With no
-    // listener added since the run began, nothing is running to wait for: end now, as Node does
-    // without a listener. Listeners are compared, not counted: a `once` listener from before the
-    // run, such as `2g`'s exit cleanup, is gone by the time this one is called.
-    const baseline = before[received as 'SIGINT' | 'SIGTERM'];
-    if (
-      process
-        .listeners(received)
-        .every((listener) => listener === onSignal || baseline.has(listener))
-    ) {
-      process.exit(128 + os.constants.signals[received]);
-    }
+    // A running step ends first, and the run stops after it. Between steps nothing runs to wait
+    // for: end now, as Node does without a listener.
+    if (running === 0) process.exit(128 + os.constants.signals[received]);
+  };
+  const steps: RunSteps = {
+    async stepAsync(work) {
+      running++;
+      try {
+        return await work();
+      } finally {
+        running--;
+      }
+    },
+    assertNotInterrupted() {
+      if (signal) throw interruptedError(signal);
+    },
   };
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   try {
-    return await run(lock, () => {
-      if (signal) throw interruptedError(signal);
-    });
+    return await run(lock, steps);
   } finally {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
