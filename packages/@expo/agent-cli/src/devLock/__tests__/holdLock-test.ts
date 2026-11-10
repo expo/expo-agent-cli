@@ -91,6 +91,31 @@ describe(holdDevServerLockAsync, () => {
     running = false;
   });
 
+  // A named port is published at the spawn, so nothing waits on the watch: it follows the dev
+  // server for as long as it runs, and a report after an `expo run:*` build still counts.
+  it(`follows a report that comes after the watch's timeout when the arguments name a port`, async () => {
+    const projectRoot = makeTempProject();
+    let running = true;
+
+    const lock = holdDevServerLockAsync(projectRoot, ['run:ios', '--port', '8303'], {
+      since: Date.now(),
+      isRunning: () => running,
+      intervalMs: 10,
+      timeoutMs: 30,
+    }).then((handle) => (held.push(handle), handle));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    report(8303);
+    expect(
+      await eventuallyAsync(
+        () => readDevServerLockAsync(projectRoot),
+        (info) => info?.portReported === true
+      )
+    ).toMatchObject({ port: 8303, portReported: true });
+    running = false;
+    await lock;
+  });
+
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
   it(`answers easOpenFinished once the EAS open settles, and keeps it across the port update from the report`, async () => {
     const projectRoot = makeTempProject();

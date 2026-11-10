@@ -28,7 +28,8 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
  * When the arguments name a port, the lock is published at the spawn with `source: 'arg'`: `dev`
  * passes `--port` on every step that serves, and the Expo CLI either binds that port or exits. A
  * named port that another project's dev server already answers on is never published; the lock
- * then waits for Metro's report, as with no port. The watch goes on, so `onResolved` is told again with `source: 'reported'` when Metro reports, and the
+ * then waits for Metro's report, as with no port. The watch goes on for as long as the dev server
+ * runs, so `onResolved` is told again with `source: 'reported'` when Metro reports, and the
  * lock then answers with the reported port and `portReported: true`. With no port in the
  * arguments, the lock waits for the report, or for the watch to give up.
  *
@@ -75,9 +76,12 @@ export async function holdDevServerLockAsync(
   const resolved: ResolvedDevServerPort = { port: named, source: 'arg' };
   options.onResolved?.(resolved);
   const lock = await publishAndWatchAsync(resolved);
+  // The lock already answers, so nothing waits on this watch: it follows the dev server for as long
+  // as it runs, and Metro's report after a long `expo run:*` build still counts.
   const watched = await resolveDevServerPortAsync(projectRoot, args, {
     ...options,
     onResolved: undefined,
+    timeoutMs: Infinity,
   });
   if (watched?.source === 'reported') {
     options.onResolved?.(watched);

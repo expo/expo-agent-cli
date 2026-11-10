@@ -859,9 +859,9 @@ async function executePlanAsync(
 /**
  * The collision a dev-server step's output reports, or null.
  *
- * A dev server that logged where it listens bound its port, so nothing in its output is a bind
- * collision. The log is read here rather than trusted from the port watch, because the watch stops
- * before a `run:*` build ends.
+ * A dev server that reported or logged where it listens bound its port, so nothing in its output
+ * is a bind collision. The port watch follows the step for as long as it runs, so a report after a
+ * `run:*` build counts; `start.log` is what `@expo/cli` 57 and older write instead.
  *
  * A collision that names another port is not this step's: a `run:*` step's output carries Gradle
  * and Xcode output too, and an `EADDRINUSE` there is some other listener. A collision that names no
