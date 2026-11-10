@@ -229,9 +229,12 @@ function holdInRun(
   if (runLock.phase !== 'building') return;
   const stillBuilding = () => isRunning() && runLock.lock.handle?.info.phase === 'building';
   const url = () => runLock.lock.handle?.info.url ?? held.info.url;
-  void openWhenAnsweringAsync(url, projectRoot, stillBuilding).then((answered) => {
-    if (answered && stillBuilding()) runLock.lock.serve();
-  });
+  // Past another project's answer: it may be a dev server that leaves before this Metro binds.
+  void openWhenAnsweringAsync(url, projectRoot, stillBuilding, { pastForeign: true }).then(
+    (answered) => {
+      if (answered && stillBuilding()) runLock.lock.serve();
+    }
+  );
 }
 
 /** How often an open aimed at a named port asks `/status` again. */
@@ -243,7 +246,9 @@ export const STATUS_POLL_INTERVAL_MS = 500;
  *
  * A port named on the command line can be held by another project's Metro, which answers `/status`
  * as well as this one would. Its project root header tells them apart: a foreign root ends the
- * poll without an open, and the busy-port retry of `dev` handles the step. A dev server that names
+ * poll without an open, and the busy-port retry of `dev` handles the step. With `pastForeign`, the
+ * poll goes on past it instead, for a caller that waits for this Metro whoever answers first. A dev
+ * server that names
  * no root is this one: this process spawned it on that port. A root that contains this project is
  * this one too when it is in the same checkout (`matchProjectRoot`, for a monorepo
  * `metro.config.js`).
@@ -251,7 +256,8 @@ export const STATUS_POLL_INTERVAL_MS = 500;
 async function openWhenAnsweringAsync(
   url: () => string,
   projectRoot: string,
-  isRunning: () => boolean
+  isRunning: () => boolean,
+  { pastForeign = false }: { pastForeign?: boolean } = {}
 ): Promise<boolean> {
   while (isRunning()) {
     const probe = await probeBundlerAsync(url(), {
@@ -259,9 +265,8 @@ async function openWhenAnsweringAsync(
       projectRoot,
     });
     if (probe.projectRootMatched === false) {
-      return false;
-    }
-    if (probe.answering) {
+      if (!pastForeign) return false;
+    } else if (probe.answering) {
       return true;
     }
     await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
