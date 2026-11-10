@@ -759,6 +759,46 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a `finishing` lock has
+  // no dev server, so the detach that reads it reports none.
+  it.skipIf(process.platform === 'win32')(
+    'reports no dev server when the run it started lost Metro before the lock was read',
+    async () => {
+      const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
+      const projectRoot = await setupAsync('go-app', {
+        easScript: script.replace(
+          'const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);',
+          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25000); const exitCode = 0;'
+        ),
+      });
+      // No port report, so the parent reads the lock only at the 20 s fallback: Metro has exited
+      // at 2.5 s, and the session start still runs.
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          {
+            env: {
+              ...easRunEnv(projectRoot, 8591),
+              STUB_EXPO_NO_PORT_REPORT: '1',
+              STUB_EXPO_DELAY_MS: '2500',
+            },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode, result.all).not.toBe(0);
+        expect(result.all).toContain('DEV_DETACH_FAILED');
+        expect(result.all).toContain('finishing its EAS session start');
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+      }
+    }
+  );
+
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
   it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
     'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro (%s)',

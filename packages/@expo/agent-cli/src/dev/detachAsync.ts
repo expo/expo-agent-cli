@@ -39,6 +39,7 @@ import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
 import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS } from '../devLock/port';
+import { RUN_PHASE } from './runPhase';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
@@ -449,6 +450,9 @@ export async function devDetachAsync(
       options.platform
     );
   }
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the child's Metro exited
+  // and its EAS open still runs: there is no dev server to report or probe.
+  if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
 
   /**
    * Whether the child this run started is gone, asked of the process rather than of an event.
@@ -1434,6 +1438,21 @@ async function waitPastBuildingAsync(
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
  * and the same command follows it.
  */
+/** The detach's stop for a child whose dev server exited while its EAS open still runs. */
+function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandError {
+  const row = RUN_PHASE.finishing;
+  const error = new CommandError(
+    'DEV_DETACH_FAILED',
+    [
+      `The detached dev server exited, and its run (pid ${lock.pid}) is finishing its EAS session start.`,
+      `Why: ${row.why(lock)}`,
+      `How: run "${row.command}". ${row.does} What the run printed is in ${logFile}.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = row.command;
+  return error;
+}
+
 function stillBuildingOnLockError(
   lock: DevServerLockInfo,
   options: DevOptions,
