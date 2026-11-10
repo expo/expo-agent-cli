@@ -443,8 +443,9 @@ directly and never enters the ladder.
 
 The lock lives in `@expo/agent-cli`, in `src/devLock/`. `@expo/agent-cli start` holds it
 while its dev server runs. An `@expo/agent-cli dev` run whose plan serves holds one lock
-for the whole run: from its first step until the run ends, or until its EAS open returns
-when Metro exited first.
+for the whole run: from its first step until the run ends. A run with an EAS open lets
+go earlier: at Metro's exit when the open has returned, or when the open returns after
+Metro exited.
 
 It is a listening socket. A file records a fact about a process, and that record
 outlives the process. A listening socket exists only while its owner does. A reader that
