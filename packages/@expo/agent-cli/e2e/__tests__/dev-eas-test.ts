@@ -9,6 +9,7 @@
 // Nothing here reaches EAS. The `eas` on `PATH` is a stub bin that records every invocation, the
 // same way the fixtures' `expo` bin does.
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 
 import {
@@ -31,6 +32,7 @@ import {
   stubExpoEnv,
   waitForAsync,
   readLastBuildFile,
+  freePortAsync,
 } from '../utils';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
@@ -583,6 +585,50 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       await cleanUpAsync(projectRoot);
     }
   });
+
+  // @ref llp/0026-dev-owns-the-open.rfc.md — with no port in the log, the open waits for /status on
+  // the named port. Another project's dev server that answers there first and then leaves does not
+  // stop the open once this project's Metro serves.
+  it.skipIf(process.platform === 'win32')(
+    "opens the app after another project's dev server left the port",
+    async () => {
+      const projectRoot = await setupAsync('go-app');
+      const port = await freePortAsync();
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas', '--port', String(port)], {
+        env: {
+          ...easRunEnv(projectRoot, port),
+          STUB_EXPO_NO_PORT_REPORT: '1',
+          STUB_EXPO_LISTEN_DELAY_MS: '3000',
+        },
+      });
+      const foreign = http.createServer((_request, response) => {
+        response.writeHead(200, { 'x-react-native-project-root': '/another/project' });
+        response.end('packager-status:running');
+      });
+      try {
+        expect(
+          await waitForAsync(
+            () => expoInvocationArgs(projectRoot).some((args) => args[0] === 'start'),
+            20_000
+          )
+        ).toBe(true);
+        await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => foreign.close(resolve));
+
+        expect(
+          await waitForAsync(
+            () => easInvocationArgs(projectRoot).some((args) => args[0] === 'simulator'),
+            15_000
+          )
+        ).toBe(true);
+      } finally {
+        foreign.close();
+        await killAsync(child);
+        await cleanUpAsync(projectRoot);
+      }
+    }
+  );
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the session cleanup
   // needs no lock, so a dev:stop during it finds no dev server to signal.

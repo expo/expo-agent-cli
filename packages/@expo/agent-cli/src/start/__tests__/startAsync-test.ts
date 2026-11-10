@@ -398,7 +398,8 @@ describe(runDevServerAsync, () => {
     });
 
     // Another project's Metro on the named port answers `/status` too; its root says it is not ours.
-    it(`should not open on the port it was given when /status answers for another project`, async () => {
+    // A foreign answer does not end the wait: that server may leave before this Metro binds.
+    it(`should not open on the port it was given while /status answers for another project`, async () => {
       const onDevServer = vi.fn();
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue(foreign);
@@ -412,7 +413,7 @@ describe(runDevServerAsync, () => {
       await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
 
       expect(onDevServer).not.toHaveBeenCalled();
-      expect(probeBundlerAsync).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(probeBundlerAsync).mock.calls.length).toBeGreaterThan(1);
       end(0);
       await promise;
     });
