@@ -26,6 +26,7 @@ import {
   expoHomeOf,
   readLastBuildFile,
   readEvents,
+  freePortAsync,
 } from '../utils';
 import {
   EMULATOR_NAME,
@@ -237,14 +238,20 @@ describe('@expo/agent-cli dev', () => {
       'says serving once Metro answers after run:%s, with no port report',
       async (platform) => {
         const projectRoot = await setupAsync('bare-app');
-        const child = spawnAgentCli(projectRoot, ['dev', `--${platform}`, '--local'], {
-          env: {
-            STUB_EXPO_LISTEN: '1',
-            STUB_EXPO_NO_PORT_REPORT: '1',
-            STUB_EXPO_BUILD_DELAY_MS: '2000',
-            STUB_EXPO_DELAY_MS: '30000',
-          },
-        });
+        // Not 8081: the stub Metro holds its port for the whole test, and other files run beside it.
+        const port = String(await freePortAsync());
+        const child = spawnAgentCli(
+          projectRoot,
+          ['dev', `--${platform}`, '--local', '--port', port],
+          {
+            env: {
+              STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_NO_PORT_REPORT: '1',
+              STUB_EXPO_BUILD_DELAY_MS: '2000',
+              STUB_EXPO_DELAY_MS: '30000',
+            },
+          }
+        );
         try {
           expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
             phase: 'building',
@@ -256,7 +263,12 @@ describe('@expo/agent-cli dev', () => {
             await new Promise((resolve) => setTimeout(resolve, 250));
             lock = await readDevLockAsync(projectRoot);
           }
-          expect(lock).toMatchObject({ pid: child.pid, phase: 'serving', portReported: false });
+          expect(lock).toMatchObject({
+            pid: child.pid,
+            port: Number(port),
+            phase: 'serving',
+            portReported: false,
+          });
         } finally {
           await killAsync(child);
         }

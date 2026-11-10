@@ -18,6 +18,7 @@ import { list as listSessions, tap } from '2g/api';
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import {
   executeAgentCliAsync,
+  freePortAsync,
   holdDevLockAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
@@ -29,15 +30,6 @@ import {
   waitForAsync,
 } from '../utils';
 import { DETACHED_LOG_PATH, cleanUpDetachedAsync, detachEnv, STUB_ALIVE_MS } from '../detachUtils';
-
-/** A port nothing listens on now, read back from a server bound to port 0. */
-async function freePortAsync(): Promise<number> {
-  const server = net.createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as net.AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
 
 /** Whether a pid is still alive, without signalling it. */
 function isAlive(pid: number): boolean {
