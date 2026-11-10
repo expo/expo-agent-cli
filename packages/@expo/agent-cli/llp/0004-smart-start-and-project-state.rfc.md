@@ -742,7 +742,10 @@ rule. Discovery's lock step (`discoverDevServerAsync` step 0) reads it too: the 
 names its port at the spawn, before Metro binds it, so a lock whose port answers with
 another project's root is not found there, and discovery goes on to its other steps. An
 open aimed at a port the command line named waits until `/status` answers there and
-names no other project's root. It never comes when the dev server exits first.
+names no other project's root. Another project's answer does not end that wait, because
+that server may leave before this project's Metro binds the port; the switch of a
+`building` lock to `serving` waits the same way. It never comes when the dev server exits
+first.
 
 `devServerPort.state` says what the plan does about the port: `picked`, `named` (with
 `taken` when the named port cannot be bound), or `running` (with `phase`, `serving` or

@@ -159,14 +159,14 @@ export async function runDevServerAsync(
       }
       const server = { url: `http://127.0.0.1:${resolved.port}`, port: resolved.port };
       // `reported` is the dev server saying where it listens. `arg` is only the port the command line
-      // named, which `dev` always passes, so the open waits until `/status` answers there and
-      // names no other project's root, and never comes when the dev server exits first. The lock
+      // named, which `dev` always passes, so the open waits until this project's Metro answers
+      // `/status` there, and never comes when the dev server exits first. The lock
       // tells `arg` at the spawn and `reported` later, and `open` fires once. `default` is a
       // guess, and an open aimed at a guessed port is the false green the lock exists to prevent.
       if (resolved.source === 'reported') {
         open(server);
       } else if (resolved.source === 'arg') {
-        void openWhenAnsweringAsync(
+        void waitForOwnMetroAsync(
           () => server.url,
           projectRoot,
           () => running && !opened
@@ -229,26 +229,27 @@ function holdInRun(
   if (runLock.phase !== 'building') return;
   const stillBuilding = () => isRunning() && runLock.lock.handle?.info.phase === 'building';
   const url = () => runLock.lock.handle?.info.url ?? held.info.url;
-  void openWhenAnsweringAsync(url, projectRoot, stillBuilding).then((answered) => {
+  void waitForOwnMetroAsync(url, projectRoot, stillBuilding).then((answered) => {
     if (answered && stillBuilding()) runLock.lock.serve();
   });
 }
 
-/** How often an open aimed at a named port asks `/status` again. */
+/** How often a wait for this project's Metro asks `/status` again. */
 export const STATUS_POLL_INTERVAL_MS = 500;
 
 /**
- * Ask `url`'s `/status` until it answers for `projectRoot`, or until `isRunning` says the dev
+ * Ask `url`'s `/status` until this project's Metro answers, or until `isRunning` says the dev
  * server is gone.
  *
- * A port named on the command line can be held by another project's Metro, which answers `/status`
- * as well as this one would. Its project root header tells them apart: a foreign root ends the
- * poll without an open, and the busy-port retry of `dev` handles the step. A dev server that names
- * no root is this one: this process spawned it on that port. A root that contains this project is
- * this one too when it is in the same checkout (`matchProjectRoot`, for a monorepo
- * `metro.config.js`).
+ * Another project's Metro can answer on the port as well as this one would, and its project root
+ * header tells them apart. Its answer does not end the wait: it may be a dev server that leaves
+ * before this project's Metro binds the port. A server that stays there keeps this Metro from
+ * binding, so the step exits, `isRunning` says so, and the busy-port retry of `dev` handles the
+ * step. A dev server that names no root is this one: this process spawned it on that port. A root
+ * that contains this project is this one too when it is in the same checkout (`matchProjectRoot`,
+ * for a monorepo `metro.config.js`).
  */
-async function openWhenAnsweringAsync(
+async function waitForOwnMetroAsync(
   url: () => string,
   projectRoot: string,
   isRunning: () => boolean
@@ -258,10 +259,7 @@ async function openWhenAnsweringAsync(
       timeoutMs: STATUS_POLL_INTERVAL_MS,
       projectRoot,
     });
-    if (probe.projectRootMatched === false) {
-      return false;
-    }
-    if (probe.answering) {
+    if (probe.answering && probe.projectRootMatched !== false) {
       return true;
     }
     await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));

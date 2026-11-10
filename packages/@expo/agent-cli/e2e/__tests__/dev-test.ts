@@ -5,6 +5,7 @@
 // `expo` invocations, the stop on the first failing step, and the build record written after a
 // successful native build.
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 
 import {
@@ -163,18 +164,31 @@ describe('@expo/agent-cli dev', () => {
     });
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `expo run:*` builds before
-    // it serves, so its lock says `building` until Metro answers /status for this project.
+    // it serves, so its lock says `building` until Metro answers /status for this project. Another
+    // project's dev server that answers on the port during the build and then leaves does not keep
+    // the lock `building` after this project's Metro serves there.
     it.each(['ios', 'android'] as const)(
       'says building on the lock while run:%s compiles, and serving once Metro answers',
       async (platform) => {
         // Bare native directories, so the plan is the one `run:*` step and nothing waits before it.
         const projectRoot = await setupAsync('bare-app');
-        const child = spawnAgentCli(projectRoot, ['dev', `--${platform}`, '--local'], {
-          env: {
-            STUB_EXPO_LISTEN: '1',
-            STUB_EXPO_BUILD_DELAY_MS: '4000',
-            STUB_EXPO_DELAY_MS: '30000',
-          },
+        // Its own port: other files run beside this one, and a dev server of theirs that stays on
+        // the port would keep this Metro from serving at all.
+        const port = await freePortAsync();
+        const child = spawnAgentCli(
+          projectRoot,
+          ['dev', `--${platform}`, '--local', '--port', String(port)],
+          {
+            env: {
+              STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_BUILD_DELAY_MS: '4000',
+              STUB_EXPO_DELAY_MS: '30000',
+            },
+          }
+        );
+        const foreign = http.createServer((_request, response) => {
+          response.writeHead(200, { 'x-react-native-project-root': '/another/project' });
+          response.end('packager-status:running');
         });
         try {
           expect(
@@ -183,10 +197,13 @@ describe('@expo/agent-cli dev', () => {
               30_000
             )
           ).toBe(true);
+          await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
           expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
             pid: child.pid,
             phase: 'building',
           });
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          await new Promise((resolve) => foreign.close(resolve));
 
           const deadline = Date.now() + 20_000;
           let lock = await readDevLockAsync(projectRoot);
@@ -194,8 +211,9 @@ describe('@expo/agent-cli dev', () => {
             await new Promise((resolve) => setTimeout(resolve, 250));
             lock = await readDevLockAsync(projectRoot);
           }
-          expect(lock).toMatchObject({ pid: child.pid, phase: 'serving' });
+          expect(lock).toMatchObject({ pid: child.pid, port, phase: 'serving' });
         } finally {
+          foreign.close();
           await killAsync(child);
         }
       }
