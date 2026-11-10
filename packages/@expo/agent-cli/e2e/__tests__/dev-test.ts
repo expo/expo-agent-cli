@@ -169,13 +169,21 @@ describe('@expo/agent-cli dev', () => {
       async (platform) => {
         // Bare native directories, so the plan is the one `run:*` step and nothing waits before it.
         const projectRoot = await setupAsync('bare-app');
-        const child = spawnAgentCli(projectRoot, ['dev', `--${platform}`, '--local'], {
-          env: {
-            STUB_EXPO_LISTEN: '1',
-            STUB_EXPO_BUILD_DELAY_MS: '4000',
-            STUB_EXPO_DELAY_MS: '30000',
-          },
-        });
+        // Not a port near 8081: other files run beside this one, and one of their dev servers can
+        // take the planned port during the build. /status then names another project, and the
+        // lock rightly stays `building`.
+        const port = String(await freePortAsync());
+        const child = spawnAgentCli(
+          projectRoot,
+          ['dev', `--${platform}`, '--local', '--port', port],
+          {
+            env: {
+              STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_BUILD_DELAY_MS: '4000',
+              STUB_EXPO_DELAY_MS: '30000',
+            },
+          }
+        );
         try {
           expect(
             await waitForAsync(
@@ -194,7 +202,7 @@ describe('@expo/agent-cli dev', () => {
             await new Promise((resolve) => setTimeout(resolve, 250));
             lock = await readDevLockAsync(projectRoot);
           }
-          expect(lock).toMatchObject({ pid: child.pid, phase: 'serving' });
+          expect(lock).toMatchObject({ pid: child.pid, port: Number(port), phase: 'serving' });
         } finally {
           await killAsync(child);
         }
