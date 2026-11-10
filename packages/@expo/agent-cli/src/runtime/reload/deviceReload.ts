@@ -85,7 +85,7 @@ export async function reloadOnDeviceAsync(
 
   // Starting it again is the deep link, which is the same step `navigate` runs — so a run with a
   // `--route` opens the route directly and a run without one opens the root.
-  const opened = await openRouteAsync(projectRoot, options, devServerUrl, device);
+  const opened = await openRouteAfterReloadAsync(projectRoot, options, devServerUrl, device);
   if (opened == null || opened.exitCode !== 0) {
     return {
       attempt: {
@@ -125,7 +125,7 @@ export async function reloadOnDeviceAsync(
  * @see src/dev/advertisedUrl.ts — and `resolveRouteUrlAsync`, which does the same thing for the two
  * callers that also need a route check and a target decision from the dev server's own target list.
  */
-export async function openRouteAsync(
+export async function openRouteAfterReloadAsync(
   projectRoot: string,
   options: ReloadOptions,
   devServerUrl: string,
