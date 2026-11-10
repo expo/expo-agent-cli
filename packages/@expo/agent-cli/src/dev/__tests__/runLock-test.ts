@@ -23,6 +23,8 @@ describe(withRunLockAsync, () => {
 
   it(`lets a running step end first, then stops the run`, async () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    // Registered before the run and removed by Node as the signal arrives, as `2g`'s exit cleanup is.
+    process.once('SIGINT', () => {});
     // A step's own forwarder, which `spawnAsync` installs while its child runs.
     const step = () => {};
     await expect(
