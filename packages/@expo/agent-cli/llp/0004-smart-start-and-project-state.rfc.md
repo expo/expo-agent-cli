@@ -443,7 +443,8 @@ directly and never enters the ladder.
 
 The lock lives in `@expo/agent-cli`, in `src/devLock/`. `@expo/agent-cli start` holds it
 while its dev server runs. An `@expo/agent-cli dev` run whose plan serves holds one lock
-for the whole run: from its first step until its EAS open returns.
+for the whole run: from its first step until the run ends, or until its EAS open returns
+when Metro exited first.
 
 It is a listening socket. A file records a fact about a process, and that record
 outlives the process. A listening socket exists only while its owner does. A reader that
@@ -475,13 +476,32 @@ Phase. The lock says what its run does now, so a reader reads it and does not in
 
 `start` always answers `serving`. `expo run:*` builds, starts Metro, and then installs
 and launches the app (`@expo/cli` 58), so `/status` is the first sign that its build ended,
-in every output mode. Only a run whose EAS open still runs when Metro exits has
-`finishing`, and it releases the lock when that open returns. Any other run releases the
-lock when its dev-server step exits, also before the cleanup of a session it started,
-which needs no lock. A run whose open started makes no busy-port retry. A busy-port retry updates
-the same lock, so the lock does not go away between the two spawns. A reader treats a
-line without `phase` as `serving`. A lock answers `building` only for a plan with a
-dev-server step: a plan that serves nothing takes no lock.
+in every output mode. A reader treats a line without `phase` as `serving`. A lock answers
+`building` only for a plan with a dev-server step: a plan that serves nothing takes no lock.
+
+Transitions. One writer changes the run's lock, and one table decides each change. The
+run's state is the phase it answers, `unlocked` (it holds no lock: before the take, after
+a foreign port, or when the take failed), or `released`. Beside it the run keeps its EAS
+open: `none`, `running` or `returned`.
+
+| state \ event | published(p) | foreign port      | Metro reports a port | `/status` answers | open starts  | open returns  | Metro exits                                                    | run ends |
+| ------------- | ------------ | ----------------- | -------------------- | ----------------- | ------------ | ------------- | -------------------------------------------------------------- | -------- |
+| unlocked      | p            | unlocked          | unlocked             | unlocked          | open running | open returned | unlocked                                                       | released |
+| building      | p            | unlocked, release | building, new port   | serving           | open running | open returned | open running: `finishing`; returned: released; none: unchanged | released |
+| serving       | p            | unlocked, release | serving, new port    | serving           | open running | open returned | as `building`                                                  | released |
+| finishing     | illegal      | illegal           | finishing            | finishing         | illegal      | released      | illegal                                                        | released |
+| released      | illegal      | released          | released             | released          | released     | released      | released                                                       | released |
+
+`published` is the take before a build step, a dev-server spawn, or a busy-port retry, with
+the step's phase, port and spawn time. It is legal whatever the open does: the open can
+start on Metro's report before a named port that another project holds is published. A
+run whose open started makes no busy-port retry; the run, not the table, keeps that rule.
+An open starts once per run and returns only after it started; any other open event is
+illegal. When Metro exits and no open started, the lock keeps its phase, because a
+busy-port retry may follow on the same lock, and the run releases it when it ends. A
+`released` run ignores late reports. An illegal pair changes nothing and is reported on
+the debug event stream as `cli:dev_lock_illegal_transition`; the lock is never the reason
+a run fails. Test: runState-test, one case per cell.
 
 What each reader does with the phase:
 
