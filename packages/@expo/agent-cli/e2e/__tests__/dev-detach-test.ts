@@ -576,7 +576,7 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(report).toMatchObject({ phase: 'serving', alreadyRunning: true, port: lock!.port });
         expect(report.port).not.toBe(8473);
       } finally {
-        await cleanUpAsync(projectRoot);
+        await cleanUpDetachedAsync(projectRoot);
       }
     });
   });
