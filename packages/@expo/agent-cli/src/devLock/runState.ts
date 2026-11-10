@@ -2,7 +2,7 @@
 // What the run's lock says after each event. Pure: the writer (`RunLock`) does the socket work.
 
 import type { ResolvedDevServerPort } from './port';
-import type { DevServerLockInfo, DevServerLockPhase } from './types';
+import type { DevServerLockInfo } from './types';
 
 /** The run's EAS open: not started, running, or returned (bound or failed). */
 export type OpenState = 'none' | 'running' | 'returned';
@@ -10,10 +10,15 @@ export type OpenState = 'none' | 'running' | 'returned';
 export type RunState =
   /** The run holds no lock: before the take, after a foreign port, or when the take failed. */
   | { phase: 'unlocked'; open: OpenState }
-  /** The phase the lock answers. */
-  | { phase: DevServerLockPhase; open: OpenState }
+  | HeldRunState
   /** The run ended and let go of its lock. Nothing moves it again. */
   | { phase: 'released' };
+
+/** A state in which the run holds the lock; its phase is the one the lock answers. */
+export type HeldRunState =
+  | { phase: 'building' | 'serving'; open: OpenState }
+  /** Metro exited while the open runs. */
+  | { phase: 'finishing'; open: 'running' };
 
 export type RunEvent =
   /** The run holds a lock for a step: the take before a build, a dev-server spawn, a port retry. */
