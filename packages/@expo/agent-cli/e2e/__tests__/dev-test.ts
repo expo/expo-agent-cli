@@ -231,6 +231,38 @@ describe('@expo/agent-cli dev', () => {
       }
     );
 
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `serving` comes from
+    // /status alone, so a port report the run cannot read does not hold the lock at `building`.
+    it.each(['ios', 'android'] as const)(
+      'says serving once Metro answers after run:%s, with no port report',
+      async (platform) => {
+        const projectRoot = await setupAsync('bare-app');
+        const child = spawnAgentCli(projectRoot, ['dev', `--${platform}`, '--local'], {
+          env: {
+            STUB_EXPO_LISTEN: '1',
+            STUB_EXPO_NO_PORT_REPORT: '1',
+            STUB_EXPO_BUILD_DELAY_MS: '2000',
+            STUB_EXPO_DELAY_MS: '30000',
+          },
+        });
+        try {
+          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
+            phase: 'building',
+          });
+          // Well inside the 20 s port watch, which the poll no longer waits for.
+          const deadline = Date.now() + 10_000;
+          let lock = await readDevLockAsync(projectRoot);
+          while (lock?.phase !== 'serving' && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            lock = await readDevLockAsync(projectRoot);
+          }
+          expect(lock).toMatchObject({ pid: child.pid, phase: 'serving', portReported: false });
+        } finally {
+          await killAsync(child);
+        }
+      }
+    );
+
     it('emits the plan before the first step runs', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);

@@ -27,6 +27,11 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
   held?: DevServerLockHandle | null;
   /** What the lock answers at the spawn: `building` for a step that compiles before it serves. */
   phase?: 'building' | 'serving';
+  /**
+   * Told the lock the moment it answers for this step, before the port watch ends: at the spawn
+   * when the arguments name a port.
+   */
+  onPublished?: (lock: DevServerLockHandle) => void;
 };
 
 /**
@@ -59,6 +64,7 @@ export async function holdDevServerLockAsync(
       : await publishAsync(projectRoot, options, resolved);
     const finish = () => lock?.update({ ...lock.info, easOpenFinished: true });
     options.easOpenFinished?.then(finish, finish);
+    if (lock) options.onPublished?.(lock);
     return lock;
   };
 
