@@ -108,6 +108,56 @@ function run() {
   );
 }
 
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exits during the
+// wait and the run still binds its session: the detach reports no dev server, and names the stop.
+it.each([false, true])(
+  'stops --wait-ready on a lock that turns finishing (reusing=%s)',
+  async (reusing) => {
+    const serving = {
+      ...lockInfo(),
+      url: 'http://127.0.0.1:8393',
+      port: 8393,
+      pid: 4242,
+      projectRoot,
+      startedAt: new Date(0).toISOString(),
+    };
+    let reads = 0;
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockImplementation(async () => {
+        reads++;
+        if (!reusing && reads === 1) return null;
+        return Date.now() < 30_000 ? serving : { ...serving, phase: 'finishing' };
+      });
+    if (reusing) {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, servingPlan);
+    }
+    // A bundler that never answers; the wait aborts its request when it gives up.
+    vi.mocked(waitForBundlerReadyAsync).mockImplementation(
+      (_url, options) =>
+        new Promise((resolve) =>
+          options.signal?.addEventListener('abort', () => resolve(readiness(false)))
+        )
+    );
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json']),
+      { print: false }
+    ).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(40_000);
+
+    const error = await result;
+    expect(error).toMatchObject({
+      code: 'DEV_DETACH_FAILED',
+      suggestedCommand: 'npx @expo/agent-cli dev:stop --eas',
+    });
+    expect(error.message).toContain('finishing its EAS session start');
+    expect(error.message).not.toContain('still running');
+  }
+);
+
 it.each([false, true])('detects death during the device probe (reusing=%s)', async (reusing) => {
   vi.mocked(devicesDisabled).mockReturnValue(false);
   vi.mocked(hostBindsPlatform).mockReturnValue(true);

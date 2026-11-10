@@ -72,6 +72,7 @@ export async function waitForDetachedReadyAsync(
         return failed('The dev-server lock changed owners while waiting for readiness.');
       }
       if (current?.phase === 'finishing') {
+        lock = current;
         return failed(
           'The dev server exited; the process holding its lock is finishing its EAS session start.'
         );

@@ -90,6 +90,7 @@
 // `simulator:stop`
 // - marks the `--id` session stopped in that file; a bare stop marks whatever `.env.eas-simulator`
 //   names. The dotenv is reset when it names the stopped id (`commands/simulator/stop.js` 33-48)
+// - STUB_SIM_STOP_DELAY_MS: how long the stop takes before it does any of that
 //
 // `simulator:exec`
 // - STUB_SIM_EXEC_EXIT / STUB_SIM_STDERR: a verb the session refused
@@ -525,7 +526,8 @@ if (command === 'simulator' || command === 'simulator:start') {
   process.exit(0);
 }
 
-if (command === 'simulator:stop') {
+/** Stop the session the argv or the dotenv names, the way `simulator:stop` does. */
+function stopSession() {
   if (process.env.STUB_SIM_STOP_EXIT)
     exitWith(process.stderr, 'Stop refused', Number(process.env.STUB_SIM_STOP_EXIT));
   const id = valueOf('--id') || loadSessionEnv({ ...process.env }).EAS_SIMULATOR_SESSION_ID;
@@ -538,6 +540,16 @@ if (command === 'simulator:stop') {
     fs.writeFileSync(DOTENV, DOTENV_HEADER);
   }
   exitWith(process.stdout, `Simulator session stopped${id ? ` (id: ${id})` : ''}`, 0);
+}
+
+if (command === 'simulator:stop') {
+  const delayMs = Number(process.env.STUB_SIM_STOP_DELAY_MS || 0);
+  if (delayMs > 0) {
+    deferred = true;
+    setTimeout(stopSession, delayMs);
+  } else {
+    stopSession();
+  }
 }
 
 if (command === 'simulator:exec') {

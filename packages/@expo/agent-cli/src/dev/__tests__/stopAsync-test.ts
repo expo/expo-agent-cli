@@ -1,5 +1,5 @@
 import { probeDevServerLockAsync, readDevServerLockAsync } from '../../devLock';
-import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
+import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
@@ -528,6 +528,62 @@ describe('dev:stop --eas', () => {
   beforeEach(() => {
     vi.spyOn(cloud(), 'probeCloudSessionAsync');
     vi.spyOn(eas(), 'stopEasSessionAsync');
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing run binds its
+  // session when its start returns, so the stop waits for that start; a silent holder still holds.
+  describe('beside a finishing run', () => {
+    const finishingLock = lock({
+      easPlatform: 'ios',
+      phase: 'finishing',
+      startedAt: new Date(0).toISOString(),
+    });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+      vi.setSystemTime(0);
+      livePids.add(4242);
+      mockPort({ answering: false });
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(finishingLock as never);
+      vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+        cloudProbe.active({ id: 'sess-1', platform: 'ios' })
+      );
+      vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+    });
+
+    it(`waits past a silent holder until the open returns, then stops the session`, async () => {
+      vi.mocked(probeDevServerLockAsync).mockImplementation(async () =>
+        Date.now() < 30_000
+          ? { connected: true, info: null }
+          : { connected: true, info: { ...finishingLock, easOpenFinished: true } }
+      );
+
+      const code = devStopAsync(projectRoot, options({ eas: true }));
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(code).resolves.toBe(EXIT_OK);
+      expect(JSON.parse(printed()).session).toMatchObject({ id: 'sess-1', stopped: true });
+    });
+
+    it(`exits 22 and stops nothing while the start outlasts the wait`, async () => {
+      vi.mocked(probeDevServerLockAsync).mockResolvedValue({
+        connected: true,
+        info: finishingLock,
+      });
+
+      const code = devStopAsync(projectRoot, options({ eas: true, followups: true }));
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      await expect(code).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
+      const report = JSON.parse(printed());
+      expect(report.session).toMatchObject({ id: null, stopped: false });
+      expect(report.followups[0].command).toBe(`${PROGRAM_PREFIX} dev:stop --eas`);
+      expect(eas().stopEasSessionAsync).not.toHaveBeenCalled();
+    });
   });
 
   it(`exits 20 when the session would not stop — it is still billing`, async () => {

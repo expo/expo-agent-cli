@@ -39,7 +39,7 @@ import {
   type DevServerLockInfo,
 } from '../devLock';
 import { event as cliEvent } from '../events';
-import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
+import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import { easStopFollowUp } from '../followups/start';
 import * as Log from '../log';
@@ -47,7 +47,9 @@ import { PROGRAM_PREFIX } from '../programName';
 import { devCommand, hostPlatform } from '../smoke/suggest';
 import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { env } from '../utils/env';
 import { windowsTaskkillCommand } from '../utils/windowsShim';
+import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { debugEvent, event } from './events';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
@@ -236,14 +238,29 @@ export async function devStopAsync(
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing run binds the
+  // session its start returns, so `--eas` waits for that start before it looks for sessions.
+  let sessionPending = false;
+  let runFinishing = finishing;
   if (options.eas && finishing && lock != null) {
-    await waitForEasOpenAsync(projectRoot, lock.pid, startedAt + options.timeoutMs);
+    sessionPending = !(await waitForEasOpenAsync(lock));
+    runFinishing = sessionPending;
+    if (sessionPending) {
+      report.session = {
+        id: null,
+        stopped: false,
+        reason: `pid ${lock.pid} is still starting its EAS Simulator session`,
+        platform: lock.easPlatform,
+      };
+    }
   }
-  const cloud = options.eas ? await stopCloudSessionsAsync(projectRoot) : null;
+  const cloud = options.eas && !sessionPending ? await stopCloudSessionsAsync(projectRoot) : null;
   if (cloud) report.session = cloud.session;
   const devServerOk = report.stopped || report.reason === 'not-running';
   Object.assign(report, await stopDevicesAsync(projectRoot, options, report, cloud));
-  report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report, finishing) : [];
+  report.followups = followUpsEnabled(options.followups)
+    ? buildFollowUps(report, runFinishing)
+    : [];
 
   event('stop_done', {
     stopped: report.stopped,
@@ -260,7 +277,11 @@ export async function devStopAsync(
 
   // A session that was asked to stop and did not is a thing still running — and billing.
   const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
-  const exitCode = devServerOk && sessionOk && !report.deviceError ? EXIT_OK : EXIT_OUTCOME_FAILED;
+  const exitCode = sessionPending
+    ? EXIT_OUTCOME_TIMEOUT
+    : devServerOk && sessionOk && !report.deviceError
+      ? EXIT_OK
+      : EXIT_OUTCOME_FAILED;
   onReport?.(report);
 
   // The event above is emitted whatever happens: a caller that suppresses the report is still
@@ -271,7 +292,9 @@ export async function devStopAsync(
     } else {
       printHumanReport(report, finishing);
     }
-    if (exitCode !== EXIT_OK) {
+    if (sessionPending) {
+      Log.error(sessionPendingExplanation(report));
+    } else if (exitCode !== EXIT_OK) {
       // A failed stop drops the device How line, so the stop's How is the one next action.
       Log.error(
         devServerOk && report.deviceError
@@ -585,19 +608,50 @@ async function waitForForcedStopAsync(
 }
 
 /**
- * Wait until the finishing run `pid` says its EAS open returned, or lets go of its lock.
+ * Wait until the finishing run of `lock` says its EAS open returned, or lets go of its lock.
  *
  * @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the run binds the session
- * inside its open, so after this a `--eas` stop finds that session. At the deadline it stops what
- * it finds.
+ * inside its open, so after this a `--eas` stop finds that session. A holder that accepts the
+ * connection and stays silent still holds the lock. The wait ends where the run's own start window
+ * ends, and no later than the session wait an agent's command can afford.
+ *
+ * @returns false when the start still runs at the deadline.
  */
-async function waitForEasOpenAsync(projectRoot: string, pid: number, deadline: number) {
+async function waitForEasOpenAsync(lock: DevServerLockInfo): Promise<boolean> {
+  const deadline = Math.min(
+    Date.parse(lock.startedAt) + EAS_TUNNEL_WAIT_MS + EAS_SESSION_START_TIMEOUT_MS,
+    Date.now() + env.AGENT_CLI_EAS_SESSION_WAIT_MS
+  );
+  const { address } = lockAddressFor(lock.projectRoot);
+  let announced = false;
   for (;;) {
-    const current = await readDevServerLockAsync(projectRoot);
-    if (current?.pid !== pid || current.easOpenFinished) return;
-    if (Date.now() + POLL_INTERVAL_MS >= deadline) return;
+    const probe = await probeDevServerLockAsync(address);
+    if (
+      !probe.connected ||
+      (probe.info && (probe.info.pid !== lock.pid || probe.info.easOpenFinished))
+    ) {
+      return true;
+    }
+    if (Date.now() + POLL_INTERVAL_MS >= deadline) return false;
+    if (!announced) {
+      announced = true;
+      Log.progress(
+        `Waiting up to ${Math.round((deadline - Date.now()) / 1000)} s for pid ${lock.pid} to finish its EAS Simulator session start, so this stop finds the session.`
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
+}
+
+/** The what / why / how for a `--eas` stop whose run still starts its session at the deadline. */
+function sessionPendingExplanation(report: DevStopResultJson): string {
+  return [
+    chalk.red(
+      `The EAS Simulator session of pid ${report.pid} is not started yet, so it was not stopped.`
+    ),
+    `Why: the run's dev server is gone, and the run binds the session its start returns. That start is still running, and the session bills from its start.`,
+    `How: run "${PROGRAM_PREFIX} dev:stop --eas" again. It waits for the start again and stops the session.`,
+  ].join('\n');
 }
 
 /** Whether nothing listens on the port: a refused connection, not a slow answer. */
@@ -725,7 +779,7 @@ function keptSessionFollowUp(
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing `dev --eas`
   // process binds the session its start returns after this report, so no binding names it yet.
   // A `dev:stop --eas` that already ran reported a session and asked the listing.
-  if (finishing && report.session == null)
+  if (finishing && report.session?.id == null)
     return easStopFollowUp(
       `pid ${report.pid} is still starting its EAS Simulator session and binds it to this worktree when the start returns. A session it keeps bills until this ends it.`
     );

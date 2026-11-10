@@ -736,11 +736,20 @@ async function runPlanStepsAsync(
           : undefined,
       }).finally(async () => {
         stepRunning = false;
-        // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone,
-        // and the run binds the session its open returns: `dev:stop` reads that here.
+        // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone.
+        // While the open runs, the run binds the session it returns, and `dev:stop` reads that
+        // here. After it, the session cleanup needs no lock, and a lock left as `serving` would
+        // send `dev:stop` to signal a run that is ending its session.
         const lock = runLock.lock;
+        const release = () => {
+          lock?.release();
+          runLock.lock = null;
+        };
         if (easOpened && lock && !lock.info.easOpenFinished) {
           lock.update({ ...lock.info, phase: 'finishing' });
+          void eas?.finished.then(release);
+        } else if (easOpened) {
+          release();
         }
         await eas?.finishAsync();
       });
@@ -779,7 +788,11 @@ async function runPlanStepsAsync(
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
-        const retry = await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
+        // None after the open started: a retry gets no open, and the run let go of its lock when
+        // that open returned (llp/0035 §Preserved sessions).
+        const retry = openArmed
+          ? null
+          : await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
         if (retry) {
           args = retry.args;
           result = retry.result;
