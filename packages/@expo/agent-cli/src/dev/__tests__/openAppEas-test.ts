@@ -585,33 +585,21 @@ describe(easRunLifecycle, () => {
     { name: 'an open that bound a session', open: true, failed: false },
     { name: 'an open that failed', open: true, failed: true },
     { name: 'no open', open: false, failed: false },
-  ])(
-    `settles finished only after an open, and removes its signal listeners: $name`,
-    async ({ open, failed }) => {
-      if (failed) vi.mocked(resolveEasCli).mockReturnValue(null);
-      const onSignal = vi.fn();
-      const eas = easRunLifecycle(projectRoot, {
-        platform: 'ios',
-        expoGo: true,
-        keepSession: true,
-        onSignal,
-      });
-      expect(process.listeners('SIGINT')).toContain(onSignal);
-      let settled = false;
-      void eas.finished.then(() => (settled = true));
+  ])(`settles finished only after an open: $name`, async ({ open, failed }) => {
+    if (failed) vi.mocked(resolveEasCli).mockReturnValue(null);
+    const eas = easRunLifecycle(projectRoot, { platform: 'ios', expoGo: true, keepSession: true });
+    let settled = false;
+    void eas.finished.then(() => (settled = true));
 
-      if (open) eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
-      await eas.finishAsync();
-      await new Promise((resolve) => setImmediate(resolve));
+    if (open) eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+    await eas.finishAsync();
+    await new Promise((resolve) => setImmediate(resolve));
 
-      expect(settled).toBe(open);
-      expect(vi.mocked(Log.warn).mock.calls.length).toBe(failed ? 1 : 0);
-      const progress = vi.mocked(Log.progress).mock.calls.map(([line]) => String(line));
-      expect(progress.some((line) => line.startsWith('Finishing EAS session work'))).toBe(open);
-      expect(process.listeners('SIGINT')).not.toContain(onSignal);
-      expect(process.listeners('SIGTERM')).not.toContain(onSignal);
-    }
-  );
+    expect(settled).toBe(open);
+    expect(vi.mocked(Log.warn).mock.calls.length).toBe(failed ? 1 : 0);
+    const progress = vi.mocked(Log.progress).mock.calls.map(([line]) => String(line));
+    expect(progress.some((line) => line.startsWith('Finishing EAS session work'))).toBe(open);
+  });
 });
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree

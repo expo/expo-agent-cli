@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import {
   clearStubFingerprintInvocations,
+  collectOutput,
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
@@ -21,6 +22,7 @@ import {
   spawnAgentCli,
   waitForAsync,
   waitForDevLockAsync,
+  waitForExitAsync,
   expoHomeOf,
   readLastBuildFile,
   readEvents,
@@ -192,6 +194,37 @@ describe('@expo/agent-cli dev', () => {
             lock = await readDevLockAsync(projectRoot);
           }
           expect(lock).toMatchObject({ pid: child.pid, phase: 'serving' });
+        } finally {
+          await killAsync(child);
+        }
+      }
+    );
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
+    // reaches, and the run starts no later step.
+    it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
+      'stops after the %s prebuild that SIGTERM ended, and starts no later step',
+      async (platform) => {
+        const projectRoot = await setupAsync('dev-client-app');
+        const child = spawnAgentCli(projectRoot, ['dev', `--${platform}`, '--local'], {
+          env: { STUB_EXPO_DELAY_MS: '30000' },
+        });
+        const output = collectOutput(child);
+        const exited = waitForExitAsync(child, output);
+        try {
+          expect(
+            await waitForAsync(
+              () => invocationArgs(projectRoot).some((args) => args[0] === 'prebuild'),
+              30_000
+            )
+          ).toBe(true);
+          child.kill('SIGTERM');
+          const result = await exited;
+
+          expect(result.exitCode, result.all).toBe(143);
+          // The step ended first: an exit before it would say nothing and orphan the prebuild.
+          expect(result.stderr).toContain('The dev run stopped on SIGTERM');
+          expect(invocationArgs(projectRoot).map((args) => args[0])).toEqual(['prebuild']);
         } finally {
           await killAsync(child);
         }

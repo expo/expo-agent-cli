@@ -65,6 +65,8 @@ export interface RunSteps {
    * Run one step, with its EAS exit work. A signal while it runs reaches its child, which ends it.
    */
   stepAsync<T>(work: () => Promise<T>): Promise<T>;
+  /** Whether a signal arrived during the run. */
+  readonly interrupted: boolean;
   /** Throw `DEV_INTERRUPTED` when a signal arrived during the run. */
   assertNotInterrupted(): void;
 }
@@ -98,6 +100,9 @@ export async function withRunLockAsync<T>(
       } finally {
         running--;
       }
+    },
+    get interrupted() {
+      return signal != null;
     },
     assertNotInterrupted() {
       if (signal) throw interruptedError(signal);

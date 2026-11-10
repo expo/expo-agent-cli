@@ -256,20 +256,16 @@ export function easRunLifecycle(
     expoGo,
     fingerprintCache,
     keepSession,
-    onSignal,
   }: {
     platform: NativePlatform;
     expoGo: boolean;
     fingerprintCache?: boolean;
     keepSession: boolean;
-    onSignal: () => void;
   }
 ): EasRunLifecycle {
   let task: Promise<OpenAppOnEasReport | null> | undefined;
   let markFinished!: () => void;
   const finished = new Promise<void>((resolve) => (markFinished = resolve));
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
   return {
     platform,
     finished,
@@ -286,22 +282,17 @@ export function easRunLifecycle(
       void task.finally(markFinished);
     },
     async finishAsync() {
-      try {
-        if (!task) return;
-        Log.progress('Finishing EAS session work before exiting.');
-        const session = await task;
-        if (keepSession || !session?.started || !session.sessionId) return;
-        const release = await releaseStartedSessionAsync(projectRoot, session.sessionId, 'dev');
-        if (release.outcome === 'stopped')
-          Log.progress(`Stopped EAS Simulator session ${session.sessionId}, created by this run.`);
-        else if (release.outcome === 'kept')
-          Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
-        else
-          Log.warn(`Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`);
-      } finally {
-        process.off('SIGINT', onSignal);
-        process.off('SIGTERM', onSignal);
-      }
+      if (!task) return;
+      Log.progress('Finishing EAS session work before exiting.');
+      const session = await task;
+      if (keepSession || !session?.started || !session.sessionId) return;
+      const release = await releaseStartedSessionAsync(projectRoot, session.sessionId, 'dev');
+      if (release.outcome === 'stopped')
+        Log.progress(`Stopped EAS Simulator session ${session.sessionId}, created by this run.`);
+      else if (release.outcome === 'kept')
+        Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
+      else
+        Log.warn(`Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`);
     },
   };
 }

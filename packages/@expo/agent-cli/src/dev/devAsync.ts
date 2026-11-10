@@ -699,9 +699,6 @@ async function runPlanStepsAsync(
             expoGo: plan.target === 'expo-go',
             fingerprintCache: options.fingerprintCache,
             keepSession: options.detachedChild,
-            onSignal: () => {
-              stepRunning = false;
-            },
           })
         : null;
       let easOpened = false;
@@ -722,7 +719,7 @@ async function runPlanStepsAsync(
               }
               openArmed = true;
               // Open alongside Metro. A failed open must not stop it.
-              const stillWanted = () => stepRunning;
+              const stillWanted = () => stepRunning && !steps.interrupted;
               if (eas) {
                 easOpened = true;
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
@@ -783,6 +780,8 @@ async function runPlanStepsAsync(
           throw await portDemandedError(options.port, options.platform);
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
+        // A signal that ended the first spawn ends the run: the retry would be a later step.
+        steps.assertNotInterrupted();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
         // None after the open started: a retry gets no open, and the run let go of its lock when
         // that open returned (llp/0035 §Preserved sessions).
