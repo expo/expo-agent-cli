@@ -759,39 +759,93 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a `finishing` lock has
+  // no dev server, so the detach that reads it reports none.
   it.skipIf(process.platform === 'win32')(
-    'reports a detached run that still builds on EAS, and a plain dev:stop stops it before Metro',
+    'reports no dev server when the run it started lost Metro before the lock was read',
     async () => {
+      const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
+      const projectRoot = await setupAsync('go-app', {
+        easScript: script.replace(
+          'const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);',
+          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25000); const exitCode = 0;'
+        ),
+      });
+      // No port report, so the parent reads the lock only at the 20 s fallback: Metro has exited
+      // at 2.5 s, and the session start still runs.
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          {
+            env: {
+              ...easRunEnv(projectRoot, 8591),
+              STUB_EXPO_NO_PORT_REPORT: '1',
+              STUB_EXPO_DELAY_MS: '2500',
+            },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode, result.all).not.toBe(0);
+        expect(result.all).toContain('DEV_DETACH_FAILED');
+        expect(result.all).toContain('finishing its EAS session start');
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+      }
+    }
+  );
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
+    'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro (%s)',
+    async (platform) => {
       const projectRoot = await setupAsync();
       await writeSchemeAsync(projectRoot, 'devclient');
       const env = {
-        ...easRunEnv(projectRoot, 8586),
+        ...easRunEnv(projectRoot, platform === 'ios' ? 8586 : 8606),
         STUB_EAS_BUILD_DELAY_MS: '60000',
         AGENT_CLI_DETACH_TIMEOUT_MS: '3000',
       };
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
           { env, reject: false }
         );
 
-        expect(result.exitCode).toBe(22);
-        const { error } = JSON.parse(result.stdout);
-        expect(error.code).toBe('DEV_DETACH_STILL_BUILDING');
-        expect(error.message).not.toContain('did not start');
-        const pid: number = error.data.pid;
+        // Reported at once, as a run that builds: no wait for a dev server that is minutes away.
+        expect(result.exitCode).toBe(0);
+        const report = JSON.parse(result.stdout);
+        expect(report).toMatchObject({ phase: 'building', alreadyRunning: false, ready: null });
+        const pid: number = report.pid;
         expect(process.kill(pid, 0)).toBe(true);
 
-        // A second detach follows the building run and spawns no second child.
+        // A second detach reports the same run and spawns no second child.
         const again = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
           { env, reject: false }
         );
-        expect(again.exitCode).toBe(22);
-        expect(JSON.parse(again.stdout).error.data.pid).toBe(pid);
+        expect(again.exitCode).toBe(0);
+        expect(JSON.parse(again.stdout)).toMatchObject({
+          phase: 'building',
+          alreadyRunning: true,
+          pid,
+        });
+
+        // --wait-ready follows the build, and its budget ends while the build runs: exit 22.
+        const waited = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', `--${platform}`, '--eas', '--detach', '--wait-ready', '--json'],
+          { env, reject: false }
+        );
+        expect(waited.exitCode).toBe(22);
+        const { error } = JSON.parse(waited.stdout);
+        expect(error).toMatchObject({ code: 'DEV_DETACH_STILL_BUILDING', data: { pid } });
         expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
           1
         );
@@ -801,7 +855,13 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           reject: false,
         });
         expect(stop.exitCode).toBe(0);
-        expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: true, pid, lockHeld: true });
+        // The building run's lock names its EAS platform, so the stop names the session follow-up.
+        expect(JSON.parse(stop.stdout)).toMatchObject({
+          stopped: true,
+          pid,
+          lockHeld: true,
+          easPlatform: platform,
+        });
         expect(
           await waitForAsync(() => {
             try {
@@ -814,6 +874,54 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         ).toBe(true);
         // The interrupted build ended the plan: no dev server started after it.
         expect(expoInvocationArgs(projectRoot).filter((args) => args[0] === 'start')).toEqual([]);
+        // It also stopped before the lookup of the build it would have used.
+        expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build:list')).toEqual(
+          []
+        );
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    }
+  );
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
+    'reports a followed build that fails, and starts no second build (%s)',
+    async (platform) => {
+      const projectRoot = await setupAsync();
+      await writeSchemeAsync(projectRoot, 'devclient');
+      const env = {
+        ...easRunEnv(projectRoot, platform === 'ios' ? 8590 : 8610),
+        STUB_EAS_BUILD_DELAY_MS: '4000',
+        STUB_EAS_BUILD_EXIT: '1',
+        STUB_EAS_BUILD_STDERR: 'Build failed: e2e-followed',
+        AGENT_CLI_DETACH_TIMEOUT_MS: '1500',
+      };
+      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+      try {
+        const first = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(JSON.parse(first.stdout).phase).toBe('building');
+
+        const again = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', `--${platform}`, '--eas', '--detach', '--wait-ready', '--json'],
+          { env: { ...env, AGENT_CLI_DETACH_TIMEOUT_MS: '15000' }, reject: false }
+        );
+
+        expect(again.exitCode).not.toBe(0);
+        const { error } = JSON.parse(again.stdout);
+        expect(error.suggestedCommand).toMatch(/dev:logs$/);
+        // The followed run held a building lock, so the report says its build ended.
+        expect(error.message).toContain('ended during its build');
+        expect(error.message).not.toContain('still running');
+        expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
+          1
+        );
+        expect(fs.readFileSync(logFile, 'utf8')).toContain('Build failed: e2e-followed');
       } finally {
         await cleanUpAsync(projectRoot);
       }

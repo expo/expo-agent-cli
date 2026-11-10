@@ -18,6 +18,7 @@ import { list as listSessions, tap } from '2g/api';
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import {
   executeAgentCliAsync,
+  freePortAsync,
   holdDevLockAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
@@ -29,15 +30,6 @@ import {
   waitForAsync,
 } from '../utils';
 import { DETACHED_LOG_PATH, cleanUpDetachedAsync, detachEnv, STUB_ALIVE_MS } from '../detachUtils';
-
-/** A port nothing listens on now, read back from a server bound to port 0. */
-async function freePortAsync(): Promise<number> {
-  const server = net.createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as net.AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
 
 /** Whether a pid is still alive, without signalling it. */
 function isAlive(pid: number): boolean {
@@ -270,16 +262,9 @@ describe('@expo/agent-cli dev --detach', () => {
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  // F125. The dev-server lock is taken at the *start* of the dev-server step, and for `expo run:*`
-  // that step builds the app before it serves anything — so a plan whose compiler is still running
-  // publishes a port nothing listens on, and this command used to report it as a dev server that
-  // had started [observed — wave 29, `evidence/10-dev-detach-android.json`].
-  //
   // `bare-app`, whose plan is the single step `expo run:ios` (`plan-test.ts`), and a stub that
-  // stays alive without ever logging a port — which is what a compiler looks like from here. The
-  // lock lands on its fallback port `PORT_WATCH_TIMEOUT_MS` in, and that wait is why this test is
-  // the slow one in this file: it is the wait the finding is about. The fallback is the `--port`
-  // passed here, so a Metro of the developer's own on 8081 changes nothing (llp/0004 §Discovery ladder).
+  // stays alive without ever serving, which is what a compiler looks like from here. The run's lock
+  // says `building`, so the detach reports the run at once, with the port the dev server will take.
   it('says the plan is building rather than that a dev server started', async () => {
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
@@ -453,7 +438,8 @@ describe('@expo/agent-cli dev --detach', () => {
 
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--local', '--detach', '--json'],
+          // The run builds first, so only --wait-ready waits for the port it serves on.
+          ['dev', '--ios', '--local', '--detach', '--wait-ready', '--json'],
           { env: servingEnv(projectRoot), reject: false }
         );
 
@@ -517,7 +503,7 @@ describe('@expo/agent-cli dev --detach', () => {
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--local', '--detach', '--json'],
+          ['dev', '--ios', '--local', '--detach', '--wait-ready', '--json'],
           {
             env: {
               ...servingEnv(projectRoot),
@@ -537,6 +523,50 @@ describe('@expo/agent-cli dev --detach', () => {
           ['run:ios', '--port', '8471'],
           ['run:ios', '--port', String(report.port)],
         ]);
+      } finally {
+        await cleanUpDetachedAsync(projectRoot);
+      }
+    });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a plain detach of a run
+    // that builds reports at once, so its port is the plan's, not the one a busy-port retry takes
+    // later. A re-run once the lock says `serving` reports where the dev server is.
+    it('reports a building run at once, and a re-run reports the port the retry took', async () => {
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
+      const env = {
+        ...servingEnv(projectRoot),
+        RCT_METRO_PORT: '8473',
+        STUB_EXPO_PORT_BUSY: '8473',
+        STUB_EXPO_BUILD_DELAY_MS: '2000',
+      };
+
+      try {
+        const first = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(first.exitCode, first.all).toBe(0);
+        expect(JSON.parse(first.stdout)).toMatchObject({ phase: 'building', ready: null });
+
+        const deadline = Date.now() + 20_000;
+        let lock = await readDevLockAsync(projectRoot);
+        while (lock?.phase !== 'serving' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          lock = await readDevLockAsync(projectRoot);
+        }
+        expect(lock).toMatchObject({ phase: 'serving' });
+
+        const again = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(again.exitCode, again.all).toBe(0);
+        const report = JSON.parse(again.stdout);
+        expect(report).toMatchObject({ phase: 'serving', alreadyRunning: true, port: lock!.port });
+        expect(report.port).not.toBe(8473);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
       }

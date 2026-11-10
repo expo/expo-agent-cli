@@ -33,6 +33,7 @@ import { isExpoDevServerAsync } from '../stopAsync';
 import { easRunLifecycle } from '../openAppEas';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { RunLock } from '../runLock';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -253,13 +254,16 @@ describe(devAsync, () => {
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
-      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios'], {
+        signal: expect.any(AbortSignal),
+      });
       expect(spawnExpoAsync).not.toHaveBeenCalled();
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        signal: expect.any(AbortSignal),
         easPlatform: null,
-        runLock: { lock: null },
+        runLock: { lock: expect.any(RunLock), phase: 'building' },
       });
     });
 

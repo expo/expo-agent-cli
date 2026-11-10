@@ -8,9 +8,10 @@ import { deviceUnavailableError } from '../deviceBinding/errors';
 import { keptDevices, unreadableBindingFiles } from '../deviceBinding/records';
 import { reapDevicesAsync } from '../deviceBinding/reap';
 import type { CleanupReport } from '../deviceBinding/cleanup';
-import { readDevServerLockAsync } from '../devLock';
+import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { PROGRAM_PREFIX } from '../programName';
 import type { DevStopOptions } from './resolveStopOptions';
+import { RUN_PHASE } from './runPhase';
 
 export interface StoppedDevices {
   devices: ReleasedDevice[];
@@ -54,14 +55,13 @@ async function stopLocalDevicesAsync(
     if (options.release) {
       // A requested port may be idle while this worktree's server runs on another port.
       // Read again after stopping: a replacement server may now hold the same lock.
+      const activeRun =
+        stop.reason === 'still-running' ? null : await activeRunLockAsync(projectRoot);
       if (stop.reason === 'still-running') {
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";
-      } else if (
-        // A `finishing` run has no dev server left (llp/0035 §Preserved sessions).
-        await holdsUnfinishedLockAsync(projectRoot)
-      ) {
-        report.deviceError = `Devices were kept because this worktree's dev server is still running.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" with no --port.`;
+      } else if (activeRun) {
+        report.deviceError = `Devices were kept: ${RUN_PHASE[activeRun.phase].state(activeRun)}.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" with no --port.`;
       } else if (stop.reason === 'foreign-dev-server' && stop.url != null) {
         // `url` is set only when the port answered as an Expo dev server.
         report.deviceError = `Devices were kept because a dev server this worktree did not lock answers on port ${stop.port}.\nHow: stop that dev server where it was started, then run "${PROGRAM_PREFIX} dev:stop --release" again.`;
@@ -114,7 +114,11 @@ async function releaseDevicesAsync(
   return { released, error };
 }
 
-async function holdsUnfinishedLockAsync(projectRoot: string): Promise<boolean> {
+/**
+ * This worktree's run that still builds or serves. A `finishing` run has no dev server left, so
+ * its devices can go (llp/0035 §Preserved sessions).
+ */
+async function activeRunLockAsync(projectRoot: string): Promise<DevServerLockInfo | null> {
   const lock = await readDevServerLockAsync(projectRoot);
-  return lock != null && lock.phase !== 'finishing';
+  return lock?.phase === 'finishing' ? null : lock;
 }

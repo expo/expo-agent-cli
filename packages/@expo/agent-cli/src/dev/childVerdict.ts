@@ -13,7 +13,7 @@
 // parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
 // below. The parent's report goes silently wrong the moment the two drift.
 
-import { appReachedDevice } from './buildEvidence';
+import { buildsBeforeServing } from './forwardedArgs';
 
 /** How many lines of the child's log are searched for its verdict. */
 export const VERDICT_LOG_LINES = 400;
@@ -145,49 +145,6 @@ export function isRelayedDeviceCode(code: string | null): code is string {
 }
 
 /**
- * Which half of its plan the detached child is in.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
- * **F125.** The dev-server lock is taken by the wrapper at the *start* of its dev-server step, and
- * for `expo run:ios` or `expo run:android` that step is one subprocess that builds, installs and
- * only then serves. So the lock answers a second in, publishing a port nothing is listening on for
- * the next ten minutes — and the parent reported `The dev server started on http://127.0.0.1:8081
- * (pid 29996)` for a run that had started no dev server at all
- * [observed — wave 29, `evidence/10-dev-detach-android.json`].
- *
- * "The lock is held" and "a dev server is listening" are two facts, and this is the second one, read
- * off the same channel as the child's verdict rather than out of a second one: the child's log holds
- * the plan it printed before it ran anything.
- */
-export interface DetachedChildPhase {
-  /**
-   * `building` while the plan's dev-server step is still compiling, `serving` otherwise.
-   *
-   * `serving` is the answer whenever nothing says otherwise — a log with no plan in it, and a plan
-   * whose dev-server step is a plain `expo start`. Guessing `building` would put a sentence about a
-   * compiler into the report of a dev server that never had one.
-   */
-  phase: 'building' | 'serving';
-  /** The plan's dev-server step, as it was printed (`expo run:android`), or null for no plan. */
-  step: string | null;
-  /**
-   * Whether that step also asks the Expo CLI to open the app on a device.
-   *
-   * @ref llp/0021-honest-reports.rfc.md §The rules — **F140.** The dev server and
-   * the app-opening are one subprocess, and the opening is the half that can end it: `expo start
-   * --ios` drives Simulator.app through AppleScript, and a macOS Automation refusal reaches the
-   * Expo CLI as an **unhandled rejection** — `AppleDeviceManager.activateWindowAsync` is called and
-   * not awaited [reference — `@expo/cli` `src/start/platforms/PlatformManager.ts`], so it lands
-   * whenever it lands and kills the process. Measured 215ms, 252ms and 263ms after `/status` first
-   * answered [observed — 2026-08-28, three runs against `friction/run9/livecheck`].
-   *
-   * So a run whose step carries this has risky work still outstanding when the bundler answers, and
-   * {@link DevDetachResultJson.ready} is a claim about a moment that may not survive the exit.
-   */
-  opensPlatform: boolean;
-}
-
-/**
  * One numbered row of the plan table `formatStartPlan` prints: `  2. expo run:android  ~minutes`.
  *
  * The command runs to the end of the run of two-or-more spaces that separates it from the time
@@ -196,83 +153,38 @@ export interface DetachedChildPhase {
  */
 const PLAN_STEP_ROW = /^\s*\d+\.\s+((?:expo|eas)(?:\s\S+)*?)(?:\s{2,}|\s*$)/;
 
-/** The plan steps that start a dev server, which is when the lock is taken (`devAsync.ts`). */
-const DEV_SERVER_COMMANDS = ['start', 'run:ios', 'run:android'];
-
-/** The dev-server steps that build the app first, and so hold the lock while a compiler runs. */
-const BUILDING_COMMANDS = ['run:ios', 'run:android'];
-
 /**
- * The `expo start` flags that make the CLI open the app on a device as well as serve it.
+ * Whether the detached child's dev-server step also opens the app, read from the plan table in
+ * its log (`src/plan/format.ts`).
  *
- * The short forms are the Expo CLI's own (`-i`, `-a`, `-w`), and the plan never emits them — but the
- * plan appends whatever the caller typed after its own arguments (`src/dev/forwardedArgs.ts`), so
- * they reach the step table exactly as typed.
- */
-/**
- * Whether a dev-server step also opens the app on a device.
+ * @ref llp/0021-honest-reports.rfc.md §The rules — **F140.** The dev server and the app-opening
+ * are one subprocess, and the opening is the half that can end it: a macOS Automation refusal
+ * reaches the Expo CLI as an unhandled rejection and kills the process, measured 215ms to 263ms
+ * after `/status` first answered [observed — 2026-08-28, `friction/run9/livecheck`]. So a run
+ * whose step opens the app has risky work outstanding when the bundler answers.
  *
- * Pure, and exported for the test table, because it is the whole of the F140 decision: which runs
- * have work outstanding that can kill the dev server after it has answered `/status`.
- *
- * `run:ios` and `run:android` do — launching the app is the last thing they do, and their launch
- * still runs through the AppleScript a Mac without the Automation grant refuses. An `expo start`
- * step never does any more: `dev` keeps the platform flags away from it and opens the app itself,
- * from its own process, where a refusal cannot take the dev server down (llp/0026).
- *
- * @param step the step as the plan table printed it, e.g. `expo run:ios`.
- */
-export function stepOpensPlatform(step: string): boolean {
-  const [, command] = step.trim().split(/\s+/);
-  return command != null && BUILDING_COMMANDS.includes(command);
-}
-
-/**
- * Read the plan out of the child's log and say which half of it is running.
- *
- * Pure over the lines, like {@link parseDetachedChildVerdict}, and reading the same two formats
- * this CLI owns: the plan table of `src/plan/format.ts`, and the install marker of
- * `./buildEvidence.ts` — the one that already decides whether a `run:*` step got its app onto a
- * device (F121). Together they answer the only question the parent has: is the compiler still
- * running, or is what follows it.
+ * `run:ios` and `run:android` open it: launching the app is the last thing they do. An
+ * `expo start` step never does: `dev` keeps the platform flags away from it and opens the app
+ * itself, from its own process (llp/0026). The last step that serves is the dev-server step; a
+ * `run:* --no-bundler` install serves nothing, so it counts only when no step serves.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.
  */
-export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedChildPhase {
-  const lines = rawLines.flatMap((line) => line.split('\n'));
-
-  // Two rows matter, and they are not always the same row. The last dev-server step is the one the
-  // lock belongs to: a plan is a list run in order, and only its last step serves. The last
-  // *compiling* step is the one that decides the phase — in a stale plan they are one `expo run:*`
-  // row, but an `*-install` plan (llp/0004 §A current build is not an installed app) puts a
-  // `run:* --no-bundler` install ahead of an `expo start` that serves, and reading only the serving
-  // row there reported `serving` while the install was still compiling a cold cache — the exact
-  // F125 misreport this parser exists to prevent.
-  let servingStep: string | null = null;
-  let compilingStep: string | null = null;
-  for (const line of lines) {
-    const command = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
-    if (!command) {
+export function childOpensPlatform(rawLines: readonly string[]): boolean {
+  let servingCommand: string | undefined;
+  let sawBuild = false;
+  for (const line of rawLines.flatMap((entry) => entry.split('\n'))) {
+    const row = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
+    if (!row) {
       continue;
     }
-    const verb = command.split(/\s+/)[1] ?? '';
-    if (BUILDING_COMMANDS.includes(verb)) {
-      compilingStep = command;
-    }
-    if (DEV_SERVER_COMMANDS.includes(verb) && !command.includes('--no-bundler')) {
-      servingStep = command;
+    const command = row.split(/\s+/)[1];
+    sawBuild ||= buildsBeforeServing(command);
+    if ((command === 'start' || buildsBeforeServing(command)) && !row.includes('--no-bundler')) {
+      servingCommand = command;
     }
   }
-
-  // The install is what says the compiler finished: it is the next thing `expo run:*` does, and it
-  // is the marker F121 already reads for exactly that reason. After it, what remains of the plan is
-  // a dev server, and a bundler that has not answered yet is about the wait rather than a build.
-  if (compilingStep != null && !appReachedDevice(lines.join('\n'))) {
-    return { phase: 'building', step: compilingStep, opensPlatform: true };
-  }
-
-  const step = servingStep ?? compilingStep;
-  return { phase: 'serving', step, opensPlatform: step != null && stepOpensPlatform(step) };
+  return servingCommand != null ? buildsBeforeServing(servingCommand) : sawBuild;
 }
 
 /**
@@ -302,7 +214,7 @@ const PLAN_PORT_ROW = /^\s*Dev server:\s+port (\d+)(?:, because (\d+) is taken)?
 /**
  * The port the child's plan gave its dev server, and the busy port the plan moved it from.
  *
- * Pure over the lines, like {@link parseDetachedChildPhase}, and read from the same table. The
+ * Pure over the lines, like {@link childOpensPlatform}, and read from the same table. The
  * first row is the plan's: the table is printed once, before any step runs.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.

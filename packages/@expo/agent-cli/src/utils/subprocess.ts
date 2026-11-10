@@ -70,6 +70,12 @@ export interface SubprocessOptions {
    * terminal exactly as they arrive.
    */
   printFilter?: (line: string) => string | null;
+  /**
+   * Checked right before the spawn, after any wait for the runner. Aborted then, nothing is
+   * spawned and the call rejects with the signal's reason. After the spawn it does nothing: the
+   * terminal-signal forwarder below reaches the child.
+   */
+  signal?: AbortSignal;
 }
 
 export interface SubprocessResult {
@@ -96,7 +102,8 @@ const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 /**
  * Run another CLI and wait for it to finish.
  *
- * Never rejects: a non-zero exit code and a missing binary are both results the caller reports,
+ * Never rejects, except with the reason of an `options.signal` aborted before the spawn: a non-zero
+ * exit code and a missing binary are both results the caller reports,
  * so the message can name the tool instead of the exception.
  *
  * **stdin is never attached.** Zero TTY is the contract of every command here (llp/0006
@@ -137,7 +144,11 @@ async function queuedSpawnAsync(
   args: string[],
   options: SubprocessOptions
 ): Promise<SubprocessResult> {
-  const lock = await acquireRunnerLockAsync(key, { timeoutMs: options.timeoutMs });
+  const lock = await acquireRunnerLockAsync(key, {
+    timeoutMs: options.timeoutMs,
+    signal: options.signal,
+  });
+  if (lock == null && options.signal?.aborted) throw options.signal.reason;
   if (lock == null) {
     // The queue is part of the budget, so running out in it is the same outcome as running out in
     // the spawn: a caller that promised an answer within a deadline reports that it did not get one.
@@ -167,8 +178,10 @@ function spawnNowAsync(
     promptGuard,
     timeoutMs,
     printFilter,
+    signal,
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
   return new Promise<SubprocessResult>((resolve) => {
     // Only when there is something to add: `undefined` is what makes the child inherit, and
     // spelling out `process.env` here would freeze a copy for no reason.

@@ -536,11 +536,8 @@ declare module '2g' {
       /** The project already had a dev server, so nothing was started. */
       alreadyRunning: boolean;
       /**
-       * `building` while the plan's dev-server step is still compiling, `serving` otherwise.
-       *
-       * `url` is where the dev server *will* listen, not always where one is: the lock is published
-       * when the dev-server step starts, and `expo run:*` builds and installs before it serves
-       * (llp/0004 §Implemented in v1, F125).
+       * What the run's lock says: `building` while it compiles, `serving` after. While it builds,
+       * `url` is where the dev server will listen, not one that answers (llp/0004 §Dev-server lock).
        */
       phase: 'building' | 'serving';
       /**

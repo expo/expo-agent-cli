@@ -41,12 +41,13 @@ import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/s
 import { PORT_WATCH_TIMEOUT_MS } from '../devLock/port';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { event as cliEvent } from '../events';
-import { EXIT_OUTCOME_FAILED } from '../exitCodes';
+import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
 import { findNeedsHumanScenario } from '../needsHuman/registry';
 import type { NativePlatform } from '../plan/types';
+import { rerunDevCommand } from '../plan/rerun';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
@@ -57,11 +58,10 @@ import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
   isRelayedDeviceCode,
-  parseDetachedChildPhase,
+  childOpensPlatform,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
   VERDICT_LOG_LINES,
-  type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
 import {
@@ -119,14 +119,11 @@ export interface DevDetachResultJson {
   /** A dev server was already running for this project, so nothing was started. */
   alreadyRunning: boolean;
   /**
-   * Which half of its plan the detached run is in: `building`, or `serving`.
+   * What the run's lock says: `building` while a step before the dev server, or an `expo run:*`
+   * step, still compiles, and `serving` after. While it builds, {@link url} is where the dev server
+   * will listen, not one that answers.
    *
    * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-   * **F125.** {@link url} is where the dev server *will* listen, not always where one is: the lock
-   * is published when the dev-server step starts, and for `expo run:ios` or `expo run:android` that
-   * step builds and installs the app before it serves anything. So a plan whose compiler is still
-   * running publishes a port nothing answers on, and a caller that reads {@link url} alone goes
-   * looking for a dev server that is ten minutes away. `serving` whenever nothing says otherwise.
    */
   phase: 'building' | 'serving';
   /**
@@ -236,17 +233,53 @@ export async function devDetachAsync(
   // project's own default. `smoke` requires a platform now, so a follow-up without one exits 1.
   const smokePlatform =
     statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that builds is
+  // reported at once, with the port its dev server will take, and nothing is waited for.
+  const reportBuildingRunAsync = async (lock: DevServerLockInfo, alreadyRunning: boolean) =>
+    reportDetached(projectRoot, options, {
+      lock,
+      alreadyRunning,
+      eas: detachEas(projectRoot, options),
+      ready: null,
+      projectRootMatched: null,
+      startedAt,
+      print,
+      tunnelUrl: null,
+      device: await boundDeviceAsync(projectRoot, options),
+      smokePlatform,
+    });
 
   // Asked before anything is spawned. A second detached dev server for one project cannot hold the
   // lock, so nothing would be able to find it or stop it afterwards.
-  const running = await readDevServerLockAsync(projectRoot);
+  let running = await readDevServerLockAsync(projectRoot);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
+  // followed, not given a second child.
+  if (running?.phase === 'building') {
+    const followed = running;
+    const wait = await waitPastBuildingAsync(
+      projectRoot,
+      options,
+      startedAt,
+      () => !isProcessAlive(followed.pid)
+    );
+    if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, true);
+    // A followed run that ended in its build spawns nothing: its log says why.
+    if (wait.kind === 'ended') {
+      const verdict = await waitForChildVerdictAsync(projectRoot);
+      const relayed = relayedDeviceError(verdict);
+      if (relayed) throw relayed;
+      throw buildEndedError(followed, verdict?.exitCode ?? null);
+    }
+    running = wait.lock;
+  }
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
   // EAS session start has no server to report, and a second child would start a second session.
   if (running?.phase === 'finishing') {
     throw await devServerRunningStopAsync(projectRoot, running, options.platform);
   }
   if (running) {
-    const hasExited = () => !isProcessAlive(running.pid);
+    const runningPid = running.pid;
+    const hasExited = () => !isProcessAlive(runningPid);
     async function checkReuseFailureAsync(
       lock: DevServerLockInfo,
       statusAnswering: boolean | null = null
@@ -282,7 +315,6 @@ export async function devDetachAsync(
         checked.lock,
         detachedLogPath(projectRoot),
         checked.result,
-        readChildPhaseSync(projectRoot),
         options.platform,
         detachEas(projectRoot, options)
       );
@@ -390,17 +422,23 @@ export async function devDetachAsync(
   });
   const hasExited = () => childExit != null;
 
-  let lock = await waitForLockAsync(projectRoot, {
-    timeoutMs: options.detachTimeoutMs,
-    hasExited,
-  });
+  const wait = await waitPastBuildingAsync(projectRoot, options, startedAt, hasExited);
+  if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, false);
+  // A run that ended in its build holds no lock any more, and its log says why.
+  let lock = wait.kind === 'up' ? wait.lock : null;
   if (!lock) {
     // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
-    const relayed = relayedDeviceError(
-      childExit ? await waitForChildVerdictAsync(projectRoot) : readChildVerdictSync(projectRoot)
-    );
+    const verdict = childExit
+      ? await waitForChildVerdictAsync(projectRoot)
+      : readChildVerdictSync(projectRoot);
+    const relayed = relayedDeviceError(verdict);
     if (relayed) {
       throw relayed;
+    }
+    if (wait.kind === 'ended' && wait.building) {
+      // Read through a cast: the `exit` callback sets it, which the narrowing here cannot see.
+      const exit = childExit as { code: number | null } | null;
+      throw buildEndedError(wait.building, exit?.code ?? verdict?.exitCode ?? null);
     }
     throw notStartedError(
       projectRoot,
@@ -411,6 +449,9 @@ export async function devDetachAsync(
       options.platform
     );
   }
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the child's Metro exited
+  // and its EAS open still runs: there is no dev server to report or probe.
+  if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
 
   /**
    * Whether the child this run started is gone, asked of the process rather than of an event.
@@ -456,17 +497,7 @@ export async function devDetachAsync(
           eas: detachEas(projectRoot, options),
         });
       }
-      // @ref ./childVerdict.ts §parseDetachedChildPhase — F125. The child's own log says which half
-      // of its plan it is in, and a plan that is compiling has not started a dev server for this
-      // report to describe.
-      throw notReadyError(
-        lock,
-        logFile,
-        result,
-        readChildPhaseSync(projectRoot),
-        options.platform,
-        detachEas(projectRoot, options)
-      );
+      throw notReadyError(lock, logFile, result, options.platform, detachEas(projectRoot, options));
     }
   }
 
@@ -485,7 +516,7 @@ export async function devDetachAsync(
     ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // One read of the whole log, for the phase, the verdict and the report's port move.
   const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
-  const phase = childPhaseOf(log);
+  const opensPlatform = log != null && childOpensPlatform(log.lines);
   let verdict = log == null ? null : parseDetachedChildVerdict(log.lines.slice(-VERDICT_LOG_LINES));
   let failure = resolveDetachFailure({
     exited: childIsGone(),
@@ -498,7 +529,7 @@ export async function devDetachAsync(
   // has work outstanding when the bundler answers, and the macOS Automation refusal that ends it
   // arrives a quarter of a second later — after every check above has passed. So the claim is held
   // open for a moment and the same three facts are asked again.
-  if (failure == null && needsOpenPlatformGrace({ ready, phase })) {
+  if (failure == null && needsOpenPlatformGrace({ ready, opensPlatform })) {
     const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
       hasExited: childIsGone,
       budgetMs: Math.min(
@@ -625,12 +656,12 @@ async function isOwnBundlerAnsweringAsync(projectRoot: string, url: string): Pro
  */
 export function needsOpenPlatformGrace({
   ready,
-  phase,
+  opensPlatform,
 }: {
   ready: boolean | null;
-  phase: DetachedChildPhase;
+  opensPlatform: boolean;
 }): boolean {
-  return ready !== false && phase.phase === 'serving' && phase.opensPlatform;
+  return ready !== false && opensPlatform;
 }
 
 /**
@@ -857,25 +888,6 @@ function readChildVerdictSync(projectRoot: string, since?: number): DetachedChil
 }
 
 /**
- * Which half of its plan the child is in, read out of the same log.
- *
- * `WHOLE_LOG` rather than the verdict's window: the plan table is printed *first*, and a
- * `run:*` step writes thousands of lines of compiler output over it. A log this run truncated is
- * still short at the top, and a window that misses the table reads as `serving`, which is the
- * wording this has always had.
- */
-function readChildPhaseSync(projectRoot: string): DetachedChildPhase {
-  return childPhaseOf(readDetachedLogSync(projectRoot, WHOLE_LOG));
-}
-
-/** The phase a whole read of the child's log names, or `serving` when there is no log. */
-function childPhaseOf(log: DetachedLogRead | null): DetachedChildPhase {
-  return log == null
-    ? { phase: 'serving', step: null, opensPlatform: false }
-    : parseDetachedChildPhase(log.lines);
-}
-
-/**
  * The error for a detached run whose dev server is not there to be reported.
  *
  * Two exit codes, and the difference is the child's own: a stop only a person can complete is
@@ -1066,10 +1078,8 @@ function reportDetached(
     ready,
     projectRootMatched,
     alreadyRunning,
-    // Read from the child's own log, which is the only channel it has to this process (F125 and
-    // F48-4 both). The phase is read even for a run that started nothing: the question "is this
-    // project's dev server listening" is the same question whoever started it.
-    phase: childPhaseOf(log).phase,
+    // The run's own lock says whether it still builds (llp/0004 §Dev-server lock).
+    phase: lock.phase === 'building' ? 'building' : 'serving',
     portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
     device,
@@ -1188,9 +1198,9 @@ function plannedPortMove(log: DetachedLogRead | null, lock: DevServerLockInfo): 
 
 function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): void {
   const label = (name: string) => name.padEnd(13);
-  // @ref llp/0004 §Implemented in v1 — F125. The URL stays on this line
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the URL stays on this line
   // because it is the one the dev server will answer on, and the words after it stop it being read
-  // as a dev server that is up: a plan that is compiling has not started one.
+  // as a dev server that is up: a run that builds has not started one.
   const where =
     report.phase === 'building'
       ? ' · not listening yet — the plan is still building'
@@ -1321,21 +1331,31 @@ function easKeptSentence(eas: DetachEas): string {
  * Poll the project's lock until it names the port the dev server took, the child dies, or the
  * budget runs out.
  *
- * The child publishes its lock at the spawn of a step that names a port, before Metro binds it,
- * and the busy-port retry can move the dev server after that with a new spawn and a new lock. So a
- * lock counts once its holder says Metro reported the port (`portReported`), or once
- * {@link PORT_WATCH_TIMEOUT_MS} has passed since the lock's `startedAt`, the bound the port
- * watch itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not
- * confirmed when the child exits or the budget runs out is still the answer.
+ * A child whose plan builds first takes its lock before its first step and says `building` until
+ * the dev-server step; that lock never ends the wait. The dev-server step serves on the same lock,
+ * before Metro binds the port, and the busy-port retry can move the dev server after that. So a
+ * serving lock counts once its holder says Metro reported the port (`portReported`), or once
+ * {@link PORT_WATCH_TIMEOUT_MS} has passed since the lock's `startedAt`, the bound the port watch
+ * itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not confirmed
+ * when the child exits or the budget runs out is still the answer, `building` included.
  */
 async function waitForLockAsync(
   projectRoot: string,
-  { timeoutMs, hasExited }: { timeoutMs: number; hasExited: () => boolean }
+  {
+    timeoutMs,
+    hasExited,
+    acceptBuilding = false,
+  }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
+  // A run that ends in its build lets go of its lock; its last `building` answer says it built.
+  let building: DevServerLockInfo | null = null;
   for (;;) {
     const lock = await readDevServerLockAsync(projectRoot);
-    if (lock) {
+    if (lock?.phase === 'building') building = lock;
+    // A `building` lock has no dev server yet. It ends the wait only for a caller that reports it.
+    if (lock?.phase === 'building' && acceptBuilding) return lock;
+    if (lock && lock.phase !== 'building') {
       const spawnedAt = Date.parse(lock.startedAt);
       if (lock.portReported || Date.now() - spawnedAt >= PORT_WATCH_TIMEOUT_MS) {
         return lock;
@@ -1344,7 +1364,7 @@ async function waitForLockAsync(
     // Checked after the read, not before: a child that started the dev server and exited in the
     // same instant still published a lock, and that lock is the answer.
     if (hasExited()) {
-      return lock;
+      return lock ?? building;
     }
     if (Date.now() + LOCK_POLL_INTERVAL_MS >= deadline) {
       return lock;
@@ -1367,19 +1387,98 @@ function logTail(projectRoot: string): string {
     : '';
 }
 
+/** What a wait for this project's lock came to, for a run that may still build. */
+type BuildingWait =
+  | { kind: 'building'; lock: DevServerLockInfo }
+  | { kind: 'up'; lock: DevServerLockInfo }
+  /** The run is gone; `building` is its last `building` lock, null when it published none. */
+  | { kind: 'ended'; building: DevServerLockInfo | null };
+
+/**
+ * Wait for this project's lock, past a run that builds.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — without --wait-ready a run
+ * that builds is reported at once (`building`). With it the wait goes on, and a run still building
+ * at the deadline is exit 22. A run that ended in its build, or no lock, is `ended`.
+ */
+async function waitPastBuildingAsync(
+  projectRoot: string,
+  options: DevOptions,
+  startedAt: number,
+  hasExited: () => boolean
+): Promise<BuildingWait> {
+  const lock = await waitForLockAsync(projectRoot, {
+    timeoutMs: options.detachTimeoutMs,
+    hasExited,
+    acceptBuilding: !options.waitReady,
+  });
+  if (!lock) return { kind: 'ended', building: null };
+  if (lock.phase !== 'building') return { kind: 'up', lock };
+  if (hasExited() || !isProcessAlive(lock.pid)) return { kind: 'ended', building: lock };
+  if (options.waitReady) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
+  return { kind: 'building', lock };
+}
+
 /** The detach's stop for a child whose dev server exited while its EAS open still runs. */
 function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandError {
   const row = RUN_PHASE.finishing;
-  const command = row.command('');
   const error = new CommandError(
     'DEV_DETACH_FAILED',
     [
       `The detached dev server exited, and its run (pid ${lock.pid}) is finishing its EAS session start.`,
       `Why: ${row.why(lock)}`,
-      `How: run "${command}". ${row.does} What the run printed is in ${logFile}.`,
+      `How: run "${row.command}". ${row.does} What the run printed is in ${logFile}.`,
     ].join('\n')
   );
-  error.suggestedCommand = command;
+  error.suggestedCommand = row.command;
+  return error;
+}
+
+/**
+ * The error for a detached run whose lock still says `building` when the wait ends.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
+ * and the same command follows it.
+ */
+function stillBuildingOnLockError(
+  lock: DevServerLockInfo,
+  options: DevOptions,
+  waitedMs: number
+): CommandError {
+  const logFile = detachedLogPath(lock.projectRoot);
+  const rerun = rerunDevCommand(options.platform, options.callerArgv);
+  const error = new CommandError(
+    'DEV_DETACH_STILL_BUILDING',
+    [
+      `This project's dev run (pid ${lock.pid}) is still building after ${Math.round(waitedMs / 1000)} s, so its dev server is not up yet.`,
+      `Why: its plan builds before it serves, and its lock says that it builds. The run keeps going and starts the dev server on ${lock.url} when the build ends.`,
+      `How: run "${rerun}" again. It follows this run and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the build of a detached run. "${PROGRAM_PREFIX} dev:stop" stops the run.`,
+    ].join('\n')
+  );
+  error.exitCode = EXIT_OUTCOME_TIMEOUT;
+  error.data = { pid: lock.pid, url: lock.url, logFile, waitedMs };
+  error.suggestedCommand = rerun;
+  return error;
+}
+
+/**
+ * The error for a detached run that held a `building` lock and ended before it served.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the run is gone, so the
+ * build failed or was stopped: the log says which.
+ */
+function buildEndedError(lock: DevServerLockInfo, exitCode: number | null): CommandError {
+  const logFile = detachedLogPath(lock.projectRoot);
+  const error = new CommandError(
+    'DEV_DETACH_FAILED',
+    [
+      `The detached dev run (pid ${lock.pid}) ended during its build${exitCode == null ? '' : ` with exit code ${exitCode}`}, so no dev server started.`,
+      `Why: its lock said that it was building, and the run is gone. A step before its dev server failed or was stopped.`,
+      `How: read what it printed in ${logFile} with "${PROGRAM_PREFIX} dev:logs", fix what stopped it, then run the same command again.${logTail(lock.projectRoot)}`,
+    ].join('\n')
+  );
+  error.data = { pid: lock.pid, exitCode, logFile };
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
   return error;
 }
 
@@ -1423,19 +1522,9 @@ export function notReadyError(
   lock: DevServerLockInfo,
   logFile: string,
   result: BundlerReadyResult,
-  phase: DetachedChildPhase = { phase: 'serving', step: null, opensPlatform: false },
   platform: PlanPlatform | null = null,
   eas: DetachEas | null = null
 ): CommandError {
-  // @ref llp/0021-honest-reports.rfc.md §The rules — F125. A plan whose
-  // dev-server step is `expo run:*` holds the lock while a compiler runs, so every sentence below
-  // would otherwise be false at once: nothing started, nothing is on that port, and "the dev server
-  // is still running" would describe Gradle. The wording follows the phase, and nothing else here
-  // changes: the wait really did give up, and the exit code is the same.
-  if (phase.phase === 'building') {
-    return stillBuildingError(lock, logFile, result, phase, platform, eas);
-  }
-
   const strangerAnswered = result.projectRootMatched === false;
   const error = new CommandError(
     'DEV_DETACH_NOT_READY',
@@ -1460,41 +1549,6 @@ export function notReadyError(
       `How: read ${logFile} with "${PROGRAM_PREFIX} dev:logs", which says what the bundler is doing. "${PROGRAM_PREFIX} smoke --ios" or "--android" then reports whether this project compiles and runs on that device. ${eas ? easStopSentence(eas) : `Stop it with "${PROGRAM_PREFIX} dev:stop".`}`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
-  return error;
-}
-
-/**
- * The failure for a `--wait-ready` that ran out while the plan was still compiling.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
- * F125. Nothing has gone wrong: the child is building, the build is the expensive step it was asked
- * to run, and the only thing that failed is a wait whose budget is much shorter than a local build.
- * So this says what is happening and which step is doing it, and it does not offer `smoke`, which
- * cannot measure a bundler that has not started, or the split-stack note, which is about two
- * listeners on a port nothing is listening on yet.
- */
-function stillBuildingError(
-  lock: DevServerLockInfo,
-  logFile: string,
-  result: BundlerReadyResult,
-  phase: DetachedChildPhase,
-  platform: PlanPlatform | null,
-  eas: DetachEas | null
-): CommandError {
-  const step = phase.step ?? 'the build step';
-  // The run's own platform when the caller had it, else read off the step row — the line below
-  // once said `--android` to every caller, iOS runs included.
-  const flag = platform ?? (step.includes('run:ios') ? 'ios' : 'android');
-  const error = new CommandError(
-    'DEV_DETACH_NOT_READY',
-    [
-      `No dev server is listening on ${lock.url} yet: the plan is still building, at "${step}" (pid ${lock.pid}), and --wait-ready gave up after ${result.waitedMs}ms.`,
-      `Why: "${step}" is one command that builds the app, installs it, and only then starts the dev server. The port above is published when that step *starts*, so it names where the dev server will be rather than where one is — and a local build takes many minutes, which is longer than this wait. The build has not failed and it has not stopped; it is still going, in the process this command started.`,
-      `How: watch it with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}) and run "${PROGRAM_PREFIX} status" when it is done — the dev server answers on ${lock.url} the moment the build finishes. ${eas ? easStopSentence(eas) : `Stop the build with "${PROGRAM_PREFIX} dev:stop".`} To avoid the wait entirely, build once with "${PROGRAM_PREFIX} dev --${flag}" in a terminal: a recorded build makes the next detached run a dev server rather than a compiler.`,
-    ].join('\n')
-  );
-  error.exitCode = EXIT_OUTCOME_FAILED;
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
   return error;
 }

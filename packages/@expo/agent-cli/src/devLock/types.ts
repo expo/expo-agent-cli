@@ -20,7 +20,7 @@ export interface DevServerLockInfo {
   portReported: boolean;
   /** PID of the `@expo/agent-cli` process holding the lock, for a report that names the owner. */
   pid: number;
-  /** When the lock was taken, as an ISO 8601 timestamp. */
+  /** When the step that serves on the lock was spawned, as an ISO 8601 timestamp. */
   startedAt: string;
   /** Project the dev server was started for, as the lock holder resolved it. */
   projectRoot: string;

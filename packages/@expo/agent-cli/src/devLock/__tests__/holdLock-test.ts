@@ -215,9 +215,9 @@ describe(holdDevServerLockAsync, () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a port retry answers on
   // the run's lock, with no gap; a port of another project releases it.
   it.each([
-    ['answers on the lock the run holds', false],
-    ['releases the lock the run holds for a foreign port', true],
-  ] as const)(`%s`, async (_name, foreign) => {
+    ['answers on the lock the run holds', false, { port: 8311, phase: 'serving' }],
+    ['releases the lock the run holds for a foreign port', true, null],
+  ] as const)(`%s`, async (_name, foreign, answer) => {
     const projectRoot = makeTempProject();
     const acquired = await acquireDevServerLockAsync(
       lockInfo({ projectRoot, port: 8310, url: 'http://127.0.0.1:8310', pid: process.pid })
@@ -244,17 +244,10 @@ describe(holdDevServerLockAsync, () => {
       held: acquired.lock,
     });
 
-    if (foreign) {
-      expect(lock).toBeNull();
-      expect(await readDevServerLockAsync(projectRoot)).toBeNull();
-    } else {
-      expect(lock).toBe(acquired.lock);
-      expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
-        port: 8311,
-        phase: 'serving',
-        startedAt: new Date(since).toISOString(),
-      });
-    }
+    expect(lock).toBe(answer ? acquired.lock : null);
+    expect(await readDevServerLockAsync(projectRoot)).toEqual(
+      answer && expect.objectContaining({ ...answer, startedAt: new Date(since).toISOString() })
+    );
   });
 
   it(`holds nothing when the dev server stops with only a foreign port to name`, async () => {

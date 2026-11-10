@@ -18,15 +18,15 @@ export type RunningDevServer = { lock: DevServerLockInfo; phase: RunningDevServe
 /**
  * The lock's phase, and for a `serving` lock one `/status` probe of its URL, picks the word.
  *
- * `starting` covers a `run:*` build that has not reached Metro, a Metro that is not up, and another
- * project's Metro on the lock's port while this project's busy-port retry moves off it: in each,
- * this project's server is on its way and there is nothing to open against yet.
+ * `starting` covers a Metro that is not up, and another project's Metro on the lock's port while
+ * this project's busy-port retry moves off it: in each, this project's server is on its way and
+ * there is nothing to open against yet. An `expo run:*` build is `building` on the lock.
  */
 export async function runningDevServerAsync(
   projectRoot: string,
   lock: DevServerLockInfo
 ): Promise<RunningDevServer> {
-  if (lock.phase === 'finishing') return { lock, phase: 'finishing' };
+  if (lock.phase !== 'serving') return { lock, phase: lock.phase };
   const probe = await probeBundlerAsync(lock.url, { projectRoot });
   const serving = probe.answering && probe.projectRootMatched !== false;
   return { lock, phase: serving ? 'serving' : 'starting' };
@@ -75,7 +75,7 @@ export function devServerRunningError(
       `How: ${row.how({ smoke, navigate })}`,
     ].join('\n')
   );
-  error.suggestedCommand = row.command(smoke);
+  error.suggestedCommand = row.command ?? smoke;
   error.exitCode = EXIT_OUTCOME_FAILED;
   error.data = { port, pid, phase };
   return error;

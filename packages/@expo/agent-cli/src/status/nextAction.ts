@@ -67,7 +67,8 @@ export interface NextTargetFacts {
   platform?: PlanPlatform;
   /** Explicit --dev-server-url. */
   devServerUrl: string | null;
-  ownServer: DevServerLockInfo | null;
+  /** This project's dev-server lock, in any phase. */
+  ownLock: DevServerLockInfo | null;
   request: LastDevRequest | null;
   bindings: BindingSummary[];
   devServer: DevServerStatus | null;
@@ -78,12 +79,13 @@ export interface NextTargetFacts {
 export function resolveNextTarget({
   platform: named,
   devServerUrl,
-  ownServer,
+  ownLock,
   request,
   bindings,
   devServer,
   state,
 }: NextTargetFacts): { platform: PlanPlatform; recoveryPort: number | null } {
+  const ownServer = servingLock(ownLock);
   const boundPlatforms = [...new Set(bindings.map((entry) => entry.platform))];
   const platform =
     named ??
@@ -119,9 +121,8 @@ export interface NextActionFacts {
   devBuildScheme: string | null;
   /** Null when the binding registry could not be read. */
   bindings: BindingSummary[] | null;
-  ownServer: DevServerLockInfo | null;
-  /** This project's dev run when its lock says `building` or `finishing`, else null. */
-  unservedRun: DevServerLockInfo | null;
+  /** This project's dev-server lock, in any phase. */
+  ownLock: DevServerLockInfo | null;
   request: LastDevRequest | null;
   deviceBackend: DeviceBackend;
   /** The plan `@expo/agent-cli dev` would make here, or null when it could not be made. */
@@ -138,8 +139,7 @@ export function chooseNextAction({
   device,
   devBuildScheme,
   bindings,
-  ownServer,
-  unservedRun,
+  ownLock,
   request,
   deviceBackend,
   plan,
@@ -171,9 +171,7 @@ export function chooseNextAction({
   );
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app, §Dependencies not installed
   // — no app to act on outranks every device next below: each of them runs `dev`, which stops first.
-  if (state.app !== 'ready') {
-    return next;
-  }
+  if (state.app !== 'ready') return next;
   const devNext = buildNextActionStatus(
     state,
     record,
@@ -184,6 +182,9 @@ export function chooseNextAction({
     null,
     recoveryPlan
   );
+  const unserved = unservedRunNext(ownLock, devNext);
+  if (unserved) return unserved;
+  const ownServer = servingLock(ownLock);
   const { backend, devArgs, devCommand } = devRerun(platform, request, recoveryPort, devNext);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
     next.command =
@@ -245,20 +246,29 @@ export function chooseNextAction({
             : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
     };
   }
-  return (unservedRun && unservedRunNext(unservedRun, devNext)) ?? next;
+  return next;
+}
+
+/** The lock of a dev server that serves, or null for none or a run that builds or finishes. */
+function servingLock(lock: DevServerLockInfo | null): DevServerLockInfo | null {
+  return lock?.phase === 'serving' ? lock : null;
 }
 
 /**
+ * The next step beside a run that builds or finishes, from its row of the phase table; null for no
+ * run or one that serves.
+ *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run with no dev server
- * outranks every step above: each of them runs `dev`, which this run's lock refuses.
+ * outranks every device step: each of them runs `dev`, which this run's lock refuses.
  */
 function unservedRunNext(
-  run: DevServerLockInfo,
+  lock: DevServerLockInfo | null,
   devNext: NextActionStatus
 ): NextActionStatus | null {
-  if (run.phase !== 'finishing') return null;
-  const row = RUN_PHASE[run.phase];
-  return { ...devNext, command: row.command(''), why: `${row.state(run)}. ${row.does}` };
+  const phase = lock?.phase;
+  if (!lock || (phase !== 'building' && phase !== 'finishing')) return null;
+  const row = RUN_PHASE[phase];
+  return { ...devNext, command: row.command, why: `${row.state(lock)}. ${row.does}` };
 }
 
 /** The `dev` re-run that keeps the saved request's flags and the recovery port. */

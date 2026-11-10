@@ -104,8 +104,7 @@ const defaults: Facts = {
   device: null,
   devBuildScheme: null,
   bindings: [],
-  ownServer: null,
-  unservedRun: null,
+  ownLock: null,
   request: null,
   deviceBackend: 'local',
   plan: null,
@@ -176,7 +175,7 @@ describe(chooseNextAction, () => {
         platform: undefined,
         request: androidRequest,
         devServerUrl: null,
-        ownServer: lockInfo({ port: 19091, url: 'http://127.0.0.1:19091' }),
+        ownLock: lockInfo({ port: 19091, url: 'http://127.0.0.1:19091' }),
       },
       command: `${dev}:stop && ${dev} --android --local --dev-client --port 19091 --device emulator-5556 --detach --wait-ready`,
       why: restart('android'),
@@ -228,34 +227,34 @@ describe(chooseNextAction, () => {
       },
       {
         name: `restarts an own ${platform} server with no app, keeping the plan's steps`,
-        facts: { platform, devServer: noApp, ownServer: own },
+        facts: { platform, devServer: noApp, ownLock: own },
         command: `${dev}:stop && ${dev} --${platform} --port 8081 --detach --wait-ready`,
         why: restart(platform),
         stepsPort: '8081',
       },
       {
         name: `waits for the ${platform} session of an own EAS server instead of a restart`,
-        facts: { platform, devServer: noApp, ownServer: easLock(platform) },
+        facts: { platform, devServer: noApp, ownLock: easLock(platform) },
         command: `${dev} --${platform} --eas --detach --wait-ready`,
         why: easWhy(platform, 'is not bound yet'),
       },
     ]),
     {
       name: 'says the session is starting while the detached child starts it',
-      facts: { devServer: noApp, ownServer: easLock('ios') },
+      facts: { devServer: noApp, ownLock: easLock('ios') },
       host: { childStartsSession: () => true },
       command: `${dev} --ios --eas --detach --wait-ready`,
       why: easWhy('ios', 'is starting'),
     },
     {
       name: 'binds the session again, not smoke, for an app on an own EAS server',
-      facts: { platform: 'android', devServer: server(), ownServer: easLock('android') },
+      facts: { platform: 'android', devServer: server(), ownLock: easLock('android') },
       command: `${dev} --android --eas --detach --wait-ready`,
       why: easWhy('android', 'is not bound yet'),
     },
     {
       name: 'takes the platform of the EAS lock when nothing names one',
-      facts: { platform: undefined, devServer: server(), ownServer: easLock('android') },
+      facts: { platform: undefined, devServer: server(), ownLock: easLock('android') },
       command: `${dev} --android --eas --detach --wait-ready`,
       why: easWhy('android', 'is not bound yet'),
     },
@@ -264,7 +263,7 @@ describe(chooseNextAction, () => {
       facts: {
         platform: 'android',
         devServer: server(),
-        ownServer: easLock('android'),
+        ownLock: easLock('android'),
         bindings: [binding({ platform: 'android', backend: 'cloud', id: 'sess-live' })],
       },
       command: `${PROGRAM_PREFIX} smoke --android --eas`,
@@ -275,7 +274,7 @@ describe(chooseNextAction, () => {
       facts: {
         platform: undefined,
         devServer: noApp,
-        ownServer: easLock('android'),
+        ownLock: easLock('android'),
         request: { platform: 'ios', port: null, buildBackend: null, runTarget: null },
       },
       command: `${dev} --android --eas --detach --wait-ready`,
@@ -283,20 +282,20 @@ describe(chooseNextAction, () => {
     },
     {
       name: 'never stops an EAS server for a caller who names the other platform',
-      facts: { devServer: noApp, ownServer: easLock('android') },
+      facts: { devServer: noApp, ownLock: easLock('android') },
       command: `${dev} --ios --port 8081 --detach --wait-ready`,
       why: unbound('ios'),
     },
     {
       name: 'binds the session of the lock on a host that binds no device',
-      facts: { devServer: noApp, ownServer: easLock('ios') },
+      facts: { devServer: noApp, ownLock: easLock('ios') },
       host: { devicesDisabled: true },
       command: `${dev} --ios --eas --detach --wait-ready`,
       why: easWhy('ios', 'is not bound yet'),
     },
     {
       name: 'names no --port beside an EAS server for an explicit URL on another port',
-      facts: { devServer: noApp, ownServer: easLock('ios'), devServerUrl: 'http://127.0.0.1:9000' },
+      facts: { devServer: noApp, ownLock: easLock('ios'), devServerUrl: 'http://127.0.0.1:9000' },
       command: `${dev} --ios --eas --detach --wait-ready`,
       why: easWhy('ios', 'is not bound yet'),
     },
@@ -315,7 +314,7 @@ describe(chooseNextAction, () => {
       name: `says an own session lease expired, with ${devServer.appsConnected} app connected`,
       facts: {
         devServer,
-        ownServer: easLock('ios'),
+        ownLock: easLock('ios'),
         bindings: [
           binding({ backend: 'cloud', id: 'sess-old', state: 'gone', expiresAt: expired }),
         ],
@@ -341,9 +340,9 @@ describe(chooseNextAction, () => {
       command: `${dev} --ios --eas --port 8081 --detach --wait-ready`,
       why: unbound('ios'),
     },
-    ...[null, own].map((ownServer): Row => ({
-      name: `reuses an expired binding (own server=${ownServer != null})`,
-      facts: { ownServer, bindings: [binding({ state: 'gone', expiresAt: expired })] },
+    ...[null, own].map((ownLock): Row => ({
+      name: `reuses an expired binding (own server=${ownLock != null})`,
+      facts: { ownLock, bindings: [binding({ state: 'gone', expiresAt: expired })] },
       command: `${dev} --ios --port 8081 --detach --wait-ready`,
       why: 'The lease on the bound ios device expired.',
     })),
@@ -356,6 +355,24 @@ describe(chooseNextAction, () => {
       },
       command: `${PROGRAM_PREFIX} smoke --ios`,
       why: expect.stringContaining('instead of starting a second server'),
+    },
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run with no dev server
+    // outranks the device steps, whose `dev` its lock would refuse.
+    {
+      name: 'shows the build of a run that builds before it serves',
+      facts: { ownLock: lockInfo({ phase: 'building', pid: 4242, port: 8090 }) },
+      command: `${PROGRAM_PREFIX} dev:logs`,
+      why: expect.stringMatching(
+        /^This project's dev run \(pid 4242\) is building before it serves on port 8090\./
+      ),
+    },
+    {
+      name: 'stops the session a finishing run binds',
+      facts: { ownLock: lockInfo({ phase: 'finishing', pid: 4242, easPlatform: 'ios' }) },
+      command: `${PROGRAM_PREFIX} dev:stop --eas`,
+      why: expect.stringMatching(
+        /^This project's last dev run \(pid 4242\) is finishing its EAS session start\./
+      ),
     },
     {
       name: "keeps the plan's next under AGENT_CLI_NO_DEVICE",

@@ -13,11 +13,10 @@ import {
 } from '../../utils/errors';
 import {
   detachedPidLine,
-  parseDetachedChildPhase,
+  childOpensPlatform,
   parseDetachedChildPid,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
-  stepOpensPlatform,
 } from '../childVerdict';
 
 vi.mock('../../log');
@@ -153,10 +152,9 @@ describe(parseDetachedChildVerdict, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// F125. The plan table is a format of this CLI's own (`src/plan/format.ts`), so it round-trips the
-// same way the verdict does: the log is built by `formatStartPlan` and read back here.
-describe(parseDetachedChildPhase, () => {
+// The plan table is a format of this CLI's own (`src/plan/format.ts`), so it round-trips the same
+// way the verdict does: the log is built by `formatStartPlan` and read back here.
+describe(childOpensPlatform, () => {
   /** The child's log, as `formatStartPlan` writes it, for a plan of the given steps. */
   function planLog(steps: { argv: string[]; reason: string }[], ...after: string[]): string[] {
     const plan: StartPlan = {
@@ -183,55 +181,28 @@ describe(parseDetachedChildPhase, () => {
     reason: 'Serves the project and opens it on a booted iOS simulator.',
   };
 
-  // The whole of F125: the lock is taken at the *start* of the dev-server step, and for a `run:*`
-  // step that step is a ten-minute Gradle build. So a published port is not a listening one.
-  it(`reads a plan still on its build step as building`, () => {
-    expect(parseDetachedChildPhase(planLog([PREBUILD, RUN_ANDROID], 'Building app...'))).toEqual({
-      phase: 'building',
-      step: 'expo run:android',
-      opensPlatform: true,
-    });
-  });
-
-  // The install is what says the compiler finished (`./buildEvidence.ts`, F121's own marker), and
-  // after it the same step is starting a dev server rather than building one.
-  it(`reads the same plan as serving once the app is on the device`, () => {
-    expect(
-      parseDetachedChildPhase(
-        planLog([PREBUILD, RUN_ANDROID], '› Installing /tmp/app.apk', 'Starting Metro Bundler')
-      )
-    ).toEqual({ phase: 'serving', step: 'expo run:android', opensPlatform: true });
-  });
-
-  it(`reads a plan whose only step is the dev server as serving`, () => {
-    expect(parseDetachedChildPhase(planLog([START]))).toEqual({
-      phase: 'serving',
-      step: 'expo start --dev-client',
-      opensPlatform: false,
-    });
-  });
-
-  // A log with no plan in it says nothing about a phase, and guessing "building" would put a
-  // sentence about a compiler into the report of a dev server that never had one.
-  it(`reads a log with no plan in it as serving`, () => {
-    expect(parseDetachedChildPhase(['Starting project at /project'])).toEqual({
-      phase: 'serving',
-      step: null,
-      opensPlatform: false,
-    });
-  });
-
-  // @ref llp/0021-honest-reports.rfc.md §The rules — F140. The step that
-  // opens the app is the step that can kill the dev server after it has answered `/status`, and it
-  // is named in the plan table like every other step.
-  // An `expo start` step opens nothing any more: `dev` performs the open itself, from its own
-  // process, so a refused Automation grant cannot take the dev server down (llp/0026).
-  it(`reads a start step as one that opens nothing itself`, () => {
-    expect(parseDetachedChildPhase(planLog([START_IOS]))).toEqual({
-      phase: 'serving',
-      step: 'expo start --go --ios --port 9201',
-      opensPlatform: false,
-    });
+  // @ref llp/0021-honest-reports.rfc.md §The rules — F140. The step that opens the app is the step
+  // that can kill the dev server after it has answered `/status`. An `expo start` step opens nothing
+  // any more: `dev` performs the open itself, from its own process (llp/0026).
+  it.each([
+    ['a plan that serves from its build step', planLog([PREBUILD, RUN_ANDROID]), true],
+    [
+      'an install before a start step',
+      planLog([{ ...RUN_ANDROID, argv: [...RUN_ANDROID.argv, '--no-bundler'] }, START]),
+      false,
+    ],
+    ['a plan whose only step is the dev server', planLog([START]), false],
+    ['a start step with a platform flag', planLog([START_IOS]), false],
+    ['a run:ios step', planLog([{ argv: ['expo', 'run:ios'], reason: 'Builds it.' }]), true],
+    [
+      'a start step with the short platform flag',
+      planLog([{ argv: ['expo', 'start', '--go', '-i'], reason: 'Serves it.' }]),
+      false,
+    ],
+    ['a plan that only prebuilds', planLog([PREBUILD]), false],
+    ['a log with no plan in it', ['Starting project at /project'], false],
+  ] as const)(`reads %s`, (_name, lines, opens) => {
+    expect(childOpensPlatform(lines)).toBe(opens);
   });
 });
 
@@ -293,24 +264,5 @@ describe(parseDetachedChildPort, () => {
   it(`should answer null for a log with no dev-server port`, () => {
     expect(parseDetachedChildPort(portLog(undefined))).toBeNull();
     expect(parseDetachedChildPort([])).toBeNull();
-  });
-});
-
-describe(stepOpensPlatform, () => {
-  it.each([
-    ['expo start --go --ios --port 9201', false],
-    ['expo start --android', false],
-    ['expo start --go -i', false],
-    ['expo start --web', false],
-    // Always: `run:*` builds, installs and launches, and the launch drives the same device tools.
-    ['expo run:ios', true],
-    ['expo run:android --device', true],
-    ['expo start', false],
-    ['expo start --dev-client', false],
-    ['expo start --go --tunnel', false],
-    // Not a dev-server step at all, so it holds no lock this question is about.
-    ['expo prebuild --platform ios', false],
-  ])('%s → %s', (step, opens) => {
-    expect(stepOpensPlatform(step)).toBe(opens);
   });
 });

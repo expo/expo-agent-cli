@@ -1386,3 +1386,12 @@ export async function linkFixtureToEasAsync(
   };
   await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
 }
+
+/** A port nothing listens on now, read back from a server bound to port 0. */
+export async function freePortAsync(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}

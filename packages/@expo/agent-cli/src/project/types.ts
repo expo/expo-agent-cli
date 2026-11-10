@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md
 // Shared contract for the project-state probe, the Expo Go compatibility check, the
 // post-install impact classifier, and the smart start plan engine. Pure data — no I/O here.
+import type { DevServerLockPhase } from '../devLock/types';
 import type { RunsOn } from '../toolchain/runsOn';
 import type { PlanBuildLocation } from '../toolchain/types';
 import type { FingerprintResult, FingerprintSource } from './fingerprint';
@@ -159,7 +160,7 @@ export interface StartPlan {
  * - `picked`: `dev` picked a free port; `movedFrom` is the busy port it moved off, or null.
  * - `named`: the caller named the port; `taken` is true when it could not be bound.
  * - `running`: this project's dev server already holds its lock on `port`, so the run stops before
- *   any step; `phase` is `finishing` when the lock says so, else `serving` when its `/status`
+ *   any step; `phase` is `building` or `finishing` when the lock says so, else `serving` when its `/status`
  *   answers for this project, else `starting`.
  */
 export type DevServerPort = {
@@ -171,5 +172,5 @@ export type DevServerPort = {
   | { state: 'running'; phase: RunningDevServerPhase }
 );
 
-/** `serving` and `starting` split a `serving` lock by whether Metro answers `/status`. */
-export type RunningDevServerPhase = 'starting' | 'serving' | 'finishing';
+/** The lock's phase, with `serving` split by whether Metro answers `/status` (`starting`). */
+export type RunningDevServerPhase = DevServerLockPhase | 'starting';

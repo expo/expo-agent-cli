@@ -21,10 +21,17 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
   /** Settles when the run's EAS open returns; the lock then answers `easOpenFinished: true`. */
   easOpenFinished?: Promise<unknown>;
   /**
-   * The lock the `dev` run already holds. The step answers on it with phase `serving` instead of
+   * The lock the `dev` run already holds. The step answers on it with its own phase instead of
    * taking a new one, so a port retry leaves no gap. A port of another project releases it.
    */
   held?: DevServerLockHandle | null;
+  /** What the lock answers at the spawn: `building` for a step that compiles before it serves. */
+  phase?: 'building' | 'serving';
+  /**
+   * Told the lock the moment it answers for this step, before the port watch ends: at the spawn
+   * when the arguments name a port.
+   */
+  onPublished?: (lock: DevServerLockHandle) => void;
 };
 
 /**
@@ -57,6 +64,7 @@ export async function holdDevServerLockAsync(
       : await publishAsync(projectRoot, options, resolved);
     const finish = () => lock?.update({ ...lock.info, easOpenFinished: true });
     options.easOpenFinished?.then(finish, finish);
+    if (lock) options.onPublished?.(lock);
     return lock;
   };
 
@@ -92,7 +100,7 @@ export async function holdDevServerLockAsync(
 /** The lock's answer for a dev server on the `resolved` port, spawned at `options.since`. */
 function lockInfo(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'>,
   { port, source }: ResolvedDevServerPort,
   easOpenFinished: boolean
 ): DevServerLockInfo {
@@ -105,7 +113,7 @@ function lockInfo(
     projectRoot,
     easPlatform: options.easPlatform ?? null,
     easOpenFinished,
-    phase: 'serving',
+    phase: options.phase ?? 'serving',
   };
 }
 
@@ -117,7 +125,7 @@ function lockInfo(
  */
 function republish(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform' | 'phase'>,
   held: DevServerLockHandle,
   resolved: ResolvedDevServerPort | null
 ): DevServerLockHandle | null {
@@ -132,10 +140,23 @@ function republish(
   return held;
 }
 
-/** Take the lock for a dev server on the resolved port. */
+/**
+ * Take the lock before any step serves, on the port the plan gave the dev server: the `dev` run's
+ * lock while it builds. Null when the lock cannot be taken, as for every lock here.
+ */
+export async function takeDevServerLockAsync(
+  projectRoot: string,
+  port: number,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'>
+): Promise<DevServerLockHandle | null> {
+  return await publishAsync(projectRoot, options, { port, source: 'arg' });
+}
+
+/** Take the lock for a dev server on the resolved port. With no `isRunning`, nothing has exited. */
 async function publishAsync(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform' | 'phase'> &
+    Partial<Pick<HoldDevServerLockOptions, 'isRunning'>>,
   resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able
@@ -151,7 +172,7 @@ async function publishAsync(
     }
     const { port, source } = resolved;
 
-    if (!options.isRunning()) {
+    if (options.isRunning?.() === false) {
       // The dev server exited before it said where it listens, so there is nothing to point at.
       debugEvent('dev_lock_skipped', { address, reason: 'dev-server-exited' });
       return null;

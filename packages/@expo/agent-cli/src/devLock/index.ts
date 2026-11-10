@@ -14,7 +14,7 @@ export {
   readDevServerLockAsync,
 } from './client';
 export type { DevLockProbe } from './client';
-export { holdDevServerLockAsync } from './holdLock';
+export { holdDevServerLockAsync, takeDevServerLockAsync } from './holdLock';
 export type { HoldDevServerLockOptions } from './holdLock';
 export {
   DEFAULT_DEV_SERVER_PORT,

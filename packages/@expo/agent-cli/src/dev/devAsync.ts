@@ -9,8 +9,9 @@ import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
-import type { DevServerLockHandle, DevServerLockInfo } from '../devLock/types';
+import type { DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
+import { withRunLockAsync, type RunLock, type RunSteps } from './runLock';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -68,6 +69,7 @@ import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
+  buildsBeforeServing,
   forwardedStepArgs,
   isDevServerStep,
   withDevice,
@@ -622,9 +624,6 @@ interface PlanRun {
   serving: { index: number; args: string[] } | null;
 }
 
-/** The run's dev-server lock, once a step took it. */
-type RunLock = { lock: DevServerLockHandle | null };
-
 /**
  * Run the plan's steps under one dev-server lock, and release it when the run ends.
  *
@@ -638,12 +637,13 @@ async function executePlanAsync(
   options: DevOptions,
   acquired: AcquireResult | null
 ): Promise<PlanRun> {
-  const runLock: RunLock = { lock: null };
-  try {
-    return await runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock);
-  } finally {
-    runLock.lock?.release();
-  }
+  return await withRunLockAsync(
+    projectRoot,
+    plan,
+    shouldOpenApp(options) ? easOpenPlatform(options) : null,
+    (runLock, steps) =>
+      runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, steps)
+  );
 }
 
 // oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
@@ -653,7 +653,8 @@ async function runPlanStepsAsync(
   state: ProjectState,
   options: DevOptions,
   acquired: AcquireResult | null,
-  runLock: RunLock
+  runLock: RunLock,
+  steps: RunSteps
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
@@ -684,10 +685,10 @@ async function runPlanStepsAsync(
     // itself, and a build step serves nothing to open.
     const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
     let stepRunning = false;
-    const runStep = async (stepArgs: string[]) => {
+    const runOneStep = async (stepArgs: string[], signal: AbortSignal) => {
       if (!devServerStep) {
         return await withLeaseExtendedAsync(projectRoot, () =>
-          runStepAsync(projectRoot, step, stepArgs, output)
+          runStepAsync(projectRoot, step, stepArgs, output, signal)
         );
       }
       stepRunning = true;
@@ -698,16 +699,17 @@ async function runPlanStepsAsync(
             expoGo: plan.target === 'expo-go',
             fingerprintCache: options.fingerprintCache,
             keepSession: options.detachedChild,
-            onSignal: () => {
-              stepRunning = false;
-            },
           })
         : null;
       let easOpened = false;
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
-        runLock,
+        signal,
+        runLock: {
+          lock: runLock,
+          phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
+        },
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
         easOpenFinished: eas ? easOpenFinished : undefined,
@@ -718,7 +720,7 @@ async function runPlanStepsAsync(
               }
               openArmed = true;
               // Open alongside Metro. A failed open must not stop it.
-              const stillWanted = () => stepRunning;
+              const stillWanted = () => stepRunning && !steps.interrupted;
               if (eas) {
                 easOpened = true;
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
@@ -737,23 +739,13 @@ async function runPlanStepsAsync(
       }).finally(async () => {
         stepRunning = false;
         // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone.
-        // While the open runs, the run binds the session it returns, and `dev:stop` reads that
-        // here. After it, the session cleanup needs no lock, and a lock left as `serving` would
-        // send `dev:stop` to signal a run that is ending its session.
-        const lock = runLock.lock;
-        const release = () => {
-          lock?.release();
-          runLock.lock = null;
-        };
-        if (easOpened && lock && !lock.info.easOpenFinished) {
-          lock.update({ ...lock.info, phase: 'finishing' });
-          void eas?.finished.then(release);
-        } else if (easOpened) {
-          release();
-        }
+        if (easOpened && eas) runLock.finish(eas.finished);
         await eas?.finishAsync();
       });
     };
+    // The port retry runs it again; a signal during either run waits for that run to end.
+    const runStep = (stepArgs: string[]) =>
+      steps.stepAsync((signal) => runOneStep(stepArgs, signal));
 
     if (step.id === 'eas-build') {
       // A remembered "no build" for this platform is about to be wrong.
@@ -772,6 +764,9 @@ async function runPlanStepsAsync(
 
     let spawnedAt = Date.now();
     let result = await runStep(args);
+    // A signal ends a step with exit 0, so a step before the dev server counts for nothing after
+    // one. The dev-server step goes on: a stop there is its normal end, and its exit work follows.
+    if (!devServerStep) steps.assertNotInterrupted();
 
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — the port carve-out. Checked
     // before the classifier below, because a busy port is the one stop in the Expo CLI's prompt
@@ -787,6 +782,8 @@ async function runPlanStepsAsync(
           throw await portDemandedError(options.port, options.platform);
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
+        // A signal that ended the first spawn ends the run: the retry would be a later step.
+        steps.assertNotInterrupted();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
         // None after the open started: a retry gets no open, and the run let go of its lock when
         // that open returned (llp/0035 §Preserved sessions).
@@ -1144,17 +1141,18 @@ async function runStepAsync(
   projectRoot: string,
   step: PlanStep,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  signal: AbortSignal
 ): Promise<StepResult> {
   if (step.argv[0] === 'eas') {
-    return await runEasStepAsync(projectRoot, args, output);
+    return await runEasStepAsync(projectRoot, args, output, signal);
   }
   if (output === 'inherit') {
     // Nothing is captured, so there is nothing for the wrapper-crash guard to read either.
-    const exitCode = await runExpoAsync(projectRoot, args);
+    const exitCode = await runExpoAsync(projectRoot, args, { signal });
     return { exitCode, stdout: '', stderr: '', binPath: null };
   }
-  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output });
+  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output, signal });
   return {
     exitCode: result.exitCode ?? 1,
     stdout: result.stdout,
@@ -1179,7 +1177,8 @@ async function runStepAsync(
 async function runEasStepAsync(
   projectRoot: string,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  signal: AbortSignal
 ): Promise<StepResult> {
   const { resolveEasCliOrThrow, easCliArgs } =
     require('../utils/easCli') as typeof import('../utils/easCli');
@@ -1190,6 +1189,7 @@ async function runEasStepAsync(
   const result = await spawnSubprocessAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
     output,
+    signal,
   });
   return {
     exitCode: result.exitCode ?? 1,

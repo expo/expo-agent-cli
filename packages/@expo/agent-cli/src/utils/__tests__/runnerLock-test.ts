@@ -115,6 +115,23 @@ describe(acquireRunnerLockAsync, () => {
     lock!.release();
   });
 
+  // A signal that stops a dev run before its queued spawn must not wait for the runner ahead.
+  it('leaves the queue at once when the signal aborts, and never runs the work', async () => {
+    const held = await acquireRunnerLockAsync('npx:eas-cli');
+    const abort = new AbortController();
+    const work = vi.fn(async () => {});
+
+    const queued = withRunnerLockAsync('npx:eas-cli', work, { signal: abort.signal });
+    abort.abort(new Error('stopped'));
+
+    await expect(queued).rejects.toThrow('stopped');
+    expect(work).not.toHaveBeenCalled();
+    held!.release();
+    const next = await acquireRunnerLockAsync('npx:eas-cli', { timeoutMs: 1000 });
+    expect(next).not.toBeNull();
+    next!.release();
+  });
+
   it('gives up the wait rather than hanging a command that named a deadline', async () => {
     const held = await acquireRunnerLockAsync('npx:eas-cli');
 

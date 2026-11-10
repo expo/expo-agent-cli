@@ -83,6 +83,7 @@ export async function runDevServerAsync(
     easPlatform = null,
     easOpenFinished,
     runLock,
+    signal,
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
@@ -93,9 +94,11 @@ export async function runDevServerAsync(
     /**
      * The lock of the `dev` run this step belongs to. The step answers on it, or takes it into
      * it, and leaves the release to the run (llp/0004 §Dev-server lock). Without it, the step
-     * takes its own lock and releases it when the dev server exits.
+     * takes its own lock, says `serving`, and releases the lock when the dev server exits.
      */
-    runLock?: { lock: DevServerLockHandle | null };
+    runLock?: StepRunLock;
+    /** Aborted before the spawn, no dev server starts and the call rejects with its reason. */
+    signal?: AbortSignal;
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -130,16 +133,18 @@ export async function runDevServerAsync(
     }
   };
   const run = withLeaseExtendedAsync(projectRoot, () =>
-    spawnDevServerAsync(projectRoot, args, output)
+    spawnDevServerAsync(projectRoot, args, output, signal)
   ).finally(() => {
     running = false;
   });
   const lock = holdDevServerLockAsync(projectRoot, args, {
     since: startedAt,
     isRunning: () => running,
+    phase: runLock?.phase ?? 'serving',
     easPlatform,
     easOpenFinished,
-    held: runLock?.lock,
+    held: runLock?.lock.handle,
+    onPublished: runLock && ((held) => holdInRun(runLock, held, projectRoot, () => running)),
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(
@@ -161,16 +166,21 @@ export async function runDevServerAsync(
       if (resolved.source === 'reported') {
         open(server);
       } else if (resolved.source === 'arg') {
-        void openWhenAnsweringAsync(server.url, projectRoot, () => running && !opened).then(
-          (answered) => {
-            if (answered) {
-              open(server);
-            }
+        void openWhenAnsweringAsync(
+          () => server.url,
+          projectRoot,
+          () => running && !opened
+        ).then((answered) => {
+          if (answered) {
+            open(server);
           }
-        );
+        });
       }
     },
   });
+
+  // The lock the port watch ends with: the same one, or none when the port was another project's.
+  void lock.then((held) => runLock?.lock.keep(held));
 
   try {
     const result = await run;
@@ -181,9 +191,47 @@ export async function runDevServerAsync(
     return { ...result, port };
   } finally {
     clearTimeout(timer);
-    if (runLock) runLock.lock = await lock;
-    else (await lock)?.release();
+    // The run's lock already has it: the `keep` above ran before this await on the same promise.
+    const held = await lock;
+    if (!runLock) held?.release();
   }
+}
+
+/** The `dev` run's lock, as a dev-server step of that run uses it. */
+interface StepRunLock {
+  lock: {
+    handle: DevServerLockHandle | null;
+    keep(handle: DevServerLockHandle | null): void;
+    serve(): void;
+  };
+  /**
+   * What the lock says at the spawn: `building` for a step that compiles before it serves. The
+   * run's lock then says `serving` once /status answers for this project.
+   */
+  phase: 'building' | 'serving';
+}
+
+/**
+ * Give the run the step's lock the moment it answers, and for a step that builds, say `serving`
+ * once /status answers for this project.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the poll starts at the
+ * publish, not at the end of the port watch, and reads the lock's URL each time, so a port Metro
+ * reports later counts.
+ */
+function holdInRun(
+  runLock: StepRunLock,
+  held: DevServerLockHandle,
+  projectRoot: string,
+  isRunning: () => boolean
+): void {
+  runLock.lock.keep(held);
+  if (runLock.phase !== 'building') return;
+  const stillBuilding = () => isRunning() && runLock.lock.handle?.info.phase === 'building';
+  const url = () => runLock.lock.handle?.info.url ?? held.info.url;
+  void openWhenAnsweringAsync(url, projectRoot, stillBuilding).then((answered) => {
+    if (answered && stillBuilding()) runLock.lock.serve();
+  });
 }
 
 /** How often an open aimed at a named port asks `/status` again. */
@@ -201,12 +249,12 @@ export const STATUS_POLL_INTERVAL_MS = 500;
  * `metro.config.js`).
  */
 async function openWhenAnsweringAsync(
-  url: string,
+  url: () => string,
   projectRoot: string,
   isRunning: () => boolean
 ): Promise<boolean> {
   while (isRunning()) {
-    const probe = await probeBundlerAsync(url, {
+    const probe = await probeBundlerAsync(url(), {
       timeoutMs: STATUS_POLL_INTERVAL_MS,
       projectRoot,
     });
@@ -239,13 +287,14 @@ async function openWhenAnsweringAsync(
 async function spawnDevServerAsync(
   projectRoot: string,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  signal: AbortSignal | undefined
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   if (output === 'inherit') {
-    return { exitCode: await runExpoAsync(projectRoot, args), stdout: '', stderr: '' };
+    return { exitCode: await runExpoAsync(projectRoot, args, { signal }), stdout: '', stderr: '' };
   }
 
-  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false });
+  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false, signal });
   if (result.spawnError) {
     throw new CommandError(
       'EXPO_CLI_NOT_FOUND',

@@ -112,6 +112,12 @@ describe(devServerRunningError, () => {
 describe('the phase table', () => {
   it.each([
     [
+      'building',
+      "This project's dev run (pid 4242) is building before it serves on port 8081",
+      'one',
+      'npx @expo/agent-cli dev:logs',
+    ],
+    [
       'serving',
       "This project's dev server is already running on port 8081 (pid 4242)",
       'one',

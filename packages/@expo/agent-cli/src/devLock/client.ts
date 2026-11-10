@@ -118,9 +118,9 @@ export async function probeDevServerLockAsync(
 /**
  * Parse one lock line into the info it names, or null.
  *
- * Every field but `easPlatform`, `easOpenFinished` and `phase` is required. A partial answer is treated as no answer, because
- * the point of the lock is that what a reader gets is complete and current — half of it is
- * neither.
+ * Every field but `portReported`, `easPlatform`, `easOpenFinished` and `phase` is required. A
+ * partial answer is treated as no answer, because the point of the lock is that what a reader gets
+ * is complete and current — half of it is neither.
  */
 function parseLockLine(answer: string): DevServerLockInfo | null {
   const line = answer.split('\n', 1)[0]?.trim();
