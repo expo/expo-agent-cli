@@ -1,7 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md
 // Find the dev server a runtime command talks to: the discovery ladder over `./devServer.ts`'s probe.
 
-import { readLastLoggedDevServerPort } from '../devLock';
 import { discoverByLockAsync } from './discoverByLock';
 import { matchProjectRoot, readReportedProjectRootAsync } from './projectRootHeader';
 import {
@@ -17,7 +16,7 @@ import {
 
 /** The two ways of describing one discovery step, so the sources and the flag stay in step. */
 function foundBy(source: DevServerSource): { source: DevServerSource; discovered: boolean } {
-  return { source, discovered: source === 'lock' || source === 'log' || source === 'scan' };
+  return { source, discovered: source === 'lock' || source === 'scan' };
 }
 
 /**
@@ -155,31 +154,6 @@ export async function discoverDevServerAsync(
     }
   };
 
-  // Step 1 — the project's own log: `expo start` logs a `metro:instantiate` event with the port
-  // into `.expo/dev/logs/start.log`. Project-scoped, but the log outlives the server that wrote
-  // it and names no PID, so the port is only a candidate until it answers a probe *and* its
-  // `/status` names this project: another worktree's Metro can bind the port after the logged
-  // server is gone. This is what finds a dev server started by `expo start` directly, with no
-  // `@expo/agent-cli` wrapper to hold a lock.
-  const loggedPort = projectRoot != null ? readLastLoggedDevServerPort(projectRoot) : null;
-  let judgedLoggedUrl: string | null = null;
-  if (loggedPort != null && loggedPort !== 8081) {
-    const loggedUrl = `http://127.0.0.1:${loggedPort}`;
-    const loggedProbe = await withTimeout(loggedUrl);
-    if (loggedProbe.reachable) {
-      const judged = await judgeAsync(loggedUrl);
-      if (judged.kind === 'accepted') {
-        return {
-          ...loggedProbe,
-          devServerUrl: loggedUrl,
-          ...foundBy('log'),
-        };
-      }
-      judgedLoggedUrl = loggedUrl;
-      recordRejected(judged);
-    }
-  }
-
   const defaultProbe = await withTimeout(DEFAULT_DEV_SERVER_URL);
   if (defaultProbe.reachable) {
     const judged = await judgeAsync(DEFAULT_DEV_SERVER_URL);
@@ -193,9 +167,7 @@ export async function discoverDevServerAsync(
     recordRejected(judged);
   }
 
-  const candidates = DEV_SERVER_SCAN_PORTS.slice(1)
-    .map((port) => `http://127.0.0.1:${port}`)
-    .filter((url) => url !== judgedLoggedUrl);
+  const candidates = DEV_SERVER_SCAN_PORTS.slice(1).map((port) => `http://127.0.0.1:${port}`);
   const accepted: (DevServerDiscovery | undefined)[] = [];
   let published: DevServerDiscovery | undefined;
   const probes = await Promise.all(

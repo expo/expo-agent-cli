@@ -391,18 +391,20 @@ Sections:
 
 ## Discovery ladder
 
-Five steps, in order, in `discoverDevServerAsync` (`src/runtime/devServer.ts`). Every
+Four steps, in order, in `discoverDevServerAsync` (`src/runtime/devServer.ts`). Every
 step probes. None trusts. The step is reported as `source`.
 
-| #   | Step                                           | Reports   | Proves                                                              |
-| --- | ---------------------------------------------- | --------- | ------------------------------------------------------------------- |
-| 0   | An explicit `--dev-server-url` or `--port`     | `flag`    | the caller named it. nothing else is tried                          |
-| 1   | The project's dev-server lock                  | `lock`    | an `@expo/agent-cli`-started wrapper is alive, and its URL answered |
-| 2   | The port `.expo/dev/logs/start.log` last named | `log`     | this project started a server there once, and it answered now       |
-| 3   | 8081                                           | `default` | Metro's default answered                                            |
-| 4   | 8082-8085, in parallel                         | `scan`    | a Metro answered. not that it is this project's                     |
+| #   | Step                                       | Reports   | Proves                                                              |
+| --- | ------------------------------------------ | --------- | ------------------------------------------------------------------- |
+| 0   | An explicit `--dev-server-url` or `--port` | `flag`    | the caller named it. nothing else is tried                          |
+| 1   | The project's dev-server lock              | `lock`    | an `@expo/agent-cli`-started wrapper is alive, and its URL answered |
+| 2   | 8081                                       | `default` | Metro's default answered                                            |
+| 3   | 8082-8085, in parallel                     | `scan`    | a Metro answered. not that it is this project's                     |
 
-Steps 2, 3 and 4 read the project-root header of `GET /status` by the rule in §A busy
+`@expo/cli` 58 writes no `.expo/dev/logs/start.log`; it reports Metro's port only through `2g`,
+which only the run that spawned Metro reads. So discovery has no project log to read.
+
+Steps 2 and 3 read the project-root header of `GET /status` by the rule in §A busy
 port, so a server of another project is skipped and reported as foreign. A `/status`
 that does not answer within 3 s is not accepted, because it proves nothing; a socket error on that
 read gets one retry. The budget is longer than the probe's, so a slow `/status` is accepted; `status`
@@ -563,8 +565,8 @@ published if the server exits first (`cli:dev_lock_skipped`, reason `foreign-por
 Still probed. The lock proves the wrapper is alive. Only an HTTP probe of the URL proves
 the dev server behind it is. Discovery uses the lock to stop guessing which port.
 
-Two accepted limits. A dev server started by `expo start` directly holds no lock, so the
-port in `start.log` plus the scan is still the answer. A posix project path long enough
+Two accepted limits. A dev server started by `expo start` directly holds no lock, so only
+8081 and the scan find it. A posix project path long enough
 to push the socket past the kernel's cap moves it out of `.expo`.
 
 ## Daemonization

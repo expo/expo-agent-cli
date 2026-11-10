@@ -242,44 +242,6 @@ describe('discoverDevServerAsync — what it leaves behind', () => {
   });
 });
 
-describe('readLastLoggedDevServerPort via discovery', () => {
-  const { vol } = require('memfs');
-  const projectRoot = '/proj';
-  afterEach(() => vol.reset());
-
-  it(`probes the port the project's start.log names before scanning`, async () => {
-    vol.fromJSON(
-      {
-        '.expo/dev/logs/start.log': [
-          JSON.stringify({ _e: 'metro:instantiate', port: 8082 }),
-          JSON.stringify({ _e: 'metro:instantiate', port: 8090 }),
-        ].join('\n'),
-      },
-      projectRoot
-    );
-    mockFetchByPort({ '8090': [target] });
-    const result = await discoverDevServerAsync(undefined, { projectRoot });
-    expect(result).toMatchObject({
-      reachable: true,
-      devServerUrl: 'http://127.0.0.1:8090',
-      source: 'log',
-      discovered: true,
-    });
-    // The logged port answered and sent no header, so neither 8081 nor the scan ports were touched.
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
-  });
-
-  it(`falls back to the scan when the logged port is stale`, async () => {
-    vol.fromJSON(
-      { '.expo/dev/logs/start.log': JSON.stringify({ _e: 'metro:instantiate', port: 8090 }) },
-      projectRoot
-    );
-    mockFetchByPort({ '8083': [target] });
-    const result = await discoverDevServerAsync(undefined, { projectRoot, timeoutMs: 50 });
-    expect(result.devServerUrl).toBe('http://127.0.0.1:8083');
-  });
-});
-
 describe('discoverDevServerAsync — project root of a scanned server', () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
   const projectRoot = path.resolve('/work/app');
@@ -417,37 +379,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
       reachable: true,
       devServerUrl: 'http://127.0.0.1:8082',
-    });
-  });
-
-  it(`judges the port start.log names, and goes on scanning when it is foreign`, async () => {
-    vol.fromJSON({
-      [path.join(projectRoot, '.expo/dev/logs/start.log')]: JSON.stringify({
-        _e: 'metro:instantiate',
-        port: 8090,
-      }),
-    });
-    mockServers({ '8090': { root: '/somewhere/else' }, '8083': { root: projectRoot } });
-    const result = await discoverDevServerAsync(undefined, { projectRoot });
-    expect(result).toMatchObject({
-      reachable: true,
-      devServerUrl: 'http://127.0.0.1:8083',
-      source: 'scan',
-    });
-  });
-
-  it(`reports a foreign logged port when nothing else matches`, async () => {
-    vol.fromJSON({
-      [path.join(projectRoot, '.expo/dev/logs/start.log')]: JSON.stringify({
-        _e: 'metro:instantiate',
-        port: 8090,
-      }),
-    });
-    mockServers({ '8090': { root: '/somewhere/else' } });
-    const result = await discoverDevServerAsync(undefined, { projectRoot });
-    expect(result).toMatchObject({
-      reachable: false,
-      foreignServers: [{ port: 8090, projectRoot: '/somewhere/else' }],
     });
   });
 });

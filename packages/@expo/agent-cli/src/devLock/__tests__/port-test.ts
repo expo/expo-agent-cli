@@ -1,17 +1,11 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // Which port the lock publishes. The dev server picks it, not the wrapper, so the wrapper reads
-// it back out of the dev server's report. `start.log` is the `@expo/cli` 57 report, which discovery
-// still reads, and must not give the previous run's answer.
+// it back out of the dev server's report, and must not take the previous run's answer.
 
 import { vol } from 'memfs';
 import path from 'path';
 
-import {
-  DEFAULT_DEV_SERVER_PORT,
-  readLastLoggedDevServerPort,
-  readPortArg,
-  resolveDevServerPortAsync,
-} from '../port';
+import { DEFAULT_DEV_SERVER_PORT, readPortArg, resolveDevServerPortAsync } from '../port';
 
 const projectRoot = path.join(path.sep, 'project');
 
@@ -45,16 +39,6 @@ function report(port: number) {
     previous + JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port }) + '\n'
   );
 }
-const startLogPath = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
-
-/** Write a `start.log` from `metro:instantiate` entries, as `2g` serializes them (`_e`, `_t`). */
-function writeStartLog(entries: { port: number; at: number }[]) {
-  vol.fromJSON({
-    [startLogPath]: entries
-      .map(({ port, at }) => JSON.stringify({ _e: 'metro:instantiate', _t: at, port }))
-      .join('\n'),
-  });
-}
 
 beforeEach(() => {
   vol.reset();
@@ -80,60 +64,6 @@ describe(readPortArg, () => {
     [['start', '--', '--port', '8082']],
   ])(`names no port in %p`, (args) => {
     expect(readPortArg(args)).toBeNull();
-  });
-});
-
-describe(readLastLoggedDevServerPort, () => {
-  it(`reads the last logged port`, () => {
-    writeStartLog([
-      { port: 8082, at: 1000 },
-      { port: 8090, at: 2000 },
-    ]);
-
-    expect(readLastLoggedDevServerPort(projectRoot)).toBe(8090);
-  });
-
-  it(`reports nothing without a log`, () => {
-    expect(readLastLoggedDevServerPort(projectRoot)).toBeNull();
-  });
-
-  it(`survives a torn write`, () => {
-    vol.fromJSON({
-      [startLogPath]: [
-        JSON.stringify({ _e: 'metro:instantiate', _t: 1000, port: 8082 }),
-        '{"_e":"metro:instantiate","_t":2000,"po',
-      ].join('\n'),
-    });
-
-    expect(readLastLoggedDevServerPort(projectRoot)).toBe(8082);
-  });
-
-  it(`ignores entries older than the run that is asking`, () => {
-    // The log outlives the dev server that wrote it, so the previous run's port is exactly the
-    // zombie answer this lock exists to make impossible.
-    writeStartLog([{ port: 8090, at: 1000 }]);
-
-    expect(readLastLoggedDevServerPort(projectRoot, { since: 2000 })).toBeNull();
-    expect(readLastLoggedDevServerPort(projectRoot, { since: 1000 })).toBe(8090);
-  });
-
-  it(`takes the newest entry at or after the cutoff`, () => {
-    writeStartLog([
-      { port: 8090, at: 1000 },
-      { port: 8082, at: 3000 },
-    ]);
-
-    expect(readLastLoggedDevServerPort(projectRoot, { since: 2000 })).toBe(8082);
-  });
-
-  it(`ignores an entry with no timestamp when a cutoff is given`, () => {
-    vol.fromJSON({
-      [startLogPath]: JSON.stringify({ _e: 'metro:instantiate', port: 8090 }),
-    });
-
-    expect(readLastLoggedDevServerPort(projectRoot, { since: 1000 })).toBeNull();
-    // Without a cutoff the entry is still a candidate: discovery probes it before trusting it.
-    expect(readLastLoggedDevServerPort(projectRoot)).toBe(8090);
   });
 });
 
@@ -168,6 +98,23 @@ describe(resolveDevServerPortAsync, () => {
       ).resolves.toEqual(expected);
     }
   );
+
+  // A `LOG_EVENTS` file outlives the run, and a line that cannot prove it is this run's is skipped.
+  it(`takes only a whole report written at or after the spawn`, async () => {
+    vol.writeFileSync(
+      eventLog.file,
+      [
+        JSON.stringify({ _e: 'metro:instantiate', _t: 500, port: 9000 }),
+        '{"_e":"metro:instantiate","_t":2000,"po',
+        JSON.stringify({ _e: 'metro:instantiate', port: 9001 }),
+        JSON.stringify({ _e: 'metro:instantiate', _t: 2000, port: 8090 }),
+      ].join('\n')
+    );
+
+    await expect(
+      resolveDevServerPortAsync(projectRoot, ['start'], { since: 1000, ...watch })
+    ).resolves.toEqual({ port: 8090, source: 'reported' });
+  });
 
   // One `LOG_EVENTS` file can serve two runs at once, so a report in it can be the other run's.
   it(`skips a reported port another project's dev server answers`, async () => {

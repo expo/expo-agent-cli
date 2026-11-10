@@ -30,7 +30,7 @@ type NavigateReport = {
   route: string;
   url: string;
   devServerUrl: string;
-  devServerSource: 'flag' | 'lock' | 'log' | 'default' | 'scan';
+  devServerSource: 'flag' | 'lock' | 'default' | 'scan';
   resolution: string;
   target: string;
   platform: string;
