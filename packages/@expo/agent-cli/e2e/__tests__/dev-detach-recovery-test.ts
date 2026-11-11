@@ -296,7 +296,12 @@ it('stop reports retained ownership when the observed owner dies before signal d
     });
     const stopped = await executeAgentCliAsync(f.root, ['dev:stop', '--json']);
     const report = JSON.parse(stopped.stdout);
-    expect(report).toMatchObject({ stopped: true, signal: null, processStillRunning: false });
+    expect(report).toMatchObject({
+      stopped: true,
+      reason: null,
+      signal: null,
+      processStillRunning: false,
+    });
     expect(report.recoveryCommand).toContain(`--discard-run ${owner.id}`);
     expect(report.followups.map((item: { id: string }) => item.id)).toEqual(['discard-run']);
     expect(fs.existsSync(marker)).toBe(true);
