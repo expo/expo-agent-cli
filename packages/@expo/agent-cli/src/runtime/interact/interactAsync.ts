@@ -548,7 +548,7 @@ function unreadCallFields(
   };
 }
 
-/** Tap the element carrying a testID, by calling the `onPress` the app wrote. */
+/** Tap the element carrying a testID: call the app's `onPress`, or toggle its switch. */
 export async function runtimeTapAsync(
   options: RuntimeTapOptions,
   context: RuntimeContext = {}
@@ -556,7 +556,11 @@ export async function runtimeTapAsync(
   const { devServerUrl, client, bundle, refusal } = await openAppAsync(options, context);
   if (refusal != null) {
     return refuseForBundle(
-      { ...unreadCallFields(options, devServerUrl, bundle, refusal), verify: null },
+      {
+        ...unreadCallFields(options, devServerUrl, bundle, refusal),
+        toggledTo: null,
+        verify: null,
+      },
       {
         json: options.json,
         what: 'nothing was tapped',
@@ -594,6 +598,7 @@ export async function runtimeTapAsync(
 
   const report: RuntimeTapJson = {
     ...fields,
+    toggledTo: typeof answer.toggledTo === 'boolean' ? answer.toggledTo : null,
     ok,
     verify,
     followups:

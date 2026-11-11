@@ -833,7 +833,7 @@ describe('a tap on a switch', () => {
       toggledTo,
     });
     expect(calls.map((call) => call[0])).toEqual([handler]);
-    if (toggledTo != null) expect(calls[0][1]).toBe(toggledTo);
+    if (toggledTo != null) expect(calls[0]?.[1]).toBe(toggledTo);
   });
 
   it.each([

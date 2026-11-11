@@ -22,6 +22,7 @@ function node(overrides: Partial<TreeNodeJson> = {}): TreeNodeJson {
     accessibilityRole: null,
     text: null,
     placeholder: null,
+    value: null,
     handlers: ['onPress'],
     interactive: true,
     disabled: false,
@@ -98,6 +99,7 @@ function tap(overrides: Partial<RuntimeTapJson> = {}): RuntimeTapJson {
       reason: null,
     },
     ok: true,
+    toggledTo: null,
     verify: null,
     followups: [],
     untrusted: ['component', 'handlerOn', 'candidates', 'threw', 'verify'],
@@ -285,6 +287,7 @@ describe(formatTap, () => {
           added: [node({ component: 'RCTText', testID: null, text: 'a new note' })],
           removed: [],
           changedText: [{ key: 'note-input', before: 'a new note', after: '' }],
+          changedValue: [],
         },
       })
     );
@@ -295,7 +298,16 @@ describe(formatTap, () => {
 
   it(`says --verify saw nothing change, which is a real answer`, () => {
     const output = formatTap(
-      tap({ verify: { waitedMs: 1000, changed: false, added: [], removed: [], changedText: [] } })
+      tap({
+        verify: {
+          waitedMs: 1000,
+          changed: false,
+          added: [],
+          removed: [],
+          changedText: [],
+          changedValue: [],
+        },
+      })
     );
 
     expect(output).toMatch(/nothing.*chang|no.*chang/i);
@@ -308,7 +320,7 @@ describe(explainTapFailure, () => {
     ['ambiguous', /--index/, 'npx @expo/agent-cli runtime:tap row --index 0'],
     ['index-out-of-range', /--index/, 'npx @expo/agent-cli runtime:tree --testID row'],
     ['disabled', /--force/, 'npx @expo/agent-cli runtime:tap row --force'],
-    ['no-handler', /handler/i, 'npx @expo/agent-cli runtime:tree --testID row'],
+    ['no-handler', /onPress or a switch/, 'npx agent-device@latest snapshot -i'],
   ])(`explains %p and names a command that recovers it`, (reason, matcher, suggestion) => {
     const failure = explainTapFailure(
       tap({
@@ -459,6 +471,7 @@ describe(diffSnapshots, () => {
       added: [],
       removed: [],
       changedText: [],
+      changedValue: [],
     });
   });
 

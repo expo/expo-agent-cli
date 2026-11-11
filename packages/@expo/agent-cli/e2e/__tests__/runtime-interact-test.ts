@@ -533,8 +533,8 @@ describe('a tap on a switch', () => {
       expect(result.exitCode).toBe(20);
       expect(JSON.parse(result.stdout)).toMatchObject({ reason: 'no-handler', toggledTo: null });
       expect(result.stderr).toContain('has no onPress and no switch');
-      expect(result.stderr).toMatch(/Try: .*simulator:exec npx agent-device@latest snapshot -i/);
-      expect(result.stderr).toContain('npx agent-device@latest press @eN');
+      expect(result.stderr).toContain('Try: npx agent-device@latest snapshot -i');
+      expect(result.stderr).toMatch(/simulator:exec npx agent-device@latest press @eN/);
       expect(result.stderr).not.toContain('Try: npx @expo/agent-cli runtime:tree');
     } finally {
       await devServer.close();

@@ -11,8 +11,10 @@
 // than a mistake of the caller, so each one says what, why, and the command that recovers it
 // (llp/0006 §Errors are prompts) — the recovery is a paste, never a re-read.
 
+import { AGENT_DEVICE_SPEC } from '../../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
+import { easCommandPrefix } from '../../utils/easCli';
 import type { BundleCheckJson } from '../bundleCheck';
 import { wrapUntrustedAppOutput } from '../untrusted';
 import type {
@@ -103,6 +105,9 @@ function nodeLine(node: TreeNodeJson): string {
   if (node.text != null) {
     parts.push(`text=${JSON.stringify(node.text)}`);
   }
+  if (node.value != null) {
+    parts.push(`value=${node.value}`);
+  }
   // Its own key, never `text`: a placeholder is what an empty input shows (F70).
   if (node.placeholder != null) {
     parts.push(`placeholder=${JSON.stringify(node.placeholder)}`);
@@ -187,6 +192,9 @@ function foundLine(report: RuntimeTapJson | RuntimeTypeJson): string {
 const CALL_CAVEAT =
   'This called the prop, not the screen: there was no touch, no press timing and no gesture recognition, and the handler was given a synthetic event whose coordinates are zero.';
 
+const TOGGLE_CAVEAT =
+  'This called the prop, not the screen: the switch was not touched, and it shows the new state only if the app passes it back as value. --verify reads it back.';
+
 /** The human report of `@expo/agent-cli runtime:tap`. */
 export function formatTap(report: RuntimeTapJson): string {
   if (!report.called) {
@@ -197,17 +205,21 @@ export function formatTap(report: RuntimeTapJson): string {
     ].join('\n');
   }
 
+  const toggled = report.toggledTo != null;
+  const did = toggled
+    ? `Toggled ${report.testID}: called onValueChange(${report.toggledTo})`
+    : `Tapped ${report.testID}`;
   const lines = [
     report.threw
-      ? `Tapped ${report.testID}, and the app's own handler threw (dev server ${report.devServerUrl}).`
-      : `Tapped ${report.testID} (dev server ${report.devServerUrl}).`,
+      ? `${did}, and the app's own handler threw (dev server ${report.devServerUrl}).`
+      : `${did} (dev server ${report.devServerUrl}).`,
   ];
   if (report.forced && report.disabled) {
     lines.push(
       `Forced: the app reports this element disabled (${report.disabledOn} on ${report.disabledComponent}), so a user could not have pressed it.`
     );
   }
-  lines.push(CALL_CAVEAT);
+  lines.push(toggled ? TOGGLE_CAVEAT : CALL_CAVEAT);
 
   const body = [foundLine(report)];
   if (report.threw) {
@@ -289,6 +301,9 @@ function verifyLines(verify: TapVerifyJson): string[] {
     lines.push(
       `  ~ ${change.key}: ${JSON.stringify(change.before)} -> ${JSON.stringify(change.after)}`
     );
+  }
+  for (const change of verify.changedValue) {
+    lines.push(`  ~ ${change.key}: value ${change.before} -> ${change.after}`);
   }
   return lines;
 }
@@ -415,6 +430,9 @@ function explainFailure(
         suggestedCommand: `${rerun} --force`,
       };
     case 'no-handler': {
+      if (command === 'runtime:tap') {
+        return explainNoTapHandler(report);
+      }
       // @ref llp/0018 §Eight shipped decisions — friction run 7, F80. With several candidates and
       // none of them carrying the prop, the answer used to be "pass --index": advice for choosing
       // between two elements this command cannot drive either of. Both facts, in the order that
@@ -451,6 +469,34 @@ function explainFailure(
   return {
     message: `${capitalize(nothing(true))} (dev server ${report.devServerUrl}).`,
     suggestedCommand: tree,
+  };
+}
+
+/**
+ * A tap on an element with no `onPress` and no switch: a real touch is the route that works.
+ *
+ * @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it. Not `runtime:tree`:
+ * the agent has usually read the tree already, and that line sent it back in a loop (N2-38).
+ */
+function explainNoTapHandler(report: RuntimeTapJson | RuntimeTypeJson): InteractFailure {
+  const several = report.matched > 1;
+  const device = `npx ${AGENT_DEVICE_SPEC}`;
+  const cloud = `${easCommandPrefix()} simulator:exec ${device}`;
+  const listed = report.candidates
+    .map(
+      (candidate) =>
+        `[${candidate.index}] ${candidate.component}${candidate.screen == null ? '' : ` on ${candidate.screen}`}`
+    )
+    .join(', ');
+  return {
+    message: [
+      several
+        ? `None of the ${report.matched} elements carrying ${report.testID} has onPress or a switch, so nothing was tapped (dev server ${report.devServerUrl}).`
+        : `The element carrying ${report.testID} has no onPress and no switch, so nothing was tapped (dev server ${report.devServerUrl}).`,
+      `Why: this command calls onPress, or onValueChange(!value) where value is a boolean. No fiber of ${several ? 'these elements' : 'this element'} has either, and no ancestor has onPress: ${listed}.`,
+      `How: touch it through the device. On a local simulator or emulator, run "${device} snapshot -i" for the @eN refs, then "${device} press @eN". On an EAS session, run the same verbs as "${cloud} snapshot -i" and "${cloud} press @eN". If snapshot finds no app session, run "open <app-id>" first.`,
+    ].join('\n'),
+    suggestedCommand: `${device} snapshot -i`,
   };
 }
 
@@ -536,14 +582,20 @@ export function diffSnapshots(
   const second = keyed(after);
   const added: TreeNodeJson[] = [];
   const removed: TreeNodeJson[] = [];
-  const changedText: { key: string; before: string | null; after: string | null }[] = [];
+  const changedText: TapVerifyJson['changedText'] = [];
+  const changedValue: TapVerifyJson['changedValue'] = [];
 
   for (const [key, node] of second) {
     const was = first.get(key);
     if (!was) {
       added.push(node);
-    } else if (was.text !== node.text) {
-      changedText.push({ key, before: was.text, after: node.text });
+    } else {
+      if (was.text !== node.text) {
+        changedText.push({ key, before: was.text, after: node.text });
+      }
+      if (was.value !== node.value) {
+        changedValue.push({ key, before: was.value, after: node.value });
+      }
     }
   }
   for (const [key, node] of first) {
@@ -554,9 +606,11 @@ export function diffSnapshots(
 
   return {
     waitedMs,
-    changed: added.length > 0 || removed.length > 0 || changedText.length > 0,
+    changed:
+      added.length > 0 || removed.length > 0 || changedText.length > 0 || changedValue.length > 0,
     added,
     removed,
     changedText,
+    changedValue,
   };
 }

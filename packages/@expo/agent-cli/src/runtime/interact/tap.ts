@@ -9,6 +9,7 @@ export const runtimeTapHelp: CommandHelp = {
   command: 'runtime:tap',
   usage: `${PROGRAM_PREFIX} runtime:tap <testID>`,
   options: [
+    `--testID <id>             The testID, as a flag instead of the first argument`,
     `--index <n>               Which of several matched elements, from 0 (default: the only one)`,
     `--all-screens             Look on every mounted screen, not only the focused one`,
     `--verify                  Walk the tree again afterwards and report what changed`,
@@ -63,6 +64,7 @@ export const runtimeTapHelp: CommandHelp = {
       'called',
       'threw',
       'reason',
+      'toggledTo',
       'bundle',
       'ok',
       'verify',
@@ -73,6 +75,8 @@ export const runtimeTapHelp: CommandHelp = {
   notes: [
     `It calls a prop; it does not touch the screen. No press timing, no responder chain, no`,
     `gesture recognition, and the synthetic event's coordinates are all zero.`,
+    `A Switch has no onPress: the tap calls onValueChange(!value) when value is a boolean, and`,
+    `says so in toggledTo. An element with neither is refused; touch it with agent-device.`,
     `A disabled element is refused with exit 20 — calling onPress would report a pass for`,
     `something a user cannot do. --force calls it anyway and says so.`,
     `--verify is the only proof offered. Without it, the claim is that a tap was made.`,

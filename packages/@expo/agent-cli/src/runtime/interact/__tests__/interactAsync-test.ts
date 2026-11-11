@@ -343,7 +343,7 @@ describe(runtimeTapAsync, () => {
 
     expect(await runtimeTapAsync(tapOptions)).toBe(EXIT_OUTCOME_FAILED);
     expect(json()).toMatchObject({ ok: false, called: false, reason });
-    expect(stderr()).toContain('npx @expo/agent-cli');
+    expect(stderr()).toContain('Try: npx ');
   });
 
   // The tap landed and the app's own code raised, which is an outcome of the app rather than a
