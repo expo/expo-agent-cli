@@ -21,6 +21,7 @@ import {
   servesPortOf,
   stopUntrackedDevServerAsync,
   untrackedDevServerClause,
+  type UntrackedDevServer,
 } from './untrackedDevServer';
 
 /** What the dev server a killed run left means for this run's port. */
@@ -31,7 +32,7 @@ export interface UntrackedPortClaim {
   reasons: string[];
 }
 
-const NO_CLAIM: UntrackedPortClaim = { claimedPort: null, reasons: [] };
+export const NO_CLAIM: UntrackedPortClaim = { claimedPort: null, reasons: [] };
 
 /**
  * Pick the dev server port and set it on every step that serves. With a live lock, list no steps.
@@ -87,50 +88,101 @@ export async function planDevServerPortAsync(
   return plan;
 }
 
+/** The dev server a killed run of this project left, as a run finds it before the probe. */
+export interface UntrackedDevServerFinding {
+  /** The server a run stops before its first step, or null. Always null for a plan. */
+  server: UntrackedDevServer | null;
+  claim: UntrackedPortClaim;
+}
+
 /**
- * The dev server a killed run of this project left, replaced before anything reads the port: nothing
- * can follow, reuse or stop it through a lock, and a second one on the next port would leave two
- * Metros for one project. A run stops it and says so; a plan only names it.
+ * Find the dev server a killed run of this project left, before the probe, and say what its port
+ * means for this run. Nothing is signalled here: a run stops it only after its refusals
+ * ({@link replaceUntrackedDevServerAsync}), so a run that refuses leaves it serving. Nothing can
+ * follow, reuse or stop it through a lock, and a second one on the next port would leave two Metros
+ * for one project, so a run that goes on replaces it; a plan only names it.
+ */
+export async function findUntrackedDevServerAsync(
+  projectRoot: string,
+  lock: DevServerLockInfo | null,
+  options: DevOptions
+): Promise<UntrackedDevServerFinding> {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  if (lock) return { server: null, claim: NO_CLAIM };
+  if (options.mode === 'plan') {
+    const verdict = await judgeEndedRunAsync(projectRoot);
+    if (verdict?.kind !== 'orphan') return { server: null, claim: NO_CLAIM };
+    const takesPort = servesPortOf(verdict.server, options.port);
+    return {
+      server: null,
+      claim: {
+        claimedPort: takesPort ? verdict.server.port : null,
+        reasons: [
+          `${untrackedDevServerClause(verdict.server)}. The run stops it${takesPort ? ` and takes port ${verdict.server.port}` : ''}.`,
+        ],
+      },
+    };
+  }
+  const server = await claimEndedRunAsync(projectRoot);
+  if (server == null) return { server: null, claim: NO_CLAIM };
+  const takesPort = servesPortOf(server, options.port);
+  return { server, claim: { claimedPort: takesPort ? server.port : null, reasons: [] } };
+}
+
+/**
+ * Replace the server {@link findUntrackedDevServerAsync} found: after the run's refusals, and only
+ * for a plan whose step serves, so a run that refuses or serves nothing leaves it serving. It is
+ * stopped by its pid, with a warning that names its port and pid.
  *
- * @returns the port this run takes from it, and what a plan says about it.
+ * @returns the plan to run: the same one, or one whose port is picked again with no claim when the
+ * server's pid went and something else still answers on its port (a named `--port` on it is then
+ * `PORT_IN_USE`).
  * @throws {CommandError} `UNTRACKED_DEV_SERVER`, an outcome, when a run that would take its port
  * could not stop it.
  */
 export async function replaceUntrackedDevServerAsync(
   projectRoot: string,
-  lock: DevServerLockInfo | null,
+  plan: StartPlan,
+  { server }: UntrackedDevServerFinding,
   options: DevOptions
-): Promise<UntrackedPortClaim> {
+): Promise<StartPlan> {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
-  if (lock) return NO_CLAIM;
-  if (options.mode === 'plan') {
-    const verdict = await judgeEndedRunAsync(projectRoot);
-    if (verdict?.kind !== 'orphan') return NO_CLAIM;
-    const takesPort = servesPortOf(verdict.server, options.port);
-    return {
-      claimedPort: takesPort ? verdict.server.port : null,
-      reasons: [
-        `${untrackedDevServerClause(verdict.server)}. The run stops it${takesPort ? ` and takes port ${verdict.server.port}` : ''}.`,
-      ],
-    };
-  }
-  const server = await claimEndedRunAsync(projectRoot);
-  if (server == null) return NO_CLAIM;
+  if (server == null || !plan.steps.some(isDevServerStep)) return plan;
+  // Picked again over the run's own plan: a run adds no reasons, and the port is set on every step
+  // that serves. A server was found, so no lock answered.
+  return (await stopForRunAsync(projectRoot, server, options))
+    ? plan
+    : await planDevServerPortAsync(projectRoot, null, plan, options, NO_CLAIM);
+}
+
+/** Stop it, and say whether the run's claim on its port still holds. */
+async function stopForRunAsync(
+  projectRoot: string,
+  server: UntrackedDevServer,
+  options: DevOptions
+): Promise<boolean> {
   const takesPort = servesPortOf(server, options.port);
   const stopped = await stopUntrackedDevServerAsync(projectRoot, server, {
     signal: DEFAULT_DEV_STOP_SIGNAL,
     timeoutMs: DEFAULT_DEV_STOP_TIMEOUT_MS,
   });
   if (stopped.stopped) {
+    const portLeft = takesPort && stopped.portStillAnswering;
     Log.warn(
-      `${untrackedDevServerClause(server)}. It was stopped${takesPort ? `, and this run takes port ${server.port}` : ''}.`
+      `${untrackedDevServerClause(server)}. It was stopped${
+        portLeft
+          ? `, but port ${server.port} still answers, so this run does not take it`
+          : takesPort
+            ? `, and this run takes port ${server.port}`
+            : ''
+      }.`
     );
-    return { claimedPort: takesPort ? server.port : null, reasons: [] };
+    return !portLeft;
   }
   if (!takesPort) {
     // The run serves elsewhere, so the server it could not stop is not in its way.
     Log.warn(`${untrackedDevServerClause(server)}. It is still running: ${stopped.detail}.`);
-    return NO_CLAIM;
+    return true;
   }
   // A signal that reached it and did not end it: SIGKILL ends it. One that did not reach it (another
   // user's process) will not reach it either.

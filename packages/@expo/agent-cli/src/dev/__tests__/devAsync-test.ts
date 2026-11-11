@@ -371,6 +371,33 @@ describe(devAsync, () => {
       );
       expect(readDevRunRecord(projectRoot)).not.toBeNull();
     });
+
+    // Its pid went, and something else answers on its port: the port is not this run's to take.
+    it(`should not take the port when it still answers after the stop`, async () => {
+      mockStaleDevClientState();
+      vol.mkdirSync(projectRoot, { recursive: true });
+      writeDevRunRecord(projectRoot, { pid: 4242, port: 8081, serverPid: 777 });
+      const live = new Set([777]);
+      vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal: string | number) => {
+        if (!live.has(pid)) throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+        if (signal !== 0) live.delete(pid);
+        return true;
+      }) as never);
+      vi.mocked(findPortListenersAsync).mockResolvedValueOnce([{ pid: 777, command: 'node' }]);
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () => new Response(null, { headers: { 'x-react-native-project-root': projectRoot } })
+      );
+      vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
+        port: 8081,
+        movedFrom: null,
+        bindable: false,
+      });
+
+      const failure = await failureOf(['--ios', '--port', '8081']);
+
+      expect(failure?.code).toBe('PORT_IN_USE');
+      expect(runDevServerAsync).not.toHaveBeenCalled();
+    });
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
