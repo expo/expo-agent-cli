@@ -631,7 +631,11 @@ function devServerLine(devServer: DevServerStatus): string {
  * `hostType` rides along in `--json` for a reader that wants all three.
  */
 function reachFact(devServer: DevServerStatus): string | null {
-  return devServer.tunnelUrl ? `${chalk.green('tunnel')} ${devServer.tunnelUrl}` : null;
+  if (devServer.tunnelUrl) {
+    return `${chalk.green('tunnel')} ${devServer.tunnelUrl}`;
+  }
+  // A tunnel the captured log names and the running dev server did not confirm.
+  return devServer.hostType === 'tunnel' ? chalk.yellow('tunnel unknown') : null;
 }
 
 /**
@@ -644,7 +648,7 @@ function reachFact(devServer: DevServerStatus): string | null {
  * different URLs and a reader with one installed needs to see which is which.
  */
 function openUrlLines(devServer: DevServerStatus): string[] {
-  if (devServer.hostType !== 'tunnel' || !devServer.openUrls.length) {
+  if (!devServer.tunnelUrl || !devServer.openUrls.length) {
     return [];
   }
   const indent = ' '.repeat(LABEL_WIDTH);

@@ -300,6 +300,49 @@ describe('resolveDevServerReachAsync', () => {
     });
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — with no lock, the log
+  // may be an earlier run's. Only the running dev server's own manifest confirms its tunnel.
+  describe('no lock answers', () => {
+    beforeEach(() => {
+      writeProject(TUNNELLED_LOG);
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+    });
+
+    it(`takes the tunnel from the manifest of the dev server that answered`, async () => {
+      mockManifest('https://real-orphan.on.expo.app');
+
+      const reach = await resolveDevServerReachAsync(projectRoot, lockUrl);
+      expect(reach.advertised).toMatchObject({
+        host: 'real-orphan.on.expo.app',
+        hostType: 'tunnel',
+      });
+      expect(reach.tunnelUnconfirmed).toBeUndefined();
+    });
+
+    // A detached `--tunnel` log often never prints the tunnel host (S3, above).
+    it.each([
+      ['names this machine', LOCAL_LOG],
+      ['is missing', null],
+    ])(`takes the manifest's tunnel when the captured log %s`, async (_, lines) => {
+      writeProject(lines);
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+      mockManifest('https://real-orphan.on.expo.app');
+
+      const reach = await resolveDevServerReachAsync(projectRoot, lockUrl);
+      expect(reach.advertised).toMatchObject({ hostType: 'tunnel' });
+      expect(reach.tunnelUnconfirmed).toBeUndefined();
+    });
+
+    it(`marks the log's tunnel unconfirmed when the manifest does not name one`, async () => {
+      mockManifest(null);
+
+      await expect(resolveDevServerReachAsync(projectRoot, lockUrl)).resolves.toMatchObject({
+        advertised: { hostType: 'tunnel' },
+        tunnelUnconfirmed: true,
+      });
+    });
+  });
+
   it(`still answers from the manifest when the log named nothing (S3)`, async () => {
     writeProject(['Starting Metro Bundler']);
     mockManifest('https://chx3ba8-alice-8303.exp.direct');

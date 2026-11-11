@@ -358,7 +358,7 @@ export function buildDevServerStatus(
   // A tunnel URL is reported only while both parts hold — see `isTunnelCurrent`. A dev server that
   // is down cannot be reached at its tunnel either, whatever the log still says.
   const tunnelUrl =
-    reach && running && isTunnelCurrent({ ...reach, running: true })
+    reach && running && !reach.tunnelUnconfirmed && isTunnelCurrent({ ...reach, running: true })
       ? (reach.advertised?.url ?? null)
       : null;
   const reachFields = {
@@ -443,6 +443,11 @@ export function applyOpenUrls(
   scheme: string | null
 ): void {
   if (!devServer?.running) {
+    return;
+  }
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a tunnel the log names and
+  // nothing confirmed: a link built on the LAN address would stand in for it.
+  if (devServer.hostType === 'tunnel' && devServer.tunnelUrl == null) {
     return;
   }
   devServer.openUrls = resolveConnectUrls(devServer, state, scheme);

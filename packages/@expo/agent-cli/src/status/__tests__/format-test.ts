@@ -859,6 +859,28 @@ describe(formatStatusReport, () => {
       expect(line(value, 'dev server')).toContain('tunnel http://abc.boltexpo.dev');
     });
 
+    it(`says the tunnel is unknown when it could not be confirmed`, () => {
+      const value = mockReport({
+        devServer: {
+          url: 'http://127.0.0.1:8081',
+          running: true,
+          appsConnected: 0,
+          source: 'default',
+          ready: true,
+          projectRootMatched: true,
+          hostType: 'tunnel',
+          tunnelUrl: null,
+          openUrls: [{ target: 'expo-go', label: 'Expo Go', url: 'exp://192.168.1.5:8081' }],
+          appsListed: 0,
+          appsStale: 0,
+        },
+      });
+
+      expect(line(value, 'dev server')).toContain('tunnel unknown');
+      // A link printed under "tunnel unknown" would be a LAN one under a tunnel's heading.
+      expect(report(value)).not.toContain('open in');
+    });
+
     // @ref llp/0021-honest-reports.rfc.md §The rules
     // K7(c) and K8: the line a tunnelled `expo start` prints for itself is
     // `exp+app://<tunnel host>`, which opens the launcher rather than the app and which no HTTP

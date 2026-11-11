@@ -630,6 +630,14 @@ When no lock answers and no dev server a killed run left is found, the text repo
 
 When `status` finds the untracked dev server a killed run left (the rule above, which only reads), the dev-server line says that its CLI process ended and nothing owns it (`ownerEnded: true` in `--json`). When this worktree also has a live cloud binding of origin `started`, `next` is `dev:stop --eas`, which stops the server and the session; without one, `next` is what it is for any running server. A tracked server, or a server the rule does not name (one a person started), shows no such line. The e2e cases "dev:stop stops the dev server it left with no lock" in `e2e/__tests__/stop-test.ts` and "after a SIGKILL, status names dev:stop --eas" in `e2e/__tests__/dev-eas-test.ts`, and the `chooseNextAction` table, enforce it.
 
+With no lock, nothing ties the captured log to the dev server that answers, so `status`
+does not take its tunnel from the log. It asks that server's manifest
+(`resolveDevServerReachAsync(projectRoot, devServerUrl)`), only when the server answered. A
+manifest that names a tunnel is the tunnel, whatever the log says. When the log names a tunnel
+the manifest does not, the line says `tunnel unknown`, `tunnelUrl` is null, and no open link
+is built: not on that tunnel, and not on the LAN address in its place.
+`src/dev/__tests__/advertisedUrl-test.ts` and `src/status/__tests__/sections-test.ts` enforce it.
+
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would
 print an object nobody reads and switch the plan's subprocess output to `capture`, which

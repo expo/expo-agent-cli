@@ -346,6 +346,9 @@ describe('status retains discovery results at its deadline', () => {
       if (!['8081', '8082', '8083', '8084'].includes(url.port)) {
         return Promise.reject(new Error('ECONNREFUSED'));
       }
+      // The manifest of the server the scan kept: no lock names it, so status asks where a device
+      // reaches it. A server with no tunnel names none.
+      if (url.pathname === '/') return Promise.resolve(new Response('{}'));
       const hang = url.port === '8084' || (url.port === '8082' && status && unanswered);
       const delay = url.port === '8082' ? 0 : 60;
       const reportedRoot =

@@ -416,6 +416,26 @@ describe(buildDevServerStatus, () => {
     });
   });
 
+  // A tunnel the dev server that answered did not confirm is not its tunnel.
+  it(`should not report a tunnel that no lock or manifest confirmed`, () => {
+    const probe: DevServerProbe = { reachable: true, targets: [] };
+    const reach = {
+      advertised: {
+        url: 'https://old-run.on.expo.app',
+        host: 'old-run.on.expo.app',
+        hostType: 'tunnel' as const,
+      },
+      running: false,
+      reason: null,
+      tunnelUnconfirmed: true as const,
+    };
+
+    expect(buildDevServerStatus(url, probe, readiness, undefined, reach)).toMatchObject({
+      hostType: 'tunnel',
+      tunnelUrl: null,
+    });
+  });
+
   it(`should report a dev server without a connected app`, () => {
     const probe: DevServerProbe = { reachable: true, targets: [] };
 
@@ -1149,6 +1169,16 @@ describe(applyOpenUrls, () => {
         url: 'exp+sampleapp://?__expo_url=https%3A%2F%2Fx8fj2.on.expo.app',
       },
     ]);
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a tunnel the log names
+  // and the dev server did not confirm: no link at all, not one built on the LAN address.
+  it(`builds no link for a tunnel nobody confirmed`, () => {
+    const devServer = { ...tunnelled, tunnelUrl: null };
+
+    applyOpenUrls(devServer, mockState({ usesDevClient: true }), 'exp+sampleapp');
+
+    expect(devServer.openUrls).toEqual([]);
   });
 
   it(`leaves a dev server that is not running alone`, () => {
