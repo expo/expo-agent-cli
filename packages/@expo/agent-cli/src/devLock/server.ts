@@ -3,7 +3,8 @@
 //
 // The lock is a listening socket, not a file, so holding it *is* being alive. A reader learns
 // where this project's dev server listens by connecting to it, and there is no state anywhere
-// that can survive the process and mislead the next reader.
+// that can survive the process and mislead the next reader. The one file beside it (`./runRecord`)
+// is read only as proof that its holder died.
 
 import fs from 'fs';
 import net from 'net';
@@ -13,6 +14,7 @@ import { ensureDotExpoProjectDirectoryInitialized } from '../utils/dotExpo';
 import { lockAddressFor } from './address';
 import { probeDevServerLockAsync } from './client';
 import { debugEvent } from './events';
+import { clearDevRunRecord, writeDevRunRecord } from './runRecord';
 import type { DevServerLockHandle, DevServerLockInfo } from './types';
 
 export type DevServerLockResult =
@@ -135,6 +137,7 @@ function createHandle(
     released = true;
     process.removeListener('exit', release);
     closeQuietly(server);
+    clearDevRunRecord(current().projectRoot, current().pid);
     if (kind === 'unix') {
       try {
         fs.unlinkSync(address);
@@ -161,6 +164,12 @@ function createHandle(
     },
     update: (info: DevServerLockInfo) => {
       if (!released) update(info);
+    },
+    // @ref ./runRecord — the trace a SIGKILL leaves, cleared by `release`.
+    noteServerPid: (port: number, serverPid: number) => {
+      const { projectRoot, pid } = current();
+      if (!released && port === current().port)
+        writeDevRunRecord(projectRoot, { pid, port, serverPid });
     },
   };
 }

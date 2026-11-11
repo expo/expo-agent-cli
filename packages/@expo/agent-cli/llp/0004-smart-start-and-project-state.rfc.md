@@ -584,6 +584,40 @@ lock would be a process nothing could find, wait on, or stop. The lock names its
 and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
 `expo` child exactly as the foreground one does.
 
+A run killed with `SIGKILL` leaves its Metro running with no lock: an untracked dev server.
+The lock is a socket so that nothing claims a process is alive after it is gone. Beside it,
+the holder keeps a run record (`.expo/agent-cli-dev-run.json`: its pid, the port, and the
+pid listening there), written once the dev server reported its port and removed when the lock
+is released. The record outlives its run only when the run died
+without its cleanup, and it is read only as proof of that death.
+
+A dev server is an untracked one when four things hold: no lock answers, the record names a
+pid that is gone (a zombie counts as gone), the only process listening on the record's port is
+the one the record names, and its `/status` names this project's root. Two processes can hold
+one port (`expo start --localhost` on `[::1]` beside a Metro on `127.0.0.1`), and then neither
+is proved: the record names no pid, and a record whose pid still listens is kept. A port can be taken again;
+a pid names one process. So a dev server a person started (`npx expo start`) is never one,
+even on the port of a run that died with its own Metro (a closed terminal): `dev:stop`
+reports it and stops it only with `--force`, and `dev` moves to the next port, as before. A
+run killed before its dev server reported left no record, so nothing is its orphan.
+Reading the record changes nothing; `dev:stop` removes a record whose port answers for
+another process, another project, or not at all.
+
+`dev:stop`, with no `--port` or with the record's port, stops an untracked server without
+`--force`: the pid match is the proof `--force` would ask for, so it signals that pid and
+reports `untracked: true` and `forced: false`.
+
+| Server on the port                        | `dev:stop`                     | `dev`                                                   |
+| ----------------------------------------- | ------------------------------ | ------------------------------------------------------- |
+| a lock answers for it                     | stops it                       | stops on the lock                                       |
+| left by a killed run (record + `/status`) | stops it, `untracked: true`    | moves to the next port; `--port` on it is `PORT_IN_USE` |
+| any other, this project's root or not     | reports it; `--force` stops it | moves to the next port; `--port` on it is `PORT_IN_USE` |
+
+The e2e cases "after a SIGKILL of a foreground dev" in `e2e/__tests__/stop-test.ts` enforce
+the rows: the stop, and a server started by hand on a dead run's port that both commands
+leave running. `src/devLock/__tests__/lock-test.ts` and
+`publishPort-test.ts` enforce the record's life.
+
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would
 print an object nobody reads and switch the plan's subprocess output to `capture`, which

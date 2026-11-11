@@ -1,6 +1,6 @@
 import { probeDevServerLockAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
-import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
+import { findPortListenerAsync, findPortListenersAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
 import {
@@ -17,6 +17,7 @@ import { bindingPathFor } from '../../deviceBinding/registry';
 import { localBackendOf } from '../../deviceBinding/types';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { readDevRunRecord, writeDevRunRecord } from '../../devLock/runRecord';
 import type { DevServerLockInfo } from '../../devLock/types';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { printed } from '../../utils/__tests__/printed';
@@ -35,6 +36,7 @@ vi.mock('../../devLock', () => {
 });
 vi.mock('../portListener', () => ({
   findPortListenerAsync: vi.fn(async () => null),
+  findPortListenersAsync: vi.fn(async () => []),
   isPortInUseAsync: vi.fn(async () => false),
 }));
 
@@ -56,14 +58,28 @@ function options(overrides: Partial<DevStopOptions> = {}): DevStopOptions {
   };
 }
 
-/** Answer `/status` as an Expo dev server, or refuse the connection. */
-function mockPort({ answering }: { answering: boolean }) {
+/**
+ * Answer `/status` as an Expo dev server, or refuse the connection. `root` is the project root the
+ * server names in its `X-React-Native-Project-Root` header.
+ */
+function mockPort({ answering, root }: { answering: boolean; root?: string }) {
   globalThis.fetch = (async () => {
     if (!answering) {
       throw new Error('connect ECONNREFUSED');
     }
-    return { ok: true, text: async () => 'packager-status:running' };
+    return {
+      ok: true,
+      text: async () => 'packager-status:running',
+      headers: new Headers(root ? { 'x-react-native-project-root': encodeURI(root) } : {}),
+      body: null,
+    };
   }) as unknown as typeof fetch;
+}
+
+/** The record a run killed with SIGKILL leaves: pid 4242 is gone, and pid 9191 listened on `port`. */
+function writeKilledRunRecord(port: number) {
+  vol.mkdirSync(projectRoot, { recursive: true });
+  writeDevRunRecord(projectRoot, { pid: 4242, port, serverPid: 9191 });
 }
 
 let originalFetch: typeof fetch | undefined;
@@ -326,6 +342,55 @@ describe(devStopAsync, () => {
 
       expect(printed()).toContain('finishing its EAS session start');
       expect(printed()).not.toContain('SIGKILL');
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the e2e "after a SIGKILL of
+  // a foreground dev" proves the stop with no flags; these are the cases e2e cannot set up.
+  describe('the dev server a killed run left', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+      vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 9191, command: 'node' });
+      vi.mocked(findPortListenersAsync).mockResolvedValue([{ pid: 9191, command: 'node' }]);
+      livePids.add(9191);
+      writeKilledRunRecord(8082);
+      mockPort({ answering: true, root: projectRoot });
+    });
+
+    // A dev server another user owns (a run under sudo): it is there, and no signal reaches it.
+    it(`should say at once that the signal could not be sent, and not wait`, async () => {
+      killSpy.mockImplementation(((pid: number, signal: string | number) => {
+        const code = !livePids.has(pid) ? 'ESRCH' : signal === 0 ? null : 'EPERM';
+        if (code == null) return true;
+        throw Object.assign(new Error(`kill ${code}`), { code });
+      }) as never);
+
+      await devStopAsync(projectRoot, options({ timeoutMs: 2000 }));
+
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({
+        stopped: false,
+        signal: null,
+        reason: 'still-running',
+        detail: 'SIGTERM could not be sent to 9191: kill EPERM',
+      });
+      expect(report.waitedMs).toBeLessThan(2000);
+      expect(readDevRunRecord(projectRoot)).not.toBeNull();
+      // No signal reaches it, so neither a longer wait nor SIGKILL is a next action.
+      expect(printed(console.error)).toContain('How: stop pid 9191 as the user that owns it');
+      expect(printed(console.error)).not.toContain('--signal SIGKILL');
+    });
+
+    it(`should treat another port as any unlocked port, and refuse it without --force`, async () => {
+      await expect(devStopAsync(projectRoot, options({ port: 8081 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+
+      expect(killed).toEqual([]);
+      expect(JSON.parse(printed())).toMatchObject({
+        untracked: false,
+        reason: 'foreign-dev-server',
+      });
     });
   });
 
@@ -766,6 +831,7 @@ describe(buildFollowUps, () => {
     easPlatform: null,
     reason: null,
     detail: null,
+    untracked: false,
     waitedMs: 0,
     followups: [],
     ...overrides,

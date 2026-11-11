@@ -26,20 +26,30 @@ export interface PortListener {
 }
 
 /**
- * The process listening on a TCP port, or null when it cannot be established.
+ * The process listening on a TCP port, or null when it cannot be established. With more than one,
+ * the first `lsof` or `netstat` lists.
  *
  * Never throws: a machine with no `lsof` is the ordinary case on a minimal container, and the
  * command that asks has a report to print either way.
  */
 export async function findPortListenerAsync(port: number): Promise<PortListener | null> {
+  return (await findPortListenersAsync(port))[0] ?? null;
+}
+
+/**
+ * Every process listening on a TCP port, each once; empty when none or when it cannot be
+ * established. Two can hold one port: a server on `[::1]` and another on `127.0.0.1` [observed —
+ * macOS], so a proof about one process asks for all of them.
+ */
+export async function findPortListenersAsync(port: number): Promise<PortListener[]> {
   try {
     return process.platform === 'win32'
-      ? await findWindowsListenerAsync(port)
-      : await findPosixListenerAsync(port);
+      ? await findWindowsListenersAsync(port)
+      : await findPosixListenersAsync(port);
   } catch {
     // "Never throws" is the contract, and it has to hold for the spawn itself as well as for its
     // result: a machine that cannot start `lsof` at all is the same answer as one with no `lsof`.
-    return null;
+    return [];
   }
 }
 
@@ -61,17 +71,17 @@ export async function isPortInUseAsync(port: number): Promise<boolean> {
 }
 
 /** `lsof -nP -iTCP:<port> -sTCP:LISTEN -FpcR` — one field per line, which is the parseable form. */
-async function findPosixListenerAsync(port: number): Promise<PortListener | null> {
+async function findPosixListenersAsync(port: number): Promise<PortListener[]> {
   const { stdout, exitCode, spawnError } = await spawnCaptureAsync(
     'lsof',
     ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'],
     { timeoutMs: LOOKUP_TIMEOUT_MS }
   );
   if (spawnError || exitCode !== 0) {
-    return null;
+    return [];
   }
-  const listener = parseLsofFields(stdout);
-  return listener && process.platform === 'linux' ? withExecutableName(listener) : listener;
+  const listeners = parseLsofFields(stdout);
+  return process.platform === 'linux' ? listeners.map(withExecutableName) : listeners;
 }
 
 /**
@@ -94,52 +104,51 @@ function withExecutableName(listener: PortListener): PortListener {
  * The field form is used rather than the columns because the columns are whitespace-aligned and a
  * command name with a space in it silently shifts every column after it.
  */
-export function parseLsofFields(stdout: string): PortListener | null {
-  let pid: number | null = null;
-  let command = '';
+export function parseLsofFields(stdout: string): PortListener[] {
+  const listeners = new Map<number, PortListener>();
+  let current: PortListener | undefined;
   for (const line of stdout.split('\n')) {
     const field = line[0];
     const value = line.slice(1).trim();
     if (field === 'p') {
-      // A second process on the same port starts a new record; the first listener is the answer.
-      if (pid != null) {
-        break;
+      // Each process starts a new record; a pid listed again is the same listener.
+      const pid = Number(value);
+      current = undefined;
+      if (Number.isInteger(pid) && pid > 0) {
+        current = listeners.get(pid) ?? { pid, command: '' };
+        listeners.set(pid, current);
       }
-      const parsed = Number(value);
-      if (Number.isInteger(parsed) && parsed > 0) {
-        pid = parsed;
-      }
-    } else if (field === 'c' && pid != null) {
-      command = value;
+    } else if (field === 'c' && current) {
+      current.command = value;
     }
   }
-  return pid == null ? null : { pid, command };
+  return [...listeners.values()];
 }
 
-/** `netstat -ano` for the pid, then `tasklist` for what that pid is. */
-async function findWindowsListenerAsync(port: number): Promise<PortListener | null> {
+/** `netstat -ano` for the pids, then `tasklist` for what each pid is. */
+async function findWindowsListenersAsync(port: number): Promise<PortListener[]> {
   const netstat = await spawnCaptureAsync('netstat', ['-ano'], { timeoutMs: LOOKUP_TIMEOUT_MS });
   if (netstat.spawnError || netstat.exitCode !== 0) {
-    return null;
+    return [];
   }
-  const pid = parseNetstatListener(netstat.stdout, port);
-  if (pid == null) {
-    return null;
-  }
-
-  const tasklist = await spawnCaptureAsync(
-    'tasklist',
-    ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
-    { timeoutMs: LOOKUP_TIMEOUT_MS }
+  return await Promise.all(
+    parseNetstatListeners(netstat.stdout, port).map(async (pid) => {
+      const tasklist = await spawnCaptureAsync(
+        'tasklist',
+        ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
+        { timeoutMs: LOOKUP_TIMEOUT_MS }
+      );
+      const command = tasklist.spawnError
+        ? ''
+        : (tasklist.stdout.split(',')[0] ?? '').replace(/"/g, '');
+      return { pid, command: command.trim() };
+    })
   );
-  const command = tasklist.spawnError
-    ? ''
-    : (tasklist.stdout.split(',')[0] ?? '').replace(/"/g, '');
-  return { pid, command: command.trim() };
 }
 
-/** Read the PID of the first LISTENING row for a port out of `netstat -ano`. */
-export function parseNetstatListener(stdout: string, port: number): number | null {
+/** Read the PIDs of the LISTENING rows for a port out of `netstat -ano`, each once. */
+export function parseNetstatListeners(stdout: string, port: number): number[] {
+  const pids: number[] = [];
   for (const line of stdout.split('\n')) {
     const columns = line.trim().split(/\s+/);
     if (columns.length < 5 || !/^LISTENING$/i.test(columns[3] ?? '')) {
@@ -150,9 +159,9 @@ export function parseNetstatListener(stdout: string, port: number): number | nul
       continue;
     }
     const pid = Number(columns[4]);
-    if (Number.isInteger(pid) && pid > 0) {
-      return pid;
+    if (Number.isInteger(pid) && pid > 0 && !pids.includes(pid)) {
+      pids.push(pid);
     }
   }
-  return null;
+  return pids;
 }

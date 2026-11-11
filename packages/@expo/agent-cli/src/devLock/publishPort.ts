@@ -21,6 +21,8 @@ export type PublishDevServerPortOptions = ResolveDevServerPortOptions & {
   easPlatform?: DevServerLockInfo['easPlatform'];
   /** What the lock answers at the spawn: `building` for a step that compiles before it serves. */
   phase: 'building' | 'serving';
+  /** The pid listening on a port, for the run record (`./runRecord`); no record without it. */
+  findListenerPid?: (port: number) => Promise<number | null>;
 };
 
 /**
@@ -46,6 +48,7 @@ export async function publishDevServerPortAsync(
   const publishAsync = async (resolved: ResolvedDevServerPort | null) => {
     if (resolved == null) return options.lock.apply({ type: 'foreign-port' });
     await publishResolvedAsync(resolved);
+    if (resolved.source === 'reported') void noteServerPidAsync(resolved.port, options);
     options.onResolved?.(resolved);
   };
   const publishResolvedAsync = async (resolved: ResolvedDevServerPort) => {
@@ -88,7 +91,30 @@ export async function publishDevServerPortAsync(
   });
   if (watched?.source === 'reported') {
     options.lock.apply({ type: 'port-reported', port: watched.port });
+    void noteServerPidAsync(watched.port, options);
     options.onResolved?.(watched);
+  }
+}
+
+/**
+ * Note in the run record which process listens on the port the dev server reported. A few tries:
+ * the report can arrive a moment before the listen is visible to `lsof`.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ */
+async function noteServerPidAsync(
+  port: number,
+  { lock, findListenerPid, isRunning }: PublishDevServerPortOptions
+): Promise<void> {
+  if (!findListenerPid) return;
+  for (let tries = 0; tries < 10 && isRunning(); tries++) {
+    const pid = await findListenerPid(port);
+    if (pid != null) {
+      // Not after the dev server exited: the port may hold another process by then.
+      if (isRunning()) lock.noteServerPid(port, pid);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 }
 

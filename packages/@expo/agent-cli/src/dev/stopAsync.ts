@@ -49,15 +49,20 @@ import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
 import { env } from '../utils/env';
 import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { debugEvent, event } from './events';
+import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
+import { isProcessAlive } from './processLiveness';
+import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
 import {
   isPortFreeAsync,
   POLL_INTERVAL_MS,
   signalAndWaitAsync,
   signalProcessAsync,
 } from './processStop';
-import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
-import { isProcessAlive } from './processLiveness';
-import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
+import {
+  claimEndedRunAsync,
+  servesPortOf,
+  stopUntrackedDevServerAsync,
+} from './untrackedDevServer';
 import type { DevStopOptions } from './resolveStopOptions';
 
 /**
@@ -178,6 +183,12 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   reason: DevStopSkipReason | null;
   /** One sentence of detail for {@link reason}. Null exactly when {@link stopped} is true. */
   detail: string | null;
+  /**
+   * No lock answered, and the dev server is the one a killed run left: the run's record names the
+   * pid that listens on the port, and its `/status` names this project. That proof lets this run
+   * stop it without `--force`.
+   */
+  untracked: boolean;
   /** How long the whole stop took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -235,7 +246,10 @@ export async function devStopAsync(
   const { report, finishing } =
     lock != null && lockOwnsTarget
       ? await stopLockedDevServerAsync(lock, options, startedAt)
-      : { report: await stopUnlockedDevServerAsync(options, startedAt, lock), finishing: false };
+      : {
+          report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
+          finishing: false,
+        };
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
@@ -330,6 +344,7 @@ async function stopLockedDevServerAsync(
     easPlatform: lock.easPlatform,
     reason: null,
     detail: null,
+    untracked: false,
     waitedMs: 0,
     followups: [],
   };
@@ -381,24 +396,9 @@ async function stopLockedDevServerAsync(
   return { report: base, finishing: false };
 }
 
-/**
- * No lock answered *for the target*. A listener may still exist, but its ownership is unknown.
- *
- * The two are told apart by the port, and the difference matters more than it looks: killing a
- * listener nobody asked about is the one thing this command must not do by accident. So the
- * default is to report it, name its pid if the machine will say, and stop.
- *
- * @param elsewhereLock a lock this project holds for a *different* port than `--port` named. It is
- * reported and never acted on: naming it is what tells a caller their own dev server is on another
- * port, and acting on it is F60.
- */
-async function stopUnlockedDevServerAsync(
-  options: DevStopOptions,
-  startedAt: number,
-  elsewhereLock: DevServerLockInfo | null = null
-): Promise<DevStopResultJson> {
-  const port = options.port ?? null;
-  const base: DevStopResultJson = {
+/** A report of the unlocked path before anything was looked at: nothing ran, nothing was sent. */
+function unlockedReport(port: number | null, startedAt: number): DevStopResultJson {
+  return {
     stopped: false,
     pid: null,
     port,
@@ -412,10 +412,43 @@ async function stopUnlockedDevServerAsync(
     portStillAnswering: null,
     reason: 'not-running',
     detail: 'no dev-server lock answered for this project, and nothing was listening for it',
+    untracked: false,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
+}
 
+/**
+ * No lock answered *for the target*. A dev server a killed run of this project left is stopped as
+ * its lock's would be (`stopUntrackedDevServerAsync`); any other listener's ownership is unknown.
+ *
+ * The two are told apart by the port, and the difference matters more than it looks: killing a
+ * listener nobody asked about is the one thing this command must not do by accident. So the
+ * default is to report it, name its pid if the machine will say, and stop.
+ *
+ * @param elsewhereLock a lock this project holds for a *different* port than `--port` named. It is
+ * reported and never acted on: naming it is what tells a caller their own dev server is on another
+ * port, and acting on it is F60.
+ */
+async function stopUnlockedDevServerAsync(
+  projectRoot: string,
+  options: DevStopOptions,
+  startedAt: number,
+  elsewhereLock: DevServerLockInfo | null = null
+): Promise<DevStopResultJson> {
+  const port = options.port ?? null;
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  const untracked = await claimEndedRunAsync(projectRoot);
+  if (untracked != null && servesPortOf(untracked, port)) {
+    return {
+      ...unlockedReport(untracked.port, startedAt),
+      pid: untracked.listener.pid,
+      url: untracked.url,
+      untracked: true,
+      ...(await stopUntrackedDevServerAsync(projectRoot, untracked, options, startedAt)),
+    };
+  }
+  const base = unlockedReport(port, startedAt);
   if (port == null) {
     base.detail =
       'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
@@ -631,12 +664,12 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
     // First, because it contradicts the line above it: the dev server stopped and the port is
     // still busy, and an agent that reads only "Stopped yes" will start the next one into a
     // collision. This command run again against the port is what names whose listener it is —
-    // the unlocked path reports its pid and its command line.
+    // the unlocked path reports its pid and its command line, and stops a killed run's orphan.
     if (report.portStillAnswering && report.port != null) {
       followups.push({
         id: 'dev-stop-port',
         command: `${PROGRAM_PREFIX} dev:stop --port ${report.port}`,
-        why: `Port ${report.port} still answers, and it is not the process that was just stopped. This asks what is on it and names the pid.`,
+        why: `Port ${report.port} still answers, and it is not the process that was just stopped. This names what is on it, and stops it without --force only when it is the dev server a killed run of this project left.`,
       });
     }
     // The run's own EAS platform, else the platform of a session this worktree has or had: a kept
@@ -754,6 +787,11 @@ function printHumanReport(report: DevStopResultJson, finishing: boolean): void {
       )
     );
   }
+  if (report.stopped && report.untracked) {
+    lines.push(
+      chalk.dim(` This project's dev server had no lock: the run that started it was killed.`)
+    );
+  }
   if (finishing && report.pid != null) {
     lines.push(
       chalk.dim(
@@ -799,6 +837,14 @@ function explainFailure(report: DevStopResultJson, options: DevStopOptions): str
       chalk.red(`This project's dev-server lock is still answering.`),
       `Why: ${report.detail}. The signal did its job — pid ${report.pid} is gone — so what is left is a second holder of the lock, which is what happens when this project has two dev servers running and only one of them was this one.`,
       `How: run "${PROGRAM_PREFIX} status --json" to see which dev server this project would now talk to, and stop that one where it was started. Nothing here is waiting on a longer --timeout, and --signal SIGKILL has nothing left to signal.`,
+    ].join('\n');
+  }
+  // No signal reached it (another user's process): a longer wait or SIGKILL would not either.
+  if (report.signal == null) {
+    return [
+      chalk.red(`The dev server is still running.`),
+      `Why: ${report.detail}.`,
+      `How: stop pid ${report.pid} as the user that owns it, then run this command again.`,
     ].join('\n');
   }
   return [

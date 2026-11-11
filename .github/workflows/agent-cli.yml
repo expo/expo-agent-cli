@@ -104,7 +104,8 @@ jobs:
 
   # The iOS half of the installed-app check only runs where `hostPlatforms()` asks for iOS: macOS.
   # The stub `xcrun` (simctl and devicectl) sits first on PATH, so no real simulator or phone
-  # is touched. Also run the macOS-only device-binding cases that Linux/Windows shards skip.
+  # is touched. Also run the macOS-only cases that Linux/Windows shards skip: device binding, and a
+  # hand-started dev server on [::1] beside a killed run's Metro.
   tier0-e2e-macos:
     needs: [stack]
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
@@ -134,6 +135,9 @@ jobs:
         working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E reload beside a local simulator
         run: bun run test:e2e -- runtime-target-selection-test
+        working-directory: packages/@expo/agent-cli
+      - name: 🧪 E2E a killed run's dev server beside one started by hand on [::1]
+        run: bun run test:e2e -- stop-test -t "after a SIGKILL of a foreground dev"
         working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.

@@ -487,15 +487,28 @@ export async function killAsync(
 
 /** Poll a condition until it becomes true, or the timeout expires. Returns the last result. */
 export async function waitForAsync(
-  check: () => boolean,
+  check: () => boolean | Promise<boolean>,
   timeoutMs: number,
   intervalMs = 100
 ): Promise<boolean> {
   const endTime = Date.now() + timeoutMs;
-  while (!check() && Date.now() < endTime) {
+  while (!(await check()) && Date.now() < endTime) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  return check();
+  return await check();
+}
+
+/** The run record a lock holder keeps beside the lock (`src/devLock/runRecord.ts`). */
+export function readRunRecord(
+  projectRoot: string
+): { pid: number; port: number; serverPid: number } | null {
+  try {
+    return JSON.parse(
+      fs.readFileSync(path.join(projectRoot, '.expo/agent-cli-dev-run.json'), 'utf8')
+    );
+  } catch {
+    return null;
+  }
 }
 
 /** Relative path of the file that caches the selected agents between runs. */

@@ -3,6 +3,7 @@ import { publishDevServerPortAsync, withRunLockAsync, type RunLock } from '../de
 import type { ResolvedDevServerPort } from '../devLock/port';
 import type { DevServerLockInfo } from '../devLock/types';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
+import { findPortListenersAsync } from '../dev/portListener';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { autoSyncSkillsAsync } from '../skills/skillsAsync';
 import { CommandError } from '../utils/errors';
@@ -172,6 +173,12 @@ export async function runDevServerAsync(
     phase,
     easPlatform,
     lock: runLock,
+    // With `lsof`, never a request: a request to Metro is not the record's to make. Only a sole
+    // listener: beside another (`[::1]` and `127.0.0.1`), which one is this run's is unknown.
+    findListenerPid: async (listenPort) => {
+      const listeners = await findPortListenersAsync(listenPort);
+      return listeners.length === 1 ? listeners[0]!.pid : null;
+    },
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(
