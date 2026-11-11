@@ -821,7 +821,11 @@ answers, the run does not take that port: it picks again, and a named `--port` o
 `PORT_IN_USE`. Under `--plan` nothing is stopped: a reason names the server and says the run
 stops it, and `devServerPort` is its port. When the stop fails and the run would take that
 port, the run stops with `UNTRACKED_DEV_SERVER`, exit 20, and recovers into
-`dev:stop --port <n> --signal SIGKILL`; a run that serves on another `--port` warns and goes on.
+`dev:stop --port <n> --signal SIGKILL`; a run that serves on another `--port` warns and goes on,
+and its warning names a stop that works once its own record replaced the orphan's
+(`--force --signal SIGKILL`). A run on another `--port` replaces the orphan too: leaving it
+was rejected, because it keeps two dev servers for one project and the new run's record
+hides the orphan from every later proof.
 
 A server on a port is this project's unless `/status` names another project root in the
 `X-React-Native-Project-Root` header. No header, or a root that contains this project (a

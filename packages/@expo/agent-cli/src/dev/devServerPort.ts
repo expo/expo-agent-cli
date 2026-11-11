@@ -180,8 +180,15 @@ async function stopForRunAsync(
     return !portLeft;
   }
   if (!takesPort) {
-    // The run serves elsewhere, so the server it could not stop is not in its way.
-    Log.warn(`${untrackedDevServerClause(server)}. It is still running: ${stopped.detail}.`);
+    // The run serves elsewhere, so the server it could not stop is not in its way. Its record is
+    // replaced by this run's, so only `--force` will name it a dev server again.
+    Log.warn(
+      `${untrackedDevServerClause(server)}. It is still running: ${stopped.detail}. ${
+        stopped.signal != null
+          ? `Stop it with "${PROGRAM_PREFIX} dev:stop --port ${server.port} --force --signal SIGKILL".`
+          : `Stop pid ${server.listener.pid} as the user that owns it.`
+      }`
+    );
     return true;
   }
   // A signal that reached it and did not end it: SIGKILL ends it. One that did not reach it (another

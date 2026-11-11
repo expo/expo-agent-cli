@@ -34,6 +34,7 @@ import { isExpoDevServerAsync } from '../stopAsync';
 import { easRunLifecycle } from '../openAppEas';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
+import { Log } from '../../log';
 import { RunLock } from '../../devLock';
 
 vi.mock('../../log');
@@ -370,6 +371,41 @@ describe(devAsync, () => {
         "This project's dev server on port 8081 (pid 777) has no lock: the run that started it was killed. The run stops it and takes port 8081."
       );
       expect(readDevRunRecord(projectRoot)).not.toBeNull();
+    });
+
+    // A run on another port goes on, and writes its own record over the orphan's: the warning's
+    // command must work without that record.
+    it.each([
+      [
+        'reached it and did not end it',
+        'delivered',
+        'dev:stop --port 8081 --force --signal SIGKILL',
+      ],
+      ['reached nothing', 'EPERM', 'Stop pid 777 as the user that owns it'],
+    ])(`should name a stop that still works when its signal %s`, async (_, outcome, expected) => {
+      mockPlatform('darwin');
+      vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+      mockStaleDevClientState();
+      vol.mkdirSync(projectRoot, { recursive: true });
+      writeDevRunRecord(projectRoot, { pid: 4242, port: 8081, serverPid: 777 });
+      vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal: string | number) => {
+        if (pid !== 777) throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+        if (signal !== 0 && outcome === 'EPERM') {
+          throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+        }
+        return true;
+      }) as never);
+      vi.mocked(findPortListenersAsync).mockResolvedValueOnce([{ pid: 777, command: 'node' }]);
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () => new Response(null, { headers: { 'x-react-native-project-root': projectRoot } })
+      );
+
+      const run = failureOf(['--ios', '--port', '9000']);
+      await vi.advanceTimersByTimeAsync(11_000);
+
+      expect(await run).toBeNull();
+      expect(vi.mocked(Log.warn).mock.calls.flat().join('\n')).toContain(expected);
+      vi.useRealTimers();
     });
 
     // Its pid went, and something else answers on its port: the port is not this run's to take.
