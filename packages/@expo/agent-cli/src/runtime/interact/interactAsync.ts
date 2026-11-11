@@ -52,6 +52,7 @@ import {
   diffSnapshots,
   explainBundleRefusal,
   explainTapFailure,
+  type TouchTarget,
   explainTypeFailure,
   formatTap,
   formatTree,
@@ -113,6 +114,8 @@ interface OpenApp {
   bundle: BundleCheckJson;
   /** Whether the bundle is broken or undecided, i.e. nothing may be asked of the app. */
   refusal: 'bundle-broken' | 'bundle-inconclusive' | null;
+  /** Where a real touch goes when a tap has no handler to call. */
+  touch: TouchTarget;
 }
 
 /**
@@ -186,9 +189,14 @@ async function openAppAsync(
         : null;
 
   const json = bundleToJson(bundle, { skippedByFlag: !wantBundleCheck });
+  const appIds = [...new Set(classifiedTargets.read.map((target) => target.appId).filter(Boolean))];
+  const touch: TouchTarget = {
+    device: targetSelection.device,
+    appId: appIds.length === 1 ? String(appIds[0]) : null,
+  };
   if (refusal != null) {
     // No connection is opened: the app is not what this run is about any more.
-    return { devServerUrl, client: null as unknown as CdpClient, bundle: json, refusal };
+    return { devServerUrl, client: null as unknown as CdpClient, bundle: json, refusal, touch };
   }
 
   return {
@@ -196,6 +204,7 @@ async function openAppAsync(
     client: new CdpClient({ metroUrl: devServerUrl, targetSelection, deviceInventory }),
     bundle: json,
     refusal,
+    touch,
   };
 }
 
@@ -553,7 +562,7 @@ export async function runtimeTapAsync(
   options: RuntimeTapOptions,
   context: RuntimeContext = {}
 ): Promise<number> {
-  const { devServerUrl, client, bundle, refusal } = await openAppAsync(options, context);
+  const { devServerUrl, client, bundle, refusal, touch } = await openAppAsync(options, context);
   if (refusal != null) {
     return refuseForBundle(
       {
@@ -635,7 +644,7 @@ export async function runtimeTapAsync(
   }
 
   if (!ok) {
-    const failure = explainTapFailure(report);
+    const failure = explainTapFailure(report, touch);
     Log.error(failure.message);
     Log.warn(`Try: ${failure.suggestedCommand}`);
     return EXIT_OUTCOME_FAILED;

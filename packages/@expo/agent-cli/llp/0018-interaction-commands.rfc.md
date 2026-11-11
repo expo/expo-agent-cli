@@ -205,9 +205,12 @@ null for a press. The text starts with `Toggled <id>: called onValueChange(true)
 switch shows the new state only if the app passes it back as `value`, so `--verify` is
 the proof: its `changedValue` names the switch, `false` before and `true` after.
 
-The `no-handler` refusal of `runtime:tap` names a real touch through `agent-device`,
-local and on an EAS session. It does not name `runtime:tree`: the agent has usually read
-the tree already, so that line sends it back in a loop.
+The `no-handler` refusal of `runtime:tap` names a real touch through `agent-device`: `open
+<app-id> --foreground` on the device this run read (`--udid` for a simulator, `--serial`
+for an emulator, `eas simulator:exec` in front on an EAS session), then `press @eN
+--settle`. A bare `agent-device` command refuses when several simulators are booted, so
+the device is named. It does not name `runtime:tree`: the agent has usually read the tree
+already, so that line sends it back in a loop.
 
 Tests: `expression-test.ts` "a tap on a switch" (the search order and the shapes that are
 refused), and `e2e/__tests__/runtime-interact-test.ts` "a tap on a switch" (the report,

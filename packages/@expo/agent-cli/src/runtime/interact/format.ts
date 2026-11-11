@@ -16,6 +16,7 @@ import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import { easCommandPrefix } from '../../utils/easCli';
 import type { BundleCheckJson } from '../bundleCheck';
+import type { SelectedDevice } from '../targetSelection';
 import { wrapUntrustedAppOutput } from '../untrusted';
 import type {
   RuntimeTapJson,
@@ -326,13 +327,25 @@ function allScreensClause(report: RuntimeTapJson | RuntimeTypeJson): string {
 }
 
 /** What, why and how for a `runtime:tap` that called nothing, or whose handler threw. */
-export function explainTapFailure(report: RuntimeTapJson): InteractFailure {
+export function explainTapFailure(
+  report: RuntimeTapJson,
+  touch: TouchTarget = { device: null, appId: null }
+): InteractFailure {
+  if (report.reason === 'no-handler') {
+    return explainNoTapHandler(report, touch);
+  }
   return explainFailure(
     report,
     'runtime:tap',
     'onPress',
     `${PROGRAM_PREFIX} runtime:tap ${quoted(report.testID)}`
   );
+}
+
+/** Where a real touch goes: the device this run read, and the app's id from its debugger target. */
+export interface TouchTarget {
+  device: SelectedDevice | null;
+  appId: string | null;
 }
 
 /** What, why and how for a `runtime:type` that called nothing, or whose handler threw. */
@@ -430,9 +443,6 @@ function explainFailure(
         suggestedCommand: `${rerun} --force`,
       };
     case 'no-handler': {
-      if (command === 'runtime:tap') {
-        return explainNoTapHandler(report);
-      }
       // @ref llp/0018 §Eight shipped decisions — friction run 7, F80. With several candidates and
       // none of them carrying the prop, the answer used to be "pass --index": advice for choosing
       // between two elements this command cannot drive either of. Both facts, in the order that
@@ -478,25 +488,38 @@ function explainFailure(
  * @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it. Not `runtime:tree`:
  * the agent has usually read the tree already, and that line sent it back in a loop (N2-38).
  */
-function explainNoTapHandler(report: RuntimeTapJson | RuntimeTypeJson): InteractFailure {
+function explainNoTapHandler(report: RuntimeTapJson, touch: TouchTarget): InteractFailure {
   const several = report.matched > 1;
-  const device = `npx ${AGENT_DEVICE_SPEC}`;
-  const cloud = `${easCommandPrefix()} simulator:exec ${device}`;
+  const local = `npx ${AGENT_DEVICE_SPEC}`;
+  const eas = `${easCommandPrefix()} simulator:exec`;
+  const device = touch.device;
+  const runner = device?.backend === 'cloud' ? `${eas} ${local}` : local;
+  const selector =
+    device?.backend === 'local-ios'
+      ? ` --udid ${device.udid}`
+      : device?.backend === 'local-android'
+        ? ` --serial ${device.serial}`
+        : '';
+  const open = `${runner} open ${touch.appId ?? '<app-id>'} --foreground${selector}`;
   const listed = report.candidates
     .map(
       (candidate) =>
         `[${candidate.index}] ${candidate.component}${candidate.screen == null ? '' : ` on ${candidate.screen}`}`
     )
     .join(', ');
+  const elsewhere =
+    device == null
+      ? ` With several devices booted, add --udid <udid> or --serial <serial>. On an EAS session, run "${eas} ${local} open ${touch.appId ?? '<app-id>'} --foreground" and "${eas} ${local} press @eN --settle".`
+      : '';
   return {
     message: [
       several
         ? `None of the ${report.matched} elements carrying ${report.testID} has onPress or a switch, so nothing was tapped (dev server ${report.devServerUrl}).`
         : `The element carrying ${report.testID} has no onPress and no switch, so nothing was tapped (dev server ${report.devServerUrl}).`,
       `Why: this command calls onPress, or onValueChange(!value) where value is a boolean. No fiber of ${several ? 'these elements' : 'this element'} has either, and no ancestor has onPress: ${listed}.`,
-      `How: touch it through the device. On a local simulator or emulator, run "${device} snapshot -i" for the @eN refs, then "${device} press @eN". On an EAS session, run the same verbs as "${cloud} snapshot -i" and "${cloud} press @eN". If snapshot finds no app session, run "open <app-id>" first.`,
+      `How: touch it through the device. Run "${open}", which prints the screen with @eN refs, then "${runner} press @eN --settle" with the ref of ${report.testID}.${elsewhere}`,
     ].join('\n'),
-    suggestedCommand: `${device} snapshot -i`,
+    suggestedCommand: open,
   };
 }
 

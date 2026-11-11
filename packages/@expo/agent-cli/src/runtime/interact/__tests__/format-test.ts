@@ -12,6 +12,7 @@ import {
   formatTree,
   formatType,
 } from '../format';
+import { easCommandPrefix } from '../../../utils/easCli';
 import type { RuntimeTapJson, RuntimeTreeJson, RuntimeTypeJson, TreeNodeJson } from '../types';
 
 function node(overrides: Partial<TreeNodeJson> = {}): TreeNodeJson {
@@ -320,7 +321,7 @@ describe(explainTapFailure, () => {
     ['ambiguous', /--index/, 'npx @expo/agent-cli runtime:tap row --index 0'],
     ['index-out-of-range', /--index/, 'npx @expo/agent-cli runtime:tree --testID row'],
     ['disabled', /--force/, 'npx @expo/agent-cli runtime:tap row --force'],
-    ['no-handler', /onPress or a switch/, 'npx agent-device@latest snapshot -i'],
+    ['no-handler', /onPress or a switch/, 'npx agent-device@latest open <app-id> --foreground'],
   ])(`explains %p and names a command that recovers it`, (reason, matcher, suggestion) => {
     const failure = explainTapFailure(
       tap({
@@ -366,6 +367,33 @@ describe(formatType, () => {
     expect(formatType(typed({ submitted: true, submitHandlerOn: 'TextInput' }))).toMatch(
       /onSubmitEditing/
     );
+  });
+});
+
+// @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it. With several simulators
+// booted, a bare agent-device command refuses as ambiguous, so the route names the scoped device.
+describe('the touch route of a tap with no handler', () => {
+  it.each([
+    {
+      device: { backend: 'local-ios' as const, udid: 'SIM-1', name: 'agent-cli 1' },
+      route: 'npx agent-device@latest open dev.app --foreground --udid SIM-1',
+    },
+    {
+      device: { backend: 'local-android' as const, serial: 'emulator-5554' },
+      route: 'npx agent-device@latest open dev.app --foreground --serial emulator-5554',
+    },
+    {
+      device: { backend: 'cloud' as const, deviceId: 'sess-1' },
+      route: `${easCommandPrefix()} simulator:exec npx agent-device@latest open dev.app --foreground`,
+    },
+    { device: null, route: 'npx agent-device@latest open dev.app --foreground' },
+  ])(`opens the app on $device.backend`, ({ device, route }) => {
+    const failure = explainTapFailure(tap({ reason: 'no-handler', called: false, ok: false }), {
+      device,
+      appId: 'dev.app',
+    });
+
+    expect(failure.suggestedCommand).toBe(route);
   });
 });
 
