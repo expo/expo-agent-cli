@@ -37,6 +37,12 @@ declare module '2g' {
      * known to be dead.
      */
     'cli:dev_lock_zombie_replaced': { address: string };
+    /**
+     * A run's lock got an event that its phase has no transition for, and changed nothing.
+     *
+     * @see llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+     */
+    'cli:dev_lock_illegal_transition': { phase: string; event: string };
     /** The lock was released, so the address answers nothing again. */
     'cli:dev_lock_released': { address: string };
     /** A connection to the lock was accepted, but what it answered was not a lock line. */

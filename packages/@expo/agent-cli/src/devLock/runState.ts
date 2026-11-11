@@ -50,6 +50,34 @@ export function isHeld(state: RunState): state is HeldRunState {
 }
 
 /** The next state, or null for an illegal pair: one that no caller should produce. */
-export function nextRunState(_state: RunState, _event: RunEvent): RunState | null {
-  throw new Error('not implemented');
+export function nextRunState(state: RunState, event: RunEvent): RunState | null {
+  if (state.phase === 'released') return event.type === 'published' ? null : state;
+  const finishing = state.phase === 'finishing';
+  const { easOpen } = state;
+  switch (event.type) {
+    case 'published': {
+      if (finishing) return null;
+      const { type: _, ...published } = event;
+      return { ...published, easOpen };
+    }
+    case 'foreign-port':
+      return finishing ? null : { phase: 'unlocked', easOpen };
+    case 'port-reported':
+      return isHeld(state) ? { ...state, port: event.port, source: 'reported' } : state;
+    case 'status-answered':
+      return state.phase === 'building' ? { ...state, phase: 'serving' } : state;
+    case 'eas-open-started':
+      return easOpen !== 'none' || finishing ? null : { ...state, easOpen: 'running' };
+    case 'eas-open-returned':
+      if (easOpen !== 'running') return null;
+      return finishing ? { phase: 'released' } : { ...state, easOpen: 'returned' };
+    case 'server-exited':
+      if (finishing) return null;
+      if (state.phase === 'unlocked' || easOpen === 'none') return state;
+      return easOpen === 'running'
+        ? { ...state, phase: 'finishing', easOpen }
+        : { phase: 'released' };
+    case 'run-ended':
+      return { phase: 'released' };
+  }
 }

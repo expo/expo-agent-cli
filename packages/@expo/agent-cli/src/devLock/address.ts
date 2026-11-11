@@ -106,3 +106,12 @@ export function digestOf(canonicalPath: string): string {
 function canonicalProjectRoot(projectRoot: string): string {
   return canonicalizeExistingPath(projectRoot);
 }
+
+/** The lock's address for an event that names it, or '' when it cannot be derived. */
+export function lockAddressOrEmpty(projectRoot: string): string {
+  try {
+    return lockAddressFor(projectRoot).address;
+  } catch {
+    return '';
+  }
+}
