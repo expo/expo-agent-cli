@@ -122,6 +122,7 @@ interface TreeAnswer {
     host: boolean;
     accessibilityRole: string | null;
     screen: string | null;
+    value?: boolean | null;
   }[];
   matched: number;
   matches: {
@@ -766,6 +767,113 @@ describe('the focus filter in an expo-router 58 app', () => {
 // @ref llp/0018-interaction-commands.rfc.md §Must not lose 6. The default is bounded by what it
 // keeps, not by a fiber depth: fiber depth on the spike's app was 152, and every visible element
 // sat between 128 and 152.
+// @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it — dogfood N2-38.
+describe('a tap on a switch', () => {
+  /** A React Native `Switch` over its host view, the way RN 0.88 renders it on iOS. */
+  function switchSpec(props: Record<string, unknown>): FiberSpec {
+    return {
+      name: 'Switch',
+      props: { testID: 'reminders', ...props },
+      children: [
+        { name: 'RCTSwitch', props: { testID: 'reminders', value: props.value === true } },
+      ],
+    };
+  }
+
+  it.each([
+    {
+      shape: 'off',
+      props: { value: false },
+      row: false,
+      handler: 'onValueChange',
+      toggledTo: true,
+    },
+    { shape: 'on', props: { value: true }, row: false, handler: 'onValueChange', toggledTo: false },
+    {
+      shape: 'in a pressable row',
+      props: { value: false },
+      row: true,
+      handler: 'onValueChange',
+      toggledTo: true,
+    },
+    {
+      shape: 'with its own onPress',
+      props: { value: false, onPress: true },
+      row: false,
+      handler: 'onPress',
+      toggledTo: null,
+    },
+  ])(`calls $handler on a switch $shape`, ({ props, row, handler, toggledTo }) => {
+    const calls: unknown[][] = [];
+    const record =
+      (name: string) =>
+      (...args: unknown[]) => {
+        calls.push([name, ...args]);
+      };
+    const { onPress, ...rest } = props as { onPress?: boolean; value: boolean };
+    const control = switchSpec({
+      ...rest,
+      onValueChange: record('onValueChange'),
+      ...(onPress ? { onPress: record('onPress') } : {}),
+    });
+    const tree: FiberSpec = row
+      ? { name: 'Pressable', props: { onPress: record('row') }, children: [control] }
+      : control;
+
+    const answer = against<CallAnswer & { toggledTo: boolean | null }>(
+      tree,
+      buildTapExpression({ testID: 'reminders', index: null, allScreens: true, force: false })
+    );
+
+    expect(answer).toMatchObject({
+      called: true,
+      handler,
+      handlerOn: 'Switch',
+      handlerOutsideMatch: false,
+      toggledTo,
+    });
+    expect(calls.map((call) => call[0])).toEqual([handler]);
+    if (toggledTo != null) expect(calls[0][1]).toBe(toggledTo);
+  });
+
+  it.each([
+    {
+      shape: 'a Slider, whose value is a number',
+      props: { value: 0.4, onValueChange: () => {} },
+      reason: 'no-handler',
+    },
+    {
+      shape: 'a Picker, which has no value',
+      props: { selectedValue: 'a', onValueChange: () => {} },
+      reason: 'no-handler',
+    },
+    {
+      shape: 'a disabled switch',
+      props: { value: false, disabled: true, onValueChange: () => {} },
+      reason: 'disabled',
+    },
+  ])(`refuses $shape`, ({ props, reason }) => {
+    const answer = against<CallAnswer & { toggledTo: boolean | null }>(
+      { name: 'Control', props: { testID: 'reminders', ...props } },
+      buildTapExpression({ testID: 'reminders', index: null, allScreens: true, force: false })
+    );
+
+    expect(answer).toMatchObject({ called: false, reason, toggledTo: null });
+  });
+
+  it(`shows the switch state as the row's value, which --verify compares`, () => {
+    const answer = against<TreeAnswer>(
+      { name: 'Root', props: {}, children: [switchSpec({ value: true, onValueChange: () => {} })] },
+      buildSnapshotExpression({ allScreens: true, maxNodes: 200 })
+    );
+
+    expect(answer.nodes.find((node) => node.testID === 'reminders')).toMatchObject({
+      handlers: ['onValueChange'],
+      value: true,
+    });
+  });
+});
+
 describe('the projections', () => {
   const mixed: FiberSpec = {
     name: 'Root',
