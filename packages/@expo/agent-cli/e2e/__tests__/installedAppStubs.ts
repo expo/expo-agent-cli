@@ -190,6 +190,9 @@ export async function killBoundEmulatorsAsync(home: string): Promise<void> {
  * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture. A
  * `reverse tcp:<port> tcp:<port>` the stub accepts is listed from then on, as on a device.
  *
+ * A stub run that throws, its own record write included, exits 70 and leaves its args and stack
+ * in `failures()`, so a call missing from `calls()` says why.
+ *
  * Installed under a fake SDK: `ANDROID_HOME` beats `PATH`, so a runner with a real SDK still
  * reaches this stub (@ref src/device/adb §resolveAdb). The returned `env` names it, and the
  * fixture's Expo home, which holds the binding.
@@ -198,8 +201,9 @@ export async function installStubAdbAsync(
   root: string,
   appId: string,
   { attached = true, bound = attached }: { attached?: boolean; bound?: boolean } = {}
-): Promise<{ env: Record<string, string>; calls: StubCalls }> {
+): Promise<{ env: Record<string, string>; calls: StubCalls; failures: () => string }> {
   const recordPath = path.join(root, '.adb-calls.jsonl');
+  const failuresPath = path.join(root, '.adb-stub-failures.jsonl');
   const scriptPath = path.join(root, '.stub-bin', 'adb-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
   if (bound) {
@@ -210,6 +214,11 @@ export async function installStubAdbAsync(
     [
       `const fs = require('fs');`,
       `const args = process.argv.slice(2);`,
+      `process.on('uncaughtException', (error) => {`,
+      `  try { fs.appendFileSync(${JSON.stringify(failuresPath)}, JSON.stringify({ args, error: String(error && error.stack) }) + '\\n'); } catch {}`,
+      `  process.stderr.write('stub adb threw: ' + String(error && error.stack) + '\\n');`,
+      `  process.exit(70);`,
+      `});`,
       `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
       `const apk = fs.readFileSync(process.env.STUB_ADB_APK_FIXTURE || ${JSON.stringify(APK_FIXTURE)});`,
       `const installed = process.env.STUB_ADB_INSTALLED !== '0';`,
@@ -284,6 +293,7 @@ export async function installStubAdbAsync(
   return {
     env: { ANDROID_HOME: sdk, __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root) },
     calls: () => readJsonLines<string[]>(recordPath),
+    failures: () => (fs.existsSync(failuresPath) ? fs.readFileSync(failuresPath, 'utf8') : ''),
   };
 }
 
