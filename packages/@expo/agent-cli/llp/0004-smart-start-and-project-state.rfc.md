@@ -588,7 +588,8 @@ A run killed with `SIGKILL` leaves its Metro running with no lock: an untracked 
 The lock is a socket so that nothing claims a process is alive after it is gone. Beside it,
 the holder keeps a run record (`.expo/agent-cli-dev-run.json`: its pid, the port, and the
 pid listening there), written once the dev server reported its port and removed when the lock
-is released. The record outlives its run only when the run died
+is released or when `dev:stop` stops the run through its lock (a Windows stop skips the
+holder's cleanup). The record outlives its run only when the run died
 without its cleanup, and it is read only as proof of that death.
 
 A dev server is an untracked one when four things hold: no lock answers, the record names a

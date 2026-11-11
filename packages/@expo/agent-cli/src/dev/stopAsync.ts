@@ -58,6 +58,7 @@ import {
   signalAndWaitAsync,
   signalProcessAsync,
 } from './processStop';
+import { clearDevRunRecord } from '../devLock/runRecord';
 import {
   claimEndedRunAsync,
   servesPortOf,
@@ -376,6 +377,9 @@ async function stopLockedDevServerAsync(
   // The two facts that are about the thing this command signalled. The port is not one of them.
   if (outcome.processGone && outcome.lockGone) {
     base.stopped = true;
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a stop that ends the
+    // holder without its cleanup (Windows `taskkill /F`) leaves its record; this stop ends it.
+    clearDevRunRecord(lock.projectRoot, lock.pid);
     return { report: base, finishing: false };
   }
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the run's lock says

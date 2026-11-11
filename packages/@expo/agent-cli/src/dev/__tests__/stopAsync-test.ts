@@ -212,6 +212,22 @@ describe(devStopAsync, () => {
       expect(printed(console.error)).toContain('SIGKILL');
     });
 
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — on Windows the signal is
+    // `taskkill /F`, which skips the holder's own cleanup, so the stop ends the record itself.
+    it(`should end the record of the run it stopped through its lock`, async () => {
+      const held = lock();
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(held as never)
+        .mockResolvedValue(null as never);
+      mockPort({ answering: false });
+      vol.mkdirSync(projectRoot, { recursive: true });
+      writeDevRunRecord(projectRoot, { pid: held.pid, port: held.port, serverPid: 9191 });
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(readDevRunRecord(projectRoot)).toBeNull();
+    });
+
     // The split-stack case, and every other "something else has that port number" case with it:
     // the checks here are over 127.0.0.1, so a dev server on ::1 and a stranger on 127.0.0.1 share
     // a port and neither sees the other. This used to be exit 20 about a process already gone.
