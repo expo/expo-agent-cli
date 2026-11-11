@@ -1,9 +1,7 @@
 import { vol } from 'memfs';
 import os from 'os';
 
-import { holdDevServerLockAsync } from '../../devLock';
-import type { DevServerLockHandle } from '../../devLock';
-import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { publishDevServerPortAsync, RunLock } from '../../devLock';
 import * as Log from '../../log';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
 import { autoSyncSkillsAsync } from '../../skills/skillsAsync';
@@ -21,7 +19,10 @@ import { printed } from '../../utils/__tests__/printed';
 vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../skills/skillsAsync', () => ({ autoSyncSkillsAsync: vi.fn() }));
-vi.mock('../../devLock', () => ({ holdDevServerLockAsync: vi.fn() }));
+vi.mock('../../devLock', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../devLock')>()),
+  publishDevServerPortAsync: vi.fn(),
+}));
 vi.mock('../../deviceBinding/renew', () => ({
   withLeaseExtendedAsync: vi.fn((_root: string, work: () => Promise<unknown>) => work()),
 }));
@@ -36,6 +37,9 @@ vi.mock('../../device/localDevice', () => ({
 }));
 
 const projectRoot = '/project';
+
+/** A step of a run, as `start` gives it: its own lock, `serving`. */
+const step = () => ({ lock: new RunLock(projectRoot), phase: 'serving' as const });
 
 /** `/status` answers, per what a probe of the named port learns. */
 const silent = { answering: false, projectRootMatched: null, reportedProjectRoot: null };
@@ -72,25 +76,11 @@ function mockLongRunningStart(): (code: number) => void {
   return (code) => end(code);
 }
 
-/** A held lock whose `release` can be asserted on. */
-function mockHeldLock(): DevServerLockHandle {
-  const lock: DevServerLockHandle = {
-    address: '/project/.expo/agent-cli-dev-server.sock',
-    replacedStale: false,
-    info: lockInfo(),
-    release: vi.fn(),
-    update: vi.fn(),
-  };
-  vi.mocked(holdDevServerLockAsync).mockResolvedValue(lock);
-  return lock;
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
   vol.reset();
   vi.mocked(autoSyncSkillsAsync).mockResolvedValue(undefined);
-  // No lock unless a test asks for one: the wrapper must work either way.
-  vi.mocked(holdDevServerLockAsync).mockResolvedValue(null);
+  vi.mocked(publishDevServerPortAsync).mockResolvedValue(undefined);
   vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
   mockLanAddress('192.168.1.5');
 });
@@ -257,7 +247,7 @@ describe(startAsync, () => {
 describe(runDevServerAsync, () => {
   it(`should run any dev server command and sync skills`, async () => {
     const end = mockLongRunningStart();
-    const promise = runDevServerAsync(projectRoot, ['run:ios'], { agentSkills: true });
+    const promise = runDevServerAsync(projectRoot, ['run:ios'], { ...step(), agentSkills: true });
 
     expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], { signal: undefined });
     vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS);
@@ -270,7 +260,7 @@ describe(runDevServerAsync, () => {
   // @ref llp/0035-one-device-per-worktree.rfc.md §Lease timer
   it(`should renew the worktree's device lease while the dev server runs`, async () => {
     const end = mockLongRunningStart();
-    const promise = runDevServerAsync(projectRoot, ['run:ios'], { agentSkills: false });
+    const promise = runDevServerAsync(projectRoot, ['run:ios'], { ...step(), agentSkills: false });
 
     expect(withLeaseExtendedAsync).toHaveBeenCalledWith(projectRoot, expect.any(Function));
     expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], { signal: undefined });
@@ -281,7 +271,10 @@ describe(runDevServerAsync, () => {
 
   it(`should skip the sync when agent skills are off`, async () => {
     const end = mockLongRunningStart();
-    const promise = runDevServerAsync(projectRoot, ['run:android'], { agentSkills: false });
+    const promise = runDevServerAsync(projectRoot, ['run:android'], {
+      ...step(),
+      agentSkills: false,
+    });
 
     vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS * 2);
     expect(autoSyncSkillsAsync).not.toHaveBeenCalled();
@@ -306,7 +299,11 @@ describe(runDevServerAsync, () => {
     it.each(['tee', 'capture'] as const)(
       `should never tell a %s dev server that it is CI`,
       async (output) => {
-        await runDevServerAsync(projectRoot, ['start', '--go'], { agentSkills: false, output });
+        await runDevServerAsync(projectRoot, ['start', '--go'], {
+          ...step(),
+          agentSkills: false,
+          output,
+        });
 
         expect(spawnExpoAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
           output,
@@ -318,7 +315,11 @@ describe(runDevServerAsync, () => {
     it.each(['run:ios', 'run:android'])(
       `should keep the watcher on for %s, which ends in a dev server too`,
       async (command) => {
-        await runDevServerAsync(projectRoot, [command], { agentSkills: false, output: 'capture' });
+        await runDevServerAsync(projectRoot, [command], {
+          ...step(),
+          agentSkills: false,
+          output: 'capture',
+        });
 
         expect(spawnExpoAsync).toHaveBeenCalledWith(
           projectRoot,
@@ -334,12 +335,13 @@ describe(runDevServerAsync, () => {
     it(`should publish the dev server alongside the subprocess`, async () => {
       const end = mockLongRunningStart();
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
       });
 
       // The arguments go along, because the requested port is the fallback when the dev server
       // never reports the one it took.
-      expect(holdDevServerLockAsync).toHaveBeenCalledWith(
+      expect(publishDevServerPortAsync).toHaveBeenCalledWith(
         projectRoot,
         ['start', '--port', '8082'],
         expect.objectContaining({
@@ -357,11 +359,12 @@ describe(runDevServerAsync, () => {
     it(`should name the EAS platform of the run on the lock`, async () => {
       const end = mockLongRunningStart();
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         easPlatform: 'android',
       });
 
-      expect(holdDevServerLockAsync).toHaveBeenCalledWith(
+      expect(publishDevServerPortAsync).toHaveBeenCalledWith(
         projectRoot,
         ['start', '--port', '8082'],
         expect.objectContaining({ easPlatform: 'android' })
@@ -378,10 +381,11 @@ describe(runDevServerAsync, () => {
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValueOnce(silent).mockResolvedValue(ours);
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         onDevServer,
       });
-      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
       await vi.advanceTimersByTimeAsync(0);
@@ -404,10 +408,11 @@ describe(runDevServerAsync, () => {
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue(foreign);
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         onDevServer,
       });
-      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
       await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
@@ -423,10 +428,11 @@ describe(runDevServerAsync, () => {
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         onDevServer,
       });
-      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
       await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
@@ -446,10 +452,11 @@ describe(runDevServerAsync, () => {
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue(ours);
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         onDevServer,
       });
-      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
       onResolved?.({ port: 8082, source: 'reported' });
@@ -467,10 +474,11 @@ describe(runDevServerAsync, () => {
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         onDevServer,
       });
-      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
       await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 2);
@@ -496,10 +504,11 @@ describe(runDevServerAsync, () => {
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue({ ...silent, answering: true });
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        ...step(),
         agentSkills: false,
         onDevServer,
       });
-      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
       await vi.advanceTimersByTimeAsync(0);
@@ -511,46 +520,14 @@ describe(runDevServerAsync, () => {
 
     it(`should report the dev server as running until it exits`, async () => {
       const end = mockLongRunningStart();
-      const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });
-      const { isRunning } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+      const promise = runDevServerAsync(projectRoot, ['start'], { ...step(), agentSkills: false });
+      const { isRunning } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
 
       expect(isRunning?.()).toBe(true);
 
       end(0);
       await promise;
       expect(isRunning?.()).toBe(false);
-    });
-
-    it(`should release the lock when the dev server exits`, async () => {
-      const lock = mockHeldLock();
-      const end = mockLongRunningStart();
-      const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });
-
-      expect(lock.release).not.toHaveBeenCalled();
-
-      end(0);
-      await promise;
-      expect(lock.release).toHaveBeenCalled();
-    });
-
-    it(`should release the lock when the dev server could not be spawned`, async () => {
-      const lock = mockHeldLock();
-      vi.mocked(runExpoAsync).mockRejectedValue(new Error('EXPO_CLI_NOT_FOUND'));
-
-      await expect(
-        runDevServerAsync(projectRoot, ['start'], { agentSkills: false })
-      ).rejects.toThrow('EXPO_CLI_NOT_FOUND');
-      expect(lock.release).toHaveBeenCalled();
-    });
-
-    it(`should run the dev server when no lock could be taken`, async () => {
-      vi.mocked(holdDevServerLockAsync).mockResolvedValue(null);
-      const end = mockLongRunningStart();
-      const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });
-
-      end(3);
-      // The lock is a convenience; the exit code of the dev server is the answer either way.
-      await expect(promise).resolves.toMatchObject({ exitCode: 3 });
     });
   });
 });

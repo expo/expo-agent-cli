@@ -14,8 +14,8 @@ export {
   readDevServerLockAsync,
 } from './client';
 export type { DevLockProbe } from './client';
-export { holdDevServerLockAsync, takeDevServerLockAsync } from './holdLock';
-export type { HoldDevServerLockOptions } from './holdLock';
+export { publishDevServerPortAsync, publishPlannedPortAsync } from './publishPort';
+export { RunLock, withRunLockAsync } from './runLock';
 export {
   DEFAULT_DEV_SERVER_PORT,
   PORT_WATCH_INTERVAL_MS,

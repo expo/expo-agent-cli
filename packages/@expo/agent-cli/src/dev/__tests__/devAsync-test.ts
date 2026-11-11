@@ -33,7 +33,7 @@ import { isExpoDevServerAsync } from '../stopAsync';
 import { easRunLifecycle } from '../openAppEas';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
-import { RunLock } from '../runLock';
+import { RunLock } from '../../devLock';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -263,7 +263,8 @@ describe(devAsync, () => {
         output: 'inherit',
         signal: expect.any(AbortSignal),
         easPlatform: null,
-        runLock: { lock: expect.any(RunLock), phase: 'building' },
+        lock: expect.any(RunLock),
+        phase: 'building',
       });
     });
 

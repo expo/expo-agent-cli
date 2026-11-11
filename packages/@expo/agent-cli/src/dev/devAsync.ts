@@ -11,7 +11,8 @@ import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
 import type { DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
-import { withRunLockAsync, type RunLock, type RunSteps } from './runLock';
+import type { RunLock } from '../devLock';
+import { withRunAsync, type RunSteps } from './runSteps';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -637,7 +638,7 @@ async function executePlanAsync(
   options: DevOptions,
   acquired: AcquireResult | null
 ): Promise<PlanRun> {
-  return await withRunLockAsync(
+  return await withRunAsync(
     projectRoot,
     plan,
     shouldOpenApp(options) ? easOpenPlatform(options) : null,
@@ -661,11 +662,7 @@ async function runPlanStepsAsync(
   let exitCode = 0;
   // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
   // retry does: the second bind is the same dev server, not a second app to open.
-  let openArmed = false;
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS open of the
-  // plan, said on the run's lock.
-  let markEasOpenFinished!: () => void;
-  const easOpenFinished = new Promise<void>((resolve) => (markEasOpenFinished = resolve));
+  let openStarted = false;
   // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
   // installs: the one the plan found, or the one this run's `eas build` step makes below.
   let easBuildId: string | null = plan.easBuild?.id ?? null;
@@ -701,30 +698,28 @@ async function runPlanStepsAsync(
             keepSession: options.detachedChild,
           })
         : null;
-      let easOpened = false;
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
         signal,
-        runLock: {
-          lock: runLock,
-          phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
-        },
+        lock: runLock,
+        phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
-        easOpenFinished: eas ? easOpenFinished : undefined,
         onDevServer: opensApp
           ? (server) => {
-              if (openArmed) {
+              if (openStarted) {
                 return;
               }
-              openArmed = true;
+              openStarted = true;
               // Open alongside Metro. A failed open must not stop it.
               const stillWanted = () => stepRunning && !steps.interrupted;
               if (eas) {
-                easOpened = true;
+                // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS
+                // open of the plan, said on the run's lock.
+                runLock.apply({ type: 'eas-open-started' });
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
-                void eas.finished.then(markEasOpenFinished);
+                void eas.finished.then(() => runLock.apply({ type: 'eas-open-returned' }));
               } else
                 void openAppForRunAsync(
                   projectRoot,
@@ -738,8 +733,6 @@ async function runPlanStepsAsync(
           : undefined,
       }).finally(async () => {
         stepRunning = false;
-        // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone.
-        if (easOpened && eas) runLock.finish(eas.finished);
         await eas?.finishAsync();
       });
     };
@@ -787,7 +780,7 @@ async function runPlanStepsAsync(
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
         // None after the open started: a retry gets no open, and the run let go of its lock when
         // that open returned (llp/0035 §Preserved sessions).
-        const retry = openArmed
+        const retry = openStarted
           ? null
           : await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
         if (retry) {

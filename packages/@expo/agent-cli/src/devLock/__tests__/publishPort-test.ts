@@ -6,21 +6,26 @@ import fs from 'fs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../client';
-import { acquireDevServerLockAsync } from '../server';
-import { lockInfo } from './fakeLock';
-import { holdDevServerLockAsync } from '../holdLock';
-import type { DevServerLockHandle } from '../types';
+import { publishDevServerPortAsync } from '../publishPort';
+import { RunLock } from '../runLock';
 import { cleanupTempProjects, makeTempProject } from './tempProject';
 
 // The suite-wide `fs` mock is memfs, which the kernel cannot bind a socket inside.
 vi.unmock('fs');
 vi.unmock('node:fs');
 
-const held: (DevServerLockHandle | null)[] = [];
+const held: RunLock[] = [];
+
+/** A `start` run's lock, released after the test. */
+function runLockFor(projectRoot: string): RunLock {
+  const lock = new RunLock(projectRoot);
+  held.push(lock);
+  return lock;
+}
 
 afterEach(() => {
   for (const lock of held.splice(0)) {
-    lock?.release();
+    lock.apply({ type: 'run-ended' });
   }
   cleanupTempProjects();
 });
@@ -61,30 +66,38 @@ async function eventuallyAsync<T>(read: () => Promise<T>, check: (value: T) => b
   }
 }
 
-describe(holdDevServerLockAsync, () => {
+describe(publishDevServerPortAsync, () => {
+  // `onResolved` comes after the publish: a caller that then waits for `/status` finds the lock
+  // already naming the port, so the answer is not lost on a lock not yet taken.
   it(`publishes the lock before any report when the arguments name a port`, async () => {
     const projectRoot = makeTempProject();
+    const runLock = runLockFor(projectRoot);
     const resolved: string[] = [];
     let running = true;
 
-    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8301'], {
+    const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8301'], {
+      lock: runLock,
+      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
-      onResolved: ({ port, source }) => resolved.push(`${source}:${port}`),
-    }).then((handle) => (held.push(handle), handle));
+      onResolved: ({ port, source }) =>
+        resolved.push(
+          `${source}:${port}, lock on ${'port' in runLock.state && runLock.state.port}`
+        ),
+    });
 
     const answer = await eventuallyAsync(
       () => readDevServerLockAsync(projectRoot),
       (info) => info != null
     );
     expect(answer).toMatchObject({ port: 8301, portReported: false, easPlatform: null });
-    expect(resolved).toEqual(['arg:8301']);
+    expect(resolved).toEqual(['arg:8301, lock on 8301']);
 
     // Metro reports later, on another port: told again, and the lock follows.
     report(8302);
     await lock;
-    expect(resolved).toEqual(['arg:8301', 'reported:8302']);
+    expect(resolved).toEqual(['arg:8301, lock on 8301', 'reported:8302, lock on 8302']);
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
       port: 8302,
       url: 'http://127.0.0.1:8302',
@@ -99,12 +112,14 @@ describe(holdDevServerLockAsync, () => {
     const projectRoot = makeTempProject();
     let running = true;
 
-    const lock = holdDevServerLockAsync(projectRoot, ['run:ios', '--port', '8303'], {
+    const lock = publishDevServerPortAsync(projectRoot, ['run:ios', '--port', '8303'], {
+      lock: runLockFor(projectRoot),
+      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
       timeoutMs: 30,
-    }).then((handle) => (held.push(handle), handle));
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     report(8303);
@@ -119,18 +134,19 @@ describe(holdDevServerLockAsync, () => {
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it(`answers easOpenFinished once the EAS open settles, and keeps it across the port update from the report`, async () => {
+  it(`answers easOpenFinished once the EAS open returns, and keeps it across the port update from the report`, async () => {
     const projectRoot = makeTempProject();
-    let finishOpen!: () => void;
-    const easOpenFinished = new Promise<void>((resolve) => (finishOpen = resolve));
+    const runLock = runLockFor(projectRoot);
+    runLock.apply({ type: 'eas-open-started' });
 
-    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8308'], {
+    const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8308'], {
+      lock: runLock,
+      phase: 'serving',
       since: Date.now(),
       isRunning: () => true,
       intervalMs: 10,
       easPlatform: 'ios',
-      easOpenFinished,
-    }).then((handle) => (held.push(handle), handle));
+    });
 
     expect(
       await eventuallyAsync(
@@ -139,7 +155,7 @@ describe(holdDevServerLockAsync, () => {
       )
     ).toMatchObject({ port: 8308, easOpenFinished: false });
 
-    finishOpen();
+    runLock.apply({ type: 'eas-open-returned' });
     expect(
       await eventuallyAsync(
         () => readDevServerLockAsync(projectRoot),
@@ -161,12 +177,14 @@ describe(holdDevServerLockAsync, () => {
     const projectRoot = makeTempProject();
     const resolved: string[] = [];
 
-    const lock = holdDevServerLockAsync(projectRoot, ['start'], {
+    const lock = publishDevServerPortAsync(projectRoot, ['start'], {
+      lock: runLockFor(projectRoot),
+      phase: 'serving',
       since: Date.now(),
       isRunning: () => true,
       intervalMs: 10,
       onResolved: ({ port, source }) => resolved.push(`${source}:${port}`),
-    }).then((handle) => (held.push(handle), handle));
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await readDevServerLockAsync(projectRoot)).toBeNull();
@@ -189,14 +207,16 @@ describe(holdDevServerLockAsync, () => {
     const resolved: string[] = [];
     let running = true;
 
-    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8304'], {
+    const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8304'], {
+      lock: runLockFor(projectRoot),
+      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
       timeoutMs: 30,
       servesAnotherProject: async (port) => port === 8304,
       onResolved: ({ port, source }) => resolved.push(`${source}:${port}`),
-    }).then((handle) => (held.push(handle), handle));
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await readDevServerLockAsync(projectRoot)).toBeNull();
@@ -219,11 +239,15 @@ describe(holdDevServerLockAsync, () => {
     ['releases the lock the run holds for a foreign port', true, null],
   ] as const)(`%s`, async (_name, foreign, answer) => {
     const projectRoot = makeTempProject();
-    const acquired = await acquireDevServerLockAsync(
-      lockInfo({ projectRoot, port: 8310, url: 'http://127.0.0.1:8310', pid: process.pid })
-    );
-    if (acquired.status !== 'acquired') throw new Error(acquired.status);
-    held.push(acquired.lock);
+    const runLock = runLockFor(projectRoot);
+    await runLock.publishAsync({
+      type: 'published',
+      phase: 'building',
+      port: 8310,
+      source: 'arg',
+      since: 0,
+      easPlatform: null,
+    });
     const since = Date.now();
     let running = true;
     // The dev server stops before it logs a port, so a foreign port leaves nothing to name.
@@ -234,17 +258,17 @@ describe(holdDevServerLockAsync, () => {
       }, 50)
     );
 
-    const lock = await holdDevServerLockAsync(projectRoot, ['start', '--port', '8311'], {
+    await publishDevServerPortAsync(projectRoot, ['start', '--port', '8311'], {
+      lock: runLock,
+      phase: 'serving',
       since,
       isRunning: () => running,
       stopped,
       intervalMs: 10,
       timeoutMs: 30,
       servesAnotherProject: async () => foreign,
-      held: acquired.lock,
     });
 
-    expect(lock).toBe(answer ? acquired.lock : null);
     expect(await readDevServerLockAsync(projectRoot)).toEqual(
       answer && expect.objectContaining({ ...answer, startedAt: new Date(since).toISOString() })
     );
@@ -256,7 +280,9 @@ describe(holdDevServerLockAsync, () => {
     let stop!: () => void;
     const stopped = new Promise<void>((resolve) => (stop = resolve));
 
-    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8306'], {
+    const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8306'], {
+      lock: runLockFor(projectRoot),
+      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       stopped,
@@ -269,7 +295,7 @@ describe(holdDevServerLockAsync, () => {
       stop();
     }, 60);
 
-    expect(await lock).toBeNull();
+    await lock;
     expect(await readDevServerLockAsync(projectRoot)).toBeNull();
   });
 });
