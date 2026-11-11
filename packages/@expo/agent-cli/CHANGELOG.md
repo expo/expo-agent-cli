@@ -36,6 +36,7 @@
 
 ### 🐛 Bug fixes
 
+- `install <pkg>` in a project that builds its own runtime no longer asks for a new build for a native module the build already links. It measures the project fingerprint before and after the install: unchanged means `reload`, unless the last recorded build was made from another fingerprint; changed keeps the build. A config plugin keeps the build, and a project on Expo Go measures nothing. `--json` carries `fingerprint` and `lastBuild` on the impact report. ([#283](https://github.com/expo/expo-agent-cli/pull/283) by [@vonovak](https://github.com/vonovak))
 - `navigate --print-url` prints its URL when the worktree's binding file cannot be read and the dev server lists no app. It still refuses with `NO_BOUND_DEVICE` once an app is listed, because the binding decides which app counts.
 - `navigate` says the app was stopped, and reports `attachRecovered: true`, only when the app was running. When nothing was running it still opens the link a second time, and says nothing was stopped.
 - `runtime:stop --eas` on an Android session asks the controller once more when its `close` ran out of time ("process remained running after close"), instead of exiting 1. About 1 stop in 3 on an EAS Expo Go session hit this. ([#211](https://github.com/expo/expo-agent-cli/pull/211) by [@vonovak](https://github.com/vonovak))
