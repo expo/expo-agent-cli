@@ -12,6 +12,7 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
+import { readEndedDevRun } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
 import { deletedWorktreeSessions } from '../deviceBinding/reap';
@@ -19,6 +20,7 @@ import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
+import type { DevServerLockInfo } from '../devLock';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
 import { exitWithCodeAsync } from '../exitCodes';
@@ -59,7 +61,7 @@ import {
 } from './freshness';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync, withCloudSessions } from './installed';
-import { chooseNextAction, cloudBindings, endedRunSession, resolveNextTarget } from './nextAction';
+import { chooseNextAction, cloudBindings, resolveNextTarget, startedSession } from './nextAction';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -411,7 +413,11 @@ export async function collectStatusReportAsync(
       deviceBackend,
       readBuildsOnceAsync
     );
-    if (report.devServer && endedRunSession(ownLock, report.devServer, sessions.cloud, platform)) {
+    if (
+      report.devServer &&
+      leftByKilledRun(projectRoot, ownLock, report.devServer) &&
+      startedSession(sessions.cloud, platform)
+    ) {
       report.devServer.ownerEnded = true;
     }
     report.next = chooseNextAction({
@@ -860,4 +866,20 @@ async function raceWithTimeoutAsync<T>(work: Promise<T>, timeoutMs: number): Pro
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * Whether the running dev server is the one a killed run of this project left: no lock answers,
+ * its `/status` names this project, and the run record of a dead run names its port. The rule
+ * `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`), read from what status already probed.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ */
+function leftByKilledRun(
+  projectRoot: string,
+  ownLock: DevServerLockInfo | null,
+  devServer: DevServerStatus
+): boolean {
+  if (ownLock || !devServer.running || devServer.projectRootMatched !== true) return false;
+  return readEndedDevRun(projectRoot)?.port === Number(new URL(devServer.url).port);
 }

@@ -626,7 +626,7 @@ server running), and a server started by hand on a dead run's port that both com
 running. `src/devLock/__tests__/lock-test.ts` and
 `publishPort-test.ts` enforce the record's life.
 
-When `status` finds an untracked dev server and this worktree has a live cloud binding of origin `started`, the run that started both ended: the dev-server line says that its CLI process ended and the server has no owner (`ownerEnded: true` in `--json`), and `next` is `dev:stop --eas`, which stops the server and the session. A tracked server, or no such binding, changes nothing. The e2e case "after a SIGKILL, status names dev:stop --eas" in `e2e/__tests__/dev-eas-test.ts` and the `chooseNextAction` table enforce it.
+When `status` finds the untracked dev server a killed run left (the rule above, read from the run record and the `/status` that status already probed) and this worktree has a live cloud binding of origin `started`, the run that started both ended: the dev-server line says that its CLI process ended and the server has no owner (`ownerEnded: true` in `--json`), and `next` is `dev:stop --eas`, which stops the server and the session. A tracked server, a server with no run record (one a person started), or no such binding, changes nothing. The e2e case "after a SIGKILL, status names dev:stop --eas" in `e2e/__tests__/dev-eas-test.ts` and the `chooseNextAction` table enforce it.
 
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would

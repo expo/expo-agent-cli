@@ -183,7 +183,7 @@ export function chooseNextAction({
     recoveryPlan
   );
   const noRun =
-    unservedRunNext(ownLock, devNext) ?? endedRunNext(ownLock, devServer, cloud, platform, devNext);
+    unservedRunNext(ownLock, devNext) ?? endedRunNext(devServer, cloud, platform, devNext);
   if (noRun) return noRun;
   const ownServer = servingLock(ownLock);
   const { backend, devArgs, devCommand } = devRerun(platform, request, recoveryPort, devNext);
@@ -250,33 +250,28 @@ export function chooseNextAction({
   return next;
 }
 
-/**
- * The started EAS session of a run that ended and left this project's dev server with no lock: a
- * SIGKILL of a foreground `dev --eas`. Null when a lock answers, the server is not this project's,
- * or no live binding of origin `started` exists.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
- */
-export function endedRunSession(
-  lock: DevServerLockInfo | null,
-  devServer: DevServerStatus | null,
+/** The live cloud binding this CLI started for `platform`, else any it started; null for none. */
+export function startedSession(
   cloud: BindingSummary[],
   platform: PlanPlatform
 ): BindingSummary | null {
-  if (lock || !devServer?.running || devServer.projectRootMatched !== true) return null;
   const started = cloud.filter((entry) => entry.origin === 'started');
   return started.find((entry) => entry.platform === platform) ?? started[0] ?? null;
 }
 
-/** `dev:stop --eas` beside the session of a run that ended; null when there is none. */
+/**
+ * `dev:stop --eas` for a dev server a killed `dev --eas` left beside its session
+ * (`DevServerStatus.ownerEnded`); null otherwise.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ */
 function endedRunNext(
-  lock: DevServerLockInfo | null,
   devServer: DevServerStatus | null,
   cloud: BindingSummary[],
   platform: PlanPlatform,
   devNext: NextActionStatus
 ): NextActionStatus | null {
-  const session = endedRunSession(lock, devServer, cloud, platform);
+  const session = devServer?.ownerEnded ? startedSession(cloud, platform) : null;
   if (!session) return null;
   return {
     ...devNext,

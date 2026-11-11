@@ -319,8 +319,9 @@ export interface DevServerStatus {
    */
   projectRootMatched: boolean | null;
   /**
-   * True when no lock answers for this project's dev server and a live `started` cloud binding
-   * exists: the CLI run that started both ended, and nothing owns the server.
+   * True when this dev server is the one a killed `dev --eas` left (no lock, its run record
+   * outlived the run, its `/status` names this project) and that run's started cloud binding is
+   * live. Nothing owns the server; `dev:stop --eas` stops both.
    *
    * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
    */
