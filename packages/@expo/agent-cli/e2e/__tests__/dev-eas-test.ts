@@ -32,6 +32,7 @@ import {
   stubExpoEnv,
   waitForAsync,
   readLastBuildFile,
+  readRunRecord,
   freePortAsync,
   waitForDevLockAsync,
 } from '../utils';
@@ -994,16 +995,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         ).toBe(true);
         const { port } = (await waitForDevLockAsync(projectRoot))!;
         // The run notes which process listens once Metro answers (src/devLock/runRecord.ts).
-        const record = path.join(projectRoot, '.expo/agent-cli-dev-run.json');
-        expect(
-          await waitForAsync(() => {
-            try {
-              return JSON.parse(fs.readFileSync(record, 'utf8')).serverPid != null;
-            } catch {
-              return false;
-            }
-          }, 10000)
-        ).toBe(true);
+        expect(await waitForAsync(() => readRunRecord(projectRoot) != null, 10000)).toBe(true);
         const exited = new Promise((resolve) => child.once('exit', resolve));
         process.kill(child.pid!, 'SIGKILL');
         await exited;
