@@ -446,7 +446,7 @@ export async function collectStatusReportAsync(
     errors.project = project.error;
   }
 
-  if (!ownServer && report.next) {
+  if (!ownLock && report.next) {
     const warning = await readDetachedRunWarning(projectRoot);
     if (warning) {
       report.next.command = warning.suggestedCommand ?? `${PROGRAM_PREFIX} dev:logs`;
