@@ -194,6 +194,100 @@ describe(classifyInstallImpactAsync, () => {
     expect(report).toMatchObject({ expoGoBundled: true, action: 'prebuild-and-build' });
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Sub-features
+  describe('with the project fingerprint across the install', () => {
+    const devClientDependencies = { expo: '54.0.0', 'expo-dev-client': '~54.0.0' };
+    const writeInstalledProject = (dependencies: Record<string, string>) =>
+      writeProject({
+        dependencies,
+        files: {
+          [`${projectRoot}/node_modules/expo-file-system/package.json`]: '{}',
+          [`${projectRoot}/node_modules/expo-file-system/ios/FileSystem.swift`]: '',
+          [`${projectRoot}/node_modules/expo-plugged/package.json`]: '{}',
+          [`${projectRoot}/node_modules/expo-plugged/ios/Plugged.swift`]: '',
+          [`${projectRoot}/node_modules/expo-plugged/app.plugin.js`]: '',
+          [`${projectRoot}/node_modules/lodash/package.json`]: '{}',
+        },
+      });
+    const same = { before: 'aaaa', after: 'aaaa' };
+
+    it.each([
+      {
+        name: 'unchanged, no build recorded',
+        surface: { ...same, lastBuildHashes: [] },
+        expected: { action: 'reload', fingerprint: 'unchanged', lastBuild: undefined },
+      },
+      {
+        name: 'unchanged, the recorded builds match',
+        surface: { ...same, lastBuildHashes: ['aaaa', 'aaaa'] },
+        expected: { action: 'reload', fingerprint: 'unchanged', lastBuild: 'current' },
+      },
+      {
+        name: 'unchanged, one recorded build is stale',
+        surface: { ...same, lastBuildHashes: ['aaaa', 'old'] },
+        expected: { action: 'prebuild-and-build', fingerprint: 'unchanged', lastBuild: 'stale' },
+      },
+      {
+        name: 'changed',
+        surface: { before: 'aaaa', after: 'bbbb', lastBuildHashes: ['aaaa'] },
+        expected: { action: 'prebuild-and-build', fingerprint: 'changed', lastBuild: undefined },
+      },
+      {
+        name: 'not measured',
+        surface: null,
+        expected: { action: 'prebuild-and-build', fingerprint: undefined, lastBuild: undefined },
+      },
+    ])(
+      `should answer $expected.action for a native package: $name`,
+      async ({ surface, expected }) => {
+        writeInstalledProject(devClientDependencies);
+
+        const [report] = await classifyInstallImpactAsync(projectRoot, ['expo-file-system'], {
+          fingerprintAcrossInstallAsync: async () => surface,
+        });
+
+        expect(report).toMatchObject({ action: expected.action });
+        expect(report?.fingerprint).toBe(expected.fingerprint);
+        expect(report?.lastBuild).toBe(expected.lastBuild);
+      }
+    );
+
+    // The hash does not see a config plugin until the app config lists it, so the build stays owed.
+    it(`should keep the build for a native package that ships a config plugin`, async () => {
+      writeInstalledProject(devClientDependencies);
+
+      const [report] = await classifyInstallImpactAsync(projectRoot, ['expo-plugged'], {
+        fingerprintAcrossInstallAsync: async () => ({ ...same, lastBuildHashes: [] }),
+      });
+
+      expect(report).toMatchObject({ action: 'prebuild-and-build' });
+      expect(report?.fingerprint).toBeUndefined();
+    });
+
+    it.each([
+      {
+        name: 'an Expo Go project',
+        dependencies: { expo: '54.0.0' },
+        packageName: 'expo-file-system',
+      },
+      {
+        name: 'a JavaScript-only install',
+        dependencies: devClientDependencies,
+        packageName: 'lodash',
+      },
+    ])(`should not measure the fingerprint for $name`, async ({ dependencies, packageName }) => {
+      writeInstalledProject(dependencies);
+      const fingerprintAcrossInstallAsync = vi.fn(async () => ({ ...same, lastBuildHashes: [] }));
+
+      const [report] = await classifyInstallImpactAsync(projectRoot, [packageName], {
+        fingerprintAcrossInstallAsync,
+      });
+
+      expect(fingerprintAcrossInstallAsync).not.toHaveBeenCalled();
+      expect(report?.fingerprint).toBeUndefined();
+    });
+  });
+
   it(`should require a native sync for a bundled module in a bare project`, async () => {
     writeProject({
       nativeDirs: true,

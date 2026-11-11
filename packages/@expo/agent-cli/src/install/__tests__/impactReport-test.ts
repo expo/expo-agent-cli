@@ -29,7 +29,9 @@ describe(reportInstallImpactAsync, () => {
 
     await reportInstallImpactAsync(projectRoot, ['expo-camera', 'zod']);
 
-    expect(classifyInstallImpactAsync).toHaveBeenCalledWith(projectRoot, ['expo-camera', 'zod']);
+    expect(classifyInstallImpactAsync).toHaveBeenCalledWith(projectRoot, ['expo-camera', 'zod'], {
+      fingerprintAcrossInstallAsync: undefined,
+    });
     const lines = printed(Log.log).split('\n');
     expect(lines.filter((line) => line.includes('expo-camera'))).toHaveLength(1);
     expect(lines.filter((line) => line.includes('zod'))).toHaveLength(1);

@@ -95,6 +95,16 @@ export interface InstallImpactReport {
   /** What must rerun after installing this package. */
   action: 'none' | 'reload' | 'prebuild-and-build' | 'native-sync';
   reasons: string[];
+  /**
+   * What the project fingerprint did across this install. Set only for a native module in a
+   * project that builds its own runtime, and only when both hashes were measured.
+   */
+  fingerprint?: 'changed' | 'unchanged';
+  /**
+   * Whether the last recorded build was made from the post-install fingerprint. Absent without a
+   * record. `stale` keeps the build action even when `fingerprint` is `unchanged`.
+   */
+  lastBuild?: 'current' | 'stale';
 }
 
 /** Rough duration class, for plan-with-cost display. Never a precise estimate. */

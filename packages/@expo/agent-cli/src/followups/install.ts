@@ -21,8 +21,8 @@ export interface InstallFollowUpInput {
  * What to do after an install: rebuild or reload, and read the skill of what was installed.
  *
  * The rebuild warning covers both ways the running app can be unable to load a native module: a
- * project targeting Expo Go, which has no build of its own, and a development build made before
- * the module existed. Either way the answer is the same command.
+ * project targeting Expo Go, which has no build of its own, and a development build whose
+ * fingerprint the install moved. Either way the answer is the same command.
  */
 export function buildInstallFollowUps({
   reports,
@@ -37,10 +37,13 @@ export function buildInstallFollowUps({
 
   if (rebuild.length) {
     const names = rebuild.map((report) => report.packageName).join(', ');
+    const cause = rebuild.some((report) => report.fingerprint === 'changed')
+      ? `This install changed the project fingerprint, so the app that is running now cannot load ${names}`
+      : `The app that is running now cannot load ${names}, which changed the native surface`;
     followups.push({
       id: 'dev',
       command: devCommand(hostPlatform()),
-      why: `The app that is running now cannot load ${names}, which changed the native surface: this plans and makes the development build that can.`,
+      why: `${cause}: this plans and makes the development build that can.`,
     });
   } else {
     // The command named here used to be `runtime:errors`, which reloads nothing — so the sentence
@@ -91,11 +94,19 @@ export function buildInstallFollowUps({
  * already carries it**. That reason stops holding the moment the project builds a runtime of its
  * own, which is what an agent needs to know and what the shorter sentence hid.
  *
- * A native package can only reach this rung by being bundled into the runtime the project targets
- * (`resolveAction`: `expoGoBundled && targetsExpoGo`), so Expo Go can be named rather than hedged.
- * A set that mixes both kinds says only what is true of the set.
+ * A native package reaches this rung in two ways (llp/0011 §`reload` has three reasons): the
+ * project fingerprint did not move across the install, or the package is bundled into the Expo Go
+ * runtime the project targets (`resolveAction`: `expoGoBundled && targetsExpoGo`). Each sentence
+ * names its own fact. A set that mixes kinds says only what is true of the set.
  */
 function reloadReason(reports: InstallImpactReport[]): string {
+  const linked = reports.filter((report) => report.fingerprint === 'unchanged');
+  if (linked.length) {
+    const names = linked.map((report) => report.packageName).join(', ');
+    return linked.every((report) => report.lastBuild === 'current')
+      ? `The project fingerprint matches the last recorded build, so that build already has the native code of ${names}: reloading the app is enough — no rebuild.`
+      : `Installing ${names} did not change the project fingerprint, so this install added no native code: reloading the app is enough. "${PROGRAM_PREFIX} status" says whether the installed build is current.`;
+  }
   const bundled = reports.filter((report) => report.impact !== 'js-only');
   if (!bundled.length) {
     return 'Only JavaScript changed, so reloading the app is enough to pick the package up — no rebuild.';

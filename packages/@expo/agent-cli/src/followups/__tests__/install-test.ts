@@ -102,6 +102,44 @@ describe(buildInstallFollowUps, () => {
     expect(followups[0]!.why).not.toContain('Only JavaScript changed');
   });
 
+  // @ref llp/0011-impact-and-freshness.rfc.md §`reload` has three reasons
+  it.each([
+    { lastBuild: 'current' as const, sentence: 'matches the last recorded build' },
+    { lastBuild: undefined, sentence: 'did not change the project fingerprint' },
+  ])(
+    `should say why a reload is enough for an already linked native module (lastBuild: $lastBuild)`,
+    ({ lastBuild, sentence }) => {
+      const followups = buildInstallFollowUps({
+        reports: [
+          report({
+            packageName: 'expo-file-system',
+            impact: 'native-module',
+            action: 'reload',
+            fingerprint: 'unchanged',
+            lastBuild,
+          }),
+        ],
+        packagesWithSkills: [],
+      });
+
+      expect(ids(followups)).toEqual(['reload-app', 'typecheck']);
+      expect(followups[0]!.why).toContain('expo-file-system');
+      expect(followups[0]!.why).toContain(sentence);
+      expect(followups[0]!.why).not.toContain('Expo Go');
+    }
+  );
+
+  it(`should say the fingerprint moved when that is why the build is needed`, () => {
+    const followups = buildInstallFollowUps({
+      reports: [
+        report({ impact: 'native-module', action: 'prebuild-and-build', fingerprint: 'changed' }),
+      ],
+      packagesWithSkills: [],
+    });
+
+    expect(followups[0]!.why).toContain('changed the project fingerprint');
+  });
+
   it(`should keep the JavaScript-only sentence for a package that ships no native code`, () => {
     const followups = buildInstallFollowUps({
       reports: [report()],

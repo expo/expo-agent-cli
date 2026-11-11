@@ -106,6 +106,7 @@ describe(installAsync, () => {
 
     expect(reportInstallImpactAsync).toHaveBeenCalledWith(projectRoot, ['expo-sqlite'], {
       silent: false,
+      fingerprintBefore: null,
     });
   });
 
@@ -114,6 +115,7 @@ describe(installAsync, () => {
 
     expect(reportInstallImpactAsync).toHaveBeenCalledWith(projectRoot, ['expo-sqlite'], {
       silent: false,
+      fingerprintBefore: null,
     });
     expect(autoSyncSkillsAsync).not.toHaveBeenCalled();
   });
@@ -238,6 +240,7 @@ describe(installAsync, () => {
       // prints them not to.
       expect(reportInstallImpactAsync).toHaveBeenCalledWith(projectRoot, ['expo-sqlite'], {
         silent: true,
+        fingerprintBefore: null,
       });
       expect(autoSyncSkillsAsync).toHaveBeenCalledWith(
         projectRoot,

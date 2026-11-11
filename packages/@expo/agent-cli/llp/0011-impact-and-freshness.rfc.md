@@ -18,16 +18,17 @@ There is no `@expo/agent-cli impact` command. The classifier is the engine under
 
 `src/project/impact.ts` classifies one package, asking "what must rerun after installing this?". `src/impact/` classifies one change. They are the same question at two scales. The module paths are what tell them apart. `classifyInstallImpactAsync` was left where it is rather than renamed, because it is referenced by name from `install`, from the plan engine, and from [[0004-smart-start-and-project-state]].
 
-## `reload` has two reasons
+## `reload` has three reasons
 
-`classifyInstallImpactAsync` reaches `action: 'reload'` down two different paths (`resolveAction` in `src/project/impact.ts`):
+`classifyInstallImpactAsync` reaches `action: 'reload'` down three different paths (`src/project/impact.ts`):
 
 1. `impact === 'js-only'`. Nothing native was added, so the native runtime is unchanged.
 2. `expoGoBundled && targetsExpoGo`. Something native was added, and the runtime the project targets already contains it.
+3. `fingerprint === 'unchanged'` and no recorded build is stale. Something native was named, and the project that builds its own runtime already linked it ([[0004-smart-start-and-project-state]] §Sub-features).
 
 The classification was always right. The sentence beside it used to be one string: "Only JavaScript changed...". Reason 2 is conditional on the runtime. Reason 1 is not. The moment that project gains `expo-dev-client` or a native directory, `targetsExpoGo` goes false and the same package needs a build.
 
-`reloadReason` in `src/followups/install.ts` words the rung from the reports it was already given: the js-only sentence when nothing native was added, and "Expo Go already carries `<packages>`, so no rebuild is needed for it... A project that builds its own runtime would need a new build." when something was. A set that mixes both says only what is true of the set. No new input. `impact` and `expoGoBundled` are on every report.
+`reloadReason` in `src/followups/install.ts` words the rung from the reports it was already given: the js-only sentence when nothing native was added, and "Expo Go already carries `<packages>`, so no rebuild is needed for it... A project that builds its own runtime would need a new build." when something was. Reason 3 has its own sentence: the fingerprint matches the last recorded build, or the install added no native code and `status` says whether the build is current. A set that mixes kinds says only what is true of the set. `impact` and `expoGoBundled` are on every report; `fingerprint` and `lastBuild` only where they were measured.
 
 ## What the vocabulary actually is
 

@@ -3,6 +3,8 @@ import { buildInstallFollowUps, followUpsEnabled, reportFollowUps } from '../fol
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
 import { dependenciesMissingSync, dependenciesNotInstalledError } from '../project/expoApp';
+import { generateFingerprintAsync } from '../project/fingerprint';
+import { resolveRuntimeTargetAsync } from '../project/impact';
 import type { InstallImpactReport } from '../project/types';
 import {
   autoSyncSkillsAsync,
@@ -40,6 +42,13 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
   if (dependenciesMissing && plan.expoArgs.length > 0) {
     throw dependenciesNotInstalledError('nothing was installed or checked');
   }
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Sub-features — measured before the install
+  // changes node_modules, so the impact report can compare the native surface after it. Only a
+  // project that builds its own runtime can use the answer, so Expo Go pays nothing.
+  const fingerprintBefore =
+    !dependenciesMissing && plan.impact && !plan.check && plan.packages.length > 0
+      ? await fingerprintBeforeInstallAsync(projectRoot)
+      : null;
   const { exitCode, checkPayload, checkOutput } = dependenciesMissing
     ? {
         exitCode: await runBareInstallAsync(projectRoot, plan.json),
@@ -61,7 +70,10 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Sub-features
   const impact = plan.impact
-    ? await reportInstallImpactAsync(projectRoot, plan.packages, { silent: plan.json })
+    ? await reportInstallImpactAsync(projectRoot, plan.packages, {
+        silent: plan.json,
+        fingerprintBefore,
+      })
     : [];
 
   if (plan.syncScope !== 'none') {
@@ -224,4 +236,12 @@ async function reportAsync(
   }
 
   reportFollowUps('install', followups, { json: plan.json });
+}
+
+/** The hash before the install, from the cache when it is current: a stale one can only read as "changed", the safe direction. */
+async function fingerprintBeforeInstallAsync(projectRoot: string): Promise<string | null> {
+  if ((await resolveRuntimeTargetAsync(projectRoot)).targetsExpoGo) {
+    return null;
+  }
+  return (await generateFingerprintAsync(projectRoot)).hash;
 }

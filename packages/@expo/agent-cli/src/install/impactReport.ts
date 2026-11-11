@@ -3,7 +3,9 @@ import chalk from 'chalk';
 
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
-import { classifyInstallImpactAsync } from '../project/impact';
+import { readLastBuildRecord } from '../plan/lastBuild';
+import { generateFingerprintAsync } from '../project/fingerprint';
+import { classifyInstallImpactAsync, type FingerprintAcrossInstall } from '../project/impact';
 import type { InstallImpact, InstallImpactReport } from '../project/types';
 import { event } from './events';
 
@@ -31,16 +33,22 @@ const ACTION_LABELS: Record<InstallImpactReport['action'], string> = {
  * @param silent The caller owns stdout, e.g. it prints one JSON object (`--json`), so the lines
  * are left out. The event and the returned classifications are unchanged — the report travels in
  * that object instead.
+ * @param fingerprintBefore The project fingerprint measured before `expo install`, or null. With
+ * it, a native module needs a build only when the fingerprint moved or the recorded build is stale.
  * @returns the classifications, which the follow-up builder reads (llp/0009), or an empty list
  * when there was nothing to classify or the classification failed.
  */
 export async function reportInstallImpactAsync(
   projectRoot: string,
   packageNames: string[],
-  { silent }: { silent?: boolean } = {}
+  { silent, fingerprintBefore = null }: { silent?: boolean; fingerprintBefore?: string | null } = {}
 ): Promise<InstallImpactReport[]> {
   try {
-    const reports = await classifyInstallImpactAsync(projectRoot, packageNames);
+    const reports = await classifyInstallImpactAsync(projectRoot, packageNames, {
+      fingerprintAcrossInstallAsync: fingerprintBefore
+        ? () => measureAfterInstallAsync(projectRoot, fingerprintBefore)
+        : undefined,
+    });
     if (!reports.length) {
       return [];
     }
@@ -68,4 +76,22 @@ export async function reportInstallImpactAsync(
     }
     return [];
   }
+}
+
+/**
+ * The post-install side is a measurement, never a cached answer: "unchanged" is what lets the
+ * caller skip a build, and a wrong "unchanged" crashes the app on a native module it lacks.
+ */
+async function measureAfterInstallAsync(
+  projectRoot: string,
+  before: string
+): Promise<FingerprintAcrossInstall | null> {
+  const after = (await generateFingerprintAsync(projectRoot, { cache: false })).hash;
+  if (!after) {
+    return null;
+  }
+  const lastBuildHashes = Object.values(readLastBuildRecord(projectRoot)).map(
+    (entry) => entry.hash
+  );
+  return { before, after, lastBuildHashes };
 }

@@ -343,6 +343,19 @@ new dev build. Bare native dirs mean pod install or gradle sync. The classifier 
 `src/project/impact.ts`. The change classifier (what a working-tree diff costs) is
 [[0011-impact-and-freshness]].
 
+The package list cannot say whether a native module is already in the build: autolinking
+links every native module in the dependency graph, so a package that another dependency
+brought in is linked before it is named in `package.json`. The fingerprint can. In a project
+that builds its own runtime, `install` measures the project fingerprint before and after the
+install. For a native module without a config plugin, an unchanged fingerprint means a reload,
+unless a recorded build was made from another fingerprint; a changed fingerprint keeps the
+build. A config plugin stays a build: the hash does not see a plugin until the app config
+lists it. A project on Expo Go measures nothing. The real `@expo/fingerprint` 0.21.9 behaves
+this way: `expo install expo-file-system`, which `expo` 58.0.5 already depends on, left the
+hash unchanged, and `expo install expo-haptics` moved it [observed, 2026-11-11]. Enforced by
+`e2e/__tests__/install-impact-test.ts` and the fingerprint table in
+`src/project/__tests__/impact-test.ts`.
+
 ## Status
 
 `@expo/agent-cli status` is a `git status`-like overview: one fast, read-only command
