@@ -604,6 +604,12 @@ run killed before its dev server reported left no record, so nothing is its orph
 Reading the record changes nothing; `dev:stop` removes a record whose port answers for
 another process, another project, or not at all.
 
+There is one record per project. A later run that does not stop the orphan (its stop failed,
+`start` never looks for one, or its proof ran out of time) and serves elsewhere writes its own
+record over the orphan's, and that orphan is then anyone's server: `--force` stops it. Refusing
+to start beside an orphan, and one record per port, were considered and rejected: the case is
+rare, and losing the proof can only spare a server, never stop the wrong one.
+
 `dev:stop`, with no `--port` or with the record's port, stops an untracked server without
 `--force`: the pid match is the proof `--force` would ask for, so it signals that pid and
 reports `untracked: true` and `forced: false`.
