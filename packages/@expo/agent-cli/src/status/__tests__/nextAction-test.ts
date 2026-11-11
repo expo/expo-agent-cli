@@ -1,4 +1,5 @@
-import type { LastDevRequest } from '../../dev/lastRequest';
+import { startupRequestFrom } from '../../dev/startupRequest';
+import { resolveDevOptions } from '../../dev/resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import type { BindingSummary } from '../../deviceBinding/summary';
 import { decideStartPlan } from '../../plan/decide';
@@ -77,13 +78,17 @@ function binding(overrides: Partial<BindingSummary>): BindingSummary {
 const expired = '2026-01-01T00:00:00.000Z';
 const own = lockInfo();
 const easLock = (platform: 'ios' | 'android') => lockInfo({ easPlatform: platform });
-const androidRequest: LastDevRequest = {
-  platform: 'android',
-  port: 19082,
-  device: 'emulator-5556',
-  buildBackend: 'local',
-  runTarget: 'dev-build',
-};
+const androidRequest = startupRequestFrom(
+  resolveDevOptions([
+    '--android',
+    '--port',
+    '19082',
+    '--device',
+    'emulator-5556',
+    '--local',
+    '--dev-client',
+  ])
+);
 const dev = `${PROGRAM_PREFIX} dev`;
 const easWhy = (platform: string) =>
   `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`;
@@ -297,7 +302,7 @@ describe(chooseNextAction, () => {
         platform: undefined,
         devServer: noApp,
         ownLock: easLock('android'),
-        request: { platform: 'ios', port: null, buildBackend: null, runTarget: null },
+        request: startupRequestFrom(resolveDevOptions(['--ios'])),
       },
       command: `${dev}:stop && ${dev} --android --eas --port 8081 --detach --wait-ready`,
       why: easWhy('android'),
@@ -431,7 +436,7 @@ describe(chooseNextAction, () => {
     {
       name: "keeps the plan's next for web",
       facts: { platform: 'web' },
-      command: `${dev} --web --port 8081`,
+      command: `${dev} --web --port 8081 --detach --wait-ready`,
       why: null,
     },
     {
@@ -439,9 +444,11 @@ describe(chooseNextAction, () => {
       facts: {
         platform: undefined,
         devServerUrl: null,
-        request: { platform: 'web', port: 19006, buildBackend: 'local', runTarget: 'expo-go' },
+        request: startupRequestFrom(
+          resolveDevOptions(['--web', '--port', '19006', '--local', '--go'])
+        ),
       },
-      command: `${dev} --web --local --go --port 19006`,
+      command: `${dev} --web --local --go --port 19006 --detach --wait-ready`,
       why: null,
     },
     {
@@ -467,15 +474,12 @@ describe(chooseNextAction, () => {
         platform: undefined,
         devServerUrl: null,
         request: {
-          platform: 'ios',
-          port: 19083,
+          ...startupRequestFrom(resolveDevOptions(['--ios', '--eas', '--port', '19083'])),
           device: 'SIM-1',
-          buildBackend: 'eas',
-          runTarget: null,
         },
         deviceBackend: 'eas',
       },
-      command: `${dev} --ios --eas --port 19083 --detach --wait-ready`,
+      command: `${dev} --ios --eas --port 19083 --tunnel --detach --wait-ready`,
       why: null,
     },
     {

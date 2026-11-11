@@ -3,6 +3,7 @@ import { vol } from 'memfs';
 
 import { readLastDevRequest, recordLastDevRequest } from '../lastRequest';
 import { resolveDevOptions } from '../resolveOptions';
+import { startupRequestFrom } from '../startupRequest';
 
 const root = '/project';
 const file = `${root}/.expo/agent-cli-last-dev.json`;
@@ -11,36 +12,23 @@ beforeEach(() => {
   vol.fromJSON({ [`${root}/package.json`]: '{}' });
 });
 
-it('retains only the parsed recovery choices from a real invocation', () => {
-  recordLastDevRequest(
-    root,
-    resolveDevOptions([
-      '--android',
-      '--port',
-      '19082',
-      '--local',
-      '--dev-client',
-      '--device',
-      'emulator-5556',
-      '--detach',
-      '--json',
-    ])
-  );
-  expect(readLastDevRequest(root)).toEqual({
-    platform: 'android',
-    port: 19082,
-    device: 'emulator-5556',
-    buildBackend: 'local',
-    runTarget: 'dev-build',
-  });
-  expect(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8'))).sort()).toEqual([
-    'buildBackend',
-    'device',
-    'platform',
-    'port',
-    'runTarget',
-    'version',
+it('stores the accepted canonical request without observer-only choices', () => {
+  const options = resolveDevOptions([
+    '--android',
+    '--port',
+    '19082',
+    '--local',
+    '--dev-client',
+    '--tunnel',
+    '--device',
+    'emulator-5556',
+    '--detach',
+    '--json',
   ]);
+  const request = startupRequestFrom(options);
+  recordLastDevRequest(root, options, request);
+  expect(readLastDevRequest(root)).toEqual(request);
+  expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 2, request });
 });
 
 it('does not write a dry run or erase the preceding real request', () => {

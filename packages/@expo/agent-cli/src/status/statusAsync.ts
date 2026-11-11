@@ -404,13 +404,14 @@ export async function collectStatusReportAsync(
     });
     // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — where `dev` would put
     // the app, read once: the plan reports it, and a device on EAS needs no local binding.
-    const deviceBackend = configuredDeviceBackend(projectRoot, request, platform);
+    const scopedRequest = request?.platform === platform ? request : null;
+    const deviceBackend = configuredDeviceBackend(projectRoot, scopedRequest, platform);
     const plan = await attemptPlanAsync(
       projectRoot,
       state,
       record,
       { ...options, platform },
-      request,
+      scopedRequest,
       deviceBackend,
       readBuildsOnceAsync
     );
@@ -570,14 +571,15 @@ function configuredDeviceBackend(
 ): DeviceBackend {
   const { readAgentCliSettings, resolveDeviceBackend } =
     require('../settings') as typeof import('../settings');
+  if (request?.platform === platform) return request.deviceBackend;
   try {
     return resolveDeviceBackend(
-      request?.buildBackend ?? null,
+      request?.build === 'auto' ? null : (request?.build ?? null),
       readAgentCliSettings(projectRoot).settings,
       platform
     );
   } catch {
-    return request?.buildBackend === 'eas' ? 'eas' : 'local';
+    return request?.deviceBackend ?? 'local';
   }
 }
 
@@ -597,8 +599,8 @@ async function attemptPlanAsync(
       await resolveStartPlanAsync(projectRoot, state, {
         platform: options.platform ?? resolveDefaultPlatform(state),
         lastBuild,
-        requestedBackend: request?.buildBackend,
-        requestedTarget: request?.runTarget,
+        requestedBackend: request?.build === 'auto' ? null : request?.build,
+        requestedTarget: request?.target === 'auto' ? null : request?.target,
         deviceBackend,
         lookUpEasBuild: async (root, platform) => {
           const builds = await readBuildsAsync();
@@ -655,11 +657,11 @@ async function probeDevServerStatusAsync(
 ): Promise<DevServerStatus> {
   const timeoutMs = options.devServerTimeoutMs ?? DEV_SERVER_PROBE_TIMEOUT_MS;
   const own =
-    options.devServerUrl == null && request?.port != null
+    options.devServerUrl == null && typeof request?.port === 'number'
       ? await readDevServerLockAsync(projectRoot, { timeoutMs })
       : null;
   const inferredUrl =
-    own?.url ?? (request?.port != null ? `http://127.0.0.1:${request.port}` : null);
+    own?.url ?? (typeof request?.port === 'number' ? `http://127.0.0.1:${request.port}` : null);
   const url = options.devServerUrl ?? inferredUrl;
   const giveUp = new AbortController();
   let bestCandidate: DevServerDiscovery | null = null;

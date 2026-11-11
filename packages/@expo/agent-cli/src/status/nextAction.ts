@@ -10,7 +10,7 @@ import { RUN_PHASE } from '../dev/runPhase';
 import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevicePlatform } from '../deviceBinding/types';
 import type { LastBuildRecord } from '../plan/lastBuild';
-import { rerunDevCommand } from '../plan/rerun';
+import { recoveryRequestFor, recoveryStartCommand } from '../dev/recoveryRequest';
 import type { DeviceBackend, NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -99,7 +99,7 @@ export function resolveNextTarget({
   const requestedPort =
     devServerUrl != null
       ? loopbackPortOfUrl(devServerUrl)
-      : (ownServer?.port ?? request?.port ?? null);
+      : (ownServer?.port ?? (typeof request?.port === 'number' ? request.port : null));
   // A selected address is a preference, not permission to take another project's port.
   const recoveryPort =
     devServer?.projectRootMatched === false && requestedPort === loopbackPortOfUrl(devServer.url)
@@ -197,12 +197,9 @@ export function chooseNextAction({
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
   const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
   const eas = !!(easServer || expiredSession);
-  const { devArgs, devCommand } = devRerun(platform, request, port, devNext, eas);
+  const devCommand = devRerun(platform, request, port, devNext, eas);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
-    next.command =
-      platform === 'web'
-        ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
-        : devCommand;
+    next.command = devCommand;
   // An unfinished session start is observed; rebinding after it finishes needs a deliberate restart.
   const pendingSession =
     easServer?.easPlatform && host.childStartsSession(easServer, easServer.easPlatform);
@@ -327,19 +324,13 @@ function devRerun(
   recoveryPort: number | null,
   devNext: NextActionStatus,
   eas: boolean
-): { backend: string | null; devArgs: string[]; devCommand: string } {
-  const backend = eas
-    ? 'eas'
-    : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-  const devArgs = [
-    ...(backend ? [`--${backend}`] : []),
-    ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-    ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
-  ];
-  const devCommand = rerunDevCommand(
-    platform,
-    devArgs,
-    backend === 'eas' ? undefined : request?.device
+): string {
+  const implicitEas =
+    devNext.buildLocation?.runsOn === 'eas' && devNext.buildLocation.selection?.implicit;
+  return recoveryStartCommand(
+    recoveryRequestFor(platform, request, {
+      port: recoveryPort,
+      deviceBackend: eas || implicitEas ? 'eas' : 'local',
+    })
   );
-  return { backend, devArgs, devCommand };
 }
