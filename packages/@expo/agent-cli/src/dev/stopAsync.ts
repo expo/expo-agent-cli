@@ -46,18 +46,19 @@ import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { devCommand, hostPlatform } from '../smoke/suggest';
 import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
-import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { env } from '../utils/env';
-import { windowsTaskkillCommand } from '../utils/windowsShim';
 import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { debugEvent, event } from './events';
+import {
+  isPortFreeAsync,
+  POLL_INTERVAL_MS,
+  signalAndWaitAsync,
+  signalProcessAsync,
+} from './processStop';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
 import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
 import type { DevStopOptions } from './resolveStopOptions';
-
-/** How often to re-check whether the dev server has gone. */
-const POLL_INTERVAL_MS = 150;
 
 /**
  * Why a dev server was not stopped.
@@ -441,26 +442,12 @@ async function stopUnlockedDevServerAsync(
 
   // @ref llp/0005 §Stopping the app — both proofs, or nothing is killed.
   if (options.force && isDevServer && listener != null && looksLikeDevServerProcess(listener)) {
-    const sent = await signalProcessAsync(listener.pid, options.signal);
-    base.signal = sent.delivered ? options.signal : null;
     // The pid, again, rather than the port. `--force` proved *this process* was the dev server on
     // the port, so this process going away is what "forced" means; a port that keeps answering
     // afterwards is a second listener, and reporting a failed kill for it would be a lie about the
     // one thing this command did do.
-    const outcome = await waitForForcedStopAsync(listener.pid, port, options.timeoutMs);
-    base.waitedMs = Date.now() - startedAt;
-    base.processStillRunning = !outcome.processGone;
-    base.portStillAnswering = !outcome.portFree;
-    if (outcome.processGone) {
-      base.stopped = true;
-      base.forced = true;
-      base.reason = null;
-      base.detail = null;
-      return base;
-    }
-    base.reason = 'still-running';
-    base.detail = `${options.signal} was sent to ${listener.pid}, and that process was still running ${options.timeoutMs}ms later`;
-    return base;
+    const outcome = await signalAndWaitAsync(listener.pid, port, options, startedAt);
+    return { ...base, ...outcome, forced: outcome.stopped };
   }
 
   base.reason = 'foreign-dev-server';
@@ -504,39 +491,6 @@ function lockElsewhereClause(lock: DevServerLockInfo | null): string {
   return lock == null
     ? ''
     : `. This project's own dev-server lock is on port ${lock.port} (pid ${lock.pid}), which is not the port this run named — nothing there was signalled`;
-}
-
-/**
- * Send a signal to a pid, without letting a delivery failure become an exception.
- *
- * On Windows `process.kill` maps every signal onto an immediate terminate, and it reaches only the
- * process named — a dev server started through a batch shim has its bundler in a child that would
- * survive. `taskkill /T` covers the tree, so that is what is used there. It is best effort and
- * untested on that platform, which is why the result says whether the call was made rather than
- * whether it worked.
- */
-export async function signalProcessAsync(
-  pid: number,
-  signal: NodeJS.Signals
-): Promise<{ delivered: boolean; error?: string }> {
-  if (process.platform === 'win32') {
-    const result = await spawnCaptureAsync(
-      windowsTaskkillCommand(),
-      ['/PID', String(pid), '/T', '/F'],
-      {
-        timeoutMs: 5000,
-      }
-    );
-    return result.spawnError
-      ? { delivered: false, error: result.spawnError.message }
-      : { delivered: result.exitCode === 0, error: result.stderr.trim() || undefined };
-  }
-  try {
-    process.kill(pid, signal);
-    return { delivered: true };
-  } catch (error: unknown) {
-    return { delivered: false, error: error instanceof Error ? error.message : String(error) };
-  }
 }
 
 /** What the three checks said the last time they were asked. */
@@ -588,25 +542,6 @@ async function waitForStopAsync(lock: DevServerLockInfo, timeoutMs: number): Pro
   }
 }
 
-/** Poll until the pid `--force` signalled has gone, or the budget runs out. */
-async function waitForForcedStopAsync(
-  pid: number,
-  port: number,
-  timeoutMs: number
-): Promise<{ processGone: boolean; portFree: boolean }> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const processGone = !isProcessAlive(pid);
-    if (processGone) {
-      return { processGone, portFree: await isPortFreeAsync(port) };
-    }
-    if (Date.now() + POLL_INTERVAL_MS >= deadline) {
-      return { processGone, portFree: await isPortFreeAsync(port) };
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-  }
-}
-
 /**
  * Wait until the finishing run of `lock` says its EAS open returned, or lets go of its lock.
  *
@@ -652,19 +587,6 @@ function sessionPendingExplanation(report: DevStopResultJson): string {
     `Why: the run's dev server is gone, and the run binds the session its start returns. That start is still running, and the session bills from its start.`,
     `How: run "${PROGRAM_PREFIX} dev:stop --eas" again. It waits for the start again and stops the session.`,
   ].join('\n');
-}
-
-/** Whether nothing listens on the port: a refused connection, not a slow answer. */
-async function isPortFreeAsync(port: number): Promise<boolean> {
-  try {
-    await fetch(`http://127.0.0.1:${port}/status`, {
-      signal: AbortSignal.timeout(400),
-    });
-    return false;
-  } catch (error: unknown) {
-    // A listener that does not answer in time is still a listener.
-    return !(error instanceof Error && error.name === 'TimeoutError');
-  }
 }
 
 /**

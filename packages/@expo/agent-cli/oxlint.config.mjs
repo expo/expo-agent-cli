@@ -4,7 +4,7 @@ const codeLines = { skipBlankLines: true, skipComments: true };
 // Lower a cap when a file shrinks; delete the entry when it is under 800.
 const longFiles = {
   'src/dev/detachAsync.ts': 997,
-  'src/dev/devAsync.ts': 1083,
+  'src/dev/devAsync.ts': 990,
 };
 
 // Known debt: files that hold a function over the 100-line limit and have room under 800. The
