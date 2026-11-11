@@ -5,46 +5,51 @@ import type { ResolvedDevServerPort } from './port';
 import type { DevServerLockInfo } from './types';
 
 /** The run's EAS open: not started, running, or returned (bound or failed). */
-export type OpenState = 'none' | 'running' | 'returned';
+export type EasOpen = 'none' | 'running' | 'returned';
+
+/** Where the lock points: the last `published` port, or the port Metro reported since. */
+export interface LockPort {
+  port: number;
+  source: ResolvedDevServerPort['source'];
+  since: number;
+  easPlatform: DevServerLockInfo['easPlatform'];
+}
+
+/** A state in which the run holds the lock; its phase is the one the lock answers. */
+export type HeldRunState = LockPort &
+  (
+    | { phase: 'building' | 'serving'; easOpen: EasOpen }
+    /** Metro exited while the EAS open runs. */
+    | { phase: 'finishing'; easOpen: 'running' }
+  );
 
 export type RunState =
   /** The run holds no lock: before the take, after a foreign port, or when the take failed. */
-  | { phase: 'unlocked'; open: OpenState }
+  | { phase: 'unlocked'; easOpen: EasOpen }
   | HeldRunState
   /** The run ended and let go of its lock. Nothing moves it again. */
   | { phase: 'released' };
 
-/** A state in which the run holds the lock; its phase is the one the lock answers. */
-export type HeldRunState =
-  | { phase: 'building' | 'serving'; open: OpenState }
-  /** Metro exited while the open runs. */
-  | { phase: 'finishing'; open: 'running' };
-
 export type RunEvent =
   /** The run holds a lock for a step: the take before a build, a dev-server spawn, a port retry. */
-  | {
-      type: 'published';
-      phase: 'building' | 'serving';
-      port: number;
-      source: ResolvedDevServerPort['source'];
-      since: number;
-      easPlatform: DevServerLockInfo['easPlatform'];
-    }
+  | ({ type: 'published'; phase: 'building' | 'serving' } & LockPort)
   /** The step's only port to name is another project's dev server. */
   | { type: 'foreign-port' }
   /** Metro reported the port it listens on. */
   | { type: 'port-reported'; port: number }
   /** `/status` answers for this project while the step runs. */
   | { type: 'status-answered' }
-  | { type: 'open-started' }
-  | { type: 'open-returned' }
-  /** The dev-server step's child exited. */
+  | { type: 'eas-open-started' }
+  | { type: 'eas-open-returned' }
+  /** The dev-server step's child exited, and its port watch ended. */
   | { type: 'server-exited' }
   | { type: 'run-ended' };
 
-/** The next state, or `illegal` for a pair no caller should produce. */
-export type RunTransition = { state: RunState } | { illegal: true };
+export function isHeld(state: RunState): state is HeldRunState {
+  return state.phase !== 'unlocked' && state.phase !== 'released';
+}
 
-export function nextRunState(_state: RunState, _event: RunEvent): RunTransition {
+/** The next state, or null for an illegal pair: one that no caller should produce. */
+export function nextRunState(_state: RunState, _event: RunEvent): RunState | null {
   throw new Error('not implemented');
 }

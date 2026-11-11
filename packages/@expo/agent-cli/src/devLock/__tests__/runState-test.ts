@@ -1,61 +1,85 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — every cell of the table.
 
-import { nextRunState, type OpenState, type RunEvent, type RunState } from '../runState';
+import {
+  nextRunState,
+  type EasOpen,
+  type LockPort,
+  type RunEvent,
+  type RunState,
+} from '../runState';
 
-const published = (phase: 'building' | 'serving'): RunEvent => ({
-  type: 'published',
-  phase,
-  port: 8081,
-  source: 'arg',
-  since: 0,
-  easPlatform: null,
-});
+/** Where a held state points before the event. */
+const HELD_AT: LockPort = { port: 8081, source: 'arg', since: 1, easPlatform: null };
+/** Where a `published` points. */
+const PUBLISHED_AT: LockPort = { port: 9000, source: 'default', since: 2, easPlatform: 'ios' };
 
-const EVENTS: [string, RunEvent][] = [
-  ['published building', published('building')],
-  ['published serving', published('serving')],
-  ['foreign-port', { type: 'foreign-port' }],
-  ['port-reported', { type: 'port-reported', port: 8082 }],
-  ['status-answered', { type: 'status-answered' }],
-  ['open-started', { type: 'open-started' }],
-  ['open-returned', { type: 'open-returned' }],
-  ['server-exited', { type: 'server-exited' }],
-  ['run-ended', { type: 'run-ended' }],
+/** A state as a cell names it: phase and EAS open, or `released`. */
+type Cell = ['unlocked' | 'building' | 'serving', EasOpen] | ['finishing', 'running'] | 'released';
+type Next = Cell | 'illegal';
+const u = (easOpen: EasOpen): Cell => ['unlocked', easOpen];
+const b = (easOpen: EasOpen): Cell => ['building', easOpen];
+const s = (easOpen: EasOpen): Cell => ['serving', easOpen];
+const f: Cell = ['finishing', 'running'];
+const R: Cell = 'released';
+const X: Next = 'illegal';
+
+/** Where the lock points after each event: the event's port, Metro's report, or unchanged. */
+type PortAfter = 'published' | 'reported' | 'kept';
+const EVENTS: [string, RunEvent, PortAfter][] = [
+  ['published building', { type: 'published', phase: 'building', ...PUBLISHED_AT }, 'published'],
+  ['published serving', { type: 'published', phase: 'serving', ...PUBLISHED_AT }, 'published'],
+  ['foreign-port', { type: 'foreign-port' }, 'kept'],
+  ['port-reported', { type: 'port-reported', port: 8082 }, 'reported'],
+  ['status-answered', { type: 'status-answered' }, 'kept'],
+  ['eas-open-started', { type: 'eas-open-started' }, 'kept'],
+  ['eas-open-returned', { type: 'eas-open-returned' }, 'kept'],
+  ['server-exited', { type: 'server-exited' }, 'kept'],
+  ['run-ended', { type: 'run-ended' }, 'kept'],
 ];
 
-/** `phase/open`, `released`, or `illegal`. */
-type Cell = string;
+function state(next: Cell, at: LockPort = HELD_AT): RunState {
+  if (next === 'released') return { phase: 'released' };
+  const [phase, easOpen] = next;
+  if (phase === 'unlocked') return { phase, easOpen };
+  return phase === 'finishing' ? { phase, easOpen: 'running', ...at } : { phase, easOpen, ...at };
+}
+
+const PORT_AFTER: Record<PortAfter, LockPort> = {
+  published: PUBLISHED_AT,
+  reported: { ...HELD_AT, port: 8082, source: 'reported' },
+  kept: HELD_AT,
+};
 
 // One row per state, one column per event in the order of EVENTS.
 // oxfmt-ignore
-const TABLE: Record<string, Cell[]> = {
-  'unlocked/none':     ['building/none',     'serving/none',     'unlocked/none',     'unlocked/none',     'unlocked/none',     'unlocked/running', 'illegal',           'unlocked/none',     'released'],
-  'unlocked/running':  ['building/running',  'serving/running',  'unlocked/running',  'unlocked/running',  'unlocked/running',  'illegal',          'unlocked/returned', 'unlocked/running',  'released'],
-  'unlocked/returned': ['building/returned', 'serving/returned', 'unlocked/returned', 'unlocked/returned', 'unlocked/returned', 'illegal',          'illegal',           'unlocked/returned', 'released'],
-  'building/none':     ['building/none',     'serving/none',     'unlocked/none',     'building/none',     'serving/none',      'building/running', 'illegal',           'building/none',     'released'],
-  'building/running':  ['building/running',  'serving/running',  'unlocked/running',  'building/running',  'serving/running',   'illegal',          'building/returned', 'finishing/running', 'released'],
-  'building/returned': ['building/returned', 'serving/returned', 'unlocked/returned', 'building/returned', 'serving/returned',  'illegal',          'illegal',           'released',          'released'],
-  'serving/none':      ['building/none',     'serving/none',     'unlocked/none',     'serving/none',      'serving/none',      'serving/running',  'illegal',           'serving/none',      'released'],
-  'serving/running':   ['building/running',  'serving/running',  'unlocked/running',  'serving/running',   'serving/running',   'illegal',          'serving/returned',  'finishing/running', 'released'],
-  'serving/returned':  ['building/returned', 'serving/returned', 'unlocked/returned', 'serving/returned',  'serving/returned',  'illegal',          'illegal',           'released',          'released'],
-  'finishing/running': ['illegal',           'illegal',          'illegal',           'finishing/running', 'finishing/running', 'illegal',          'released',          'illegal',           'released'],
-  released:            ['illegal',           'illegal',          'released',          'released',          'released',          'released',         'released',          'released',          'released'],
-};
+const TABLE: [Cell, Next[]][] = [
+  [u('none'),     [b('none'),     s('none'),     u('none'),     u('none'),     u('none'),     u('running'), X,              u('none'),     R]],
+  [u('running'),  [b('running'),  s('running'),  u('running'),  u('running'),  u('running'),  X,            u('returned'),  u('running'),  R]],
+  [u('returned'), [b('returned'), s('returned'), u('returned'), u('returned'), u('returned'), X,            X,              u('returned'), R]],
+  [b('none'),     [b('none'),     s('none'),     u('none'),     b('none'),     s('none'),     b('running'), X,              b('none'),     R]],
+  [b('running'),  [b('running'),  s('running'),  u('running'),  b('running'),  s('running'),  X,            b('returned'),  f,             R]],
+  [b('returned'), [b('returned'), s('returned'), u('returned'), b('returned'), s('returned'), X,            X,              R,             R]],
+  [s('none'),     [b('none'),     s('none'),     u('none'),     s('none'),     s('none'),     s('running'), X,              s('none'),     R]],
+  [s('running'),  [b('running'),  s('running'),  u('running'),  s('running'),  s('running'),  X,            s('returned'),  f,             R]],
+  [s('returned'), [b('returned'), s('returned'), u('returned'), s('returned'), s('returned'), X,            X,              R,             R]],
+  [f,             [X,             X,             X,             f,             f,             X,            R,              X,             R]],
+  [R,             [X,             X,             R,             R,             R,             R,            R,              R,             R]],
+];
 
-function parse(cell: Cell): RunState {
-  if (cell === 'released') return { phase: 'released' };
-  const [phase, open] = cell.split('/') as [RunState['phase'], OpenState];
-  return { phase, open } as RunState;
-}
-
-const CASES = Object.entries(TABLE).flatMap(([state, row]) =>
-  EVENTS.map(([name, event], column) => ({ state, name, event, expected: row[column]! }))
+const CASES = TABLE.flatMap(([from, row]) =>
+  EVENTS.map(([name, event, portAfter], column) => {
+    const next = row[column]!;
+    return {
+      from: state(from),
+      name,
+      event,
+      expected: next === 'illegal' ? null : state(next, PORT_AFTER[portAfter]),
+    };
+  })
 );
 
 describe(nextRunState, () => {
-  it.each(CASES)(`$state × $name → $expected`, ({ state, event, expected }) => {
-    expect(nextRunState(parse(state), event)).toEqual(
-      expected === 'illegal' ? { illegal: true } : { state: parse(expected) }
-    );
+  it.each(CASES)(`$from.phase/$from.easOpen × $name`, ({ from, event, expected }) => {
+    expect(nextRunState(from, event)).toEqual(expected);
   });
 });

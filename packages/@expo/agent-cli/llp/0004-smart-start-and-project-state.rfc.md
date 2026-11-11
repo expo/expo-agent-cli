@@ -482,27 +482,40 @@ in every output mode. A reader treats a line without `phase` as `serving`. A loc
 
 Transitions. One writer changes the run's lock, and one table decides each change. The
 run's state is the phase it answers, `unlocked` (it holds no lock: before the take, after
-a foreign port, or when the take failed), or `released`. Beside it the run keeps its EAS
-open: `none`, `running` or `returned`.
+a foreign port, or when the take failed), or `released`. Beside the phase the run keeps
+its EAS open (`none`, `running`, `returned`) and, while it holds the lock, the port the
+lock names. A cell names the phase and the EAS open after the event.
 
-| state \ event | published(p) | foreign port      | Metro reports a port | `/status` answers | open starts  | open returns  | Metro exits                                                    | run ends |
-| ------------- | ------------ | ----------------- | -------------------- | ----------------- | ------------ | ------------- | -------------------------------------------------------------- | -------- |
-| unlocked      | p            | unlocked          | unlocked             | unlocked          | open running | open returned | unlocked                                                       | released |
-| building      | p            | unlocked, release | building, new port   | serving           | open running | open returned | open running: `finishing`; returned: released; none: unchanged | released |
-| serving       | p            | unlocked, release | serving, new port    | serving           | open running | open returned | as `building`                                                  | released |
-| finishing     | illegal      | illegal           | finishing            | finishing         | illegal      | released      | illegal                                                        | released |
-| released      | illegal      | released          | released             | released          | released     | released      | released                                                       | released |
+| state \ event      | published(p) | foreign port      | Metro reports a port | `/status` answers | EAS open starts   | EAS open returns   | Metro exits        | run ends |
+| ------------------ | ------------ | ----------------- | -------------------- | ----------------- | ----------------- | ------------------ | ------------------ | -------- |
+| unlocked, none     | p, none      | unchanged         | unchanged            | unchanged         | unlocked, running | illegal            | unchanged          | released |
+| unlocked, running  | p, running   | unchanged         | unchanged            | unchanged         | illegal           | unlocked, returned | unchanged          | released |
+| unlocked, returned | p, returned  | unchanged         | unchanged            | unchanged         | illegal           | illegal            | unchanged          | released |
+| building, none     | p, none      | unlocked, release | new port             | serving, none     | building, running | illegal            | unchanged          | released |
+| building, running  | p, running   | unlocked, release | new port             | serving, running  | illegal           | building, returned | finishing, running | released |
+| building, returned | p, returned  | unlocked, release | new port             | serving, returned | illegal           | illegal            | released           | released |
+| serving, none      | p, none      | unlocked, release | new port             | unchanged         | serving, running  | illegal            | unchanged          | released |
+| serving, running   | p, running   | unlocked, release | new port             | unchanged         | illegal           | serving, returned  | finishing, running | released |
+| serving, returned  | p, returned  | unlocked, release | new port             | unchanged         | illegal           | illegal            | released           | released |
+| finishing, running | illegal      | illegal           | new port             | unchanged         | illegal           | released           | illegal            | released |
+| released           | illegal      | unchanged         | unchanged            | unchanged         | unchanged         | unchanged          | unchanged          | released |
 
-`published` is the take before a build step, a dev-server spawn, or a busy-port retry, with
-the step's phase, port and spawn time. It is legal whatever the open does: the open can
-start on Metro's report before a named port that another project holds is published. A
-run whose open started makes no busy-port retry; the run, not the table, keeps that rule.
-An open starts once per run and returns only after it started; any other open event is
-illegal. When Metro exits and no open started, the lock keeps its phase, because a
-busy-port retry may follow on the same lock, and the run releases it when it ends. A
-`released` run ignores late reports. An illegal pair changes nothing and is reported on
-the debug event stream as `cli:dev_lock_illegal_transition`; the lock is never the reason
-a run fails. Test: runState-test, one case per cell.
+`published` is the take before a build step, a dev-server spawn, or a busy-port retry,
+with the step's phase, port, spawn time and EAS platform; the lock then names that port.
+When Metro reports a port, a held lock names it, with `portReported`. `published` is legal
+whatever the EAS open does: the open can start on Metro's report before a named port that
+another project holds is published. An EAS open starts once per run and returns only
+after it started; any other open event is illegal. When Metro exits with no EAS open
+started, the lock keeps its phase, because a busy-port retry may follow on the same lock,
+and the run releases it when it ends. Metro's exit is said after the step's port watch
+ends, so no event of a step lands after it. A `released` run ignores late reports. An
+illegal pair changes nothing and is reported on the debug event stream as
+`cli:dev_lock_illegal_transition`; the lock is never the reason a run fails. Test:
+runState-test, one case per cell.
+
+A run makes no busy-port retry after any open starts, local or on EAS. The run keeps that
+rule, because the table sees only the EAS open: a local open has no exit work, and the
+lock must not say `finishing` for it.
 
 What each reader does with the phase:
 
