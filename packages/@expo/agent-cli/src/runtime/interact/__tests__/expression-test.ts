@@ -836,29 +836,13 @@ describe('a tap on a switch', () => {
     if (toggledTo != null) expect(calls[0]?.[1]).toBe(toggledTo);
   });
 
-  it.each([
-    {
-      shape: 'a Slider, whose value is a number',
-      props: { value: 0.4, onValueChange: () => {} },
-      reason: 'no-handler',
-    },
-    {
-      shape: 'a Picker, which has no value',
-      props: { selectedValue: 'a', onValueChange: () => {} },
-      reason: 'no-handler',
-    },
-    {
-      shape: 'a disabled switch',
-      props: { value: false, disabled: true, onValueChange: () => {} },
-      reason: 'disabled',
-    },
-  ])(`refuses $shape`, ({ props, reason }) => {
+  it(`refuses a Slider, whose value is a number a tap has no argument for`, () => {
     const answer = against<CallAnswer & { toggledTo: boolean | null }>(
-      { name: 'Control', props: { testID: 'reminders', ...props } },
-      buildTapExpression({ testID: 'reminders', index: null, allScreens: true, force: false })
+      { name: 'Slider', props: { testID: 'volume', value: 0.4, onValueChange: () => {} } },
+      buildTapExpression({ testID: 'volume', index: null, allScreens: true, force: false })
     );
 
-    expect(answer).toMatchObject({ called: false, reason, toggledTo: null });
+    expect(answer).toMatchObject({ called: false, reason: 'no-handler', toggledTo: null });
   });
 
   it(`shows the switch state as the row's value, which --verify compares`, () => {

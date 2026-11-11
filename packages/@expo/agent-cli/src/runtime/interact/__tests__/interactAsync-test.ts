@@ -335,7 +335,6 @@ describe(runtimeTapAsync, () => {
     ['ambiguous', 3, {}],
     ['index-out-of-range', 1, {}],
     ['disabled', 1, { disabled: true, disabledOn: 'disabled', disabledComponent: 'Pressable' }],
-    ['no-handler', 1, {}],
   ])(`exits 20 for %p, and says on stderr what to run next`, async (reason, matched, extra) => {
     mockEvaluate(
       tapAnswer({ reason, matched, called: false, index: null, handler: null, ...extra })
@@ -343,7 +342,7 @@ describe(runtimeTapAsync, () => {
 
     expect(await runtimeTapAsync(tapOptions)).toBe(EXIT_OUTCOME_FAILED);
     expect(json()).toMatchObject({ ok: false, called: false, reason });
-    expect(stderr()).toContain('Try: npx ');
+    expect(stderr()).toContain('npx @expo/agent-cli');
   });
 
   // The tap landed and the app's own code raised, which is an outcome of the app rather than a

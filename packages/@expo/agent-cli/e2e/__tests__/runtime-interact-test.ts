@@ -452,10 +452,7 @@ describe('a tap on a switch', () => {
       nodeCount: 1,
     });
 
-  it.each([
-    { form: 'the positional', args: ['reminders'] },
-    { form: '--testID', args: ['--testID', 'reminders'] },
-  ])(`toggles it named by $form, and --verify reports the changed value`, async ({ args }) => {
+  it(`toggles it, by --testID or by the positional, and --verify reports the changed value`, async () => {
     let walks = 0;
     const devServer = await startStubDevServerAsync({
       targets: [EXPO_GO_TARGET],
@@ -465,18 +462,18 @@ describe('a tap on a switch', () => {
         }
         if (expression.includes('var FULL =')) {
           walks += 1;
-          return switchRow(walks > 1);
+          return switchRow(walks % 2 === 0);
         }
         return undefined;
       },
     });
+    const tapArgs = ['--verify', '--dev-server-url', devServer.url];
     try {
       const json = await executeAgentCliAsync(projectRoot, [
         'runtime:tap',
-        ...args,
-        '--verify',
-        '--dev-server-url',
-        devServer.url,
+        '--testID',
+        'reminders',
+        ...tapArgs,
         '--json',
       ]);
       expect(json.exitCode).toBe(0);
@@ -491,16 +488,50 @@ describe('a tap on a switch', () => {
         },
       });
 
-      walks = 0;
       const text = await executeAgentCliAsync(projectRoot, [
         'runtime:tap',
-        ...args,
-        '--verify',
-        '--dev-server-url',
-        devServer.url,
+        'reminders',
+        ...tapArgs,
       ]);
       expect(text.stdout).toContain('Toggled reminders: called onValueChange(true)');
       expect(text.stdout).toContain('~ reminders: value false -> true');
+    } finally {
+      await devServer.close();
+    }
+  });
+
+  it(`is offered as the tap after a tree, and a slider is not`, async () => {
+    const devServer = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      inspectorEvaluate: responder({
+        tree: treeAnswer({
+          nodes: [
+            node({
+              component: 'Slider',
+              testID: 'volume',
+              handlers: ['onValueChange'],
+              value: null,
+            }),
+            node({
+              component: 'Switch',
+              testID: 'reminders',
+              handlers: ['onValueChange'],
+              value: false,
+            }),
+          ],
+          nodeCount: 2,
+        }),
+      }),
+    });
+    try {
+      const result = await executeAgentCliAsync(projectRoot, [
+        'runtime:tree',
+        '--dev-server-url',
+        devServer.url,
+      ]);
+
+      expect(result.stdout).toContain('npx @expo/agent-cli runtime:tap reminders --verify');
+      expect(result.stdout).not.toContain('runtime:tap volume');
     } finally {
       await devServer.close();
     }

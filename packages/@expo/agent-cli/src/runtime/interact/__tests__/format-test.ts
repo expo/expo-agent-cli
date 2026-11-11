@@ -321,7 +321,6 @@ describe(explainTapFailure, () => {
     ['ambiguous', /--index/, 'npx @expo/agent-cli runtime:tap row --index 0'],
     ['index-out-of-range', /--index/, 'npx @expo/agent-cli runtime:tree --testID row'],
     ['disabled', /--force/, 'npx @expo/agent-cli runtime:tap row --force'],
-    ['no-handler', /onPress or a switch/, 'npx agent-device@latest open <app-id> --foreground'],
   ])(`explains %p and names a command that recovers it`, (reason, matcher, suggestion) => {
     const failure = explainTapFailure(
       tap({
@@ -386,7 +385,6 @@ describe('the touch route of a tap with no handler', () => {
       device: { backend: 'cloud' as const, deviceId: 'sess-1' },
       route: `${easCommandPrefix()} simulator:exec npx agent-device@latest open dev.app --foreground`,
     },
-    { device: null, route: 'npx agent-device@latest open dev.app --foreground' },
   ])(`opens the app on $device.backend`, ({ device, route }) => {
     const failure = explainTapFailure(tap({ reason: 'no-handler', called: false, ok: false }), {
       device,

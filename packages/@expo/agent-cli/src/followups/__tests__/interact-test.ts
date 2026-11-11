@@ -62,21 +62,14 @@ describe(buildTreeFollowUps, () => {
     expect(commands(followups)[0]).toBe('npx @expo/agent-cli runtime:tree --all');
   });
 
-  // @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it.
-  it.each([
-    { element: 'a button', node: { handlers: ['onPress'] }, tapped: true },
-    { element: 'a switch', node: { handlers: ['onValueChange'], value: false }, tapped: true },
-    { element: 'a slider', node: { handlers: ['onValueChange'], value: null }, tapped: false },
-  ])(`offers a tap on $element a --testID run was about: $tapped`, ({ node, tapped }) => {
+  it(`taps the element a --testID run was about`, () => {
     const followups = buildTreeFollowUps({
-      nodes: [{ testID: 'inc-btn', disabled: false, ...node }],
+      nodes: [{ testID: 'inc-btn', handlers: ['onPress'], disabled: false }],
       testID: 'inc-btn',
       platform: null,
     });
 
-    expect(commands(followups).includes('npx @expo/agent-cli runtime:tap inc-btn --verify')).toBe(
-      tapped
-    );
+    expect(commands(followups)[0]).toBe('npx @expo/agent-cli runtime:tap inc-btn --verify');
   });
 
   it(`quotes a testID a shell would split`, () => {
