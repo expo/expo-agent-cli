@@ -206,7 +206,7 @@ export async function devDetachAsync(
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that builds is
   // reported at once, with the port its dev server will take, and nothing is waited for.
   const reportBuildingRunAsync = async (lock: DevServerLockInfo, logFile: string) =>
-    reportDetached(projectRoot, options, {
+    reportDetached(options, {
       lock,
       eas: detachEas(projectRoot, options),
       ready: null,
