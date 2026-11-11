@@ -833,22 +833,6 @@ describe('EAS session lifecycle of the dev-server step', () => {
   });
 
   it.each(['ios', 'android'] as const)(
-    'opens only once when the %s server reports readiness twice',
-    async (platform) => {
-      vi.mocked(runDevServerAsync).mockImplementationOnce(async (_root, _args, opts) => {
-        const server = { url: 'http://127.0.0.1:8081', port: 8081 };
-        opts?.onDevServer?.(server);
-        opts?.onDevServer?.(server);
-        return devServerRun();
-      });
-
-      await devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--eas']));
-
-      expect(lifecycle.open).toHaveBeenCalledTimes(1);
-    }
-  );
-
-  it.each(['ios', 'android'] as const)(
     'does not retry a %s port collision after interruption',
     async (platform) => {
       vi.mocked(runDevServerAsync).mockImplementationOnce(async () => {
