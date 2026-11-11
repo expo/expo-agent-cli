@@ -12,7 +12,7 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
-import { readEndedDevRun } from '../dev/untrackedDevServer';
+import { findUntrackedDevServerAsync } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
 import { deletedWorktreeSessions } from '../deviceBinding/reap';
@@ -415,7 +415,7 @@ export async function collectStatusReportAsync(
     );
     if (
       report.devServer &&
-      leftByKilledRun(projectRoot, ownLock, report.devServer) &&
+      (await leftByKilledRunAsync(projectRoot, ownLock, report.devServer)) &&
       startedSession(sessions.cloud, platform)
     ) {
       report.devServer.ownerEnded = true;
@@ -870,16 +870,17 @@ async function raceWithTimeoutAsync<T>(work: Promise<T>, timeoutMs: number): Pro
 
 /**
  * Whether the running dev server is the one a killed run of this project left: no lock answers,
- * its `/status` names this project, and the run record of a dead run names its port. The rule
- * `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`), read from what status already probed.
+ * and the rule `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`) finds it on this port. The
+ * rule's reads run only when a dead run's record is there.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
  */
-function leftByKilledRun(
+async function leftByKilledRunAsync(
   projectRoot: string,
   ownLock: DevServerLockInfo | null,
   devServer: DevServerStatus
-): boolean {
+): Promise<boolean> {
   if (ownLock || !devServer.running || devServer.projectRootMatched !== true) return false;
-  return readEndedDevRun(projectRoot)?.port === Number(new URL(devServer.url).port);
+  const untracked = await findUntrackedDevServerAsync(projectRoot);
+  return untracked?.port === Number(new URL(devServer.url).port);
 }
