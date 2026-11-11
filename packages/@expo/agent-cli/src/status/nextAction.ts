@@ -251,10 +251,7 @@ export function chooseNextAction({
 }
 
 /** The live cloud binding this CLI started for `platform`, else any it started; null for none. */
-export function startedSession(
-  cloud: BindingSummary[],
-  platform: PlanPlatform
-): BindingSummary | null {
+function startedSession(cloud: BindingSummary[], platform: PlanPlatform): BindingSummary | null {
   const started = cloud.filter((entry) => entry.origin === 'started');
   return started.find((entry) => entry.platform === platform) ?? started[0] ?? null;
 }

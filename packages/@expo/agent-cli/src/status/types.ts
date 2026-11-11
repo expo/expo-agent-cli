@@ -319,9 +319,9 @@ export interface DevServerStatus {
    */
   projectRootMatched: boolean | null;
   /**
-   * True when this dev server is the one a killed `dev --eas` left (no lock, its run record
-   * outlived the run, its `/status` names this project) and that run's started cloud binding is
-   * live. Nothing owns the server; `dev:stop --eas` stops both.
+   * True when this dev server is the one a killed run left: no lock answers, the run's record
+   * outlived it, the listener is the pid that run saw, and its `/status` names this project.
+   * Nothing owns it. Beside a session that run started, `next` is `dev:stop --eas`.
    *
    * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
    */

@@ -12,7 +12,7 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
-import { findUntrackedDevServerAsync } from '../dev/untrackedDevServer';
+import { judgeEndedRunAsync } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
 import { deletedWorktreeSessions } from '../deviceBinding/reap';
@@ -61,7 +61,7 @@ import {
 } from './freshness';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync, withCloudSessions } from './installed';
-import { chooseNextAction, cloudBindings, resolveNextTarget, startedSession } from './nextAction';
+import { chooseNextAction, cloudBindings, resolveNextTarget } from './nextAction';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -413,11 +413,7 @@ export async function collectStatusReportAsync(
       deviceBackend,
       readBuildsOnceAsync
     );
-    if (
-      report.devServer &&
-      (await leftByKilledRunAsync(projectRoot, ownLock, report.devServer)) &&
-      startedSession(sessions.cloud, platform)
-    ) {
+    if (report.devServer && (await leftByKilledRunAsync(projectRoot, ownLock, report.devServer))) {
       report.devServer.ownerEnded = true;
     }
     report.next = chooseNextAction({
@@ -870,8 +866,8 @@ async function raceWithTimeoutAsync<T>(work: Promise<T>, timeoutMs: number): Pro
 
 /**
  * Whether the running dev server is the one a killed run of this project left: no lock answers,
- * and the rule `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`) finds it on this port. The
- * rule's reads run only when a dead run's record is there.
+ * and the rule `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`) names it on this port. The
+ * rule only reads, and its reads run only when a dead run's record is there.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
  */
@@ -881,6 +877,6 @@ async function leftByKilledRunAsync(
   devServer: DevServerStatus
 ): Promise<boolean> {
   if (ownLock || !devServer.running || devServer.projectRootMatched !== true) return false;
-  const untracked = await findUntrackedDevServerAsync(projectRoot);
-  return untracked?.port === Number(new URL(devServer.url).port);
+  const verdict = await judgeEndedRunAsync(projectRoot);
+  return verdict?.kind === 'orphan' && verdict.server.port === Number(new URL(devServer.url).port);
 }
