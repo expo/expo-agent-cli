@@ -8,6 +8,7 @@ import path from 'path';
 
 import { lockAddressFor } from '../address';
 import { probeDevServerLockAsync, readDevServerLockAsync } from '../client';
+import { readDevRunRecord, writeDevRunRecord } from '../runRecord';
 import { acquireDevServerLockAsync } from '../server';
 import type { DevServerLockInfo } from '../types';
 import { cleanupTempProjects, makeTempProject as makeProjectRoot } from './tempProject';
@@ -100,6 +101,58 @@ describe('dev server lock', () => {
     expect(await probeDevServerLockAsync(lockAddressFor(projectRoot).address)).toEqual({
       connected: false,
       info: null,
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the trace a SIGKILL leaves.
+  describe('the run record', () => {
+    async function heldAsync(port: number) {
+      const projectRoot = makeProjectRoot();
+      const info = lockInfo(projectRoot, port);
+      const result = await acquireAsync(info);
+      if (result.status !== 'acquired') throw new Error(result.status);
+      return { projectRoot, info, lock: result.lock };
+    }
+
+    it(`names the holder, the port it answers for now, and that port's listener; nothing after release`, async () => {
+      const { projectRoot, info, lock } = await heldAsync(8091);
+      expect(readDevRunRecord(projectRoot)).toBeNull();
+
+      lock.update({ ...info, port: 8092, url: 'http://127.0.0.1:8092' });
+      // Found on the port the lock moved away from: not the listener of the port it names now.
+      lock.noteServerPid(8091, 776);
+      expect(readDevRunRecord(projectRoot)).toBeNull();
+      lock.noteServerPid(8092, 777);
+      expect(readDevRunRecord(projectRoot)).toEqual({
+        pid: process.pid,
+        port: 8092,
+        serverPid: 777,
+      });
+
+      lock.release();
+      lock.noteServerPid(8092, 778);
+      expect(readDevRunRecord(projectRoot)).toBeNull();
+    });
+
+    it.each([
+      ['its own record', 0, null],
+      ['a record a later holder wrote', 1, 'kept'],
+    ] as const)(`removes %s on release`, async (_, pidOffset, kept) => {
+      const { projectRoot, lock } = await heldAsync(8094);
+      lock.noteServerPid(8094, 777);
+      if (pidOffset) {
+        writeDevRunRecord(projectRoot, {
+          pid: process.pid + pidOffset,
+          port: 8094,
+          serverPid: 777,
+        });
+      }
+
+      lock.release();
+
+      expect(readDevRunRecord(projectRoot)?.pid ?? null).toBe(
+        kept ? process.pid + pidOffset : null
+      );
     });
   });
 

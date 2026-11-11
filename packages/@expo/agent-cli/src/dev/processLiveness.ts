@@ -6,6 +6,8 @@
 // file, and either can be true for a reason that has nothing to do with the process that was
 // signalled.
 
+import { spawnSync } from 'child_process';
+
 /**
  * Whether a pid names a process that exists.
  *
@@ -26,5 +28,24 @@ export function isProcessAlive(pid: number): boolean {
     return true;
   } catch (error: unknown) {
     return (error as NodeJS.ErrnoException | undefined)?.code === 'EPERM';
+  }
+}
+
+/**
+ * Whether a pid names a process that still runs: alive, and not a zombie. A killed process stays
+ * a zombie until its parent reaps it, and a harness that never reaps keeps it so; `kill -0` still
+ * succeeds for it. Asks `ps`, so only for a pid that should be gone.
+ */
+export function isProcessRunning(pid: number): boolean {
+  if (!isProcessAlive(pid)) return false;
+  if (process.platform === 'win32') return true;
+  try {
+    const { stdout } = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 2000,
+    });
+    return !stdout?.trim().startsWith('Z');
+  } catch {
+    return true;
   }
 }

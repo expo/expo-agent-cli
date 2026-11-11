@@ -150,8 +150,8 @@ async function startDevServer(
 
 // `dev:stop`'s own act, through `dev:stop`'s own function, with its report suppressed: this
 // run prints one report and the stop is a line in it. Everything that makes the stop safe is
-// that command's — it signals the pid the project's lock names and refuses a dev server no
-// lock answers for, so a cleanup can never take down something this run did not start.
+// that command's — it signals the pid the project's lock names, and with no lock only the dev
+// server a killed run of this project left, so a cleanup never takes down a server a person started.
 async function stopDevServer(
   ctx: SmokeDepsContext,
   server: DevServerState

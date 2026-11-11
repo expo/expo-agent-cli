@@ -1,7 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app
 // Signalling a process `dev:stop` has proved, and waiting for it to go. The pid is the evidence;
-// the port only rides along. The locked stop polls with these helpers; `--force` signals and waits
-// here.
+// the port only rides along. The locked stop polls with these helpers; the lock-less stops,
+// `--force` and the dev server a killed run left (`./untrackedDevServer`), signal and wait here.
 
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { windowsTaskkillCommand } from '../utils/windowsShim';
@@ -35,6 +35,18 @@ export async function signalAndWaitAsync(
   startedAt: number
 ): Promise<SignalOutcome> {
   const sent = await signalProcessAsync(pid, options.signal);
+  if (!sent.delivered && isProcessAlive(pid)) {
+    // Nothing reached it (another user's process, say), so waiting for it to go would only wait.
+    return {
+      stopped: false,
+      signal: null,
+      reason: 'still-running',
+      detail: `${options.signal} could not be sent to ${pid}${sent.error ? `: ${sent.error}` : ''}`,
+      processStillRunning: true,
+      portStillAnswering: !(await isPortFreeAsync(port)),
+      waitedMs: Date.now() - startedAt,
+    };
+  }
   const outcome = await waitForProcessGoneAsync(pid, port, options.timeoutMs);
   return {
     stopped: outcome.processGone,

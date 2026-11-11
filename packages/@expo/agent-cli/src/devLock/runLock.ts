@@ -54,6 +54,14 @@ export class RunLock {
     this.#commit(published);
   }
 
+  /**
+   * Record the pid found listening on `port` (`./runRecord`). Nothing when no lock is held, or
+   * when the lock answers for another port by now.
+   */
+  noteServerPid(port: number, serverPid: number): void {
+    this.#handle?.noteServerPid(port, serverPid);
+  }
+
   /** Every event but a take. */
   apply(runEvent: Exclude<RunEvent, Published>): void {
     this.#commit(runEvent);

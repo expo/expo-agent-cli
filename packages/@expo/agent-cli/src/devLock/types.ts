@@ -60,4 +60,9 @@ export interface DevServerLockHandle {
   readonly info: DevServerLockInfo;
   /** Answer every later connection with `info` instead. */
   update(info: DevServerLockInfo): void;
+  /**
+   * Record the pid found listening on `port`, so a killed run's dev server can be proved
+   * (`./runRecord`). Ignored when the lock answers for another port by now.
+   */
+  noteServerPid(port: number, serverPid: number): void;
 }

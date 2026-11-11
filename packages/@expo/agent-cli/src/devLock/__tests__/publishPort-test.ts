@@ -7,6 +7,7 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../client';
 import { publishDevServerPortAsync } from '../publishPort';
+import { readDevRunRecord } from '../runRecord';
 import { RunLock } from '../runLock';
 import { cleanupTempProjects, makeTempProject } from './tempProject';
 
@@ -197,6 +198,31 @@ describe(publishDevServerPortAsync, () => {
       port: 8303,
       portReported: true,
     });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the record a SIGKILL
+  // leaves names the listener also when the lookup answers before the lock is taken. A named port
+  // is the e2e "after a SIGKILL of a foreground dev" (`dev` always names one).
+  it(`records the pid listening on the reported port when the arguments name no port`, async () => {
+    const projectRoot = makeTempProject();
+    const published = publishDevServerPortAsync(projectRoot, ['start'], {
+      lock: runLockFor(projectRoot),
+      phase: 'serving',
+      since: Date.now(),
+      isRunning: () => true,
+      intervalMs: 10,
+      findListenerPid: async () => 777,
+    });
+
+    report(8310);
+    await published;
+
+    expect(
+      await eventuallyAsync(
+        async () => readDevRunRecord(projectRoot),
+        (record) => record != null
+      )
+    ).toEqual({ pid: process.pid, port: 8310, serverPid: 777 });
   });
 
   // A Metro of another project on `*:8081` answered the port a run fell back to, and the lock

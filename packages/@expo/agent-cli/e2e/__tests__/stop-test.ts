@@ -5,16 +5,23 @@
 // unit test cannot see: `dev:stop` signals a **real process**, and the property that matters is
 // that it signals the one the lock names and nothing else; `runtime:stop` runs a **real device
 // tool**, and the property that matters is the exact argv it hands it.
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
 import {
   executeAgentCliAsync,
+  freePortAsync,
   holdDevLockAsync,
+  readDevLockAsync,
+  readRunRecord,
   setupFixtureAsync,
+  spawnAgentCli,
   startStubDevServerAsync,
   stubExpoEnv,
+  waitForAsync,
+  waitForDevLockAsync,
 } from '../utils';
 import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
@@ -135,6 +142,7 @@ describe('@expo/agent-cli dev:stop', () => {
       'reason',
       'signal',
       'stopped',
+      'untracked',
       'url',
       'waitedMs',
     ]);
@@ -506,4 +514,203 @@ describe('@expo/agent-cli runtime:stop', () => {
     expect(result.all).toContain('runtime:stop');
     expect(result.all).toContain('dev:stop');
   });
+});
+
+/** The pid listening on `port`, by `lsof`. */
+function findPortListenerPid(port: number): number {
+  const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {
+    encoding: 'utf8',
+  });
+  return Number(out.trim().split('\n')[0]);
+}
+
+async function answersStatusAsync(port: number): Promise<boolean> {
+  try {
+    return (await fetch(`http://127.0.0.1:${port}/status`)).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A foreground `dev` whose CLI process gets SIGKILL. Its `expo start` child keeps serving the port
+ * with no lock. Only the CLI pid is signalled, never its process group.
+ */
+async function startOrphanedDevServerAsync(
+  projectRoot: string
+): Promise<{ port: number; cleanup(): void }> {
+  const port = await freePortAsync();
+  // A named port, as a person passes it: Metro reports its port only to the CLI that dies.
+  const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--port', String(port)], {
+    env: { STUB_EXPO_LISTEN: '1', STUB_EXPO_DELAY_MS: '120000' },
+  });
+  const cleanup = () => {
+    try {
+      process.kill(-child.pid!, 'SIGKILL');
+    } catch {
+      // The group is already gone.
+    }
+  };
+  try {
+    expect(await waitForDevLockAsync(projectRoot)).toMatchObject({ port, pid: child.pid });
+    // The run notes which process listens once Metro answers; a person's SIGKILL comes later.
+    await waitForAsync(() => readRunRecord(projectRoot) != null, 5000);
+    expect(readRunRecord(projectRoot)).toEqual({
+      version: 1,
+      pid: child.pid,
+      port,
+      serverPid: expect.any(Number),
+    });
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    process.kill(child.pid!, 'SIGKILL');
+    await exited;
+    expect(await readDevLockAsync(projectRoot)).toBeNull();
+    expect(await answersStatusAsync(port)).toBe(true);
+    return { port, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground dev', () => {
+  it.each([
+    ['with no flags', []],
+    ['with --port on its port', ['--port']],
+  ])(
+    'dev:stop stops the dev server it left with no lock, without --force, %s',
+    async (_, flags) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const orphan = await startOrphanedDevServerAsync(projectRoot);
+      const args = flags.flatMap((flag) => [flag, String(orphan.port)]);
+
+      try {
+        const result = await executeAgentCliAsync(projectRoot, ['dev:stop', ...args, '--json'], {
+          reject: false,
+        });
+
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          stopped: true,
+          port: orphan.port,
+          lockHeld: false,
+          forced: false,
+          untracked: true,
+          reason: null,
+          detail: null,
+          processStillRunning: false,
+          portStillAnswering: false,
+        });
+        expect(result.exitCode).toBe(0);
+        expect(await answersStatusAsync(orphan.port)).toBe(false);
+        expect(readRunRecord(projectRoot)).toBeNull();
+      } finally {
+        orphan.cleanup();
+      }
+    },
+    60_000
+  );
+
+  // A dev server a person started is never this project's orphan: no killed run left a record.
+  // A run that died with its own Metro (a closed terminal: the whole group goes) leaves its record.
+  // A person then starts Metro by hand on that port: another process, so not the run's orphan.
+  it('leaves a dev server started by hand running, as dev:stop and dev did before', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const { port, cleanup } = await startOrphanedDevServerAsync(projectRoot);
+    process.kill(findPortListenerPid(port), 'SIGKILL');
+    cleanup();
+    expect(await waitForAsync(async () => !(await answersStatusAsync(port)), 5000)).toBe(true);
+    expect(readRunRecord(projectRoot)).toMatchObject({ port });
+    const byHand = spawn(
+      process.execPath,
+      [path.join(projectRoot, 'node_modules/expo/bin/cli'), 'start', '--port', String(port)],
+      {
+        cwd: projectRoot,
+        // No agent-cli parent to report a port to, as for a person's own `expo start`.
+        env: {
+          ...process.env,
+          STUB_EXPO_LISTEN: '1',
+          STUB_EXPO_DELAY_MS: '120000',
+          STUB_EXPO_NO_PORT_REPORT: '1',
+        },
+        stdio: 'ignore',
+      }
+    );
+
+    try {
+      expect(await waitForAsync(() => answersStatusAsync(port), 5000)).toBe(true);
+      const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+        reject: false,
+      });
+      expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: false, reason: 'not-running' });
+      const named = await executeAgentCliAsync(
+        projectRoot,
+        ['dev:stop', '--port', String(port), '--json'],
+        { reject: false }
+      );
+      expect(JSON.parse(named.stdout)).toMatchObject({
+        stopped: false,
+        untracked: false,
+        reason: 'foreign-dev-server',
+      });
+      const dev = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--port', String(port), '--json'],
+        { env: stubExpoEnv(projectRoot), reject: false }
+      );
+      expect(JSON.parse(dev.stdout).error.code).toBe('PORT_IN_USE');
+      expect(await answersStatusAsync(port)).toBe(true);
+    } finally {
+      byHand.kill('SIGKILL');
+    }
+  }, 60_000);
+
+  // `npx expo start --localhost` listens on [::1] only, so a run's own Metro can take the same port
+  // on 127.0.0.1 beside it [observed — macOS]. Two listeners prove neither, so nothing is recorded.
+  it.skipIf(process.platform !== 'darwin')(
+    'never takes a hand-started dev server on [::1] for the run that served beside it',
+    async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const port = await freePortAsync();
+      const byHand = spawn(
+        process.execPath,
+        [
+          '-e',
+          `require('http').createServer((_, res) => {
+            res.writeHead(200, { 'X-React-Native-Project-Root': encodeURI(${JSON.stringify(projectRoot)}) });
+            res.end('packager-status:running');
+          }).listen(${port}, 'localhost');`,
+        ],
+        { stdio: 'ignore' }
+      );
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--port', String(port)], {
+        env: { STUB_EXPO_LISTEN: '1', STUB_EXPO_DELAY_MS: '120000' },
+      });
+
+      try {
+        expect(await waitForDevLockAsync(projectRoot, 30_000)).toMatchObject({ port });
+        expect(await waitForAsync(() => answersStatusAsync(port), 5000)).toBe(true);
+        // As long as a run notes its listener: a record would have landed by now.
+        await waitForAsync(() => readRunRecord(projectRoot) != null, 5000);
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        process.kill(child.pid!, 'SIGKILL');
+        await exited;
+
+        const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+          reject: false,
+        });
+
+        expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: false, untracked: false });
+        expect(() => process.kill(byHand.pid!, 0)).not.toThrow();
+      } finally {
+        try {
+          process.kill(-child.pid!, 'SIGKILL');
+        } catch {
+          // The group is already gone.
+        }
+        byHand.kill('SIGKILL');
+      }
+    },
+    60_000
+  );
 });
