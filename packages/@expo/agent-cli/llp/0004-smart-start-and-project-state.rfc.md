@@ -503,8 +503,9 @@ lock names. A cell names the phase and the EAS open after the event.
 `published` is the take before a build step, a dev-server spawn, or a busy-port retry,
 with the step's phase, port, spawn time and EAS platform; the lock then names that port.
 When Metro reports a port, a held lock names it, with `portReported`. `published` is legal
-whatever the EAS open does: the open can start on Metro's report before a named port that
-another project holds is published. An EAS open starts once per run and returns only
+whatever the EAS open does; no publish follows an open, because the run makes no
+busy-port retry after one (below). A step tells its caller a port only after the lock
+names it, so the caller's `/status` wait never answers a lock not yet taken. An EAS open starts once per run and returns only
 after it started; any other open event is illegal. When Metro exits with no EAS open
 started, the lock keeps its phase, because a busy-port retry may follow on the same lock,
 and the run releases it when it ends. Metro's exit is said after the step's port watch
