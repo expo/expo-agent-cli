@@ -455,7 +455,7 @@ async function stopUnlockedDevServerAsync(
   const base = unlockedReport(port, startedAt);
   if (port == null) {
     base.detail =
-      'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
+      'no dev-server lock answered for this project, and no dev server a killed run of this project left was found. Pass --port to inspect a specific port';
     return base;
   }
 
@@ -752,9 +752,17 @@ function printHumanReport(report: DevStopResultJson, finishing: boolean): void {
     );
   }
   const lines = [
-    chalk`{bold Stopped} ${report.stopped ? chalk.green('yes') : chalk.red('no')}${
-      report.forced ? chalk.dim(' · forced') : ''
-    }`,
+    !report.stopped && report.reason === 'not-running'
+      ? // Only a port that was looked at and found quiet shows that nothing runs; with no port, a
+        // server a person started may be up, and the line says what was checked.
+        chalk.dim(
+          report.portStillAnswering === false
+            ? 'Dev server not running'
+            : `No dev-server lock answered, and no dev server a killed run left was found · pass --port to check a port`
+        )
+      : chalk`{bold Stopped} ${report.stopped ? chalk.green('yes') : chalk.red('no')}${
+          report.forced ? chalk.dim(' · forced') : ''
+        }`,
   ];
   if (report.session) {
     lines.push(

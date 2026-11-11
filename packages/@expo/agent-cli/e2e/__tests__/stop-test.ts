@@ -151,7 +151,7 @@ describe('@expo/agent-cli dev:stop', () => {
 
   // @ref llp/0010-agent-conventions.rfc.md §Exit codes — the end state the caller asked for is
   // the state it is already in, so a second run must not read as a failure.
-  it('exits 0 when nothing was running', async () => {
+  it('exits 0 when nothing was running, and says so without a red "Stopped no"', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json']);
@@ -165,8 +165,21 @@ describe('@expo/agent-cli dev:stop', () => {
       // No lock and no port to look at: nothing was measured, and the way to name a port is the flag.
       processStillRunning: null,
       portStillAnswering: null,
-      detail: expect.stringContaining('--port'),
+      detail: expect.stringContaining('no dev server a killed run of this project left was found'),
     });
+
+    // No port was looked at: the line says what was checked, not that nothing runs.
+    const text = await executeAgentCliAsync(projectRoot, ['dev:stop']);
+    expect(text.exitCode).toBe(0);
+    expect(text.stdout).toContain('No dev-server lock answered');
+    expect(text.stdout).not.toContain('Stopped');
+    // A port that was looked at and is quiet is a dev server that is not running.
+    const quiet = await executeAgentCliAsync(projectRoot, [
+      'dev:stop',
+      '--port',
+      String(await freePortAsync()),
+    ]);
+    expect(quiet.stdout).toContain('Dev server not running');
   });
 
   // The one thing this command must not do by accident. A second project's dev server on the port
@@ -658,6 +671,10 @@ describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground d
         reject: false,
       });
       expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: false, reason: 'not-running' });
+      // No port was looked at, so the text claims nothing about the server that is up.
+      const stopText = await executeAgentCliAsync(projectRoot, ['dev:stop'], { reject: false });
+      expect(stopText.stdout).not.toContain('Dev server not running');
+      expect(stopText.stdout).toContain('pass --port');
       const named = await executeAgentCliAsync(
         projectRoot,
         ['dev:stop', '--port', String(port), '--json'],

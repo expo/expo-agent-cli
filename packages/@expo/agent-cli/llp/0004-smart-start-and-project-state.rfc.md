@@ -626,6 +626,8 @@ server running), and a server started by hand on a dead run's port that both com
 running. `src/devLock/__tests__/lock-test.ts` and
 `publishPort-test.ts` enforce the record's life.
 
+When no lock answers and no dev server a killed run left is found, the text report opens without a red `Stopped no`: with `--port` on a port where nothing listens, it says `Dev server not running`; with no `--port`, no port was looked at and a server a person started may be up, so it says what was checked and to pass `--port`. `--json` keeps `stopped: false` and `reason: 'not-running'`.
+
 When `status` finds the untracked dev server a killed run left (the rule above, which only reads), the dev-server line says that its CLI process ended and nothing owns it (`ownerEnded: true` in `--json`). When this worktree also has a live cloud binding of origin `started`, `next` is `dev:stop --eas`, which stops the server and the session; without one, `next` is what it is for any running server. A tracked server, or a server the rule does not name (one a person started), shows no such line. The e2e cases "dev:stop stops the dev server it left with no lock" in `e2e/__tests__/stop-test.ts` and "after a SIGKILL, status names dev:stop --eas" in `e2e/__tests__/dev-eas-test.ts`, and the `chooseNextAction` table, enforce it.
 
 Three flags are stripped from the child's command line. `--detach` would detach a
