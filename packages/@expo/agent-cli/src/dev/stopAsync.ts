@@ -240,18 +240,10 @@ export async function devStopAsync(
 ): Promise<number> {
   const startedAt = Date.now();
   if (options.discardRun != null) {
-    const removed = await discardDetachedRunAsync(projectRoot, options.discardRun);
-    const report = unlockedReport(null, startedAt);
-    report.discardedRun = removed ? options.discardRun : null;
-    report.reason = removed ? 'record-discarded' : 'not-running';
-    report.detail = `${removed ? 'Discarded' : 'No record remains for'} attempt ${options.discardRun}. No processes were stopped and no EAS sessions or devices were released.`;
-    Object.assign(report, { devices: [], reaped: [], deviceError: null });
-    onReport?.(report);
-    if (print) {
-      if (options.json) Log.log(JSON.stringify(report, null, 2));
-      else Log.log(report.detail);
-    }
-    return EXIT_OK;
+    return discardRunAsync(projectRoot, options.discardRun, startedAt, options, {
+      print,
+      onReport,
+    });
   }
   const lock = await readDevServerLockAsync(projectRoot);
 
@@ -361,6 +353,27 @@ export async function devStopAsync(
 }
 
 /** The ordinary path: a lock answers, so the pid to signal is known and so is what it owns. */
+async function discardRunAsync(
+  projectRoot: string,
+  id: string,
+  startedAt: number,
+  options: DevStopOptions,
+  { print = true, onReport }: DevStopReportOptions
+): Promise<number> {
+  const removed = await discardDetachedRunAsync(projectRoot, id);
+  const report = unlockedReport(null, startedAt);
+  report.discardedRun = removed ? id : null;
+  report.reason = removed ? 'record-discarded' : 'not-running';
+  report.detail = `${removed ? 'Discarded' : 'No record remains for'} attempt ${id}. No processes were stopped and no EAS sessions or devices were released.`;
+  Object.assign(report, { devices: [], reaped: [], deviceError: null });
+  onReport?.(report);
+  if (print) {
+    if (options.json) Log.log(JSON.stringify(report, null, 2));
+    else Log.log(report.detail);
+  }
+  return EXIT_OK;
+}
+
 async function stopLockedDevServerAsync(
   lock: DevServerLockInfo,
   options: DevStopOptions,
