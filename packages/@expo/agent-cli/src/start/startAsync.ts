@@ -154,8 +154,9 @@ export async function runDevServerAsync(
     const wanted = () => running && (phase === 'building' || !opened);
     void waitForOwnMetroAsync(() => serverAt(port ?? first).url, projectRoot, wanted).then(
       (answered) => {
-        if (!answered) return;
-        if (running) runLock.apply({ type: 'status-answered' });
+        // Metro that exited meanwhile has nothing to answer for or to open the app on.
+        if (!answered || !running) return;
+        runLock.apply({ type: 'status-answered' });
         open(serverAt(port ?? first));
       }
     );
@@ -186,7 +187,9 @@ export async function runDevServerAsync(
     onResolved: (resolved) => {
       port = resolved;
       if (resolved.source === 'reported') open(serverAt(resolved));
-      if (answers && !waiting && resolved.source !== 'default') waitForAnswer(resolved);
+      // A building step waits on any port: the answer must come from this project's Metro anyway.
+      const worthWaiting = resolved.source !== 'default' || phase === 'building';
+      if (answers && !waiting && worthWaiting) waitForAnswer(resolved);
     },
   });
 
