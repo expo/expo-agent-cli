@@ -85,7 +85,11 @@ import {
   resolvePlannedPortAsync,
   type PortCollision,
 } from './portCollision';
-import { planDevServerPortAsync, portDemandedError } from './devServerPort';
+import {
+  planDevServerPortAsync,
+  portDemandedError,
+  replaceUntrackedDevServerAsync,
+} from './devServerPort';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { devServerRunningStopAsync } from './runningDevServer';
 import { easCommandPrefix } from '../utils/easCli';
@@ -131,6 +135,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     });
   }
   recordLastDevRequest(projectRoot, options);
+  // Before the probe: the resolver's device step checks a named port, and a killed run's server holds it.
+  const claim = await replaceUntrackedDevServerAsync(projectRoot, lock, options);
 
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
@@ -178,7 +184,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // passed it [observed — friction run 7, F71; live run S5].
   const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
 
-  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options);
+  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options, claim);
   warnDroppedExpoArgs(plan, dropped);
 
   // A draft that builds is bound here, not in the resolver: after the port check above and the

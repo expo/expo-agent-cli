@@ -26,7 +26,8 @@ import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { isInteractive } from '../../utils/interactive';
 import { devAsync } from '../devAsync';
 import { findFreePortAsync, resolvePlannedPortAsync } from '../portCollision';
-import { findPortListenerAsync } from '../portListener';
+import { readDevRunRecord, writeDevRunRecord } from '../../devLock/runRecord';
+import { findPortListenerAsync, findPortListenersAsync } from '../portListener';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
@@ -117,6 +118,7 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
 vi.mock('../portListener', async () => ({
   ...(await vi.importActual<typeof import('../portListener')>('../portListener')),
   findPortListenerAsync: vi.fn(async () => null),
+  findPortListenersAsync: vi.fn(async () => []),
 }));
 vi.mock('../stopAsync', async () => ({
   ...(await vi.importActual<typeof import('../stopAsync')>('../stopAsync')),
@@ -340,6 +342,34 @@ describe(devAsync, () => {
 
       expect(followups.map((followup) => followup.id)).toContain('dev-server-port-unknown');
       expect(followups.map((followup) => followup.command)).not.toContain('exp://192.168.1.5:8081');
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — the dev server a killed run
+  // left is replaced, not joined by a second one on the next port.
+  describe('the dev server a killed run left', () => {
+    // The e2e "after a SIGKILL of a foreground dev" proves the run's stop; a plan stops nothing.
+    it(`should say under --plan that the run stops it and takes its port`, async () => {
+      mockStaleDevClientState();
+      // A run 4242 died and left its record; its listener 777 still serves this project.
+      vol.mkdirSync(projectRoot, { recursive: true });
+      writeDevRunRecord(projectRoot, { pid: 4242, port: 8081, serverPid: 777 });
+      vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+      });
+      vi.mocked(findPortListenersAsync).mockResolvedValueOnce([{ pid: 777, command: 'node' }]);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(null, { headers: { 'x-react-native-project-root': projectRoot } })
+      );
+
+      await devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']));
+
+      const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+      expect(plan.devServerPort).toEqual({ port: 8081, movedFrom: null, state: 'picked' });
+      expect(plan.reasons).toContain(
+        "This project's dev server on port 8081 (pid 777) has no lock: the run that started it was killed. The run stops it and takes port 8081."
+      );
+      expect(readDevRunRecord(projectRoot)).not.toBeNull();
     });
   });
 

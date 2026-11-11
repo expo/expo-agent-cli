@@ -9,6 +9,9 @@ import { CommandError } from '../utils/errors';
 /** How long to wait for the dev server to go, when `--timeout` says nothing. */
 export const DEFAULT_DEV_STOP_TIMEOUT_MS = 10_000;
 
+/** The signal `dev:stop` sends when `--signal` says nothing: it lets the dev server shut its bundler down. */
+export const DEFAULT_DEV_STOP_SIGNAL: NodeJS.Signals = 'SIGTERM';
+
 /**
  * Signals this command will send.
  *
@@ -79,7 +82,7 @@ export function resolveDevStopOptions(argv: string[]): DevStopOptions {
     });
   }
 
-  const signal = (args['--signal'] ?? 'SIGTERM') as NodeJS.Signals;
+  const signal = (args['--signal'] ?? DEFAULT_DEV_STOP_SIGNAL) as NodeJS.Signals;
   if (!DEV_STOP_SIGNALS.includes(signal)) {
     throw new CommandError(
       'BAD_ARGS',

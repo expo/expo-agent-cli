@@ -601,8 +601,8 @@ a pid names one process. So a dev server a person started (`npx expo start`) is 
 even on the port of a run that died with its own Metro (a closed terminal): `dev:stop`
 reports it and stops it only with `--force`, and `dev` moves to the next port, as before. A
 run killed before its dev server reported left no record, so nothing is its orphan.
-Reading the record changes nothing; `dev:stop` removes a record whose port answers for
-another process, another project, or not at all.
+Reading the record changes nothing; `dev:stop` and a `dev` run (not `--plan`, not `status`)
+remove a record whose port answers for another process, another project, or not at all.
 
 There is one record per project. A later run that does not stop the orphan (its stop failed,
 `start` never looks for one, or its proof ran out of time) and serves elsewhere writes its own
@@ -617,12 +617,12 @@ reports `untracked: true` and `forced: false`.
 | Server on the port                        | `dev:stop`                     | `dev`                                                   |
 | ----------------------------------------- | ------------------------------ | ------------------------------------------------------- |
 | a lock answers for it                     | stops it                       | stops on the lock                                       |
-| left by a killed run (record + `/status`) | stops it, `untracked: true`    | moves to the next port; `--port` on it is `PORT_IN_USE` |
+| left by a killed run (record + `/status`) | stops it, `untracked: true`    | stops it, takes its port                                |
 | any other, this project's root or not     | reports it; `--force` stops it | moves to the next port; `--port` on it is `PORT_IN_USE` |
 
 The e2e cases "after a SIGKILL of a foreground dev" in `e2e/__tests__/stop-test.ts` enforce
-the rows: the stop, and a server started by hand on a dead run's port that both commands
-leave running. `src/devLock/__tests__/lock-test.ts` and
+the three rows: the stop, the port the next `dev` takes, and a server started by hand on a
+dead run's port that both commands leave running. `src/devLock/__tests__/lock-test.ts` and
 `publishPort-test.ts` enforce the record's life.
 
 Three flags are stripped from the child's command line. `--detach` would detach a
@@ -806,6 +806,18 @@ app to whatever holds the port, and exits 0.
 
 A busy port with no live lock of this project behind it is busy whoever holds it, an
 `npx expo start` run outside this CLI included: the plan moves to the next free port.
+
+One exception: the untracked dev server a killed run of this project left (§Daemonization).
+Before the project is probed, a `dev` run reads the run record, stops that server by its
+pid, and takes its port. It is not reused, as a locked server is: no lock names its pid, so
+nothing can follow it, wait on it, or stop it, and its tunnel is not known. It is not left
+beside a second server either, because that is two servers for one project. Stopping it
+and taking its port is the nearest thing to the lock rule: one project, one dev server,
+held by a lock. A warning names the port and the pid. Under `--plan` nothing is stopped: a
+reason names the server and says the run stops it, and `devServerPort` is its port. When
+the stop fails and the run would take that port, the run stops with `UNTRACKED_DEV_SERVER`,
+exit 20, and recovers into `dev:stop --port <n> --signal SIGKILL`; a run that serves on
+another `--port` warns and goes on.
 
 A server on a port is this project's unless `/status` names another project root in the
 `X-React-Native-Project-Root` header. No header, or a root that contains this project (a
