@@ -266,10 +266,10 @@ This is preferred over the device path. It needs no platform tooling, no applica
 
 `--method auto` is one ladder, keyed on whether the command socket holds a client [confirmed, Kudo's delegate, 2026-08-27]:
 
-| rung | mechanism               | reached when                                                             |
-| ---- | ----------------------- | ------------------------------------------------------------------------ |
-| 1    | broadcast on `/message` | the socket holds a client                                                |
-| 2    | relaunch the app        | the socket holds none, or the broadcast was delivered and proved nothing |
+| rung | mechanism               | reached when                                                                                                                             |
+| ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | broadcast on `/message` | the socket holds a client                                                                                                                |
+| 2    | relaunch the app        | the socket holds none, or the broadcast was delivered and proved nothing, or its churn brought no fresh target and no bundle within 10 s |
 
 While the scope skips an app (§Target owner), rung 1 is not the broadcast. The dev server relays a broadcast to every app on its port, so it would reload the skipped app too. Rung 1 is then CDP `Page.reload` to each own target that has the `nativePageReloads` capability, and its proof is the new JavaScript context on that target (§What proves a reload). The `smoke` gate's reload is the same rung 1, and it ends on the same shared observations: after a rung 1 that reached an app and did not prove itself, `smoke` watches for a fresh target or a bundle that may count, as `runtime:reload` does, and it never relaunches. Test: e2e smoke-target-selection-test "smoke takes an Android bundle as proof when Page.reload kept the context beside an iOS app". Tests: rungOne-test "what rung 1 does, and which bundle proves it"; e2e runtime-preflight-test "runtime:reload sends no broadcast and reloads only the session app"; e2e smoke-target-selection-test "smoke reloads only its own app beside $name".
 
@@ -287,7 +287,9 @@ The entry-bundle check runs before any rung [confirmed, Kudo, 2026-08-24]. A rel
 
 Known limit: `method` names the rung, so a `Page.reload` rung 1 reports `method: dev-server`, also under a pinned `--method dev-server`; only the attempt says `page-reload`.
 
-A broadcast that was delivered is a mechanism that ran. An attempt carries `delivered` beside `ok`. Delivery is whether the action reached the app. It is not whether it worked. A delivered-and-unproved broadcast is exit 22, and `auto` climbs to rung 2. A pinned `--method` never climbs. A broadcast whose churn was observed is a reload, and nothing follows it. The attempt says which of the two states it was reached for.
+A broadcast that was delivered is a mechanism that ran. An attempt carries `delivered` beside `ok`. Delivery is whether the action reached the app. It is not whether it worked. A delivered-and-unproved broadcast is exit 22, and `auto` climbs to rung 2. A pinned `--method` never climbs. The attempt says which of the two states it was reached for.
+
+Churn proves that the app acted, not that it came back. An app can reconnect to the command socket and never fetch the bundle. In `auto`, a broadcast whose churn was observed then waits at most 10 s for a fresh own target or a bundle that may count. The entry-bundle check has already built the bundle, so an app that reloads fetches it well inside that bound. Under `--no-bundle-check` a slow build can outlast the bound; the relaunch then costs native state, and the relaunched app's fetch of the same bundle is still the proof. With neither observation, the attempt is delivered and not `ok`, its reason names the bound, and the run climbs to rung 2 with the rest of `--timeout`. A pinned `--method dev-server` waits the whole `--timeout`. Test: e2e runtime-reload-test "relaunches when the app reconnects after the broadcast and fetches no bundle".
 
 Rung 2 replaces the app's process, so the JavaScript state is gone. The attempt carries the cost, and only when there was an app to lose state. A relaunch that started an app cost nothing and says nothing.
 

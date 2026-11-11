@@ -473,6 +473,66 @@ describe('@expo/agent-cli runtime:reload', () => {
     }
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. The app reconnects to the command
+  // socket after the broadcast and never fetches the bundle [observed — live-cloud CI, Android dev
+  // build, 2026-11-11]. Churn is not a reason to wait out --timeout: the run climbs to the relaunch.
+  it('relaunches when the app reconnects after the broadcast and fetches no bundle', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const logPath = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+    await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
+    await fs.promises.writeFile(logPath, 'Starting Metro Bundler\n');
+    const started = appStartedMarkerPath(projectRoot);
+    let fetched = false;
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      // A relaunched app registers under the page id it had and fetches its bundle.
+      targets: () => {
+        if (!fetched && fs.existsSync(started)) {
+          fetched = true;
+          fs.appendFileSync(
+            logPath,
+            'iOS Bundled 25ms node_modules/expo-router/entry.js (1 module)\n'
+          );
+        }
+        return [EXPO_GO_TARGET];
+      },
+      messageSocket: 'v2',
+      reloadTargets: 'stale',
+    });
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:reload', '--ios', '--timeout', '25s', '--json'],
+        { env: stubExpoEnv(projectRoot), reject: false }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      const report: ReloadReport = JSON.parse(result.stdout);
+      expect(report.method).toBe('device');
+      expect(report.commandSocketChurn.reconnected).toBe(1);
+      expect(report.bundlesAfterReload.observed).toBe(true);
+      expect(report.attempts.map(({ method, ok }) => ({ method, ok }))).toEqual([
+        { method: 'dev-server', ok: false },
+        { method: 'device', ok: true },
+      ]);
+      expect(report.attempts[0]!.reason).toContain('within 10000ms');
+      expect(readXcrun()).toContainEqual([
+        'simctl',
+        'terminate',
+        SIMULATOR_UDID,
+        'host.exp.Exponent',
+      ]);
+    } finally {
+      releaseLock();
+      await stub.close();
+    }
+  });
+
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — **F141**, the reload half.
   //
   // The bundle signal and the fresh-target watch share one budget and the first to answer ends both,
