@@ -374,6 +374,8 @@ describe(devAsync, () => {
 
     // Its pid went, and something else answers on its port: the port is not this run's to take.
     it(`should not take the port when it still answers after the stop`, async () => {
+      // The signal path under test is `process.kill`; Windows signals with `taskkill`.
+      mockPlatform('darwin');
       mockStaleDevClientState();
       vol.mkdirSync(projectRoot, { recursive: true });
       writeDevRunRecord(projectRoot, { pid: 4242, port: 8081, serverPid: 777 });
