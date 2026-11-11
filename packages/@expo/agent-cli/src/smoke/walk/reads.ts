@@ -236,7 +236,7 @@ export async function runtimeAndErrorsStep(
         value: result,
       };
     },
-    { budgetMs: options.windowMs }
+    { budgetMs: null }
   );
   return { runtime, collected };
 }
