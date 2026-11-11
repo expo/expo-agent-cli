@@ -73,9 +73,9 @@ export const EXIT_OUTCOME_CANCELED = 21;
 /**
  * The tool worked and the operation did not finish in the time it was given.
  *
- * Inconclusive rather than failed: the wait expired, and a longer `--timeout` or a second look may
- * still find success. Kept apart from {@link EXIT_OUTCOME_FAILED} because retrying is the obvious
- * next action here and is a waste of minutes there.
+ * Inconclusive rather than failed: a wait expired or an observation found the requested operation
+ * still in progress. Follow the observation action, or wait longer, to learn its outcome. A matching
+ * detached-start retry can return this code immediately without starting or adopting another run.
  */
 export const EXIT_OUTCOME_TIMEOUT = 22;
 

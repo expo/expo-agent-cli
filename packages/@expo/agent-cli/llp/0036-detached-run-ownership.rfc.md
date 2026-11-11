@@ -36,13 +36,43 @@ differ. An unknown endpoint is uncertain evidence, not proof of absence or permi
 discard. Invalid ancillary metadata does not change a known endpoint's liveness. Existing
 dev-server locks retain their published address across CLI versions.
 
-Repeated detached starts refuse even with identical options; changing options requires
-explicit stop/start. Observers report their own child and retain its private log.
-Each worktree has independent ownership. Fixed-name logs remain readable.
+A repeated request never adopts the child or reopens its app. While a live run is still
+starting, the same startup options return **22**, `DEV_START_IN_PROGRESS`, with an observe
+action and the elected attempt's log. Different startup options return **20**,
+`DEV_START_BUSY`, with explicit stop-then-start advice preserving the requested options.
+Once startup completes, a repeated start returns 20 even when its options match.
+Output and waiting options do not change startup identity; platform, backend, target,
+device, requested port, app opening and startup-affecting Expo options do.
+
+An observation deadline does not turn pending work into failure or completion. After the
+default parent timeout, status identifies the same starting attempt and its log; reading
+that log and retrying the same request start no additional build, device or session.
+Readiness and app-open settlement come from the work itself, even if the best-effort
+dev-server lock could not publish. Missing evidence remains unknown.
+
+Observers report their own child and retain its private log. A proven non-owner candidate's
+refused log can be removed; elected failures remain available for diagnosis. Each worktree
+has independent ownership. Fixed-name logs remain readable.
 
 Parent-held guards, the best-effort dev-server lock alone, and timeout-based takeover
 leave duplicate-start windows. General orphan adoption and foreground exclusivity are
 out of scope. Socket liveness does not imply that Metro is ready.
+
+## Stopping a starting run
+
+Ordinary stop addresses the captured attempt before or after dev-lock publication. One
+cancellation path stops subsequent startup and accounts for work already in flight.
+An acknowledgement means accepted, not completed. A bounded wait may return pending;
+it does not release admission or authorize stopping a replacement.
+
+Plain stop preserves and reports EAS sessions. Explicit session/device cleanup acts only
+on resources captured by that run, including a late session ID returned by its submitted
+work, and completes while admission is held. An unknown resource outcome retains evidence.
+A missed terminal reply cannot authorize a later sweep of the worktree's current resources.
+
+These contracts are exercised through the compiled CLI in `dev-detach-control-test.ts` and
+`dev-detach-long-build-test.ts`. Their external barriers hold preparation, build submission and app opening;
+the long-build acceptance uses the actual default parent timeout on iOS and Android.
 
 ## Contract evidence
 
