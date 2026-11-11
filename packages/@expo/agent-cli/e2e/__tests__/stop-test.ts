@@ -587,6 +587,13 @@ describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground d
       const args = flags.flatMap((flag) => [flag, String(orphan.port)]);
 
       try {
+        const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
+          reject: false,
+        });
+        expect(JSON.parse(status.stdout).devServer).toMatchObject({
+          running: true,
+          ownerEnded: true,
+        });
         const result = await executeAgentCliAsync(projectRoot, ['dev:stop', ...args, '--json'], {
           reject: false,
         });
@@ -640,6 +647,13 @@ describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground d
 
     try {
       expect(await waitForAsync(() => answersStatusAsync(port), 5000)).toBe(true);
+      // Status finds it on the port of the last dev request, and says nothing owns it only for an orphan.
+      const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
+        reject: false,
+      });
+      const devServer = JSON.parse(status.stdout).devServer;
+      expect(devServer).toMatchObject({ running: true, projectRootMatched: true });
+      expect(devServer.ownerEnded).toBeUndefined();
       const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
         reject: false,
       });

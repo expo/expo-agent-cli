@@ -269,6 +269,25 @@ describe(chooseNextAction, () => {
       command: `${PROGRAM_PREFIX} smoke --android --eas`,
       why: expect.stringContaining('an EAS Simulator session is on record'),
     },
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    {
+      name: 'names dev:stop --eas for the server a killed run left beside its started session',
+      facts: {
+        devServer: server({ ownerEnded: true }),
+        bindings: [binding({ backend: 'cloud', id: 'sess-7' })],
+      },
+      command: `${dev}:stop --eas`,
+      why: 'the run that started this dev server and EAS session sess-7 ended; this stops both',
+    },
+    {
+      name: 'stays smoke --eas when that server sits beside a session this CLI did not start',
+      facts: {
+        devServer: server({ ownerEnded: true }),
+        bindings: [binding({ backend: 'cloud', id: 'sess-7', origin: 'dotenv' })],
+      },
+      command: `${PROGRAM_PREFIX} smoke --ios --eas`,
+      why: expect.stringContaining('an EAS Simulator session is on record'),
+    },
     {
       name: 'never stops an EAS server for a remembered request of the other platform',
       facts: {

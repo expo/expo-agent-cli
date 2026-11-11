@@ -33,6 +33,7 @@ import {
   waitForAsync,
   readLastBuildFile,
   freePortAsync,
+  waitForDevLockAsync,
 } from '../utils';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
@@ -972,6 +973,71 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         await cleanUpAsync(projectRoot);
       }
     }
+  );
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  it.skipIf(process.platform === 'win32')(
+    'after a SIGKILL, status names dev:stop --eas, which stops the dev server and the session',
+    async () => {
+      const projectRoot = await setupAsync('go-app');
+      const env = easRunEnv(projectRoot, 8577);
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas', '--port', '8577'], {
+        env,
+      });
+      const output = collectOutput(child);
+      try {
+        expect(
+          await waitForAsync(
+            () => output.stderr.includes('Opened the app on EAS Simulator session'),
+            10000
+          )
+        ).toBe(true);
+        const { port } = (await waitForDevLockAsync(projectRoot))!;
+        // The run notes which process listens once Metro answers (src/devLock/runRecord.ts).
+        const record = path.join(projectRoot, '.expo/agent-cli-dev-run.json');
+        expect(
+          await waitForAsync(() => {
+            try {
+              return JSON.parse(fs.readFileSync(record, 'utf8')).serverPid != null;
+            } catch {
+              return false;
+            }
+          }, 10000)
+        ).toBe(true);
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        process.kill(child.pid!, 'SIGKILL');
+        await exited;
+
+        const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
+          env,
+        });
+        const report = JSON.parse(status.stdout);
+        expect(report.devServer).toMatchObject({ running: true, ownerEnded: true });
+        expect(report.next.command).toBe('npx @expo/agent-cli dev:stop --eas');
+        const text = await executeAgentCliAsync(projectRoot, ['status'], { env });
+        expect(text.stdout).toContain('its CLI process ended, so nothing owns it');
+
+        const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+          env,
+          reject: false,
+        });
+        expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: true, port });
+        expect(easInvocationArgs(projectRoot)).toContainEqual([
+          'simulator:stop',
+          '--id',
+          'sess-e2e-started',
+          '--non-interactive',
+        ]);
+        await expect(fetch(`http://127.0.0.1:${port}/status`)).rejects.toThrow();
+      } finally {
+        try {
+          process.kill(-child.pid!, 'SIGKILL');
+        } catch {
+          // The group is already gone.
+        }
+      }
+    },
+    60_000
   );
 
   it('starts a session running Expo Go for a project Expo Go can run, and builds nothing', async () => {

@@ -182,8 +182,9 @@ export function chooseNextAction({
     null,
     recoveryPlan
   );
-  const unserved = unservedRunNext(ownLock, devNext);
-  if (unserved) return unserved;
+  const noRun =
+    unservedRunNext(ownLock, devNext) ?? endedRunNext(devServer, cloud, platform, devNext);
+  if (noRun) return noRun;
   const ownServer = servingLock(ownLock);
   const { backend, devArgs, devCommand } = devRerun(platform, request, recoveryPort, devNext);
   if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
@@ -247,6 +248,33 @@ export function chooseNextAction({
     };
   }
   return next;
+}
+
+/** The live cloud binding this CLI started for `platform`, else any it started; null for none. */
+function startedSession(cloud: BindingSummary[], platform: PlanPlatform): BindingSummary | null {
+  const started = cloud.filter((entry) => entry.origin === 'started');
+  return started.find((entry) => entry.platform === platform) ?? started[0] ?? null;
+}
+
+/**
+ * `dev:stop --eas` for a dev server a killed `dev --eas` left beside its session
+ * (`DevServerStatus.ownerEnded`); null otherwise.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ */
+function endedRunNext(
+  devServer: DevServerStatus | null,
+  cloud: BindingSummary[],
+  platform: PlanPlatform,
+  devNext: NextActionStatus
+): NextActionStatus | null {
+  const session = devServer?.ownerEnded ? startedSession(cloud, platform) : null;
+  if (!session) return null;
+  return {
+    ...devNext,
+    command: `${PROGRAM_PREFIX} dev:stop --eas`,
+    why: `the run that started this dev server and EAS session ${session.id} ended; this stops both`,
+  };
 }
 
 /** The lock of a dev server that serves, or null for none or a run that builds or finishes. */

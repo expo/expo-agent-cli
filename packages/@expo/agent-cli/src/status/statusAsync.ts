@@ -12,6 +12,7 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
+import { judgeEndedRunAsync } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
 import { deletedWorktreeSessions } from '../deviceBinding/reap';
@@ -19,6 +20,7 @@ import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
+import type { DevServerLockInfo } from '../devLock';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
 import { exitWithCodeAsync } from '../exitCodes';
@@ -411,6 +413,9 @@ export async function collectStatusReportAsync(
       deviceBackend,
       readBuildsOnceAsync
     );
+    if (report.devServer && (await leftByKilledRunAsync(projectRoot, ownLock, report.devServer))) {
+      report.devServer.ownerEnded = true;
+    }
     report.next = chooseNextAction({
       state,
       record,
@@ -857,4 +862,21 @@ async function raceWithTimeoutAsync<T>(work: Promise<T>, timeoutMs: number): Pro
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * Whether the running dev server is the one a killed run of this project left: no lock answers,
+ * and the rule `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`) names it on this port. The
+ * rule only reads, and its reads run only when a dead run's record is there.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ */
+async function leftByKilledRunAsync(
+  projectRoot: string,
+  ownLock: DevServerLockInfo | null,
+  devServer: DevServerStatus
+): Promise<boolean> {
+  if (ownLock || !devServer.running || devServer.projectRootMatched !== true) return false;
+  const verdict = await judgeEndedRunAsync(projectRoot);
+  return verdict?.kind === 'orphan' && verdict.server.port === Number(new URL(devServer.url).port);
 }

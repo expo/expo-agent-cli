@@ -319,6 +319,14 @@ export interface DevServerStatus {
    */
   projectRootMatched: boolean | null;
   /**
+   * True when this dev server is the one a killed run left: no lock answers, the run's record
+   * outlived it, the listener is the pid that run saw, and its `/status` names this project.
+   * Nothing owns it. Beside a session that run started, `next` is `dev:stop --eas`.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   */
+  ownerEnded?: true;
+  /**
    * How a device **off this machine** reaches this dev server, per what the dev server printed.
    *
    * `localhost` and `lan` say the URL above is the only address there is, and neither is usable
