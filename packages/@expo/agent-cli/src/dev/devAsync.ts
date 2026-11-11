@@ -85,7 +85,12 @@ import {
   resolvePlannedPortAsync,
   type PortCollision,
 } from './portCollision';
-import { planDevServerPortAsync, portDemandedError } from './devServerPort';
+import {
+  findUntrackedDevServerAsync,
+  planDevServerPortAsync,
+  portDemandedError,
+  replaceUntrackedDevServerAsync,
+} from './devServerPort';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { devServerRunningStopAsync } from './runningDevServer';
 import { easCommandPrefix } from '../utils/easCli';
@@ -131,6 +136,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     });
   }
   recordLastDevRequest(projectRoot, options);
+  // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.
+  const orphan = await findUntrackedDevServerAsync(projectRoot, lock, options);
 
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
@@ -138,7 +145,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — the resolver binds the device for a
   // draft that builds nothing, before its presence probe; a draft that builds is bound below, after
   // the refusals, so no simulator is created for a run that then refuses.
-  const acquireDevice = deviceCallbackFor(projectRoot, options, lock);
+  const acquireDevice = deviceCallbackFor(projectRoot, options, lock, orphan.claim.claimedPort);
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
@@ -178,7 +185,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // passed it [observed — friction run 7, F71; live run S5].
   const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
 
-  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options);
+  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options, orphan.claim);
   warnDroppedExpoArgs(plan, dropped);
 
   // A draft that builds is bound here, not in the resolver: after the port check above and the
@@ -214,6 +221,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     await assertEasProjectConfiguredAsync(projectRoot);
   }
 
+  plan = await replaceUntrackedDevServerAsync(projectRoot, plan, orphan, options);
   if (bindsHere) {
     acquired = await acquireDevice(plan);
   }
@@ -344,7 +352,8 @@ function isImplicitEas(plan: StartPlan): boolean {
 function deviceCallbackFor(
   projectRoot: string,
   options: DevOptions,
-  lock: DevServerLockInfo | null
+  lock: DevServerLockInfo | null,
+  claimedPort: number | null // a killed run's dev server's port, busy until this run replaces it
 ): (draft: StartPlan) => Promise<AcquireResult | null> {
   return async (draft) => {
     if (lock) {
@@ -359,7 +368,7 @@ function deviceCallbackFor(
         ? await inspectOwnDeviceAsync(projectRoot, platform)
         : null;
     }
-    if (options.port != null && draft.steps.some(isDevServerStep)) {
+    if (options.port != null && options.port !== claimedPort && draft.steps.some(isDevServerStep)) {
       const planned = await resolvePlannedPortAsync(options.port);
       if (!planned.bindable) {
         throw await portDemandedError(options.port, options.platform);

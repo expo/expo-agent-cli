@@ -14,6 +14,7 @@ import {
   executeAgentCliAsync,
   freePortAsync,
   holdDevLockAsync,
+  killAsync,
   readDevLockAsync,
   readRunRecord,
   setupFixtureAsync,
@@ -713,4 +714,47 @@ describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground d
     },
     60_000
   );
+
+  // A run that refuses leaves the dev server it would have replaced: here its named --port is busy.
+  it('a dev that refuses leaves that server running', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const orphan = await startOrphanedDevServerAsync(projectRoot);
+    const busy = net.createServer();
+    await new Promise<void>((resolve) => busy.listen(0, '127.0.0.1', resolve));
+    const busyPort = (busy.address() as net.AddressInfo).port;
+
+    try {
+      const dev = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--port', String(busyPort), '--json'],
+        { env: stubExpoEnv(projectRoot), reject: false }
+      );
+
+      expect(JSON.parse(dev.stdout).error.code).toBe('PORT_IN_USE');
+      expect(await answersStatusAsync(orphan.port)).toBe(true);
+    } finally {
+      busy.close();
+      orphan.cleanup();
+    }
+  }, 60_000);
+
+  it('the next dev stops that server and takes its port, with no second dev server', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const orphan = await startOrphanedDevServerAsync(projectRoot);
+    const orphanPid = findPortListenerPid(orphan.port);
+    const rerun = spawnAgentCli(projectRoot, ['dev', '--ios'], {
+      env: { STUB_EXPO_LISTEN: '1', STUB_EXPO_DELAY_MS: '120000' },
+    });
+
+    try {
+      expect(await waitForDevLockAsync(projectRoot, 30_000)).toMatchObject({
+        port: orphan.port,
+        pid: rerun.pid,
+      });
+      expect(() => process.kill(orphanPid, 0)).toThrow();
+    } finally {
+      await killAsync(rerun);
+      orphan.cleanup();
+    }
+  }, 60_000);
 });

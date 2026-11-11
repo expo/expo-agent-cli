@@ -1,6 +1,6 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
 // This project's dev server that a killed run left: a SIGKILL ends the run before its cleanup, so
-// its Metro keeps serving with no lock. `dev:stop` decides it by one rule.
+// its Metro keeps serving with no lock. `dev:stop` and `dev` decide it by one rule.
 
 import { clearDevRunRecord, readDevRunRecord, type DevRunRecord } from '../devLock/runRecord';
 import { matchProjectRoot, readReportedProjectRootAsync } from '../runtime/projectRootHeader';
@@ -102,4 +102,9 @@ export async function stopUntrackedDevServerAsync(
     clearDevRunRecord(projectRoot, server.runPid);
   }
   return outcome;
+}
+
+/** One sentence that names the server and why no run owns it. */
+export function untrackedDevServerClause({ port, listener }: UntrackedDevServer): string {
+  return `This project's dev server on port ${port} (pid ${listener.pid}) has no lock: the run that started it was killed`;
 }
