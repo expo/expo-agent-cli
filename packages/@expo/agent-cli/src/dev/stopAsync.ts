@@ -286,7 +286,7 @@ export async function devStopAsync(
   if ((report.stopped && !report.recoveryCommand) || (!lock && report.reason === 'not-running')) {
     const warning = await readDetachedRunWarning(projectRoot);
     if (warning) {
-      report.reason = 'ownership-retained';
+      if (!report.stopped) report.reason = 'ownership-retained';
       report.detail = warning.message;
       report.recoveryCommand = warning.suggestedCommand ?? null;
     }
