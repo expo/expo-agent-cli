@@ -37,7 +37,6 @@ import * as Log from '../log';
 import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
 import { findNeedsHumanScenario } from '../needsHuman/registry';
 import type { NativePlatform } from '../plan/types';
-import { rerunDevCommand } from '../plan/rerun';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
@@ -1232,8 +1231,7 @@ async function waitPastBuildingAsync(
   if (!lock) return { kind: 'ended', building: null };
   if (lock.phase !== 'building') return { kind: 'up', lock };
   if (hasExited() || !isProcessAlive(lock.pid)) return { kind: 'ended', building: lock };
-  if (options.waitReady)
-    throw stillBuildingOnLockError(lock, options, Date.now() - startedAt, logFile);
+  if (options.waitReady) throw stillBuildingOnLockError(lock, Date.now() - startedAt, logFile);
   return { kind: 'building', lock };
 }
 
@@ -1256,26 +1254,24 @@ function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandEr
  * The error for a detached run whose lock still says `building` when the wait ends.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
- * and the same command follows it.
+ * and status and logs observe it without starting another run.
  */
 function stillBuildingOnLockError(
   lock: DevServerLockInfo,
-  options: DevOptions,
   waitedMs: number,
   logFile: string
 ): CommandError {
-  const rerun = rerunDevCommand(options.platform, options.callerArgv);
   const error = new CommandError(
     'DEV_DETACH_STILL_BUILDING',
     [
       `This project's dev run (pid ${lock.pid}) is still building after ${Math.round(waitedMs / 1000)} s, so its dev server is not up yet.`,
       `Why: its plan builds before it serves, and its lock says that it builds. The run keeps going and starts the dev server on ${lock.url} when the build ends.`,
-      `How: run "${rerun}" again. It follows this run and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the build of a detached run. "${PROGRAM_PREFIX} dev:stop" stops the run.`,
+      `How: read the build output in ${logFile} and use "${PROGRAM_PREFIX} status" to observe progress. "${PROGRAM_PREFIX} dev:stop" stops the run. A repeated start refuses while this run owns startup.`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
   error.data = { pid: lock.pid, url: lock.url, logFile, waitedMs };
-  error.suggestedCommand = rerun;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
   return error;
 }
 
