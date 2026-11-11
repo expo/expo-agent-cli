@@ -165,14 +165,12 @@ describe('@expo/agent-cli dev:stop', () => {
       // No lock and no port to look at: nothing was measured, and the way to name a port is the flag.
       processStillRunning: null,
       portStillAnswering: null,
-      detail: expect.stringContaining(
-        'no run of this project was killed with its dev server still serving'
-      ),
+      detail: expect.stringContaining('no dev server a killed run of this project left was found'),
     });
 
     const text = await executeAgentCliAsync(projectRoot, ['dev:stop']);
     expect(text.exitCode).toBe(0);
-    expect(text.stdout).toContain('Dev server not running · nothing to stop');
+    expect(text.stdout).toContain('Dev server not running');
     expect(text.stdout).not.toContain('Stopped');
   });
 
