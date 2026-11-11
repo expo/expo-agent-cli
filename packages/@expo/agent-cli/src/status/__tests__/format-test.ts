@@ -870,13 +870,15 @@ describe(formatStatusReport, () => {
           projectRootMatched: true,
           hostType: 'tunnel',
           tunnelUrl: null,
-          openUrls: [],
+          openUrls: [{ target: 'expo-go', label: 'Expo Go', url: 'exp://192.168.1.5:8081' }],
           appsListed: 0,
           appsStale: 0,
         },
       });
 
       expect(line(value, 'dev server')).toContain('tunnel unknown');
+      // A link printed under "tunnel unknown" would be a LAN one under a tunnel's heading.
+      expect(report(value)).not.toContain('open in');
     });
 
     // @ref llp/0021-honest-reports.rfc.md §The rules

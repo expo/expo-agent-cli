@@ -226,17 +226,21 @@ export async function resolveDevServerReachAsync(
     Promise.resolve(readDevServerLogSync(projectRoot)),
   ]);
   const fromLog = resolveDevServerReach(captured, lock);
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  if (lock == null && devServerUrl != null && fromLog.advertised?.hostType === 'tunnel') {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — with no lock, only the
+  // manifest of the dev server that answered names its tunnel, whatever the log says (S3, below).
+  if (lock == null && devServerUrl != null) {
     const fromServer = await fetchAdvertisedUrlAsync(devServerUrl);
-    return fromServer?.hostType === 'tunnel'
-      ? { advertised: fromServer, running: false, reason: null }
-      : {
-          ...fromLog,
-          reason:
-            'no lock ties the captured log to the dev server that answered, and its manifest named no tunnel',
-          tunnelUnconfirmed: true,
-        };
+    if (fromServer?.hostType === 'tunnel') {
+      return { advertised: fromServer, running: false, reason: null };
+    }
+    if (fromLog.advertised?.hostType === 'tunnel') {
+      return {
+        ...fromLog,
+        reason:
+          'no lock ties the captured log to the dev server that answered, and its manifest named no tunnel',
+        tunnelUnconfirmed: true,
+      };
+    }
   }
   if (lock == null || fromLog.advertised?.hostType === 'tunnel') {
     // A log that already names a host a device off this machine can use is the best answer there

@@ -319,6 +319,20 @@ describe('resolveDevServerReachAsync', () => {
       expect(reach.tunnelUnconfirmed).toBeUndefined();
     });
 
+    // A detached `--tunnel` log often never prints the tunnel host (S3, above).
+    it.each([
+      ['names this machine', LOCAL_LOG],
+      ['is missing', null],
+    ])(`takes the manifest's tunnel when the captured log %s`, async (_, lines) => {
+      writeProject(lines);
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+      mockManifest('https://real-orphan.on.expo.app');
+
+      const reach = await resolveDevServerReachAsync(projectRoot, lockUrl);
+      expect(reach.advertised).toMatchObject({ hostType: 'tunnel' });
+      expect(reach.tunnelUnconfirmed).toBeUndefined();
+    });
+
     it(`marks the log's tunnel unconfirmed when the manifest does not name one`, async () => {
       mockManifest(null);
 

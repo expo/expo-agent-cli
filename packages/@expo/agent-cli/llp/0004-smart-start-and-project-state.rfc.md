@@ -633,8 +633,9 @@ When `status` finds the untracked dev server a killed run left (the rule above, 
 With no lock, nothing ties the captured log to the dev server that answers, so `status`
 does not take its tunnel from the log. It asks that server's manifest
 (`resolveDevServerReachAsync(projectRoot, devServerUrl)`), only when the server answered. A
-manifest that names a tunnel is the tunnel. Otherwise the line says `tunnel unknown`,
-`tunnelUrl` is null, and no development-build link is built on a tunnel nobody confirmed.
+manifest that names a tunnel is the tunnel, whatever the log says. When the log names a tunnel
+the manifest does not, the line says `tunnel unknown`, `tunnelUrl` is null, and no open link
+is built: not on that tunnel, and not on the LAN address in its place.
 `src/dev/__tests__/advertisedUrl-test.ts` and `src/status/__tests__/sections-test.ts` enforce it.
 
 Three flags are stripped from the child's command line. `--detach` would detach a

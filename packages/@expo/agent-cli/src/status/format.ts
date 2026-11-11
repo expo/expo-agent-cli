@@ -648,7 +648,7 @@ function reachFact(devServer: DevServerStatus): string | null {
  * different URLs and a reader with one installed needs to see which is which.
  */
 function openUrlLines(devServer: DevServerStatus): string[] {
-  if (devServer.hostType !== 'tunnel' || !devServer.openUrls.length) {
+  if (!devServer.tunnelUrl || !devServer.openUrls.length) {
     return [];
   }
   const indent = ' '.repeat(LABEL_WIDTH);

@@ -445,6 +445,11 @@ export function applyOpenUrls(
   if (!devServer?.running) {
     return;
   }
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a tunnel the log names and
+  // nothing confirmed: a link built on the LAN address would stand in for it.
+  if (devServer.hostType === 'tunnel' && devServer.tunnelUrl == null) {
+    return;
+  }
   devServer.openUrls = resolveConnectUrls(devServer, state, scheme);
 }
 
