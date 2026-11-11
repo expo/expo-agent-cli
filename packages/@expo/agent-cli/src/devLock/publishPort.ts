@@ -41,8 +41,14 @@ export async function publishDevServerPortAsync(
   args: string[],
   options: PublishDevServerPortOptions
 ): Promise<void> {
+  // `onResolved` is told after the publish settles, so a caller that waits for the lock's answer
+  // starts once the lock holds the port.
   const publishAsync = async (resolved: ResolvedDevServerPort | null) => {
     if (resolved == null) return options.lock.apply({ type: 'foreign-port' });
+    await publishResolvedAsync(resolved);
+    options.onResolved?.(resolved);
+  };
+  const publishResolvedAsync = async (resolved: ResolvedDevServerPort) => {
     if (!options.isRunning()) {
       // The dev server exited before it said where it listens, so there is nothing to point at.
       if (!isHeld(options.lock.state)) {
@@ -67,12 +73,12 @@ export async function publishDevServerPortAsync(
   const servesAnotherProject =
     options.servesAnotherProject ?? ((port) => servesAnotherProjectAsync(projectRoot, port));
   if (named == null || (await servesAnotherProject(named))) {
-    return await publishAsync(await resolveDevServerPortAsync(projectRoot, args, options));
+    return await publishAsync(
+      await resolveDevServerPortAsync(projectRoot, args, { ...options, onResolved: undefined })
+    );
   }
 
-  const resolved: ResolvedDevServerPort = { port: named, source: 'arg' };
-  options.onResolved?.(resolved);
-  await publishAsync(resolved);
+  await publishAsync({ port: named, source: 'arg' });
   // The lock already answers, so nothing waits on this watch: it follows the dev server for as long
   // as it runs, and Metro's report after a long `expo run:*` build still counts.
   const watched = await resolveDevServerPortAsync(projectRoot, args, {
@@ -81,8 +87,8 @@ export async function publishDevServerPortAsync(
     timeoutMs: Infinity,
   });
   if (watched?.source === 'reported') {
-    options.onResolved?.(watched);
     options.lock.apply({ type: 'port-reported', port: watched.port });
+    options.onResolved?.(watched);
   }
 }
 

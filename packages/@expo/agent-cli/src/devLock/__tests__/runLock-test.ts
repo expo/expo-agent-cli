@@ -37,14 +37,18 @@ async function loggedEventsAsync(): Promise<{ _e: string }[]> {
 
 describe(RunLock, () => {
   it(`changes nothing on an illegal publish and reports it on the debug stream`, async () => {
-    await withRunLockAsync(makeTempProject(), async (lock) => {
+    const projectRoot = makeTempProject();
+    await withRunLockAsync(projectRoot, async (lock) => {
       await lock.publishAsync({ ...published, phase: 'serving' });
       lock.apply({ type: 'eas-open-started' });
       lock.apply({ type: 'server-exited' });
 
       await lock.publishAsync({ ...published, phase: 'building', port: 8322 });
 
-      expect(lock.state).toMatchObject({ phase: 'finishing', port: 8321 });
+      expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
+        phase: 'finishing',
+        port: 8321,
+      });
     });
     expect(await loggedEventsAsync()).toContainEqual(
       expect.objectContaining({
@@ -58,22 +62,19 @@ describe(RunLock, () => {
 
 describe(withRunLockAsync, () => {
   it.each([
-    ['returns', async () => {}],
-    [
-      'throws',
-      async () => {
-        throw new Error('the run failed');
-      },
-    ],
-  ] as const)(`releases the run's lock when the run %s`, async (_name, end) => {
+    ['returns', null],
+    ['throws', new Error('the run failed')],
+  ] as const)(`releases the run's lock when the run %s`, async (_name, failure) => {
     const projectRoot = makeTempProject();
+    let answered: unknown = null;
     const settled = withRunLockAsync(projectRoot, async (lock) => {
       await lock.publishAsync({ ...published, phase: 'serving' });
-      expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8321 });
-      await end();
+      answered = await readDevServerLockAsync(projectRoot);
+      if (failure) throw failure;
     });
 
-    await settled.catch(() => {});
+    await (failure ? expect(settled).rejects.toBe(failure) : settled);
+    expect(answered).toMatchObject({ port: 8321 });
     expect(await readDevServerLockAsync(projectRoot)).toBeNull();
   });
 });

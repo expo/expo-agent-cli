@@ -150,15 +150,15 @@ export async function runDevServerAsync(
   let waiting = false;
   const waitForAnswer = (first: ResolvedDevServerPort) => {
     waiting = true;
-    void waitForOwnMetroAsync(
-      () => serverAt(port ?? first).url,
-      projectRoot,
-      () => running
-    ).then((answered) => {
-      if (!answered || !running) return;
-      runLock.apply({ type: 'status-answered' });
-      open(serverAt(port ?? first));
-    });
+    // A step that does not build has nothing left to wait for once its open went on Metro's report.
+    const wanted = () => running && (phase === 'building' || !opened);
+    void waitForOwnMetroAsync(() => serverAt(port ?? first).url, projectRoot, wanted).then(
+      (answered) => {
+        if (!answered) return;
+        if (running) runLock.apply({ type: 'status-answered' });
+        open(serverAt(port ?? first));
+      }
+    );
   };
   const run = withLeaseExtendedAsync(projectRoot, () =>
     spawnDevServerAsync(projectRoot, args, output, signal)

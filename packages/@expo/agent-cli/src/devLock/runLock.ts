@@ -43,8 +43,14 @@ export class RunLock {
     if (!handle) return;
     // The run ended while the take ran: the lock has nothing left to answer for.
     if (this.#state.phase === 'released') return handle.release();
+    // Again from the state now: an EAS open can start while the take runs. A state the publish
+    // no longer holds the lock in keeps no socket.
+    const now = nextRunState(this.#state, published);
+    if (!now || !isHeld(now)) {
+      handle.release();
+      return this.#commit(published);
+    }
     this.#handle = handle;
-    // Again from the state now: an EAS open can start while the take runs.
     this.#commit(published);
   }
 

@@ -67,18 +67,24 @@ async function eventuallyAsync<T>(read: () => Promise<T>, check: (value: T) => b
 }
 
 describe(publishDevServerPortAsync, () => {
+  // `onResolved` comes after the publish: a caller that then waits for `/status` finds the lock
+  // already naming the port, so the answer is not lost on a lock not yet taken.
   it(`publishes the lock before any report when the arguments name a port`, async () => {
     const projectRoot = makeTempProject();
+    const runLock = runLockFor(projectRoot);
     const resolved: string[] = [];
     let running = true;
 
     const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8301'], {
-      lock: runLockFor(projectRoot),
+      lock: runLock,
       phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
-      onResolved: ({ port, source }) => resolved.push(`${source}:${port}`),
+      onResolved: ({ port, source }) =>
+        resolved.push(
+          `${source}:${port}, lock on ${'port' in runLock.state && runLock.state.port}`
+        ),
     });
 
     const answer = await eventuallyAsync(
@@ -86,12 +92,12 @@ describe(publishDevServerPortAsync, () => {
       (info) => info != null
     );
     expect(answer).toMatchObject({ port: 8301, portReported: false, easPlatform: null });
-    expect(resolved).toEqual(['arg:8301']);
+    expect(resolved).toEqual(['arg:8301, lock on 8301']);
 
     // Metro reports later, on another port: told again, and the lock follows.
     report(8302);
     await lock;
-    expect(resolved).toEqual(['arg:8301', 'reported:8302']);
+    expect(resolved).toEqual(['arg:8301, lock on 8301', 'reported:8302, lock on 8302']);
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
       port: 8302,
       url: 'http://127.0.0.1:8302',
