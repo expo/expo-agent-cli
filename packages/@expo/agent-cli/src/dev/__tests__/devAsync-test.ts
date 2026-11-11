@@ -803,7 +803,10 @@ describe('EAS session lifecycle of the dev-server step', () => {
   };
   beforeEach(() => {
     mockProjectState();
-    vi.mocked(easRunLifecycle).mockReturnValue(lifecycle);
+    vi.mocked(easRunLifecycle).mockImplementation((_root, { platform }) => ({
+      ...lifecycle,
+      platform,
+    }));
     vi.mocked(runDevServerAsync).mockImplementation(async (_root, _args, opts) => {
       opts?.onDevServer?.({ url: 'http://127.0.0.1:8081', port: 8081 });
       return devServerRun();
@@ -828,6 +831,63 @@ describe('EAS session lifecycle of the dev-server step', () => {
     const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
     expect(opts!.easPlatform).toBe('ios');
   });
+
+  it.each(['ios', 'android'] as const)(
+    'opens only once when the %s server reports readiness twice',
+    async (platform) => {
+      vi.mocked(runDevServerAsync).mockImplementationOnce(async (_root, _args, opts) => {
+        const server = { url: 'http://127.0.0.1:8081', port: 8081 };
+        opts?.onDevServer?.(server);
+        opts?.onDevServer?.(server);
+        return devServerRun();
+      });
+
+      await devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--eas']));
+
+      expect(lifecycle.open).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['ios', 'android'] as const)(
+    'does not retry a %s port collision after interruption',
+    async (platform) => {
+      vi.mocked(runDevServerAsync).mockImplementationOnce(async () => {
+        process.emit('SIGTERM', 'SIGTERM');
+        return portTakenOn(8081);
+      });
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--eas']))
+      ).rejects.toMatchObject({ code: 'DEV_INTERRUPTED', exitCode: 143 });
+      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['ios', 'android'] as const)(
+    'keeps %s finalization active when a signal arrives after the server exits',
+    async (platform) => {
+      let finish!: () => void;
+      const finalization = new Promise<void>((resolve) => (finish = resolve));
+      lifecycle.finishAsync.mockImplementationOnce(() => finalization);
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      let returned = false;
+      const run = devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--eas'])).then(
+        (code) => {
+          returned = true;
+          return code;
+        }
+      );
+      try {
+        await vi.waitFor(() => expect(lifecycle.finishAsync).toHaveBeenCalledTimes(1));
+        process.emit('SIGTERM', 'SIGTERM');
+        expect(exit).not.toHaveBeenCalled();
+        expect(returned).toBe(false);
+      } finally {
+        finish();
+      }
+      await expect(run).resolves.toBe(0);
+    }
+  );
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the run lets go of its
   // lock when its open returns, so a retry after the open started would serve without one.
