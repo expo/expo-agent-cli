@@ -27,12 +27,8 @@
 // `still-running` — exit 20 — about a process that was already gone, with a `How:` line offering
 // `--signal SIGKILL` for a pid nothing could signal.
 
-import { stopDetachedStartupAsync, prepareDetachedStopAsync } from './stopDetachedStartup';
-import {
-  readDetachedAttemptAsync,
-  retireDetachedAttempt,
-  type DetachedAttemptRef,
-} from './detachedOwner';
+import { observeOwnedStopAsync, prepareDetachedStopAsync } from './stopDetachedStartup';
+import { type DetachedAttemptRef } from './detachedOwner';
 import chalk from 'chalk';
 
 import type { CloudPlatform } from '../device/cloudSimulator';
@@ -265,31 +261,26 @@ async function stopCapturedAsync(
     ownsTarget: lockOwnsTarget,
   });
 
-  const { report, finishing } =
-    control && (control.state === 'accepted' || !lock)
-      ? {
-          report: await stopDetachedStartupAsync(ref!, control, options.timeoutMs, startedAt),
+  const {
+    report,
+    finishing,
+    pending = false,
+  } = control
+    ? await observeOwnedStopAsync(ref!, control, lock, options, startedAt)
+    : lock != null && lockOwnsTarget
+      ? await stopLockedDevServerAsync(lock, options, startedAt)
+      : {
+          report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
           finishing: false,
-        }
-      : lock != null && lockOwnsTarget
-        ? await stopLockedDevServerAsync(
-            lock,
-            options,
-            startedAt,
-            options.eas ? null : (ref ?? null)
-          )
-        : {
-            report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
-            finishing: false,
-          };
+        };
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing run binds the
   // session its start returns, so `--eas` waits for that start before it looks for sessions.
-  let sessionPending = false;
+  let sessionPending = options.eas && pending;
   let runFinishing = finishing;
-  if (options.eas && finishing && lock != null) {
+  if (!control && options.eas && finishing && lock != null) {
     sessionPending = !(await waitForEasOpenAsync(lock));
     runFinishing = sessionPending;
     if (sessionPending) {
@@ -359,9 +350,8 @@ async function stopCapturedAsync(
 async function stopLockedDevServerAsync(
   lock: DevServerLockInfo,
   options: DevStopOptions,
-  startedAt: number,
-  attempt: DetachedAttemptRef | null
-): Promise<{ report: DevStopResultJson; finishing: boolean }> {
+  startedAt: number
+): Promise<{ report: DevStopResultJson; finishing: boolean; pending?: boolean }> {
   const base: DevStopResultJson = {
     stopped: false,
     pid: lock.pid,
@@ -411,16 +401,6 @@ async function stopLockedDevServerAsync(
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a stop that ends the
     // holder without its cleanup (Windows `taskkill /F`) leaves its record; this stop ends it.
     clearDevRunRecord(lock.projectRoot, lock.pid);
-    if (
-      attempt &&
-      !retireDetachedAttempt(attempt) &&
-      (await readDetachedAttemptAsync(lock.projectRoot))
-    ) {
-      base.stopped = false;
-      base.reason = 'still-running';
-      base.detail =
-        'The process stopped, but detached ownership could not be safely retired. Inspect dev:logs before manual recovery.';
-    }
     return { report: base, finishing: false };
   }
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the run's lock says

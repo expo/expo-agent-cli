@@ -1,3 +1,4 @@
+import type { RunCancellation } from '../utils/startupTasks';
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
 import { outputTail } from '../deploy/parseOutput';
 import { type AcquireResult } from '../deviceBinding';
@@ -113,6 +114,7 @@ async function runPlanStepsAsync(
   let easBuildId = plan.easBuild?.id ?? null;
   let serving: ServingStep | null = null;
   for (const [index, step] of plan.steps.entries()) {
+    scope.steps.assertNotInterrupted();
     assertRunnableStep(step);
     let args = step.argv.slice(1);
     planEvent('start_plan_step', {
@@ -130,9 +132,9 @@ async function runPlanStepsAsync(
       args = attempt.args;
       result = attempt.result;
     } else {
-      result = await scope.steps.stepAsync((signal) =>
+      result = await scope.steps.stepAsync((cancellation) =>
         withLeaseExtendedAsync(projectRoot, () =>
-          runStepAsync(projectRoot, step, args, output, signal)
+          runStepAsync(projectRoot, step, args, output, cancellation)
         )
       );
       scope.steps.assertNotInterrupted();
@@ -155,6 +157,7 @@ async function runPlanStepsAsync(
       dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
       if (options.deviceBackend === 'eas') {
         easBuildId = await findBuiltEasIdAsync(projectRoot, step);
+        scope.steps.assertNotInterrupted();
       }
     }
     // @ref llp/0023-fingerprint-caching.rfc.md §What invalidates an answer
@@ -250,16 +253,16 @@ async function runStepAsync(
   step: PlanStep,
   args: string[],
   output: SubprocessOutput,
-  signal: AbortSignal
+  cancellation: RunCancellation
 ): Promise<StepResult> {
   if (step.argv[0] === 'eas') {
-    return await runEasStepAsync(projectRoot, args, output, signal);
+    return await runEasStepAsync(projectRoot, args, output, cancellation);
   }
   if (output === 'inherit') {
-    const exitCode = await runExpoAsync(projectRoot, args, { signal });
+    const exitCode = await runExpoAsync(projectRoot, args, cancellation);
     return { exitCode, stdout: '', stderr: '', binPath: null };
   }
-  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output, signal });
+  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output, ...cancellation });
   return {
     exitCode: result.exitCode ?? 1,
     stdout: result.stdout,
@@ -273,7 +276,7 @@ async function runEasStepAsync(
   projectRoot: string,
   args: string[],
   output: SubprocessOutput,
-  signal: AbortSignal
+  cancellation: RunCancellation
 ): Promise<StepResult> {
   const { resolveEasCliOrThrow, easCliArgs } =
     require('../utils/easCli') as typeof import('../utils/easCli');
@@ -284,7 +287,7 @@ async function runEasStepAsync(
   const result = await spawnSubprocessAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
     output,
-    signal,
+    ...cancellation,
   });
   return {
     exitCode: result.exitCode ?? 1,

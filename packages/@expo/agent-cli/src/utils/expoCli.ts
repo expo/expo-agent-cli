@@ -1,5 +1,6 @@
 import { debugEvent } from '../events';
 import { CommandError } from './errors';
+import type { RunCancellation } from './startupTasks';
 import { runInheritedAsync } from './inheritedRun';
 import { resolvePackageRunner } from './packageRunner';
 import { resolveProjectBin } from './projectBin';
@@ -39,7 +40,7 @@ export function resolveExpoCli(projectRoot: string, args: string[]): ExpoCliComm
   return { command, args: ['expo', ...args] };
 }
 
-export interface SpawnExpoOptions {
+export interface SpawnExpoOptions extends RunCancellation {
   /** Defaults to `capture`. `inherit` is {@link runExpoAsync}'s mode, and only its. */
   output?: CapturedOutput;
   /** Kill the run when it goes silent on a question. See `SubprocessOptions.promptGuard`. */
@@ -83,7 +84,7 @@ export interface SpawnExpoOptions {
 export async function spawnExpoAsync(
   projectRoot: string,
   args: string[],
-  { output = 'capture', promptGuard, ci = true, signal }: SpawnExpoOptions = {}
+  { output = 'capture', promptGuard, ci = true, ...cancellation }: SpawnExpoOptions = {}
 ): Promise<{ cli: ExpoCliCommand; result: SubprocessResult }> {
   const cli = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command: cli.command, args: cli.args });
@@ -92,7 +93,7 @@ export async function spawnExpoAsync(
     cwd: projectRoot,
     output,
     promptGuard,
-    signal,
+    ...cancellation,
     // Nothing rather than `CI=0`: a machine whose own environment says `CI` is a machine where the
     // frozen bundler is the right behaviour, and overriding it here would be this wrapper deciding
     // something about the caller's environment that it was never told.
@@ -116,14 +117,14 @@ export async function spawnExpoAsync(
 export function runExpoAsync(
   projectRoot: string,
   args: string[],
-  { signal }: { signal?: AbortSignal } = {}
+  cancellation: RunCancellation = {}
 ): Promise<number> {
   const { command, args: commandArgs } = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command, args: commandArgs });
 
   return runInheritedAsync(command, commandArgs, {
     cwd: projectRoot,
-    signal,
+    ...cancellation,
     onExit: (code, exitSignal) =>
       debugEvent('expo_exit', { code, signal: exitSignal ?? undefined }),
     onSpawnError: (error) =>

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import {
   withDetachedOwnerAsync,
   readDetachedAttemptAsync,
-  cancelDetachedAttemptAsync,
+  requestOwnedStopAsync,
   DETACHED_ATTEMPT_ENV,
 } from '../../src/dev/detachedOwner';
 import { resolveDevOptions } from '../../src/dev/resolveOptions';
@@ -536,7 +536,8 @@ it.each([spawnSubprocessAsync, spawnCaptureAsync])(
           },
         });
       for (const headers of [{ Authorization: 'wrong' }, { 'x-detached-attempt': 'wrong' }])
-        expect((await post('cancel', headers)).status).toBe(401);
+        for (const endpoint of ['cancel', 'stop'])
+          expect((await post(endpoint, headers)).status).toBe(401);
       const abort = new AbortController();
       const first = await post('cancel', {}, abort.signal);
       expect(first.status).toBe(202);
@@ -545,7 +546,7 @@ it.each([spawnSubprocessAsync, spawnCaptureAsync])(
       await first.text().catch(() => {});
       expect((await post('cancel')).status).toBe(409);
       expect((await post('release', grant)).status).toBe(204);
-      const second = await cancelDetachedAttemptAsync(owner, resolveDevStopOptions([]));
+      const second = await requestOwnedStopAsync(owner, resolveDevStopOptions([]));
       expect((await post('release', grant)).status).toBe(409);
       expect((await post('cancel')).status).toBe(409);
       let completed = false;
@@ -668,7 +669,6 @@ it.each([
       const result = await completion;
       expect(await waitForAsync(() => !isProcessAlive(owner.pid), 5000), output.all).toBe(true);
       await exited;
-      expect(isProcessAlive(owner.pid)).toBe(false);
       if (failure) {
         if (stop) {
           expect(result).toMatchObject({ exitCode: 22 });

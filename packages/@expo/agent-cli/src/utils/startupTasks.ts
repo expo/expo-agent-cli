@@ -1,3 +1,4 @@
+// @ref llp/0036-owned-detached-stop.rfc.md
 import { AsyncLocalStorage } from 'async_hooks';
 import type { ChildProcess } from 'child_process';
 
@@ -6,10 +7,20 @@ import { createTreeKillEvidence, killProcessTree } from './processGroup';
 
 export type StartupDrain = 'drained' | 'uncertain';
 
+export interface RunCancellation {
+  signal?: AbortSignal;
+  stopSignal?: AbortSignal;
+}
+
+export type OwnedStopAction = 'cancel-startup' | 'stop-run';
+
 export type StartupSession = { id: string; platform: 'ios' | 'android' };
 
 export function createStartupScope() {
   const controller = new AbortController();
+  const runStop = new AbortController();
+  let lockedPort: (() => number | null) | undefined;
+  let stoppedChild: ChildProcess | undefined;
   const pending = new Set<Promise<unknown>>();
   const children = new Set<ChildProcess>();
   const treeKills = createTreeKillEvidence();
@@ -34,7 +45,47 @@ export function createStartupScope() {
   };
   return {
     controller,
+    runStop,
     treeKills,
+    get canFinish() {
+      return (
+        !runStop.signal.aborted ||
+        (!!stoppedChild && !children.has(stoppedChild) && !treeKills.failed)
+      );
+    },
+    registerLockedPort(currentPort: () => number | null) {
+      lockedPort = currentPort;
+      return () => {
+        lockedPort = undefined;
+      };
+    },
+    stopAction(
+      port: number | null,
+      configuredPort: number | null,
+      lockedOnly: boolean,
+      legacy: boolean
+    ): OwnedStopAction | null {
+      if ((locked && legacy) || (!locked && lockedOnly)) return null;
+      if (port != null && port !== (locked ? lockedPort?.() : configuredPort)) return null;
+      return locked ? 'stop-run' : 'cancel-startup';
+    },
+    requestStop(action: OwnedStopAction) {
+      if (action === 'cancel-startup') {
+        abort(
+          'Detached startup was stopped. An already submitted EAS build continues on EAS; "eas build:cancel" ends it.'
+        );
+      } else {
+        const error = new CommandError(
+          'DEV_INTERRUPTED',
+          'The detached dev run was stopped. No later step will run.'
+        );
+        error.exitCode = 20;
+        runStop.abort(error);
+      }
+    },
+    stopChild(child: ChildProcess) {
+      stoppedChild = killProcessTree(child, 'SIGKILL') ? child : undefined;
+    },
     assertActive,
     pending,
     children,
@@ -49,14 +100,6 @@ export function createStartupScope() {
       if (phase === 'created') finish();
     },
     abort,
-    cancel(allowed = true) {
-      if (locked) return 'locked' as const;
-      if (!allowed) return 'unsupported' as const;
-      abort(
-        'Detached startup was stopped. An already submitted EAS build continues on EAS; "eas build:cancel" ends it.'
-      );
-      return 'accepted' as const;
-    },
     handoff() {
       if (treeKills.failed) abort('Detached startup could not stop its managed subprocess tree.');
       if (controller.signal.aborted) return false;
@@ -66,7 +109,7 @@ export function createStartupScope() {
     },
     canOpen() {
       if (!locked) abort('Detached startup could not publish a stoppable dev-server lock.');
-      return locked;
+      return locked && !runStop.signal.aborted;
     },
   };
 }
@@ -87,6 +130,21 @@ export function recordStartupSession(
 
 export function assertStartupActive(): void {
   tasks.getStore()?.assertActive();
+}
+
+export const ownedRunStopSignal = () => tasks.getStore()?.runStop.signal;
+export const registerLockedStop = (currentPort: () => number | null) =>
+  tasks.getStore()?.registerLockedPort(currentPort) ?? (() => {});
+export const canFinishStartup = () => tasks.getStore()?.canFinish ?? true;
+export function bindOwnedChildStop(child: ChildProcess, signal?: AbortSignal): () => void {
+  const scope = tasks.getStore();
+  const stop = () => {
+    if (scope) scope.stopChild(child);
+    else killProcessTree(child, 'SIGKILL');
+  };
+  signal?.addEventListener('abort', stop, { once: true });
+  if (signal?.aborted) stop();
+  return () => signal?.removeEventListener('abort', stop);
 }
 
 export const handoffStartup = () => tasks.getStore()?.handoff() ?? true;
@@ -119,7 +177,8 @@ export function trackStartupChild(child: ChildProcess): void {
       });
     })
   );
-  if (scope.controller.signal.aborted || scope.treeKills.failed) killProcessTree(child, 'SIGKILL');
+  if (scope.controller.signal.aborted || (!scope.treeKills.handedOff && scope.treeKills.failed))
+    killProcessTree(child, 'SIGKILL');
 }
 
 export async function withStartupTasksAsync<T>(

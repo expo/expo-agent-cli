@@ -8,6 +8,7 @@
 // copied: getting it subtly different for one of the two CLIs is a bug nobody would look for.
 
 import { spawn } from 'child_process';
+import type { RunCancellation } from './startupTasks';
 
 import { withRunnerLockAsync, runnerSpawnKey } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
@@ -39,13 +40,15 @@ const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 export function runInheritedAsync(
   command: string,
   args: string[],
-  options: {
+  options: RunCancellation & {
     cwd: string;
     onExit?: (code: number, signal: NodeJS.Signals | null) => void;
     onSpawnError?: (error: NodeJS.ErrnoException) => void;
     signal?: AbortSignal;
   }
 ): Promise<number> {
+  if (options.stopSignal)
+    return Promise.reject(new Error('Owned runs require managed subprocess output.'));
   const key = runnerSpawnKey(command, args);
   return key == null
     ? runInheritedNowAsync(command, args, options)

@@ -108,7 +108,7 @@ export class DevServerStepRunner {
     const openPlatform = step.argv[1] === 'start' ? this.openPlatform : null;
     const spawnedAt = Date.now();
     // Session cleanup stays inside the active step so interruption waits for it.
-    const result = await steps.stepAsync(async (signal) => {
+    const result = await steps.stepAsync(async (cancellation) => {
       let attemptActive = true;
       let localOpen: Promise<void> | undefined;
       const stillWanted = () => attemptActive && !steps.interrupted;
@@ -124,14 +124,14 @@ export class DevServerStepRunner {
       return await runDevServerAsync(projectRoot, args, {
         agentSkills: options.agentSkills,
         output,
-        signal,
+        ...cancellation,
         lock,
         phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
         onDevServer: openPlatform
           ? ({ url }) => {
-              if (this.openAttempted) return;
+              if (this.openAttempted || !stillWanted()) return;
               this.openAttempted = true;
               if (eas) {
                 lock.apply({ type: 'eas-open-started' });

@@ -453,7 +453,7 @@ describe(runDevServerAsync, () => {
           settled = true;
         });
         await vi.advanceTimersByTimeAsync(0);
-        if (mode === 'cancelled') scope.cancel();
+        if (mode === 'cancelled') scope.requestStop('cancel-startup');
         if (mode === 'failed') scope.abort('publication failed');
         end(0);
         publish();

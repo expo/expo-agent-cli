@@ -28,6 +28,9 @@ export function createTreeKillEvidence() {
     handoff() {
       evidence.handedOff = true;
     },
+    get handedOff() {
+      return evidence.handedOff;
+    },
     get failed() {
       return evidence.failed;
     },
@@ -47,17 +50,18 @@ export function createTreeKillEvidence() {
  */
 export const USE_PROCESS_GROUP = process.platform !== 'win32';
 
-/** Signal the managed group/tree, retaining a failed pre-lock attempt before direct fallback. */
-export function killProcessTree(child: ChildProcess, signal?: NodeJS.Signals): void {
+/** Stop the managed tree, retaining uncertainty even when direct fallback closes its parent. */
+export function killProcessTree(child: ChildProcess, signal?: NodeJS.Signals): boolean {
   const evidence = startupTrees.get(child);
   const prelock = evidence && !evidence.handedOff;
   const requested = prelock ? 'SIGKILL' : (signal ?? 'SIGTERM');
-  if (USE_PROCESS_GROUP && child.pid != null) {
+  if (process.platform !== 'win32' && child.pid != null) {
     try {
       process.kill(-child.pid, requested);
-      return;
+      return true;
     } catch (error) {
-      if (prelock && (error as NodeJS.ErrnoException).code !== 'ESRCH') evidence.failed = true;
+      if (evidence && (error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+      if (evidence) evidence.failed = true;
     }
   }
   if (process.platform === 'win32' && child.pid != null) {
@@ -66,11 +70,12 @@ export function killProcessTree(child: ChildProcess, signal?: NodeJS.Signals): v
         stdio: 'ignore',
         windowsHide: true,
       });
-      if (killed?.status === 0 && !killed.error && !killed.signal) return;
+      if (killed?.status === 0 && !killed.error && !killed.signal) return true;
     } catch {}
-    if (prelock) evidence.failed = true;
+    if (evidence) evidence.failed = true;
   }
   try {
     child.kill(requested);
   } catch {}
+  return false;
 }

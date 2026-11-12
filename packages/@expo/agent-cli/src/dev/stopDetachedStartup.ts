@@ -1,7 +1,7 @@
 import { lockAddressFor, probeDevServerLockAsync } from '../devLock';
 import {
   inspectDetachedStopAsync,
-  cancelDetachedAttemptAsync,
+  requestOwnedStopAsync,
   retireDetachedAttempt,
   readDetachedAttemptAsync,
   type DetachedAttemptRef,
@@ -9,57 +9,82 @@ import {
 } from './detachedOwner';
 import { captureCloudSessionsAsync, stopCloudSessionsAsync } from './stopCloudSessions';
 import { captureDetachedDevices, stopDevicesAsync } from './stopDevices';
-import { readDevServerLockAsync } from '../devLock';
+import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
+import { env } from '../utils/env';
+import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
+import type { StartupSession } from '../utils/startupTasks';
 import type { DevStopOptions } from './resolveStopOptions';
 import { isProcessAlive } from './processLiveness';
 import { isPortFreeAsync, POLL_INTERVAL_MS } from './processStop';
 import type { DevStopResultJson } from './stopAsync';
 
-export async function waitForDetachedExitAsync(ref: DetachedAttemptRef, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs;
+export async function observeOwnedStopAsync(
+  ref: DetachedAttemptRef,
+  control: Awaited<ReturnType<typeof requestOwnedStopAsync>>,
+  lock: DevServerLockInfo | null,
+  options: DevStopOptions,
+  startedAt: number
+): Promise<{ report: DevStopResultJson; finishing: boolean; pending: boolean }> {
+  let deadline = startedAt + options.timeoutMs;
+  let receipt: StartupSession[] | null | undefined;
+  void control.completion.then((value) => {
+    receipt = value;
+  });
+  let finishing = false;
+  let stopped = false;
   for (;;) {
     const probe = await probeDevServerLockAsync(lockAddressFor(ref.projectRoot).address);
-    const processGone = !isProcessAlive(ref.pid);
+    const current = probe.info;
+    const matches = current?.detachedAttemptId === ref.id && current.pid === ref.pid;
+    if (matches && current.phase === 'finishing' && !finishing) {
+      finishing = true;
+      lock = current;
+      if (!options.eas) {
+        stopped = true;
+        break;
+      }
+      deadline = Math.min(
+        Date.parse(current.startedAt) + EAS_TUNNEL_WAIT_MS + EAS_SESSION_START_TIMEOUT_MS,
+        Date.now() + env.AGENT_CLI_EAS_SESSION_WAIT_MS
+      );
+      control.extendCompletionDeadline(deadline);
+    }
     const lockGone =
-      !probe.connected || (probe.info != null && probe.info.detachedAttemptId !== ref.id);
-    if (processGone && lockGone) return true;
-    if (Date.now() + POLL_INTERVAL_MS >= deadline) return false;
+      !probe.connected || (current != null && current.detachedAttemptId != null && !matches);
+    if (receipt != null && !isProcessAlive(ref.pid) && lockGone) {
+      stopped = true;
+      finishing = false;
+      break;
+    }
+    if (receipt === null || Date.now() + POLL_INTERVAL_MS >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-}
-
-export async function stopDetachedStartupAsync(
-  ref: DetachedAttemptRef,
-  control: Awaited<ReturnType<typeof cancelDetachedAttemptAsync>>,
-  timeoutMs: number,
-  startedAt: number
-): Promise<DevStopResultJson> {
-  const drained = await control.completion;
-  const stopped =
-    drained != null &&
-    (await waitForDetachedExitAsync(
-      ref,
-      control.state === 'accepted' ? Math.max(0, startedAt + timeoutMs - Date.now()) : timeoutMs
-    ));
+  const port = lock?.port ?? ref.port;
   return {
-    stopped,
-    pid: ref.pid,
-    port: ref.port,
-    url: null,
-    lockHeld: false,
-    signal: null,
-    forced: false,
-    forceRefusedBy: null,
-    processStillRunning: isProcessAlive(ref.pid),
-    easPlatform: null,
-    portStillAnswering: ref.port == null ? null : !(await isPortFreeAsync(ref.port)),
-    reason: stopped ? null : 'still-running',
-    detail: stopped
-      ? 'Startup stopped. An already submitted EAS build continues on EAS; "eas build:cancel" ends it.'
-      : 'The captured startup did not prove completed cleanup and exit within the stop timeout. Its ownership was kept.',
-    untracked: false,
-    waitedMs: Date.now() - startedAt,
-    followups: [],
+    finishing,
+    pending: !stopped,
+    report: {
+      stopped: stopped || finishing,
+      pid: ref.pid,
+      port,
+      url: lock?.url ?? null,
+      lockHeld: lock != null,
+      signal: null,
+      forced: false,
+      forceRefusedBy: null,
+      processStillRunning: isProcessAlive(ref.pid),
+      easPlatform: lock?.easPlatform ?? null,
+      portStillAnswering: port == null ? null : !(await isPortFreeAsync(port)),
+      reason: stopped || finishing ? null : 'still-running',
+      detail: stopped
+        ? control.action === 'cancel-startup'
+          ? 'Startup stopped. An already submitted EAS build continues on EAS; "eas build:cancel" ends it.'
+          : null
+        : 'The captured owner did not prove completed cleanup and exit within the stop timeout. Its ownership was kept.',
+      untracked: false,
+      waitedMs: Date.now() - startedAt,
+      followups: [],
+    },
   };
 }
 
@@ -72,12 +97,11 @@ export async function prepareDetachedStopAsync(
   const ref = inspected.attempt?.ref;
   const captured =
     inspected.authorized && ref && options.eas ? await captureCloudSessionsAsync(root) : undefined;
-  const control =
-    inspected.authorized && ref ? await cancelDetachedAttemptAsync(ref, options) : null;
+  const releaseCaptured = captureDetachedDevices(root, options, expected ?? ref ?? undefined);
+  const control = inspected.authorized && ref ? await requestOwnedStopAsync(ref, options) : null;
   let lock = inspected.lock;
-  let releaseCaptured: ReturnType<typeof captureDetachedDevices>;
   try {
-    if (control?.state === 'locked') {
+    if (control?.action === 'stop-run') {
       lock = await readDevServerLockAsync(root);
       if (
         lock &&
@@ -87,7 +111,6 @@ export async function prepareDetachedStopAsync(
       )
         throw stopUncertainError();
     }
-    releaseCaptured = captureDetachedDevices(root, options, expected ?? ref ?? undefined);
   } catch (error) {
     await control?.releaseAsync();
     throw error;
@@ -100,11 +123,7 @@ export async function prepareDetachedStopAsync(
     async cleanupAsync(report: DevStopResultJson, pending: boolean) {
       const sessions =
         control && options.eas && !pending && report.stopped ? await control.completion : null;
-      if (
-        control &&
-        options.eas &&
-        (!sessions || !(await waitForDetachedExitAsync(ref!, options.timeoutMs)))
-      ) {
+      if (control && options.eas && (!sessions || pending || !report.stopped)) {
         pending = true;
         report.session = {
           id: null,

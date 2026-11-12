@@ -588,19 +588,20 @@ work, even when the parent exits or its wait expires.
 Before lock publication, an equivalent request returns 22 and a changed request returns 20.
 `status` and `dev:logs` expose the same detached PID and private log without exposing the token.
 One parsed settings snapshot determines both request identity and child execution; later edits
-apply to a later start. Every detached stop authenticates to the captured attempt before signaling.
+apply to a later start. Every detached stop authenticates to the captured attempt before interrupting its plan.
 A single nonce grants stop authority. Closing or aborting its response never transfers that authority.
-A plain stopper explicitly releases its nonce after its last signal, captured-device cleanup and
+A plain stopper explicitly releases its nonce after stop observation, captured-device cleanup and
 retirement decision. A released nonce cannot release a later grant. Admission closes before teardown.
 
-| Captured stop         | Completion and retirement contract                                                                                                                                                                                                                                                      | Proof                                                                                                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Before lock handoff   | Abort queued and fallback work, force managed tree termination, and await direct-child close and startup work. Failed tree termination retains uncertainty even after direct fallback succeeds. Only a matching drained body plus owner exit and lock disappearance permits completion. | `dev-detached-owner-test` covers both runners, independent-stdio descendants, failed group termination, and nested deadline work.                                                  |
-| After lock handoff    | Follow ordinary locked stop. Plain stop can retire after a hard exit bypasses the body. Failed publication cancels startup and late callbacks cannot open.                                                                                                                              | `runLock-test`, `startAsync-test`, and the existing stop/start process cases.                                                                                                      |
-| Finishing EAS session | Plain stop returns promptly and keeps sessions. Explicit `--eas` waits on its separate session budget, then requires the drained body and actual exit before releasing only captured or owner-reported IDs and retiring. Missing receipts retain uncertain ownership.                   | `dev-eas-test` holds both platforms' receipts through plain stop and a short local timeout. `dev-detached-owner-test` holds cleanup against a successor and crashes after a grant. |
+| Captured stop         | Completion and retirement contract                                                                                                                                                                                                                                                      | Proof                                                                                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before lock handoff   | Abort queued and fallback work, force managed tree termination, and await direct-child close and startup work. Failed tree termination retains uncertainty even after direct fallback succeeds. Only a matching drained body plus owner exit and lock disappearance permits completion. | `dev-detached-owner-test` covers both runners, independent-stdio descendants, failed group termination, and nested deadline work.                                                         |
+| After lock handoff    | Stop the selected plan tree cooperatively while the owner completes EAS work. Finishing requires native tree success and direct-child close. Failed publication cancels startup and late callbacks cannot open.                                                                         | `dev-owned-stop-test` covers active, queued, publication, inter-step and port-move boundaries.                                                                                            |
+| Finishing EAS session | Plain stop returns promptly and keeps sessions. Explicit `--eas` waits on its separate session budget, then requires the drained body and actual exit before releasing only captured or owner-reported IDs and retiring. Missing receipts retain uncertain ownership.                   | `dev-owned-stop-test` holds both platforms' receipts through plain stop and a short local timeout. `dev-detached-owner-test` holds cleanup against a successor and crashes after a grant. |
 
 Pre-lock termination failure blocks further subprocess admission and first lock handoff. After handoff,
-ordinary locked signal behavior remains unchanged. The managed group or Windows taskkill contract
+failed managed termination invalidates the receipt without killing later EAS finishing children.
+[[0036-owned-detached-stop]] defines cooperative stop, compatibility, flags and completion evidence. The managed group or Windows taskkill contract
 does not contain descendants that deliberately escape it, nor prove arbitrary OS descendant exit.
 
 The response body reports settled managed work, separately from accepted headers. Socket closure and PID
@@ -737,7 +738,8 @@ A run stops on SIGINT or SIGTERM between steps. The step that was running gets t
 signal and ends, and the run starts no later step and exits 130 or 143. So a plain
 `dev:stop` stops a run in `building`, and no dev server starts after the interrupted
 build. An `eas build` that was already submitted keeps running on EAS; `eas build:cancel`
-ends it. On Windows `dev:stop` ends the process tree at once, with the same result.
+ends it. An owned detached stop ends only the selected managed plan tree on Windows and POSIX,
+leaves outstanding EAS work alive, and admits no later step.
 
 Tests: dev-eas-test (the report, the 22, the follow by a re-run, a followed build that
 fails, the stop of a building run), dev-detach-test (a building `expo run:*` plan).

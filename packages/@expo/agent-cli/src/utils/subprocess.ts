@@ -9,7 +9,13 @@ import { env } from './env';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
-import { assertStartupActive, startupSignal, trackStartupChild } from './startupTasks';
+import {
+  assertStartupActive,
+  startupSignal,
+  bindOwnedChildStop,
+  trackStartupChild,
+  type RunCancellation,
+} from './startupTasks';
 
 /** What happens to the output of the subprocess. */
 export type SubprocessOutput =
@@ -31,7 +37,7 @@ export type SubprocessOutput =
 /** The output modes that keep what the tool printed, i.e. everything but `inherit`. */
 export type CapturedOutput = Exclude<SubprocessOutput, 'inherit'>;
 
-export interface SubprocessOptions {
+export interface SubprocessOptions extends RunCancellation {
   cwd?: string;
   /** Defaults to `capture`. */
   output?: SubprocessOutput;
@@ -125,7 +131,10 @@ export function spawnSubprocessAsync(
   args: string[],
   options: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
-  options = { ...options, signal: startupSignal(options.signal) };
+  const admission = options.stopSignal
+    ? AbortSignal.any([...(options.signal ? [options.signal] : []), options.stopSignal])
+    : options.signal;
+  options = { ...options, signal: startupSignal(admission) };
   if (options.signal?.aborted) return Promise.reject(options.signal.reason);
   const key = runnerSpawnKey(command, args);
   if (key == null) {
@@ -182,6 +191,7 @@ function spawnNowAsync(
     timeoutMs,
     printFilter,
     signal,
+    stopSignal,
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
   if (signal?.aborted) return Promise.reject(signal.reason);
@@ -204,6 +214,7 @@ function spawnNowAsync(
     });
 
     trackStartupChild(child);
+    const unbindStop = bindOwnedChildStop(child, stopSignal);
     let stdout = '';
     let stderr = '';
     /** Set when the guard below kills the child, so `close` knows why it is closing. */
@@ -264,6 +275,7 @@ function spawnNowAsync(
       return { signal, forward } as const;
     });
     const stopWatching = () => {
+      unbindStop();
       guard?.stop();
       clearTimeout(deadline);
       // A tool that ends without a trailing newline still said what it said.

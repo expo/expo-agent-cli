@@ -3,7 +3,13 @@
 import * as Log from '../log';
 import { currentDetachedAttemptId } from '../dev/detachedOwner';
 import { PROGRAM_NAME } from '../programName';
-import { failStartupLock, handoffStartup, startupSignal } from '../utils/startupTasks';
+import {
+  canFinishStartup,
+  failStartupLock,
+  handoffStartup,
+  ownedRunStopSignal,
+  startupSignal,
+} from '../utils/startupTasks';
 import { lockAddressOrEmpty } from './address';
 import { debugEvent, event } from './events';
 import { isHeld, nextRunState, type HeldRunState, type RunEvent, type RunState } from './runState';
@@ -35,7 +41,7 @@ export class RunLock {
 
   /** The `published` event. Takes the lock first when the run holds none. */
   async publishAsync(published: Published): Promise<void> {
-    if (startupSignal()?.aborted) return;
+    if (startupSignal()?.aborted || ownedRunStopSignal()?.aborted) return;
     const next = nextRunState(this.#state, published);
     if (this.#handle || !next || !isHeld(next)) {
       if (!this.#handle && this.#state.phase !== 'released') failStartupLock();
@@ -51,7 +57,7 @@ export class RunLock {
       return;
     }
     // The run ended while the take ran: the lock has nothing left to answer for.
-    if (this.#state.phase === 'released') return handle.release();
+    if (this.#state.phase === 'released' || ownedRunStopSignal()?.aborted) return handle.release();
     // Again from the state now: an EAS open can start while the take runs. A state the publish
     // no longer holds the lock in keeps no socket.
     const now = nextRunState(this.#state, published);
@@ -75,6 +81,7 @@ export class RunLock {
 
   /** Every event but a take. */
   apply(runEvent: Exclude<RunEvent, Published>): void {
+    if (runEvent.type === 'server-exited' && !canFinishStartup()) return;
     this.#commit(runEvent);
   }
 

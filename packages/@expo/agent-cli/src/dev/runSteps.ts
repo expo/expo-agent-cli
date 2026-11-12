@@ -8,7 +8,13 @@ import { publishPlannedPortAsync, withRunLockAsync, type RunLock } from '../devL
 import { isDevServerStep } from './forwardedArgs';
 import type { StartPlan } from '../project/types';
 import { CommandError } from '../utils/errors';
-import { assertStartupActive, canOpenStartup } from '../utils/startupTasks';
+import {
+  assertStartupActive,
+  canOpenStartup,
+  ownedRunStopSignal,
+  registerLockedStop,
+  type RunCancellation,
+} from '../utils/startupTasks';
 
 /** How a run marks its steps, so a signal knows whether a step has to end first. */
 export interface RunSteps {
@@ -17,7 +23,7 @@ export interface RunSteps {
    * `work` passes `signal` to the spawn: a signal that comes before the child exists aborts it, so
    * the child never starts and the step rejects with `DEV_INTERRUPTED`.
    */
-  stepAsync<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  stepAsync<T>(work: (cancellation: RunCancellation) => Promise<T>): Promise<T>;
   /** Whether a signal arrived during the run. */
   readonly interrupted: boolean;
   /** Throw `DEV_INTERRUPTED` when a signal arrived during the run. */
@@ -41,13 +47,21 @@ export async function withRunAsync<T>(
 ): Promise<T> {
   assertStartupActive();
   return await withRunLockAsync(projectRoot, async (lock) => {
-    const port = plan.devServerPort?.port;
-    if (port != null && plan.steps.findIndex(isDevServerStep) > 0) {
-      await publishPlannedPortAsync(lock, projectRoot, port, easPlatform);
-      canOpenStartup();
-      assertStartupActive();
+    const unregister = registerLockedStop(() => ('port' in lock.state ? lock.state.port : null));
+    try {
+      return await withSignalsAsync(async (steps) => {
+        steps.assertNotInterrupted();
+        const port = plan.devServerPort?.port;
+        if (port != null && plan.steps.findIndex(isDevServerStep) > 0) {
+          await publishPlannedPortAsync(lock, projectRoot, port, easPlatform);
+          canOpenStartup();
+          steps.assertNotInterrupted();
+        }
+        return await run(lock, steps);
+      });
+    } finally {
+      unregister();
     }
-    return await withSignalsAsync((steps) => run(lock, steps));
   });
 }
 
@@ -56,6 +70,10 @@ async function withSignalsAsync<T>(run: (steps: RunSteps) => Promise<T>): Promis
   let signal: NodeJS.Signals | null = null;
   let running = 0;
   const abort = new AbortController();
+  const stopSignal = ownedRunStopSignal();
+  const onStop = () => abort.abort(stopSignal!.reason);
+  stopSignal?.addEventListener('abort', onStop, { once: true });
+  if (stopSignal?.aborted) onStop();
   const onSignal = (received: NodeJS.Signals) => {
     signal ??= received;
     abort.abort(interruptedError(signal));
@@ -65,19 +83,20 @@ async function withSignalsAsync<T>(run: (steps: RunSteps) => Promise<T>): Promis
   };
   const steps: RunSteps = {
     async stepAsync(work) {
+      steps.assertNotInterrupted();
       running++;
       try {
-        return await work(abort.signal);
+        return await work({ signal: abort.signal, ...(stopSignal ? { stopSignal } : {}) });
       } finally {
         running--;
       }
     },
     get interrupted() {
-      return signal != null;
+      return abort.signal.aborted;
     },
     assertNotInterrupted() {
       assertStartupActive();
-      if (signal) throw interruptedError(signal);
+      abort.signal.throwIfAborted();
     },
   };
   process.on('SIGINT', onSignal);
@@ -85,6 +104,7 @@ async function withSignalsAsync<T>(run: (steps: RunSteps) => Promise<T>): Promis
   try {
     return await run(steps);
   } finally {
+    stopSignal?.removeEventListener('abort', onStop);
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
   }

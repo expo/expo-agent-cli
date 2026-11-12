@@ -1,3 +1,4 @@
+import type { RunCancellation } from '../utils/startupTasks';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { publishDevServerPortAsync, withRunLockAsync, type RunLock } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
@@ -89,8 +90,8 @@ export async function runDevServerAsync(
     easPlatform = null,
     lock: runLock,
     phase,
-    signal,
-  }: {
+    ...cancellation
+  }: RunCancellation & {
     agentSkills: boolean;
     output?: SubprocessOutput;
     /** The platform of the EAS session this run opens the app on, named on the lock. */
@@ -169,7 +170,7 @@ export async function runDevServerAsync(
     ).catch(() => {});
   };
   const run = withLeaseExtendedAsync(projectRoot, () =>
-    spawnDevServerAsync(projectRoot, args, output, signal)
+    spawnDevServerAsync(projectRoot, args, output, cancellation)
   ).finally(() => {
     running = false;
   });
@@ -273,13 +274,21 @@ async function spawnDevServerAsync(
   projectRoot: string,
   args: string[],
   output: SubprocessOutput,
-  signal: AbortSignal | undefined
+  cancellation: RunCancellation
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   if (output === 'inherit') {
-    return { exitCode: await runExpoAsync(projectRoot, args, { signal }), stdout: '', stderr: '' };
+    return {
+      exitCode: await runExpoAsync(projectRoot, args, cancellation),
+      stdout: '',
+      stderr: '',
+    };
   }
 
-  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false, signal });
+  const { result } = await spawnExpoAsync(projectRoot, args, {
+    output,
+    ci: false,
+    ...cancellation,
+  });
   if (result.spawnError) {
     throw new CommandError(
       'EXPO_CLI_NOT_FOUND',

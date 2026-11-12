@@ -182,10 +182,14 @@ describe(devStopAsync, () => {
         const action = new URL(String(url)).pathname;
         requests.push(`${request?.method} ${action}`);
         return new Response(
-          action === '/cancel' ? JSON.stringify({ id, drained: true, sessions: [] }) : null,
+          action === '/stop' ? JSON.stringify({ id, drained: true, sessions: [] }) : null,
           {
             status: action === '/release' ? 204 : 200,
-            headers: { 'x-detached-attempt': id, 'x-detached-grant': id },
+            headers: {
+              'x-detached-attempt': id,
+              'x-detached-grant': id,
+              'x-detached-stop': 'stop-run',
+            },
           }
         );
       }) as typeof fetch;
@@ -207,6 +211,69 @@ describe(devStopAsync, () => {
       expect(requests.filter((request) => request === 'POST /release')).toHaveLength(
         race === 'new-lock' || race === 'scoped-eas' ? 0 : 1
       );
+    }
+  );
+
+  it.each([
+    'old-server',
+    'invalid-action',
+    'wrong-generation',
+    'missing-grant',
+    'invalid-receipt',
+  ] as const)(
+    'refuses an owned %s response without falling back to a PID signal',
+    async (responseKind) => {
+      const id = '00000000-0000-4000-8000-000000000001';
+      const owned = lock({ detachedAttemptId: id });
+      const directory = path.join(claimDirectory, id);
+      vol.mkdirSync(directory, { recursive: true });
+      vol.writeFileSync(
+        path.join(directory, 'owner.json'),
+        JSON.stringify({
+          id,
+          directory,
+          projectRoot,
+          request: '[]',
+          pid: owned.pid,
+          port: owned.port,
+          logFile: path.join(projectRoot, '.expo', 'dev', 'logs', `dev-detached-${id}.log`),
+          control: { port: 12345, token: id },
+        })
+      );
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null).mockResolvedValueOnce(owned);
+      const requests: string[] = [];
+      globalThis.fetch = (async (url, request) => {
+        const action = new URL(String(url)).pathname;
+        if (action === '/status') return new Response('');
+        requests.push(`${request?.method} ${action}`);
+        return new Response(
+          action === '/stop' ? JSON.stringify({ id: 'other', drained: true, sessions: [] }) : null,
+          {
+            status:
+              action === '/release'
+                ? 204
+                : action === '/stop' && responseKind === 'old-server'
+                  ? 401
+                  : 200,
+            headers: {
+              'x-detached-attempt':
+                action === '/stop' && responseKind === 'wrong-generation' ? 'other' : id,
+              'x-detached-grant': responseKind === 'missing-grant' ? '' : id,
+              'x-detached-stop': responseKind === 'invalid-action' ? 'signal-owner' : 'stop-run',
+            },
+          }
+        );
+      }) as typeof fetch;
+      const stopping = devStopAsync(projectRoot, options(), { print: false });
+      if (responseKind === 'invalid-receipt') expect(await stopping).toBe(EXIT_OUTCOME_FAILED);
+      else await expect(stopping).rejects.toMatchObject({ code: 'DEV_DETACHED_STOP_UNCERTAIN' });
+      expect(killed).toEqual([]);
+      expect(requests).toEqual(
+        responseKind === 'invalid-receipt'
+          ? ['HEAD /', 'POST /stop', 'POST /release']
+          : ['HEAD /', 'POST /stop']
+      );
+      expect(vol.existsSync(directory)).toBe(true);
     }
   );
 

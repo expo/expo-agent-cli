@@ -163,7 +163,7 @@ it.each(
     [false, true].map((handedOff) => ({ outcome, handedOff }))
   )
 )(
-  'records pre-lock taskkill failure before direct fallback and retains it (%j)',
+  'records taskkill failure before direct fallback and retains it (%j)',
   ({ outcome, handedOff }) => {
     mockPlatform('win32');
     vi.spyOn(process, 'kill').mockImplementation(() => {
@@ -173,7 +173,7 @@ it.each(
     const child = fakeChild({ pid: 4321 });
     evidence.track(child as any);
     if (handedOff) evidence.handoff();
-    const failed = !handedOff && outcome !== 'success';
+    const failed = outcome !== 'success';
     child.kill.mockImplementation(() => {
       expect(evidence.failed).toBe(failed);
     });

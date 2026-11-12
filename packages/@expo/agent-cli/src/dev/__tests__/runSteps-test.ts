@@ -41,9 +41,9 @@ describe(withRunAsync, () => {
   it(`aborts the step's signal with DEV_INTERRUPTED before its child exists`, async () => {
     await expect(
       withRunAsync('/project', plan, null, (_lock, steps) =>
-        steps.stepAsync(async (signal) => {
+        steps.stepAsync(async ({ signal }) => {
           process.emit('SIGTERM', 'SIGTERM');
-          signal.throwIfAborted();
+          signal!.throwIfAborted();
         })
       )
     ).rejects.toMatchObject({ code: 'DEV_INTERRUPTED', exitCode: 143 });

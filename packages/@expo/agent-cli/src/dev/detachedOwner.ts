@@ -15,8 +15,8 @@ import {
   createStartupScope,
   withStartupTasksAsync,
   type StartupSession,
+  type OwnedStopAction,
 } from '../utils/startupTasks';
-import { env } from '../utils/env';
 import {
   detachedLogPath,
   publishDetachedLogSync,
@@ -105,12 +105,13 @@ export async function inspectDetachedStopAsync(
     attempt &&
     (!attempt.ref ||
       (options.port != null && options.port !== knownPort) ||
+      options.signal !== 'SIGTERM' ||
       (!matching && !supportsStartupCancellation(options)))
   ) {
     const error = detachedAttemptError(attempt);
     error.exitCode = 20;
     error.message +=
-      '\nNothing was stopped. Startup cancellation requires its known port, no --force or --release, and the default SIGTERM signal.';
+      '\nNothing was stopped. Owned stops require the default SIGTERM option. Before lock publication they also require the known port and no --force or --release.';
     throw error;
   }
   return { attempt, lock, authorized };
@@ -119,7 +120,8 @@ export async function inspectDetachedStopAsync(
 export const supportsStartupCancellation = (options: DevStopOptions) =>
   !options.force && !options.release && options.signal === 'SIGTERM';
 
-export async function cancelDetachedAttemptAsync(ref: DetachedAttemptRef, options: DevStopOptions) {
+export async function requestOwnedStopAsync(ref: DetachedAttemptRef, options: DevStopOptions) {
+  if (options.signal !== 'SIGTERM') throw stopUncertainError();
   const controller = new AbortController();
   let released = false;
   const deadline = Date.now() + options.timeoutMs;
@@ -129,13 +131,14 @@ export async function cancelDetachedAttemptAsync(ref: DetachedAttemptRef, option
     controller.abort();
   };
   try {
-    const response = await fetch(`http://127.0.0.1:${ref.control.port}/cancel`, {
+    const response = await fetch(`http://127.0.0.1:${ref.control.port}/stop`, {
       method: 'POST',
       redirect: 'error',
       headers: {
         Authorization: ref.control.token,
         'x-detached-attempt': ref.id,
-        'x-detached-cancel': String(supportsStartupCancellation(options)),
+        'x-detached-port': String(options.port),
+        'x-detached-policy': options.force || options.release ? 'locked-only' : 'default',
         'x-detached-eas': String(options.eas),
       },
       signal: controller.signal,
@@ -143,16 +146,17 @@ export async function cancelDetachedAttemptAsync(ref: DetachedAttemptRef, option
     if (
       response.headers.get('x-detached-attempt') !== ref.id ||
       !UUID.test(response.headers.get('x-detached-grant') ?? '') ||
-      (response.status !== 202 && response.status !== 200)
+      !(
+        (response.status === 202 && response.headers.get('x-detached-stop') === 'cancel-startup') ||
+        (response.status === 200 && response.headers.get('x-detached-stop') === 'stop-run')
+      )
     )
       throw new Error();
-    clearTimeout(timer);
-    timer = setTimeout(
-      () => controller.abort(),
-      response.status === 200 && options.eas
-        ? options.timeoutMs + env.AGENT_CLI_EAS_SESSION_WAIT_MS
-        : Math.max(0, deadline - Date.now())
-    );
+    const extendCompletionDeadline = (until: number) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), Math.max(0, until - Date.now()));
+    };
+    extendCompletionDeadline(deadline);
     const completion = response
       .json()
       .then(
@@ -176,7 +180,8 @@ export async function cancelDetachedAttemptAsync(ref: DetachedAttemptRef, option
       )
       .finally(() => clearTimeout(timer));
     return {
-      state: response.status === 202 ? ('accepted' as const) : ('locked' as const),
+      action: response.headers.get('x-detached-stop') as OwnedStopAction,
+      extendCompletionDeadline,
       completion,
       dispose,
       async releaseAsync() {
@@ -353,7 +358,7 @@ export async function withDetachedOwnerAsync<T>(
   }
   const token = randomUUID();
   const startup = createStartupScope();
-  const control = createControlServer(id, token, startup);
+  const control = createControlServer(id, token, startup, options.port);
   const { server } = control;
   let ref: DetachedAttemptRef | null = null;
   try {
@@ -388,7 +393,8 @@ export async function withDetachedOwnerAsync<T>(
 function createControlServer(
   id: string,
   token: string,
-  startup: ReturnType<typeof createStartupScope>
+  startup: ReturnType<typeof createStartupScope>,
+  configuredPort: number | null
 ) {
   const responses = new Set<Promise<void>>();
   let grant: { nonce: string; retainClaim: boolean } | undefined;
@@ -396,10 +402,11 @@ function createControlServer(
   const server = http.createServer((request, response) => {
     const post = request.method === 'POST' && request.headers['x-detached-attempt'] === id;
     const cancel = post && request.url === '/cancel';
+    const stop = post && request.url === '/stop';
     const release = post && request.url === '/release';
     if (
       request.headers.authorization !== token ||
-      (!cancel && !release && !(request.method === 'HEAD' && request.url === '/'))
+      (!cancel && !stop && !release && !(request.method === 'HEAD' && request.url === '/'))
     ) {
       response.writeHead(401, { Connection: 'close' }).end();
       return;
@@ -415,22 +422,34 @@ function createControlServer(
       response.writeHead(matches ? 204 : 409).end();
       return;
     }
-    const outcome = cancel
-      ? grant
-        ? 'unsupported'
-        : startup.cancel(request.headers['x-detached-cancel'] === 'true')
-      : 'locked';
-    if (cancel && outcome !== 'unsupported')
-      grant = { nonce: randomUUID(), retainClaim: request.headers['x-detached-eas'] === 'true' };
-    response.writeHead(outcome === 'accepted' ? 202 : outcome === 'locked' ? 200 : 409, {
-      Connection: 'close',
-      'x-detached-attempt': id,
-      ...(cancel && grant ? { 'x-detached-grant': grant.nonce } : {}),
-    });
-    if (!cancel || outcome === 'unsupported') {
-      response.end();
+    if (!cancel && !stop) {
+      response.writeHead(200, { 'x-detached-attempt': id }).end();
       return;
     }
+    const portHeader = request.headers['x-detached-port'];
+    const port = portHeader === 'null' ? null : Number(portHeader);
+    const policy = request.headers['x-detached-policy'];
+    const valid = cancel
+      ? request.headers['x-detached-cancel'] === 'true'
+      : (port === null || (Number.isInteger(port) && port > 0 && port <= 65535)) &&
+        (policy === 'default' || policy === 'locked-only') &&
+        ['true', 'false'].includes(String(request.headers['x-detached-eas']));
+    const action =
+      !grant && valid
+        ? startup.stopAction(cancel ? null : port, configuredPort, policy === 'locked-only', cancel)
+        : null;
+    if (!action) {
+      response.writeHead(409).end();
+      return;
+    }
+    grant = { nonce: randomUUID(), retainClaim: request.headers['x-detached-eas'] === 'true' };
+    startup.requestStop(action);
+    response.writeHead(action === 'cancel-startup' ? 202 : 200, {
+      Connection: 'close',
+      'x-detached-attempt': id,
+      'x-detached-grant': grant.nonce,
+      'x-detached-stop': action,
+    });
     response.flushHeaders();
     const reply = async () => {
       const drained = await startup.drained;

@@ -731,9 +731,7 @@ describe('@expo/agent-cli dev --detach', () => {
         lockHeld: true,
         processStillRunning: false,
       });
-      expect(process.platform === 'win32' ? [null, 'SIGTERM'] : ['SIGTERM']).toContain(
-        report.signal
-      );
+      expect(report.signal).toBeNull();
       expect(await waitForAsync(() => !isAlive(recordedPid), 5000)).toBe(true);
       // The wrapper is gone, and so is the lock it held — the two halves of "no orphan".
       expect(await waitForAsync(() => !isAlive(pid), 5000)).toBe(true);

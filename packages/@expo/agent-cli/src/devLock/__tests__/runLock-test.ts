@@ -150,13 +150,13 @@ it.each(['cancel', 'tainted', 'handoff', 'released', 'in-use', 'failed'] as cons
         kill.mockRestore();
       }
       child.emit('close', 0);
-      if (ordering === 'cancel') expect(scope.cancel()).toBe('accepted');
+      if (ordering === 'cancel') scope.requestStop('cancel-startup');
       if (ordering === 'released') lock.apply({ type: 'run-ended' });
       resume();
       const outcome = await finished;
       if (ordering === 'handoff') {
         expect(outcome).toBe(true);
-        expect(scope.cancel()).toBe('locked');
+        expect(scope.stopAction(null, null, false, false)).toBe('stop-run');
       } else expect(outcome).toMatchObject({ code: 'DEV_INTERRUPTED' });
       lock.apply({ type: 'run-ended' });
       if (holder?.status === 'acquired') holder.lock.release();

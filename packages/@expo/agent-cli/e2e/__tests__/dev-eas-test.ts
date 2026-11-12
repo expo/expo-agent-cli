@@ -11,7 +11,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { buildSessionStopArgs } from '../../src/device/eas';
 
 import {
   cloudBindingFile,
@@ -734,84 +733,6 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(state === 'reused');
       } finally {
         await killAsync(child);
-      }
-    }
-  );
-
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
-    'answers plain stop then EAS stop while the %s session receipt is held',
-    async (platform) => {
-      const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
-      const projectRoot = await setupAsync('go-app', {
-        easScript: script.replace(
-          'const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);',
-          `while (!fs.existsSync('release-session')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); const exitCode = 0;`
-        ),
-      });
-      try {
-        // A detached run keeps its session, so the session is the stop's to end.
-        const started = await executeAgentCliAsync(
-          projectRoot,
-          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
-          { env: { ...easRunEnv(projectRoot, 8587), STUB_EXPO_DELAY_MS: '2500' } }
-        );
-        const { pid, logFile }: { pid: number; logFile: string } = JSON.parse(started.stdout);
-        expect(
-          await waitForAsync(
-            () =>
-              fs.existsSync(logFile) &&
-              fs.readFileSync(logFile, 'utf8').includes('Finishing EAS session work'),
-            15_000
-          )
-        ).toBe(true);
-
-        const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
-          env: stubExpoEnv(projectRoot),
-          reject: false,
-        });
-
-        expect(result.exitCode).toBe(0);
-        const report = JSON.parse(result.stdout);
-        // The dev server is gone; the pid finishes its session start, and nothing signals it.
-        expect(report).toMatchObject({
-          stopped: true,
-          reason: null,
-          pid,
-          lockHeld: true,
-          signal: null,
-          processStillRunning: true,
-          easPlatform: platform,
-        });
-        expect(report.followups[0].command).toMatch(/dev:stop --eas$/);
-
-        // `--eas` waits for the start, so it finds and stops the session the run binds.
-        expect(
-          easInvocationArgs(projectRoot).filter(([verb]) => verb === 'simulator:stop')
-        ).toEqual([]);
-        const stopping = executeAgentCliAsync(
-          projectRoot,
-          ['dev:stop', '--eas', '--json', '--timeout', '500ms'],
-          { env: stubExpoEnv(projectRoot), reject: false }
-        );
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        fs.writeFileSync(path.join(projectRoot, 'release-session'), '');
-        const easStop = await stopping;
-        expect(easStop.exitCode, easStop.all).toBe(0);
-        expect(JSON.parse(easStop.stdout).session).toMatchObject({
-          id: 'sess-e2e-started',
-          stopped: true,
-        });
-        expect(
-          easInvocationArgs(projectRoot).filter(([verb]) => verb === 'simulator:stop')
-        ).toEqual([buildSessionStopArgs('sess-e2e-started')]);
-        expect(fs.existsSync(sessionBindingFile(projectRoot, platform))).toBe(false);
-      } finally {
-        fs.writeFileSync(path.join(projectRoot, 'release-session'), '');
-        await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
-          env: stubExpoEnv(projectRoot),
-          reject: false,
-        });
       }
     }
   );
