@@ -196,6 +196,7 @@ describe('device lifecycle across two worktrees', () => {
       expect.objectContaining({ platform: 'ios', id: udid, name, origin: 'created' })
     );
 
+    await executeAgentCliAsync(projectRoot, ['dev:stop'], { env });
     const reused = await executeAgentCliAsync(
       projectRoot,
       ['dev', '--ios', '--detach', '--no-open'],
