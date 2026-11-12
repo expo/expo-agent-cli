@@ -50,15 +50,20 @@ if (mode === 'args') {
     }
   }, 10);
 } else {
+  if (mode.endsWith('-native')) {
+    const creator = spawn(process.env.PROBE_HELPER, ['--native-creator', directory, 'one', process.env.PROBE_NESTED || 'plain'], { stdio: 'ignore', detached: true });
+    creator.unref();
+    marker('creator-spawned', { childPid: creator.pid });
+  }
   const child = spawn(process.execPath, [self, 'leaf', directory, token], {
-    stdio: mode === 'pipe' ? ['ignore', process.stdout, process.stderr] : 'ignore',
+    stdio: mode.startsWith('pipe') ? ['ignore', process.stdout, process.stderr] : 'ignore',
     detached: true,
   });
   child.unref();
   marker('spawned-leaf', { childPid: child.pid });
   const timer = setInterval(() => {
     if (!exists('leaf.json')) return;
-    if (mode === 'active') return;
+    if (mode.startsWith('active')) return;
     clearInterval(timer);
     process.stdout.write(`root-output-${token}\n`);
     process.stderr.write(`root-error-${token}\n`);

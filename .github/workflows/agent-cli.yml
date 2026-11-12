@@ -1,4 +1,4 @@
-name: Windows native job prototype
+name: Windows native job witness prototype 2
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 12
     env:
-      PROBE_DIRECTORY: ${{ github.workspace }}\scripts\diagnostics\windows-job-prototype
+      PROBE_DIRECTORY: ${{ github.workspace }}\scripts\diagnostics\windows-job-prototype-2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -30,16 +30,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: windows-job-prototype-${{ github.sha }}
+          name: windows-job-prototype-2-${{ github.sha }}
           if-no-files-found: error
           include-hidden-files: true
           path: |
-            scripts/diagnostics/windows-job-prototype/results/
-            scripts/diagnostics/windows-job-prototype/job-helper.exe
-            scripts/diagnostics/windows-job-prototype/job-helper.cpp
-            scripts/diagnostics/windows-job-prototype/controller.mjs
-            scripts/diagnostics/windows-job-prototype/fixture.mjs
-            scripts/diagnostics/windows-job-prototype/build.ps1
-            scripts/diagnostics/windows-job-prototype/README.md
-            scripts/diagnostics/windows-job-prototype/MANIFEST.sha256
+            scripts/diagnostics/windows-job-prototype-2/results/
+            scripts/diagnostics/windows-job-prototype-2/job-helper.exe
+            scripts/diagnostics/windows-job-prototype-2/job-helper.cpp
+            scripts/diagnostics/windows-job-prototype-2/native-fixture.h
+            scripts/diagnostics/windows-job-prototype-2/ORIGIN-V1.sha256
+            scripts/diagnostics/windows-job-prototype-2/controller.mjs
+            scripts/diagnostics/windows-job-prototype-2/fixture.mjs
+            scripts/diagnostics/windows-job-prototype-2/build.ps1
+            scripts/diagnostics/windows-job-prototype-2/README.md
+            scripts/diagnostics/windows-job-prototype-2/MANIFEST.sha256
             .github/workflows/agent-cli.yml

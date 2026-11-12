@@ -18,4 +18,4 @@ exit /b %errorlevel%
 if ($LASTEXITCODE -ne 0) { throw "Native compile failed with $LASTEXITCODE" }
 Get-ComputerInfo -Property WindowsProductName, WindowsVersion, OsName, OsVersion, OsBuildNumber, OsArchitecture | ConvertTo-Json | Set-Content (Join-Path $results 'windows.json')
 Get-FileHash -Algorithm SHA256 (Join-Path $probe 'job-helper.exe') | Format-List | Out-File (Join-Path $results 'helper-sha256.txt')
-Get-ChildItem $probe -File | Where-Object Extension -In '.cpp', '.mjs', '.ps1', '.yml', '.md' | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $results 'source-hashes.json')
+Get-ChildItem $probe -File | Where-Object Extension -In '.cpp', '.h', '.mjs', '.ps1', '.yml', '.md' | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $results 'source-hashes.json')

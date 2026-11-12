@@ -12,6 +12,7 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#include <algorithm>
 
 static HANDLE control = INVALID_HANDLE_VALUE;
 static HANDLE available;
@@ -27,6 +28,12 @@ static bool negative = false;
 static std::wstring fault;
 struct Observer { HANDLE handle; DWORD pid; unsigned long long created; std::string token; BOOL member; };
 static std::vector<Observer> observers;
+struct BoundMember { HANDLE handle; DWORD pid; unsigned long long created; };
+static std::vector<BoundMember> bound;
+static bool sealAccepted = false;
+static bool bindingComplete = false;
+static bool settlementPending = false;
+static unsigned long long operationDeadline = 0;
 
 static unsigned long long filetime(FILETIME t) { return (static_cast<unsigned long long>(t.dwHighDateTime) << 32) | t.dwLowDateTime; }
 static unsigned long long now() { FILETIME t; GetSystemTimePreciseAsFileTime(&t); return filetime(t) / 10000 - 11644473600000ULL; }
@@ -115,6 +122,8 @@ static unsigned snapshot(const char* phase) {
   for (const auto& o : observers) {
     DWORD wait = WaitForSingleObject(o.handle, 0); DWORD e = wait == WAIT_FAILED ? GetLastError() : 0;
     if (wait != WAIT_OBJECT_0) ++pending;
+    BOOL currentMember = FALSE; BOOL membershipOk = IsProcessInJob(o.handle, job, &currentMember); DWORD membershipError = membershipOk ? 0 : GetLastError();
+    emit("observer-membership", ",\"phase\":\"%s\",\"pid\":%lu,\"created\":\"%llu\",\"memberAtObservation\":%s,\"currentMember\":%s,\"membershipOk\":%s,\"membershipError\":%lu,\"wait\":%lu", phase, o.pid, o.created, o.member ? "true" : "false", currentMember ? "true" : "false", membershipOk ? "true" : "false", membershipError, wait);
     emit("observer", ",\"phase\":\"%s\",\"pid\":%lu,\"created\":\"%llu\",\"token\":\"%s\",\"member\":%s,\"wait\":%lu,\"error\":%lu", phase, o.pid, o.created, o.token.c_str(), o.member ? "true" : "false", wait, e);
   }
   return pending;
@@ -124,6 +133,8 @@ static void heldDrop() {
   bool beforeOk = count(&before, &beforeError, job);
   for (auto& o : observers) { CloseHandle(o.handle); o.handle = NULL; }
   observers.clear();
+  for (auto& member : bound) CloseHandle(member.handle);
+  bound.clear();
   DWORD rootWait = root.hProcess ? WaitForSingleObject(root.hProcess, 0) : WAIT_FAILED;
   if (root.hProcess) { CloseHandle(root.hProcess); root.hProcess = NULL; }
   bool afterOk = count(&after, &afterError, job);
@@ -187,6 +198,126 @@ static int observe(Frame& f) {
   emit("observed", ",\"pid\":%lu,\"created\":\"%llu\",\"token\":\"%s\",\"member\":%s,\"wait\":%lu", pid, created, token.c_str(), member ? "true" : "false", WaitForSingleObject(process, 0));
   return 0;
 }
+static bool memberList(const char* phase, std::vector<DWORD>& pids) {
+  const DWORD capacity = 4096;
+  std::vector<unsigned char> bytes(sizeof(JOBOBJECT_BASIC_PROCESS_ID_LIST) + capacity * sizeof(ULONG_PTR));
+  auto list = reinterpret_cast<JOBOBJECT_BASIC_PROCESS_ID_LIST*>(bytes.data());
+  BOOL ok = QueryInformationJobObject(job, JobObjectBasicProcessIdList, list, static_cast<DWORD>(bytes.size()), NULL);
+  DWORD e = ok ? 0 : GetLastError();
+  emit("member-list", ",\"phase\":\"%s\",\"ok\":%s,\"error\":%lu,\"assigned\":%lu,\"returned\":%lu,\"capacity\":%lu", phase, ok ? "true" : "false", e, list->NumberOfAssignedProcesses, list->NumberOfProcessIdsInList, capacity);
+  if (!ok || list->NumberOfAssignedProcesses != list->NumberOfProcessIdsInList || list->NumberOfProcessIdsInList > capacity) return false;
+  for (DWORD i = 0; i < list->NumberOfProcessIdsInList; ++i) {
+    if (list->ProcessIdList[i] > MAXDWORD) return false;
+    pids.push_back(static_cast<DWORD>(list->ProcessIdList[i]));
+    emit("listed-member", ",\"phase\":\"%s\",\"pid\":%lu", phase, pids.back());
+  }
+  std::sort(pids.begin(), pids.end());
+  return std::adjacent_find(pids.begin(), pids.end()) == pids.end();
+}
+static void ledger(const char* phase) {
+  JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info = {};
+  BOOL ok = QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &info, sizeof info, NULL);
+  DWORD error = ok ? 0 : GetLastError();
+  bool rootInBound = false;
+  for (const auto& member : bound) if (member.pid == root.dwProcessId) rootInBound = true;
+  emit("lifetime-accounting", ",\"phase\":\"%s\",\"ok\":%s,\"error\":%lu,\"active\":%lu,\"totalProcesses\":%lu,\"totalTerminatedProcesses\":%lu,\"boundHandles\":%zu,\"candidateIdentitiesIncludingRoot\":%zu,\"observerHandlesExcluded\":%zu", phase, ok ? "true" : "false", error, info.ActiveProcesses, info.TotalProcesses, info.TotalTerminatedProcesses, bound.size(), bound.size() + (root.hProcess && !rootInBound ? 1 : 0), observers.size());
+}
+static int seal(Frame& f) {
+  DWORD limit = f.u32(); auto deadline = f.u64();
+  if (!f.end() || operationDeadline || now() >= deadline) return errorExit("seal-frame-state", ERROR_INVALID_DATA);
+  operationDeadline = deadline;
+  DWORD before = 0, be = 0, after = 0, ae = 0;
+  bool beforeOk = count(&before, &be, job);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+  BOOL queried = QueryInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof limits, NULL);
+  DWORD queryError = queried ? 0 : GetLastError();
+  if (!queried) { emit("uncertain", ",\"reason\":\"query-before-seal\",\"error\":%lu", queryError); return 3; }
+  limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+  limits.BasicLimitInformation.ActiveProcessLimit = limit;
+  ledger("before-seal");
+  emit("seal-begin", ",\"limit\":%lu,\"beforeOk\":%s,\"before\":%lu,\"beforeError\":%lu,\"deadlineMs\":%llu", limit, beforeOk ? "true" : "false", before, be, deadline);
+  BOOL ok = SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof limits);
+  DWORD e = ok ? 0 : GetLastError();
+  bool afterOk = count(&after, &ae, job);
+  sealAccepted = ok != FALSE;
+  emit("seal-result", ",\"limit\":%lu,\"ok\":%s,\"error\":%lu,\"before\":%lu,\"afterOk\":%s,\"after\":%lu,\"afterError\":%lu,\"deadlineMs\":%llu", limit, ok ? "true" : "false", e, before, afterOk ? "true" : "false", after, ae, deadline);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION readback = {};
+  BOOL readbackOk = QueryInformationJobObject(job, JobObjectExtendedLimitInformation, &readback, sizeof readback, NULL); DWORD readbackError = readbackOk ? 0 : GetLastError();
+  emit("seal-readback", ",\"ok\":%s,\"error\":%lu,\"limitFlags\":%lu,\"activeProcessLimit\":%lu", readbackOk ? "true" : "false", readbackError, readback.BasicLimitInformation.LimitFlags, readback.BasicLimitInformation.ActiveProcessLimit);
+  ledger("after-seal"); snapshot("after-seal"); emit("seal-observations-complete");
+  return 0;
+}
+static int bindMembers(Frame& f) {
+  auto deadline = f.u64();
+  if (!f.end() || !sealAccepted || deadline != operationDeadline || now() >= deadline) { emit("uncertain", ",\"reason\":\"unaccepted-or-expired-seal\""); return 3; }
+  ledger("before-bind"); snapshot("before-bind");
+  std::vector<DWORD> first, second;
+  if (!memberList("before-bind", first)) { emit("uncertain", ",\"reason\":\"incomplete-member-list\""); return 3; }
+  for (DWORD pid : first) {
+    if (now() >= deadline) { emit("uncertain", ",\"reason\":\"bind-deadline\""); return 3; }
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) { emit("uncertain", ",\"reason\":\"bind-open-process\",\"pid\":%lu,\"error\":%lu", pid, GetLastError()); return 3; }
+    BOOL member = FALSE; BOOL inJobOk = IsProcessInJob(process, job, &member); DWORD membershipError = inJobOk ? 0 : GetLastError();
+    DWORD creationError = 0; auto created = creation(process, &creationError);
+    DWORD wait = WaitForSingleObject(process, 0); DWORD waitError = wait == WAIT_FAILED ? GetLastError() : 0;
+    emit("bound-member", ",\"pid\":%lu,\"created\":\"%llu\",\"member\":%s,\"membershipError\":%lu,\"creationError\":%lu,\"wait\":%lu,\"waitError\":%lu", pid, created, member ? "true" : "false", membershipError, creationError, wait, waitError);
+    if (!inJobOk || !member || creationError || waitError) { CloseHandle(process); emit("uncertain", ",\"reason\":\"ambiguous-member-identity\",\"pid\":%lu", pid); return 3; }
+    for (const auto& observed : observers) if (observed.pid == pid && observed.created != created) { CloseHandle(process); emit("uncertain", ",\"reason\":\"known-identity-changed\",\"pid\":%lu", pid); return 3; }
+    if (pid == root.dwProcessId) { DWORD e; auto expected = creation(root.hProcess, &e); if (e || expected != created) { CloseHandle(process); emit("uncertain", ",\"reason\":\"root-identity-changed\""); return 3; } }
+    bound.push_back({ process, pid, created });
+  }
+  if (!memberList("after-bind", second) || first != second) { emit("uncertain", ",\"reason\":\"member-list-changed\""); return 3; }
+  bindingComplete = true; ledger("after-bind");
+  emit("bound-ready", ",\"members\":%zu,\"deadlineMs\":%llu,\"claim\":\"experimental-complete-current-list\"", bound.size(), deadline);
+  return 0;
+}
+static unsigned boundSnapshot(const char* phase) {
+  unsigned pending = 0;
+  for (const auto& member : bound) {
+    DWORD wait = WaitForSingleObject(member.handle, 0); DWORD error = wait == WAIT_FAILED ? GetLastError() : 0;
+    if (wait != WAIT_OBJECT_0) ++pending;
+    emit("bound-wait", ",\"phase\":\"%s\",\"pid\":%lu,\"created\":\"%llu\",\"wait\":%lu,\"error\":%lu", phase, member.pid, member.created, wait, error);
+  }
+  return pending;
+}
+static int stopBound(Frame& f) {
+  auto deadline = f.u64();
+  if (!f.end() || !bindingComplete || deadline != operationDeadline || now() >= deadline) { emit("uncertain", ",\"reason\":\"unbound-or-expired-stop\""); return 3; }
+  emit("stop-selected", ",\"deadlineMs\":%llu,\"witness\":\"sealed-bound-handles\"", deadline);
+  BOOL ok = TerminateJobObject(job, 41); DWORD e = ok ? 0 : GetLastError();
+  emit("terminate", ",\"ok\":%s,\"error\":%lu", ok ? "true" : "false", e);
+  if (!ok) { emit("uncertain", ",\"reason\":\"terminate\",\"error\":%lu", e); return 3; }
+  bool countCandidateLogged = false;
+  while (now() < deadline) {
+    rootExit(); DWORD active = 0, queryError = 0;
+    if (!count(&active, &queryError, job)) { emit("uncertain", ",\"reason\":\"accounting\",\"error\":%lu", queryError); return 3; }
+    DWORD rootWait = WaitForSingleObject(root.hProcess, 0);
+    bool allSignaled = true;
+    for (const auto& member : bound) {
+      DWORD wait = WaitForSingleObject(member.handle, 0);
+      if (wait == WAIT_FAILED) { emit("uncertain", ",\"reason\":\"bound-wait\",\"error\":%lu", GetLastError()); return 3; }
+      if (wait != WAIT_OBJECT_0) allSignaled = false;
+    }
+    if (!active && rootWait == WAIT_OBJECT_0 && !countCandidateLogged) {
+      countCandidateLogged = true;
+      unsigned observedPending = snapshot("count-only-candidate");
+      unsigned boundPending = boundSnapshot("count-only-candidate");
+      ledger("count-only-candidate");
+      std::vector<DWORD> current; memberList("count-only-candidate", current);
+      emit("count-only-candidate", ",\"active\":0,\"rootWait\":0,\"observerUnsignaled\":%u,\"boundUnsignaled\":%u", observedPending, boundPending);
+    }
+    if (!active && rootWait == WAIT_OBJECT_0 && allSignaled) {
+      ledger("bound-stop-verdict");
+      std::vector<DWORD> current; memberList("bound-stop-verdict", current);
+      unsigned pending = snapshot("stop-verdict"); boundSnapshot("stop-verdict");
+      emit("stopped", ",\"active\":0,\"rootWait\":0,\"knownUnsignaled\":%u,\"boundMembers\":%zu,\"deadlineMs\":%llu,\"witness\":\"sealed-bound-handles\"", pending, bound.size(), deadline);
+      settlementPending = true;
+      return -1;
+    }
+    Sleep(1);
+  }
+  snapshot("deadline"); boundSnapshot("deadline"); emit("uncertain", ",\"reason\":\"bound-deadline\",\"deadlineMs\":%llu", deadline); return 3;
+}
 static int stop(Frame& f) {
   auto deadline = f.u64(); if (!f.end()) return errorExit("stop-frame", ERROR_INVALID_DATA);
   emit("stop-selected", ",\"deadlineMs\":%llu", deadline);
@@ -204,6 +335,8 @@ static int stop(Frame& f) {
     if (active != previous) { emit("accounting", ",\"active\":%lu,\"rootWait\":%lu", active, rootWait); previous = active; }
     if (active == 0 && rootWait == WAIT_OBJECT_0) {
       unsigned pending = snapshot("stop-verdict");
+      ledger("v1-count-only-candidate");
+      std::vector<DWORD> current; memberList("v1-count-only-candidate", current);
       emit("candidate", ",\"active\":0,\"rootWait\":%lu,\"knownUnsignaled\":%u,\"deadlineMs\":%llu", rootWait, pending, deadline);
       if (fault == L"malformed-stop") { char bad[] = "{malformed\n"; DWORD error; transfer(true, bad, sizeof bad - 1, &error); Sleep(INFINITE); }
       if (fault == L"withhold-stop") Sleep(INFINITE);
@@ -212,6 +345,7 @@ static int stop(Frame& f) {
       if (negative) {
         for (auto& o : observers) if (WaitForSingleObject(o.handle, 0) == WAIT_TIMEOUT) { BOOL ok = TerminateProcess(o.handle, 42); emit("negative-cleanup", ",\"pid\":%lu,\"created\":\"%llu\",\"ok\":%s,\"error\":%lu", o.pid, o.created, ok ? "true" : "false", ok ? 0 : GetLastError()); WaitForSingleObject(o.handle, 2000); }
       }
+      if (fault == L"count-only") { settlementPending = true; return -1; }
       heldDrop(); return 0;
     }
     if (rootWait == WAIT_FAILED) { emit("uncertain", ",\"reason\":\"root-wait\",\"error\":%lu", GetLastError()); return 3; }
@@ -230,7 +364,10 @@ static int inspectHandles() {
   printf("{\"controlPresent\":%s,\"controlError\":%lu,\"jobPresent\":%s,\"jobError\":%lu}\n", controlPresent ? "true" : "false", ce, jobPresent ? "true" : "false", je);
   return 0;
 }
+#include "native-fixture.h"
 int wmain(int argc, wchar_t** argv) {
+  if (argc >= 2 && wcscmp(argv[1], L"--native-creator") == 0) return nativeCreator(argc, argv);
+  if (argc >= 2 && wcscmp(argv[1], L"--native-sleeper") == 0) return nativeSleeper(argc, argv);
   if (argc == 2 && wcscmp(argv[1], L"--inspect-handles") == 0) return inspectHandles();
   control = reinterpret_cast<HANDLE>(_get_osfhandle(3));
   if (control == INVALID_HANDLE_VALUE) return 90;
@@ -256,7 +393,18 @@ int wmain(int argc, wchar_t** argv) {
       }
       if (kind == 'O') { int result = observe(f); if (result) return result; continue; }
       if (kind == 'A' && negative) { BOOL ok = AssignProcessToJobObject(job, root.hProcess); DWORD e = ok ? 0 : GetLastError(); emit("assigned-late", ",\"ok\":%s,\"error\":%lu", ok ? "true" : "false", e); if (!ok) return 2; continue; }
-      if (kind == 'T') return stop(f);
+      if (kind == 'D') {
+        DWORD index = f.u32(); if (!f.end() || index >= observers.size()) return errorExit("audit-retirement-index", ERROR_INVALID_DATA);
+        const auto& observed = observers[index]; BOOL ok = TerminateProcess(observed.handle, 43); DWORD error = ok ? 0 : GetLastError();
+        DWORD wait = WaitForSingleObject(observed.handle, 0);
+        emit("audit-external-termination", ",\"ok\":%s,\"error\":%lu,\"pid\":%lu,\"created\":\"%llu\",\"wait\":%lu", ok ? "true" : "false", error, observed.pid, observed.created, wait);
+        snapshot("external-termination-before-bind"); ledger("external-termination-before-bind"); std::vector<DWORD> current; memberList("external-termination-before-bind", current);
+        emit("audit-retirement-observed"); continue;
+      }
+      if (kind == 'B') { int result = seal(f); if (result) return result; continue; }
+      if (kind == 'Q') { int result = bindMembers(f); if (result) return result; continue; }
+      if (kind == 'V' && settlementPending) { ledger("node-settlement"); std::vector<DWORD> current; memberList("node-settlement", current); snapshot("node-settlement"); boundSnapshot("node-settlement"); emit("settlement-observed"); heldDrop(); return 0; }
+      if (kind == 'T') { int result = fault == L"bound" ? stopBound(f) : stop(f); if (result == -1) continue; return result; }
       if (kind == 'R') {
         auto deadline = f.u64(); if (!f.end() || now() >= deadline) { emit("uncertain", ",\"reason\":\"release-deadline\""); return 3; }
         rootExit(); if (!rootReported) return errorExit("release-before-root-exit", ERROR_INVALID_STATE);

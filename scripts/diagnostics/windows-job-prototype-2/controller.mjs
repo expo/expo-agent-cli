@@ -4,6 +4,7 @@ import os from 'node:os';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,7 @@ const trace = path.join(output, 'events.jsonl');
 const log = (event, fields = {}) => fs.appendFileSync(trace, JSON.stringify({ event, timeMs: Date.now(), ...fields }) + '\n');
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const check = (condition, message) => { if (!condition) throw new Error(message); };
+check(!fs.existsSync(trace), 'Use a fresh result directory; an earlier events trace already exists');
 const until = async (predicate, message, timeout = 6000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const value = predicate(); if (value) return value; await delay(2); }
@@ -61,7 +63,7 @@ function session(name, options = {}) {
   const dir = path.join(output, name);
   fs.mkdirSync(dir, { recursive: true });
   const token = crypto.randomUUID();
-  const env = { ...process.env, PROBE_PARITY: 'env value Ž 🧪', ...options.env };
+  const env = { ...process.env, PROBE_HELPER: helper, PROBE_PARITY: 'env value Ž 🧪', ...options.env };
   const child = spawn(helper, [], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe', 'overlapped'] });
   const state = { name, dir, token, child, events: [], stdout: [], stderr: [], stdoutEnded: false, stderrEnded: false, exit: undefined, choice: undefined, malformed: undefined };
   sessions.push(state);
@@ -115,14 +117,14 @@ function session(name, options = {}) {
     if (info.port) { const identity = await socketIdentity(info); check(identity.token === token && identity.pid === info.pid, 'fixture identity challenge mismatch'); }
     state.send('O', u32(info.pid), wide(`${token}-${label}`));
     const observed = await until(() => state.events.find((event) => event.event === 'observed' && event.token === `${token}-${label}`), `${name} retained ${label}`);
-    check(observed.created && observed.wait === 258, 'observer must hold the known live process');
+    check(observed.created && observed.wait === 258 && observed.member, 'observer must hold a known live member of the selected job');
     return observed;
   };
   state.stop = (timeout = 4000) => {
     if (state.choice === 'release') return Promise.resolve({ kind: 'already-completed' });
     if (state.stopPromise) return state.stopPromise;
     state.choice = 'stop';
-    const deadline = Date.now() + timeout;
+    const deadline = state.boundDeadline || Date.now() + timeout;
     state.stopPromise = terminal('T', 'stopped', deadline);
     return state.stopPromise;
   };
@@ -153,11 +155,19 @@ function session(name, options = {}) {
         return false;
       }, `${name} terminal result`, Math.max(0, deadline - Date.now()) + 300);
     } catch (error) { result = { kind: 'uncertain', reason: String(error) }; }
-    finally { clearTimeout(timer); }
+    finally { clearTimeout(timer); clearTimeout(state.sealWatchdog); }
     if (result.kind === 'uncertain' && state.exit === undefined) child.kill();
     log('terminal-result', { name, ...result, elapsedBeyondDeadlineMs: Date.now() - deadline });
     return result;
   }
+  state.armSeal = async (limit, timeout = 6000) => {
+    state.choice = 'stop'; state.boundDeadline = Date.now() + timeout;
+    state.sealWatchdog = setTimeout(() => { log('node-seal-watchdog', { name, deadline: state.boundDeadline }); child.kill(); }, timeout);
+    state.send('B', u32(limit), u64(state.boundDeadline));
+    const sealed = await state.wait('seal-result'); await state.wait('seal-observations-complete'); return sealed;
+  };
+  state.bind = () => { state.send('Q', u64(state.boundDeadline)); return state.wait('bound-ready'); };
+  state.settlement = async () => { state.send('V'); await state.wait('settlement-observed'); await until(() => state.exit !== undefined, 'settlement helper exit'); };
   state.completed = () => until(() => state.event('root-exited') && state.stdoutEnded && state.stderrEnded, `${name} target completion`);
   state.save = () => { fs.writeFileSync(path.join(dir, 'stdout.bin'), Buffer.concat(state.stdout)); fs.writeFileSync(path.join(dir, 'stderr.bin'), Buffer.concat(state.stderr)); };
   return state;
@@ -184,6 +194,7 @@ async function run(name, action) {
   finally {
     for (const state of sessions) {
       fs.writeFileSync(path.join(state.dir, 'shutdown'), 'stop');
+      clearTimeout(state.sealWatchdog);
       if (state.exit === undefined) state.child.kill();
       state.save();
     }
@@ -193,131 +204,142 @@ async function run(name, action) {
 
 if (process.platform !== 'win32') throw new Error('Native Windows is required; do not interpret a non-Windows run as mechanism evidence');
 check(Number(process.versions.node.split('.')[0]) === 24, 'Run with actual Node 24');
-log('environment', { platform: process.platform, release: os.release(), version: os.version(), architecture: process.arch, node: process.version, execPath: process.execPath, versions: process.versions, helper, helperSha256: sha256(helper), controllerSha256: sha256(fileURLToPath(import.meta.url)) });
+log('environment', { platform: process.platform, release: os.release(), version: os.version(), architecture: process.arch, node: process.version, execPath: process.execPath, versions: process.versions, helper, helperSha256: sha256(helper), nodeSha256: sha256(process.execPath), controllerSha256: sha256(fileURLToPath(import.meta.url)) });
 
-await run('transport-and-handle-exclusion', async () => {
-  const s = session('transport'); await s.wait('hello'); s.send('P'); await s.wait('pong');
-  const ready = await s.launch('unused', { target: direct(helper, ['--inspect-handles']) });
-  check(ready.member, 'creation-time JOB_LIST membership missing');
-  await s.start(); await natural(s);
-  const handles = JSON.parse(Buffer.concat(s.stdout).toString('utf8'));
-  log('numeric-handle-probe', { name: s.name, ...handles, interpretation: handles.controlPresent || handles.jobPresent ? 'inconclusive-handle-value-reuse-possible' : 'parent-handle-values-absent' });
-});
-await run('suspended-cancel', async () => {
-  const s = session('suspended'); await s.launch('active');
-  const stop = s.stop(); check(stop === s.stop(20000), 'repeated stop must join the original deadline');
-  const result = await stop; check(result.kind === 'stopped' && result.ack.knownUnsignaled === 0, 'suspended stop failed');
-  await delay(150); check(!readMarker(s.dir, 'active-first'), 'suspended root executed its first marker');
-});
-await run('selected-job-and-held-eas', async () => {
-  const selected = session('selected'); const eas = session('eas');
-  await Promise.all([selected.launch('active', { batch: true }), eas.launch('eas')]);
-  await Promise.all([selected.start(), eas.start()]);
-  const leaf = await marker(selected.dir, 'leaf'); const root = await marker(selected.dir, 'active-first');
-  const easIdentity = await marker(eas.dir, 'eas-ready');
-  await selected.observe(root, 'root-node'); await selected.observe(leaf, 'leaf'); await eas.observe(easIdentity, 'fake-eas');
-  await confirmedStop(selected);
-  check(!eas.event('root-exited') && eas.exit === undefined, 'selected stop killed EAS sibling');
-  fs.writeFileSync(path.join(eas.dir, 'release-eas'), 'go');
-  await natural(eas);
-  check(JSON.parse(Buffer.concat(eas.stdout).toString()).id === easIdentity.id, 'held EAS ID changed');
-  let reachable = true; try { await socketIdentity(leaf); } catch { reachable = false; }
-  check(!reachable, 'selected leaf responder survived confirmed stop');
-});
-for (const milliseconds of [0, 13]) {
-  await run(`cmd-early-${milliseconds}ms`, async () => {
-    for (let i = 0; i < 8; ++i) {
-      const s = session(`early-${milliseconds}-${i}`); await s.launch('active', { batch: true });
-      s.send('S'); if (milliseconds) await delay(milliseconds);
-      await confirmedStop(s);
-      const before = fs.readdirSync(s.dir).filter((name) => name.endsWith('.json')).sort();
-      await delay(80);
-      const after = fs.readdirSync(s.dir).filter((name) => name.endsWith('.json')).sort();
-      check(JSON.stringify(before) === JSON.stringify(after), 'new fixture marker appeared after stop verdict');
-      log('early-marker-snapshot', { name: s.name, milliseconds, before, after, nativeRoot: s.event('ready') });
+const readLines = (filename) => {
+  try { return fs.readFileSync(filename, 'utf8').split('\n').slice(0, -1).map((line) => JSON.parse(line)); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+};
+const creatorLog = (state) => readLines(path.join(state.dir, 'creator-one.jsonl'));
+const candidateOutcomes = [];
+
+for (const limit of [1, 0]) {
+  for (const nested of [false, true]) {
+    for (const mode of ['active-native', 'pipe-native']) {
+      await run(`seal-${limit}-${nested ? 'nested' : 'plain'}-${mode}`, async () => {
+        const s = session(`seal-${limit}-${nested ? 'nested' : 'plain'}-${mode}`, { env: { PROBE_NESTED: nested ? 'nested' : 'plain' } });
+        await s.launch(mode, { fault: 'bound' }); await s.start();
+        const leaf = await marker(s.dir, 'leaf'); await s.observe(leaf, 'leaf');
+        const ready = await until(() => creatorLog(s).find((event) => event.event === 'creator-ready'), 'native creator ready');
+        const creatorObserved = await s.observe(ready, 'native-creator');
+        check(creatorObserved.created === ready.created, 'native creator exact creation identity mismatch');
+        for (const event of creatorLog(s).filter((event) => event.event === 'create-attempt' && event.phase === 'initial')) {
+          check(event.ok && event.created, 'initial native child creation failed before seal');
+          const observed = await s.observe({ pid: event.childPid }, `initial-${event.attempt}`);
+          check(observed.created === event.created, 'native child exact creation identity mismatch');
+        }
+        if (mode === 'pipe-native') {
+          await s.wait('root-exited'); check(!s.stdoutEnded && !s.stderrEnded, 'pipe-holder fixture did not hold output');
+        }
+        fs.writeFileSync(path.join(s.dir, 'churn'), 'go');
+        await until(() => creatorLog(s).some((event) => event.phase === 'churn' && event.ok), 'pre-seal native creation');
+        const sealed = await s.armSeal(limit);
+        log('seal-experiment', { name: s.name, sealed });
+        if (!sealed.ok) {
+          candidateOutcomes.push({ name: s.name, observationPassed: false, reason: 'SetInformationJobObject rejected limit', sealed });
+          return;
+        }
+        const readback = s.event('seal-readback');
+        check(readback?.ok && readback.activeProcessLimit === limit && (readback.limitFlags & 0x2008) === 0x2008, 'seal readback must preserve the requested active-process limit and kill-on-close');
+        fs.writeFileSync(path.join(s.dir, 'post-seal'), 'attempt eight births');
+        await until(() => creatorLog(s).some((event) => event.event === 'post-seal-done'), 'post-seal native attempts');
+        const attempts = creatorLog(s);
+        const postSeal = attempts.filter((event) => event.phase === 'post-seal');
+        const observersAfterSeal = s.events.filter((event) => event.event === 'observer' && event.phase === 'after-seal');
+        log('seal-admission-observations', { name: s.name, sealed, attempts, postSeal, observersAfterSeal });
+        check(postSeal.length === 8, 'incomplete post-seal native attempt evidence');
+        check(observersAfterSeal.length === 4, 'incomplete existing-member observer evidence');
+        const membershipsAfterSeal = s.events.filter((event) => event.event === 'observer-membership' && event.phase === 'after-seal');
+        check(membershipsAfterSeal.length === 4 && membershipsAfterSeal.every((event) => event.membershipOk && event.currentMember && event.memberAtObservation), 'seal observers must remain members of the selected job');
+        if (postSeal.some((event) => event.ok) || observersAfterSeal.some((event) => event.wait !== 258)) {
+          candidateOutcomes.push({ name: s.name, observationPassed: false, reason: 'new admission succeeded or a held existing process was removed', sealed, postSeal, observersAfterSeal });
+          return;
+        }
+        if (limit === 0 && !nested && mode === 'pipe-native') {
+          s.send('D', u32(2)); await s.wait('audit-retirement-observed');
+          check(s.event('audit-external-termination')?.ok, 'controlled audit handle termination failed');
+        }
+        let binding;
+        try { binding = await s.bind(); }
+        catch (error) {
+          candidateOutcomes.push({ name: s.name, observationPassed: false, reason: 'binding uncertain', error: String(error), native: s.events.at(-1) });
+          return;
+        }
+        const result = await s.stop();
+        check(result.kind === 'stopped', `bound candidate remained uncertain ${JSON.stringify(result)}`);
+        check(result.ack.witness === 'sealed-bound-handles' && result.ack.boundMembers === binding.members, 'missing complete bound-set verdict');
+        check(result.ack.knownUnsignaled === 0, 'COUNTEREXAMPLE: independent test observer remains unsignaled after bound-set waits');
+        const boundVerdict = s.events.filter((event) => event.event === 'bound-wait' && event.phase === 'stop-verdict');
+        check(boundVerdict.length === binding.members && boundVerdict.every((event) => event.wait === 0), 'bound handle wait set incomplete');
+        await s.settlement();
+        const lateObservers = s.events.filter((event) => event.event === 'observer' && event.phase === 'node-settlement');
+        check(lateObservers.length === observersAfterSeal.length && lateObservers.every((event) => event.wait === 0), 'known observer unsignaled at later Node settlement');
+        candidateOutcomes.push({ name: s.name, observationPassed: true, binding, result });
+      });
     }
-  });
+  }
 }
-await run('root-exit-with-pipe-holder', async () => {
-  const s = session('pipe-holder'); await s.launch('pipe'); await s.start();
-  const leaf = await marker(s.dir, 'leaf'); await s.observe(leaf, 'pipe-leaf'); await s.wait('root-exited');
-  check(!s.stdoutEnded && !s.stderrEnded && s.exit === undefined, 'root exit incorrectly closed inherited output or helper');
-  await confirmedStop(s);
+
+await run('count-only-pipe-holder-negative-comparison', async () => {
+  for (let i = 0; i < 8; ++i) {
+    const s = session(`count-only-${i}`); await s.launch('pipe', { fault: 'count-only' }); await s.start();
+    await s.observe(await marker(s.dir, 'leaf'), 'pipe-leaf'); await s.wait('root-exited');
+    const result = await s.stop();
+    check(result.kind === 'stopped', 'original count-only comparison did not reach its candidate');
+    log('count-only-negative-comparison', { name: s.name, knownUnsignaledAtCandidate: result.ack.knownUnsignaled, result, interpretation: 'historical rejected predicate, never production stop proof' });
+    await s.settlement();
+  }
 });
-for (const code of [0, 17]) {
-  await run(`natural-daemon-${code}`, async () => {
-    const s = session(`daemon-${code}`, { env: { PROBE_ROOT_CODE: String(code) } }); await s.launch('daemon'); await s.start();
-    const leaf = await marker(s.dir, 'leaf'); await s.observe(leaf, 'daemon');
-    await natural(s); check(s.event('root-exited').code === code, 'natural root code changed');
-    check((await socketIdentity(leaf)).token === s.token, 'daemon died on natural release');
-    check((await s.stop()).kind === 'already-completed', 'release-first stop claimed termination');
-    fs.writeFileSync(path.join(s.dir, 'spawn-next'), 'go');
-    const descendant = await marker(s.dir, 'grandchild');
-    check((await socketIdentity(descendant)).token === s.token, 'released daemon could not spawn a child');
-  });
+
+async function npmShim(from, to) {
+  const npmDirectory = path.join(path.dirname(process.execPath), 'node_modules', 'npm');
+  const requireFromNpm = createRequire(path.join(npmDirectory, 'package.json'));
+  const shimSource = requireFromNpm.resolve('cmd-shim');
+  const shimPackage = path.join(path.dirname(path.dirname(shimSource)), 'package.json');
+  const installedShim = requireFromNpm('cmd-shim');
+  await installedShim(from, to);
+  log('npm-shim-provenance', { source: shimSource, sourceSha256: sha256(shimSource), npm: JSON.parse(fs.readFileSync(path.join(npmDirectory, 'package.json'), 'utf8')).version, package: JSON.parse(fs.readFileSync(shimPackage, 'utf8')), generatedShim: to + '.cmd', generatedShimSha256: sha256(to + '.cmd') });
+  fs.copyFileSync(shimSource, path.join(output, 'installed-cmd-shim-source.js'));
+  return to + '.cmd';
 }
-await run('delayed-assignment-negative-control', async () => {
-  const s = session('negative'); const ready = await s.launch('active', { negative: true, batch: true });
-  check(!ready.member, 'negative was already assigned'); await s.start();
-  const leaf = await marker(s.dir, 'leaf'); await s.observe(await marker(s.dir, 'active-first'), 'uncontained-root-node');
-  const observed = await s.observe(leaf, 'escaped-leaf');
-  check(!observed.member, 'negative leaf was contained before delayed assignment');
-  s.send('A'); const assigned = await s.wait('assigned-late'); check(assigned.ok, 'late assignment control failed');
-  const verdict = await s.stop(); check(verdict.kind === 'stopped', 'negative did not reach proposed witness');
-  check(verdict.ack.knownUnsignaled > 0, 'negative control failed to expose surviving leaf');
-  log('negative-control-detected', { name: s.name, verdict });
-});
-for (const fault of ['job', 'attributes', 'create', 'crash-before', 'crash-ready']) {
-  await run(`setup-${fault}`, async () => {
-    const s = session(`setup-${fault}`);
-    try { await s.launch('active', { fault }); } catch {}
-    await until(() => s.exit !== undefined, 'failed setup helper exit');
-    await delay(100); check(!readMarker(s.dir, 'active-first'), 'failed setup executed target');
-    check(!s.event('stopped') && !s.event('released'), 'setup loss claimed terminal success');
-    if (['job', 'attributes', 'create'].includes(fault)) check(s.event('native-error')?.error > 0, 'missing native error');
-  });
+function decodedOutput(chunks) {
+  const text = Buffer.concat(chunks).toString('utf8');
+  try { return { observed: JSON.parse(text.split('\n')[0]), rawText: text }; }
+  catch (error) { return { observed: null, rawText: text, decodeError: String(error) }; }
 }
-for (const fault of ['terminate', 'query', 'deadline', 'withhold-stop', 'malformed-stop', 'invalid-ack']) {
-  await run(`stop-${fault}`, async () => {
-    const s = session(`stop-${fault}`); await s.launch('active', { fault }); await s.start();
-    if (fault === 'terminate') await marker(s.dir, 'leaf');
-    const result = await s.stop(500);
-    check(result.kind === 'uncertain', 'fault was promoted to stop success');
-  });
-}
-await run('active-helper-crash', async () => {
-  const s = session('active-crash'); await s.launch('active'); await s.start(); await marker(s.dir, 'leaf');
-  s.send('X'); const result = await s.stop(500); check(result.kind === 'uncertain', 'helper crash was promoted to proof');
-});
-await run('release-failure', async () => {
-  const s = session('release-failure'); await s.launch('daemon', { fault: 'release' }); await s.start(); await s.completed();
-  const result = await s.release(500); check(result.kind === 'uncertain', 'release failure was ignored');
-});
-await run('raw-output-burst', async () => {
-  const s = session('burst'); await s.launch('burst'); await s.start(); s.send('P'); await s.wait('pong'); await natural(s);
-  const expected = Buffer.alloc(512 * 1024); for (let i = 0; i < expected.length; ++i) expected[i] = i % 251;
-  check(Buffer.concat(s.stdout).equals(expected), 'stdout bytes changed under burst');
-  check(Buffer.concat(s.stderr).equals(Buffer.from(expected).reverse()), 'stderr bytes changed under burst');
-});
 const parityArgs = ['', 'a b', 'Žluťoučký 🧪', 'one"two', 'a&b', 'a%b', 'a^b', 'a!b', 'tail\\', 'two\\\\"q', '(x)|<>'];
-for (const batch of [false, true]) {
-  await run(`argv-output-parity-${batch ? 'cmd' : 'direct'}`, async () => {
-    const s = session(`parity-${batch ? 'cmd' : 'direct'}`);
-    await s.launch('args', { batch, args: parityArgs });
-    const target = s.target;
-    const baseline = spawn(batch ? target.command : target.image, target.args, { cwd: s.dir, env: { ...process.env, PROBE_PARITY: 'env value Ž 🧪' }, shell: batch, stdio: ['ignore', 'pipe', 'pipe'] });
+for (const variant of ['direct', 'v1-stub', 'installed-npm-shim']) {
+  await run(`argv-instrument-${variant}`, async () => {
+    const s = session(`parity-${variant}`);
+    let target = direct(process.execPath, [fixture, 'args', s.dir, s.token, ...parityArgs]);
+    if (variant === 'v1-stub') {
+      const shim = path.join(s.dir, 'package runner.cmd');
+      fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`);
+      target = batchTarget(shim, ['args', s.dir, s.token, ...parityArgs]);
+    }
+    if (variant === 'installed-npm-shim') {
+      const script = path.join(s.dir, 'real-shim-target.cjs');
+      fs.writeFileSync(script, '#!/usr/bin/env node\n' + `process.argv = [process.execPath, ${JSON.stringify(fixture)}, 'args', ${JSON.stringify(s.dir)}, ${JSON.stringify(s.token)}, ...process.argv.slice(2)];\nimport(${JSON.stringify(new URL('./fixture.mjs', import.meta.url).href)});\n`);
+      const shim = await npmShim(script, path.join(s.dir, 'npm-generated-shim'));
+      target = batchTarget(shim, parityArgs);
+    }
+    await s.launch('unused', { target });
+    const baseline = spawn(target.shell ? target.command : target.image, target.args, { cwd: s.dir, env: { ...process.env, PROBE_PARITY: 'env value Ž 🧪' }, shell: target.shell, stdio: ['ignore', 'pipe', 'pipe'] });
     const stdout = [], stderr = []; baseline.stdout.on('data', (b) => stdout.push(b)); baseline.stderr.on('data', (b) => stderr.push(b));
     const baselineCode = await new Promise((resolve, reject) => { baseline.once('error', reject); baseline.once('close', resolve); });
     await s.start(); await natural(s);
-    check(Buffer.concat(s.stdout).equals(Buffer.concat(stdout)), 'stdout argv/cwd/env/binary parity mismatch');
-    check(Buffer.concat(s.stderr).equals(Buffer.concat(stderr)), 'stderr byte parity mismatch');
-    check(s.event('root-exited').code === baselineCode && baselineCode === 17, 'exit code parity mismatch');
-    const decoded = JSON.parse(Buffer.concat(s.stdout).toString().split('\n')[0]);
-    check(JSON.stringify(decoded.args) === JSON.stringify(parityArgs), 'existing launch does not preserve requested argv');
+    const helperCode = s.event('root-exited').code;
+    fs.writeFileSync(path.join(s.dir, 'baseline-stdout.bin'), Buffer.concat(stdout));
+    fs.writeFileSync(path.join(s.dir, 'baseline-stderr.bin'), Buffer.concat(stderr));
+    const baselineDecoded = decodedOutput(stdout), helperDecoded = decodedOutput(s.stdout);
+    const record = { variant, requestedArgv: parityArgs, baseline: { exitCode: baselineCode, ...baselineDecoded }, helper: { exitCode: helperCode, ...helperDecoded }, stdoutEqual: Buffer.concat(s.stdout).equals(Buffer.concat(stdout)), stderrEqual: Buffer.concat(s.stderr).equals(Buffer.concat(stderr)), intendedArgvPreserved: JSON.stringify(helperDecoded.observed?.args) === JSON.stringify(parityArgs) };
+    fs.writeFileSync(path.join(s.dir, 'parity.json'), JSON.stringify(record, null, 2) + '\n'); log('argv-parity-instrument', record);
+    check(record.stdoutEqual && record.stderrEqual && helperCode === baselineCode, 'helper differs from actual Node baseline');
+    if (variant !== 'v1-stub') check(record.intendedArgvPreserved && helperCode === 17, 'faithful executable/shim launch does not preserve intended argv and exit code');
   });
 }
 for (const state of sessions) state.save();
-const summary = { finishedAt: new Date().toISOString(), passed: results.every((result) => result.passed), results };
+const summary = { productionWitnessProven: false, candidateObservationSuccess: candidateOutcomes.length === 8 && candidateOutcomes.every((outcome) => outcome.observationPassed), finishedAt: new Date().toISOString(), passed: results.every((result) => result.passed), candidateOutcomes, results, interpretation: 'Experimental admission and current-member binding only; no universal historical-tree proof is claimed' };
 fs.writeFileSync(path.join(output, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
 console.log(JSON.stringify(summary, null, 2));
 process.exitCode = summary.passed ? 0 : 1;
