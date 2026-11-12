@@ -168,9 +168,10 @@ it.concurrent.for(platforms.flatMap((platform) => [false, true].map((eas) => ({ 
   async ({ platform, eas }, { expect }) => {
     const fixture = await setupDetachedFixtureAsync();
     const { root, port, env, heldPids, processes } = fixture;
-    const run = (args: string[]) =>
+    const releaseStop = path.join(root, 'release-simulator-stop');
+    const run = (args: string[], overrides: NodeJS.ProcessEnv = {}) =>
       executeAgentCliAsync(root, [...args, '--json'], {
-        env: { ...env, STUB_SIM_STOP_DELAY_MS: '1000' },
+        env: { ...env, ...overrides },
         reject: false,
       });
     const bindingRoot = canonicalizeExistingPath(root);
@@ -181,6 +182,7 @@ it.concurrent.for(platforms.flatMap((platform) => [false, true].map((eas) => ({ 
       { env: { ...env, HOLD_FINGERPRINT: '1' } }
     );
     const output = collectOutput(parent);
+    let pendingStop: Promise<unknown> | undefined;
     try {
       expect(await waitForAsync(() => heldPids().length === 1, 15_000), output.all).toBe(true);
       expect(await readDevLockAsync(root)).toBeNull();
@@ -198,7 +200,11 @@ it.concurrent.for(platforms.flatMap((platform) => [false, true].map((eas) => ({ 
         expect(pids.every(isProcessRunning), refused.all).toBe(true);
       }
 
-      const stopping = run(['dev:stop', '--port', String(port), ...(eas ? ['--eas'] : [])]);
+      const stopping = run(
+        ['dev:stop', '--port', String(port), ...(eas ? ['--eas'] : [])],
+        eas ? { STUB_SIM_STOP_RELEASE_FILE: releaseStop } : {}
+      );
+      pendingStop = Promise.allSettled([stopping]);
       if (eas) {
         expect(
           await waitForAsync(
@@ -215,10 +221,13 @@ it.concurrent.for(platforms.flatMap((platform) => [false, true].map((eas) => ({ 
           String(port),
         ]);
         expect(blocked.exitCode, blocked.all).toBe(20);
-        expect((await run(['dev:stop', '--eas'])).exitCode).toBe(20);
+        const duplicate = await run(['dev:stop', '--eas']);
+        expect(duplicate.exitCode, duplicate.all).toBe(20);
         await writeCloudBindingAsync(expoHomeOf(root), bindingRoot, { id: 'successor', platform });
+        fs.writeFileSync(releaseStop, '');
       }
       const stopped = await stopping;
+      pendingStop = undefined;
       const stops = stubEasArgs(root).filter(([verb]) => verb === 'simulator:stop');
       expect(stops).toEqual(eas ? [buildSessionStopArgs('captured')] : []);
       expect(
@@ -238,8 +247,13 @@ it.concurrent.for(platforms.flatMap((platform) => [false, true].map((eas) => ({ 
       expect(stubEasArgs(root)).toEqual(easCalls);
       expect(readStubExpoInvocations(root).filter(({ args }) => args[0] === 'start')).toEqual([]);
     } finally {
-      await killAsync(parent, 'SIGKILL');
-      await fixture.cleanup();
+      try {
+        if (eas && pendingStop) fs.writeFileSync(releaseStop, '');
+      } finally {
+        await pendingStop;
+        await killAsync(parent, 'SIGKILL');
+        await fixture.cleanup();
+      }
     }
   }
 );

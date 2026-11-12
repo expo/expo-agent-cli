@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import path from 'path';
 import { probeDevServerLockAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { findPortListenerAsync, findPortListenersAsync, isPortInUseAsync } from '../portListener';
@@ -43,6 +44,7 @@ vi.mock('../portListener', () => ({
 }));
 
 const projectRoot = '/project';
+const claimDirectory = path.join(projectRoot, '.expo', 'dev', 'detached-claim');
 function lock(overrides: Partial<DevServerLockInfo> = {}) {
   return lockInfo(overrides);
 }
@@ -138,7 +140,7 @@ afterEach(() => {
     globalThis.fetch = originalFetch;
   }
   killSpy.mockRestore();
-  vol.rmSync(`${projectRoot}/.expo/dev/detached-claim`, { recursive: true, force: true });
+  vol.rmSync(claimDirectory, { recursive: true, force: true });
 });
 
 describe(devStopAsync, () => {
@@ -147,11 +149,12 @@ describe(devStopAsync, () => {
     async (race) => {
       const id = '00000000-0000-4000-8000-000000000001';
       const owned = lock({ detachedAttemptId: id });
+      const directory = path.join(claimDirectory, id);
+      const ownerFile = path.join(directory, 'owner.json');
       if (race !== 'new-lock') {
-        const directory = `${projectRoot}/.expo/dev/detached-claim/${id}`;
         vol.mkdirSync(directory, { recursive: true });
         vol.writeFileSync(
-          `${directory}/owner.json`,
+          ownerFile,
           JSON.stringify({
             id,
             directory,
@@ -159,7 +162,7 @@ describe(devStopAsync, () => {
             request: '[]',
             pid: owned.pid,
             port: owned.port,
-            logFile: `${projectRoot}/.expo/dev/logs/dev-detached-${id}.log`,
+            logFile: path.join(projectRoot, '.expo', 'dev', 'logs', `dev-detached-${id}.log`),
             control: { port: 12345, token: id },
           })
         );
@@ -192,13 +195,7 @@ describe(devStopAsync, () => {
         {
           print: false,
           expectedAttempt:
-            race === 'scoped-eas'
-              ? JSON.parse(
-                  String(
-                    vol.readFileSync(`${projectRoot}/.expo/dev/detached-claim/${id}/owner.json`)
-                  )
-                )
-              : undefined,
+            race === 'scoped-eas' ? JSON.parse(String(vol.readFileSync(ownerFile))) : undefined,
         }
       );
       if (race === 'scoped-eas') {

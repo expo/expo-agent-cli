@@ -11,6 +11,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import {
+  collectOutput,
   executeAgentCliAsync,
   freePortAsync,
   holdDevLockAsync,
@@ -38,9 +39,7 @@ const EXPO_GO_TARGET = {
  * `dev:stop` sends a real signal to a real pid, so the test needs a real process to receive one —
  * a mocked `process.kill` would prove nothing about the thing this command exists to do.
  */
-async function startSignalRecorderAsync(
-  projectRoot: string
-): Promise<{ pid: number; signalled(): string | null; stop(): void }> {
+async function startSignalRecorderAsync(projectRoot: string) {
   const logPath = path.join(projectRoot, '.signal.log');
   const scriptPath = path.join(projectRoot, 'signal-recorder.js');
   await fs.promises.writeFile(
@@ -54,16 +53,34 @@ async function startSignalRecorderAsync(
       `  });`,
       `}`,
       `setInterval(() => {}, 1000);`,
+      `process.stdout.write('ready\\n');`,
     ].join('\n')
   );
 
-  const { spawn } = require('node:child_process') as typeof import('node:child_process');
-  const child = spawn(process.execPath, [scriptPath], { stdio: 'ignore' });
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  const child = spawn(process.execPath, [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const output = collectOutput(child);
+  const exited = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  let childError: Error | undefined;
+  child.on('error', (error) => {
+    childError = error;
+  });
+  const stop = async () => {
+    if (child.pid && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
+  };
+  await waitForAsync(
+    () => output.stdout === 'ready\n' || childError != null || child.exitCode !== null,
+    10_000
+  );
+  if (output.stdout !== 'ready\n' || childError || !child.pid) {
+    await stop();
+    throw childError ?? new Error(`Signal recorder did not become ready: ${output.all}`);
+  }
   return {
-    pid: child.pid!,
+    pid: child.pid,
     signalled: () => (fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : null),
-    stop: () => child.kill('SIGKILL'),
+    exited,
+    stop,
   };
 }
 
@@ -73,19 +90,17 @@ describe('@expo/agent-cli dev:stop', () => {
   it('signals the process the lock names', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const recorder = await startSignalRecorderAsync(projectRoot);
-    // A port nothing listens on, so "the dev server has gone" is true the moment the lock does.
-    const releaseLock = await holdDevLockAsync(projectRoot, {
-      url: 'http://127.0.0.1:59999',
-      port: 59999,
-      pid: recorder.pid,
-      startedAt: new Date().toISOString(),
-      projectRoot,
-    });
-
+    let released: Promise<void> | undefined;
     try {
-      // The lock has to stop answering for the wait to end, and this test holds it rather than a
-      // dev server, so it is released the moment the signal has landed.
-      setTimeout(() => releaseLock(), 500);
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: 'http://127.0.0.1:59999',
+        port: 59999,
+        pid: recorder.pid,
+        startedAt: new Date().toISOString(),
+        projectRoot,
+      });
+      released = recorder.exited.then(releaseLock);
+      void released.catch(() => {});
       const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
         env: stubExpoEnv(projectRoot),
       });
@@ -111,8 +126,8 @@ describe('@expo/agent-cli dev:stop', () => {
         expect(recorder.signalled()).toBe('SIGTERM');
       }
     } finally {
-      releaseLock();
-      recorder.stop();
+      await recorder.stop();
+      await released;
     }
   });
 
@@ -254,7 +269,7 @@ describe('@expo/agent-cli dev:stop', () => {
       expect((await fetch(`${stranger.url}/status`)).ok).toBe(true);
     } finally {
       releaseLock();
-      recorder.stop();
+      await recorder.stop();
       await stranger.close();
     }
   });

@@ -91,6 +91,7 @@
 // - marks the `--id` session stopped in that file; a bare stop marks whatever `.env.eas-simulator`
 //   names. The dotenv is reset when it names the stopped id (`commands/simulator/stop.js` 33-48)
 // - STUB_SIM_STOP_DELAY_MS: how long the stop takes before it does any of that
+// - STUB_SIM_STOP_RELEASE_FILE: wait for this file after logging the invocation
 //
 // `simulator:exec`
 // - STUB_SIM_EXEC_EXIT / STUB_SIM_STDERR: a verb the session refused
@@ -543,6 +544,11 @@ function stopSession() {
 }
 
 if (command === 'simulator:stop') {
+  const release = process.env.STUB_SIM_STOP_RELEASE_FILE;
+  if (release) {
+    const wait = new Int32Array(new SharedArrayBuffer(4));
+    while (!fs.existsSync(release)) Atomics.wait(wait, 0, 0, 50);
+  }
   const delayMs = Number(process.env.STUB_SIM_STOP_DELAY_MS || 0);
   if (delayMs > 0) {
     deferred = true;

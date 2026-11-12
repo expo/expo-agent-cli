@@ -693,9 +693,13 @@ describe('@expo/agent-cli dev --detach', () => {
   it('is stopped by dev:stop, which takes the whole tree with it', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const childPidFile = path.join(projectRoot, 'expo-child.pid');
+    let childPid: number | undefined;
     fs.appendFileSync(
       path.join(projectRoot, 'node_modules/expo/bin/cli'),
-      `\nif (process.argv[2] === 'start') require('node:fs').writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));\n`
+      `\nif (process.argv[2] === 'start') {\n` +
+        `  require('node:fs').writeFileSync(${JSON.stringify(childPidFile + '.tmp')}, String(process.pid));\n` +
+        `  require('node:fs').renameSync(${JSON.stringify(childPidFile + '.tmp')}, ${JSON.stringify(childPidFile)});\n` +
+        `}\n`
     );
     try {
       const started = await executeAgentCliAsync(
@@ -707,8 +711,12 @@ describe('@expo/agent-cli dev --detach', () => {
       );
       const { pid } = JSON.parse(started.stdout);
       expect(await waitForAsync(() => fs.existsSync(childPidFile), 5000)).toBe(true);
-      const childPid = Number(fs.readFileSync(childPidFile, 'utf8'));
-      expect(isAlive(childPid)).toBe(true);
+      const recordedPid = Number(fs.readFileSync(childPidFile, 'utf8'));
+      expect(Number.isSafeInteger(recordedPid) && recordedPid > 0).toBe(true);
+      expect(recordedPid).not.toBe(pid);
+      expect(recordedPid).not.toBe(process.pid);
+      childPid = recordedPid;
+      expect(isAlive(recordedPid)).toBe(true);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
         env: stubExpoEnv(projectRoot),
@@ -726,12 +734,23 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(process.platform === 'win32' ? [null, 'SIGTERM'] : ['SIGTERM']).toContain(
         report.signal
       );
-      expect(await waitForAsync(() => !isAlive(childPid), 5000)).toBe(true);
+      expect(await waitForAsync(() => !isAlive(recordedPid), 5000)).toBe(true);
       // The wrapper is gone, and so is the lock it held — the two halves of "no orphan".
       expect(await waitForAsync(() => !isAlive(pid), 5000)).toBe(true);
       expect(await readDevLockAsync(projectRoot)).toBeNull();
     } finally {
-      await cleanUpDetachedAsync(projectRoot);
+      try {
+        await cleanUpDetachedAsync(projectRoot);
+      } finally {
+        if (childPid && isAlive(childPid)) {
+          try {
+            process.kill(childPid, 'SIGKILL');
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+          }
+          expect(await waitForAsync(() => !isAlive(childPid!), 5000)).toBe(true);
+        }
+      }
     }
   });
 
