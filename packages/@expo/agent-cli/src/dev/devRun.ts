@@ -291,7 +291,7 @@ export async function withDevRunAsync<T>(
     try {
       const terminal = await run.finishAsync();
       const retained = run.progress.kind === 'unaccounted';
-      if (retained)
+      if (retained && release)
         Log.warn(
           'Startup ownership was retained because submitted work could not be accounted for.'
         );

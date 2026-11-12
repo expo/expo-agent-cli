@@ -157,8 +157,9 @@ describe.concurrent('@expo/agent-cli dev --eas — a foreground open that ends',
       env: { STUB_SIM_STOP_EXIT: '1' },
     });
 
-    expect(result.stderr).toContain('Could not stop EAS Simulator session sess-e2e-started: ');
-    expect(result.stderr).toContain('simulator:stop --id sess-e2e-started" ends it.');
+    expect(result.stderr).toContain('EAS Simulator session sess-e2e-started:');
+    expect(result.stderr).toContain('simulator:stop --id sess-e2e-started" ends it');
+    expect(result.stderr).not.toContain('Startup ownership was retained');
     expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(true);
   });
 
