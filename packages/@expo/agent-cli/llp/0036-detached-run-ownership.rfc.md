@@ -70,9 +70,12 @@ on resources captured by that run, including a late session ID returned by its s
 work, and completes while admission is held. An unknown resource outcome retains evidence.
 A missed terminal reply cannot authorize a later sweep of the worktree's current resources.
 
-These contracts are exercised through the compiled CLI in `dev-detach-control-test.ts` and
-`dev-detach-long-build-test.ts`. Their external barriers hold preparation, build submission and app opening;
-the long-build acceptance uses the actual default parent timeout on iOS and Android.
+These contracts are exercised through the compiled CLI. The tests
+`cooperative stop cancels a responsive %s owner before its server lock exists` and
+`matching %s election contenders observe startup while changed requests refuse it` live in
+`dev-detach-control-test.ts`. The test
+`DF1: a default observation timeout leaves one %s build observable and controllable` in
+`dev-detach-long-build-test.ts` uses the actual default parent timeout on iOS and Android.
 
 ## Contract evidence
 
@@ -101,10 +104,11 @@ Malformed records do not grant automatic admission. Discard probes the captured 
 even when ancillary metadata is malformed. Unknown or invalid endpoint evidence remains
 uncertain; the observer cannot invent an address and treat its absence as proof of death.
 
-Windows stop force-terminates the tree. Only successful delivery and confirmed termination
-allow the stop command to clear the record captured before signalling. Failed or uncertain
-stops retain it. A process that disappears before signal delivery may be reported stopped,
-but retained ownership must still be reported with its recovery action; process termination
+Ordinary stop of a verified detached owner uses the same cooperative cancellation on every
+platform. An explicit forced Windows tree stop clears the captured record only after
+successful delivery and confirmed termination. Failed or uncertain stops retain it.
+A process that disappears before signal delivery may be reported stopped with `reason: null`,
+but retained admission must still be reported with its recovery action; process termination
 does not establish that another start is admitted. This is enforced by
 `stop reports retained ownership when the observed owner dies before signal delivery`.
 Normal POSIX shutdown lets the owner release after awaited cleanup.
