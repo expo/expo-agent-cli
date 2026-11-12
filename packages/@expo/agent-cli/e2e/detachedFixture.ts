@@ -62,17 +62,19 @@ export async function setupDetachedFixtureAsync() {
   const releaseCandidates = () => fs.writeFileSync(candidates, '');
   const releaseFingerprint = () => fs.writeFileSync(release, '');
   async function cleanup() {
-    const pids = [...processes().map(({ pid }) => pid), ...heldPids()];
-    for (const pid of pids.filter(isProcessRunning)) {
+    let pids = [...processes().map(({ pid }) => pid), ...heldPids()].filter(isProcessRunning);
+    for (const pid of pids) {
       await signalProcessAsync(pid, 'SIGKILL');
     }
     releaseCandidates();
     releaseSmokeCandidate();
     releaseFingerprint();
-    if (!(await waitForAsync(() => pids.every((pid) => !isProcessRunning(pid)), 5000))) {
-      throw new Error(
-        `Fixture processes still running: ${pids.filter(isProcessRunning).join(', ')}`
-      );
+    await waitForAsync(() => {
+      pids = pids.filter(isProcessRunning);
+      return pids.length === 0;
+    }, 5000);
+    if (pids.length) {
+      throw new Error(`Fixture processes still running: ${pids.join(', ')}`);
     }
   }
   return {

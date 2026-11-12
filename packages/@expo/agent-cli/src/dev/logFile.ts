@@ -7,7 +7,6 @@ import { stripVTControlCharacters } from 'util';
 /** Directory of the per-run logs, as `.expo`'s own README describes it. */
 const DEV_LOGS_DIR = path.join('.expo', 'dev', 'logs');
 
-/** Legacy log used only when no candidate has published a current pointer. */
 const DETACHED_LOG_NAME = 'dev-detached.log';
 const attribution = new AsyncLocalStorage<{ root: string; logFile?: string }>();
 

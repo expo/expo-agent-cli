@@ -53,15 +53,17 @@ it('uses evaluated config even when the static app.json says the project is link
   expect(readStubEasInvocations(projectRoot)).toEqual([]);
 });
 
-it('relays a detached config evaluation failure', async () => {
-  const projectRoot = await setupFixtureAsync('go-app');
-  await installStubEasAsync(projectRoot);
-  const argv = ['dev', '--ios', '--eas', '--detach', '--json'];
-  const result = await executeAgentCliAsync(projectRoot, argv, {
+it.each([undefined, '\n', '\r\n'])('relays detached config errors (%j)', async (eol) => {
+  const root = await setupFixtureAsync('go-app');
+  await installStubEasAsync(root);
+  const result = await executeAgentCliAsync(root, ['dev', '--ios', '--eas', '--detach', '--json'], {
     reject: false,
-    env: { STUB_EXPO_CONFIG_JSON: path.join(projectRoot, 'missing-config.json') },
+    env:
+      eol === undefined
+        ? { STUB_EXPO_CONFIG_JSON: path.join(root, 'missing-config.json') }
+        : { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: `Bad config${eol}Missing variant` },
   });
   expect(result.exitCode, result.all).toBe(1);
-  expect(JSON.parse(result.stdout).error.code).toBe('EAS_PROJECT_CONFIG_UNREADABLE');
-  expect(readStubEasInvocations(projectRoot)).toEqual([]);
+  expect(JSON.parse(result.stdout).error.code, result.all).toBe('EAS_PROJECT_CONFIG_UNREADABLE');
+  expect(readStubEasInvocations(root)).toEqual([]);
 });

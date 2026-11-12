@@ -72,7 +72,7 @@ export function parseDetachedChildVerdict(
 ): DetachedChildVerdict | null {
   // One element per line, whoever the caller is: a log file read is already split, and an error a
   // test hands over as one multi-line string is the same text.
-  const lines = rawLines.flatMap((line) => line.split('\n'));
+  const lines = rawLines.flatMap((line) => line.replace(/\r$/, '').split(/\r?\n/));
   let scenario: string | null = null;
   let code: string | null = null;
   let exitCode: number | null = null;

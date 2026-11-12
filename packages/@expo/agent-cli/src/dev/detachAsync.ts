@@ -421,7 +421,6 @@ async function devDetachAttributedAsync(
   // A run that ended in its build holds no lock any more, and its log says why.
   let lock = wait.kind === 'up' ? wait.lock : null;
   if (!lock) {
-    // A startup refusal in the child can reach the caller before any lock.
     const verdict = childExit
       ? await waitForChildVerdictAsync(projectRoot)
       : readChildVerdictSync(projectRoot);

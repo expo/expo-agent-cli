@@ -56,7 +56,6 @@ it.concurrent.for(
     expect(await waitForAsync(() => heldPids().length > 0, 15_000), output.all).toBe(true);
     const logs = await run(['dev:logs']);
     const logged = JSON.parse(logs.stdout);
-    expect.soft(logged).toMatchObject({ detached: { phase: 'starting' } });
     const { logFile, lines } = logged;
     const pid =
       logged.detached?.pid ??
@@ -77,7 +76,7 @@ it.concurrent.for(
 
     expect.soft(path.basename(logFile)).not.toBe(path.basename(DETACHED_LOG_PATH));
     const observation = { phase: 'starting', pid, port, logFile };
-    expect.soft(JSON.parse(logs.stdout), logs.all).toMatchObject({ detached: observation });
+    expect.soft(logged, logs.all).toMatchObject({ detached: observation });
 
     const changedPort = String(await freePortAsync());
     const [equivalent, changed] = await Promise.all([
