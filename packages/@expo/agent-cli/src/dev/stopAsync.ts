@@ -192,7 +192,7 @@ function finishStopReport(
   return exitCode;
 }
 
-/** The ordinary path: a lock answers, so the pid to signal is known and so is what it owns. */
+/** Discard admission evidence without observing or stopping the work it once admitted. */
 async function discardRunAsync(
   projectRoot: string,
   id: string,
@@ -204,7 +204,7 @@ async function discardRunAsync(
   const report = emptyStopReport(null, startedAt);
   report.admission = removed ? 'discarded' : null;
   report.discardedRun = removed ? id : null;
-  report.reason = 'not-running';
+  report.reason = 'not-requested';
   report.detail = `${removed ? 'Discarded' : 'No record remains for'} attempt ${id}. No processes were stopped and no EAS sessions or devices were released.`;
   Object.assign(report, { devices: [], reaped: [], deviceError: null });
   onReport?.(report);

@@ -121,6 +121,8 @@ function ownerReport(target: OwnerTarget, startedAt: number): DevStopResultJson 
 function setMetroOutcome(report: DevStopResultJson, metro: MetroEvidence): void {
   if (metro.kind === 'awaiting') {
     report.port ??= metro.plannedPort;
+    report.stopped = false;
+    report.reason = 'not-running';
     return;
   }
   report.port ??= metro.server?.port ?? null;

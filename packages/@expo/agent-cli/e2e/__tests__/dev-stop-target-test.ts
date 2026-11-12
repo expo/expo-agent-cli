@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
+import { listenAttemptAsync } from '../../src/dev/detachedProtocol';
 import { lockAddressFor } from '../../src/devLock/address';
 import { detachedRunFixture } from '../detachedRunFixture';
 import { installStubEasAsync, stubEasCommands, writeCloudBindingAsync } from '../stubEas';
@@ -129,6 +130,64 @@ it('an explicit other port never cancels the detached owner', async () => {
     expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
   } finally {
     await f.cleanup();
+  }
+});
+
+it('a canceled building owner reports no ready Metro even after its PID exits', async () => {
+  const root = await setupFixtureAsync('go-app');
+  const id = randomUUID();
+  const directory = path.join(root, '.expo', 'dev', 'detached-run');
+  const logFile = path.join(root, 'building-owner.log');
+  const address = lockAddressFor(root, { name: `detached-${id}` }).address;
+  const port = await freePortAsync();
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    stdio: 'ignore',
+    detached: true,
+  });
+  const metro = { kind: 'awaiting', plannedPort: port } as const;
+  let settling: Promise<void> | undefined;
+  let endpoint: Awaited<ReturnType<typeof listenAttemptAsync>> | undefined;
+  let releaseLock: (() => void) | undefined;
+  try {
+    endpoint = await listenAttemptAsync(address, id, {
+      inspect: () => ({ kind: 'starting', metro }),
+      cancel() {
+        settling ??= (async () => {
+          await killAsync(child, 'SIGKILL');
+          endpoint?.close({
+            kind: 'finished',
+            metro,
+            admission: 'released',
+            cleanup: { sessions: [], devices: [] },
+          });
+        })();
+      },
+    });
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, `owner-${id}.json`),
+      JSON.stringify({ id, pid: child.pid, logFile, endpoint: address })
+    );
+    releaseLock = await holdDevLockAsync(root, {
+      pid: child.pid!,
+      port,
+      url: `http://127.0.0.1:${port}`,
+      projectRoot: root,
+      startedAt: new Date().toISOString(),
+    });
+    const result = await executeAgentCliAsync(root, ['dev:stop', '--json']);
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      stopped: false,
+      reason: 'not-running',
+      admission: 'released',
+      processStillRunning: false,
+    });
+  } finally {
+    releaseLock?.();
+    await settling;
+    endpoint?.close();
+    await killAsync(child, 'SIGKILL');
   }
 });
 

@@ -7,10 +7,12 @@ import type { StoppedDevices } from './stopDevices';
 /**
  * Why a dev server was not stopped.
  *
- * A closed set rather than a sentence, because the three cases need three different next actions
+ * A closed set rather than a sentence, because the cases need different next actions
  * and an agent must not have to read English to tell them apart.
  */
 export type DevStopSkipReason =
+  /** The command only discarded admission evidence and did not request a process stop. */
+  | 'not-requested'
   /** Nothing was running: no lock answered and nothing listens on the port. */
   | 'not-running'
   /** Something listens, but no lock proves this project's ownership of it. */

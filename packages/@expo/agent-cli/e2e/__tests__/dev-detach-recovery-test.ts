@@ -150,6 +150,11 @@ it.skipIf(process.platform === 'win32').each([true, false])(
       const discarded = await f.run(['dev:stop', '--discard-run', id, '--json']);
       expect(discarded.exitCode, discarded.all).toBe(0);
       if (survives) {
+        expect(JSON.parse(discarded.stdout)).toMatchObject({
+          stopped: false,
+          reason: 'not-requested',
+          admission: 'discarded',
+        });
         expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
         expect(() => process.kill(f.serverPid(), 0)).not.toThrow();
         const foreign = await f.start();
