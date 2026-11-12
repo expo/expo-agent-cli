@@ -1,7 +1,14 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { detachedControlFixture } from '../detachedControlFixture';
-import { waitForAsync } from '../utils';
+import { expoHomeOf, waitForAsync } from '../utils';
+import {
+  cloudBindingFile,
+  installStubEasAsync,
+  stubEasArgs,
+  writeCloudBindingAsync,
+} from '../stubEas';
 
 it.each(['ios', 'android'] as const)(
   'cooperative stop cancels a responsive %s owner before its server lock exists',
@@ -14,6 +21,11 @@ it.each(['ios', 'android'] as const)(
       expect(fs.existsSync(f.record(started.id))).toBe(true);
       const stopped = await f.run(['dev:stop', '--json']);
       expect(stopped.exitCode, stopped.all).toBe(0);
+      expect(JSON.parse(stopped.stdout)).toMatchObject({
+        stopped: false,
+        reason: 'not-running',
+        admission: 'released',
+      });
       expect(
         await waitForAsync(() => {
           try {
@@ -50,6 +62,55 @@ it.each(['ios', 'android'] as const)(
       expect(changed.exitCode, changed.all).toBe(20);
       expect(JSON.parse(changed.stdout).error.code).toBe('DEV_START_BUSY');
       expect(f.marks('entered')).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
+it.each(['ios', 'android'] as const)(
+  'preflight %s cancellation cleans up captured existing resources before releasing admission',
+  async (platform) => {
+    const f = await detachedControlFixture(platform);
+    try {
+      await installStubEasAsync(f.root);
+      const root = fs.realpathSync(f.root);
+      await writeCloudBindingAsync(expoHomeOf(f.root), root, { id: 'prior-session', platform });
+      const local = cloudBindingFile(expoHomeOf(f.root), root, 'android').replace(
+        '-cloud.json',
+        '-local-android.json'
+      );
+      const boundAt = new Date().toISOString();
+      fs.mkdirSync(path.dirname(local), { recursive: true });
+      fs.writeFileSync(
+        local,
+        JSON.stringify({
+          version: 1,
+          projectRoot: root,
+          boundAt,
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          device: {
+            backend: 'local-android',
+            platform: 'android',
+            serial: 'captured-usb',
+            origin: { kind: 'explicit' },
+          },
+        })
+      );
+      const owner = f.start();
+      expect(await waitForAsync(() => f.marks('entered').length === 1, 15000)).toBe(true);
+      const stopped = await f.run(['dev:stop', '--eas', '--release', '--json']);
+      expect(stopped.exitCode, stopped.all).toBe(0);
+      expect(JSON.parse(stopped.stdout).admission).toBe('released');
+      expect(fs.existsSync(f.record(owner.id))).toBe(false);
+      expect(fs.existsSync(cloudBindingFile(expoHomeOf(f.root), root, platform))).toBe(false);
+      expect(stubEasArgs(f.root).filter(([verb]) => verb === 'simulator:stop')).toEqual([
+        ['simulator:stop', '--id', 'prior-session', '--non-interactive'],
+      ]);
+      const remaining = JSON.parse(fs.readFileSync(local, 'utf8'));
+      expect(remaining.boundAt).toBe(boundAt);
+      expect(Date.parse(remaining.expiresAt)).toBeLessThanOrEqual(Date.now());
+      await owner.result;
     } finally {
       await f.cleanup();
     }

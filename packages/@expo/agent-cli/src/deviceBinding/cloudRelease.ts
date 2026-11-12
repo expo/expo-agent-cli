@@ -5,8 +5,13 @@ import { cloudStopCommand, stopAndWriteBackAsync } from './cleanup';
 import { readCloudBindings, type CloudBinding } from './cloud';
 import { debugEvent } from './events';
 import { clearInspectCache } from './inspect';
-import { bindingPathFor, removeBindingFile, withRegistryLockAsync } from './registry';
-import { WRITE_LOCK_WAIT_MS } from './release';
+import {
+  bindingPathFor,
+  readBindingFile,
+  removeBindingFile,
+  withRegistryLockAsync,
+} from './registry';
+import { sameBinding, WRITE_LOCK_WAIT_MS } from './release';
 import { defaultTools } from './tools';
 import type { DeviceTools } from './types';
 
@@ -122,4 +127,48 @@ export async function releaseStartedSessionAsync(
   return result.ok
     ? { outcome: 'stopped' }
     : { outcome: 'failed', reason: result.reason ?? endsIt('the stop failed', id) };
+}
+
+/** Stop only the captured acquisition; a later binding remains somebody else's resource. */
+export async function releaseCapturedSessionAsync(
+  projectRoot: string,
+  session: { id: string; platform: 'ios' | 'android'; binding?: CloudBinding },
+  tools: DeviceTools = defaultTools()
+): Promise<{ outcome: 'stopped' | 'preserved' | 'unknown'; detail?: string }> {
+  const file = bindingPathFor(projectRoot, session.platform, 'cloud');
+  try {
+    const section = await withRegistryLockAsync(
+      async () => {
+        const read = readBindingFile(file);
+        if (read.kind === 'unreadable')
+          return {
+            outcome: 'unknown' as const,
+            detail: `The captured binding at ${file} cannot be read.`,
+          };
+        if (
+          session.binding
+            ? read.kind !== 'binding' || !sameBinding(read.binding, session.binding)
+            : read.kind === 'binding' &&
+              read.binding.device.backend === 'cloud' &&
+              read.binding.device.id === session.id
+        )
+          return {
+            outcome: 'preserved' as const,
+            detail: 'The captured session binding changed before cleanup.',
+          };
+        if (session.binding) removeBindingFile(file);
+        return { removed: session.binding ? { file, binding: session.binding } : undefined };
+      },
+      { waitMs: WRITE_LOCK_WAIT_MS, tools }
+    );
+    if (section.outcome) return { outcome: section.outcome, detail: section.detail };
+    const result = await stopReleasedAsync(projectRoot, session.id, 'dev', tools, section.removed);
+    return result.ok
+      ? { outcome: 'stopped' }
+      : { outcome: 'unknown', detail: result.reason ?? 'The session stop failed.' };
+  } catch (error) {
+    return { outcome: 'unknown', detail: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearInspectCache();
+  }
 }

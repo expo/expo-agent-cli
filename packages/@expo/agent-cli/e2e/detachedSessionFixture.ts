@@ -2,11 +2,10 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { observeDetachedRunAsync, cancelDetachedRunAsync } from '../src/dev/detachedOwnership';
-import type { CancelIntent, LiveAttempt } from '../src/dev/devRunTypes';
 import { cloudBindingFile, installStubEasAsync, STUB_EAS_SCRIPT, stubEasArgs } from './stubEas';
 import {
   collectOutput,
+  executeAgentCliAsync,
   expoHomeOf,
   freePortAsync,
   killAsync,
@@ -69,13 +68,21 @@ export async function detachedSessionFixture(platform: 'ios' | 'android') {
   const binding = cloudBindingFile(expoHomeOf(root), fs.realpathSync(root), platform);
   const mark = (name: string) => path.join(barrier, name);
   const release = (phase: 'start' | 'stop') => fs.writeFileSync(mark(`${phase}-release`), '');
-  const observe = () => observeDetachedRunAsync(root, { deadline: Date.now() + 1000 });
-  const cancel = (attempt: LiveAttempt, intent: Partial<CancelIntent> = {}, timeoutMs = 1000) =>
-    cancelDetachedRunAsync(attempt, {
-      signal: 'SIGTERM',
-      ...intent,
-      deadline: Date.now() + timeoutMs,
+  const stop = (flags: string[] = [], timeout = '200ms') =>
+    executeAgentCliAsync(root, ['dev:stop', ...flags, '--timeout', timeout, '--json'], {
+      reject: false,
     });
+  async function metroDown() {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/status`, {
+        signal: AbortSignal.timeout(300),
+      });
+      await response.text();
+      return false;
+    } catch {
+      return true;
+    }
+  }
   async function entered(phase: 'start' | 'stop') {
     expect(
       await waitForAsync(() => fs.existsSync(mark(`${phase}-entered`)), 15_000),
@@ -107,8 +114,8 @@ export async function detachedSessionFixture(platform: 'ios' | 'android') {
     binding,
     mark,
     release,
-    observe,
-    cancel,
+    stop,
+    metroDown,
     entered,
     cleanup,
     commands: () => stubEasArgs(root),

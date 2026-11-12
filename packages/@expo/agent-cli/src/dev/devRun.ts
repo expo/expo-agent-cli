@@ -1,6 +1,10 @@
 import os from 'node:os';
 
-import type { Binding } from '../deviceBinding';
+import { deviceIdOf, releaseWorktreeDevicesAsync, type Binding } from '../deviceBinding';
+import type { CloudBinding } from '../deviceBinding/cloud';
+import { releaseCapturedSessionAsync } from '../deviceBinding/cloudRelease';
+import { deviceReport, ownBindingFiles } from '../deviceBinding/records';
+import { readBindingFile } from '../deviceBinding/registry';
 import { Log } from '../log';
 import { CommandError } from '../utils/errors';
 import { acquireDetachedRunAsync } from './detachedOwnership';
@@ -15,6 +19,7 @@ import type {
   OpenSettlement,
   OpenWork,
   RunProgress,
+  SessionReference,
 } from './devRunTypes';
 import type { StartupRequest } from './startupRequest';
 
@@ -38,12 +43,19 @@ class WorkScope implements DevRun {
   private serving: Serving | null = null;
   private finishing = false;
   private intent: CancelIntent | null = null;
+  private cleanupFailure: string | null = null;
+  private unreadable: { backend: string; file: string }[] = [];
 
-  constructor(readonly request: StartupRequest) {}
+  constructor(
+    readonly request: StartupRequest,
+    private readonly root: string,
+    private readonly keepSessions: boolean
+  ) {}
 
   get progress(): RunProgress {
     const metro = this.metro;
     const opening = this.serving?.opening;
+    if (this.cleanupFailure) return { kind: 'unaccounted', metro, detail: this.cleanupFailure };
     if (opening?.kind === 'settled' && opening.result.kind === 'unaccounted')
       return { kind: 'unaccounted', metro, detail: opening.result.detail };
     if (this.signal.aborted || this.finishing || metro.kind === 'exited')
@@ -87,7 +99,21 @@ class WorkScope implements DevRun {
   }
 
   captureBinding(binding: Binding): void {
-    if (!this.bindings.some((captured) => captured === binding)) this.bindings.push(binding);
+    const at = this.bindings.findIndex(
+      (captured) =>
+        captured.device.backend === binding.device.backend &&
+        deviceIdOf(captured.device) === deviceIdOf(binding.device)
+    );
+    if (at === -1) this.bindings.push(binding);
+    else this.bindings[at] = binding;
+  }
+
+  captureInitialBindings(): void {
+    for (const entry of ownBindingFiles(this.root)) {
+      const read = readBindingFile(entry.file);
+      if (read.kind === 'binding') this.captureBinding(read.binding);
+      else if (read.kind === 'unreadable') this.unreadable.push(entry);
+    }
   }
 
   async serveAsync<T>(
@@ -134,16 +160,104 @@ class WorkScope implements DevRun {
       };
     } finally {
       current.active = false;
-      if (current.opening.kind === 'pending') await current.opening.task;
-      await open?.finishAsync?.();
+      if (current.opening.kind === 'pending') {
+        if (open?.kind === 'eas') Log.progress('Finishing EAS session work before exiting.');
+        await current.opening.task;
+      }
     }
   }
 
-  async finishAsync(): Promise<{ metro: MetroEvidence; cleanup: CapturedCleanup }> {
+  async finishAsync(): Promise<{
+    metro: Exclude<MetroEvidence, { kind: 'ready' }>;
+    cleanup: CapturedCleanup;
+  }> {
     this.finishing = true;
+    const metro = this.metro;
+    if (metro.kind === 'ready') throw new Error('The serving operation has not settled.');
+    const sessions = new Map<string, { session: SessionReference; binding?: CloudBinding }>();
+    for (const binding of this.bindings) {
+      if (binding.device.backend === 'cloud')
+        sessions.set(binding.device.id, {
+          session: { id: binding.device.id, platform: binding.device.platform, origin: 'reused' },
+          binding: { ...binding, device: binding.device },
+        });
+    }
+    const open = this.serving?.opening;
+    if (open?.kind === 'settled' && open.result.session) {
+      const { session } = open.result;
+      sessions.set(session.id, { ...sessions.get(session.id), session });
+    }
+    const sessionResults = new Map<string, CapturedCleanup['sessions'][number]>();
+    const deviceResults = new Map<Binding, CapturedCleanup['devices'][number]>();
+    let eas: boolean, local: boolean;
+    do {
+      eas = Boolean(this.intent?.eas);
+      local = Boolean(this.intent?.release);
+      for (const captured of sessions.values()) {
+        const { session } = captured;
+        const previous = sessionResults.get(session.id);
+        if (previous && previous.outcome !== 'preserved') continue;
+        const shouldStop = eas || (!this.keepSessions && session.origin === 'started');
+        if (!shouldStop) {
+          if (!previous && session.origin === 'started')
+            Log.progress(`Kept EAS Simulator session ${session.id}; dev:stop --eas stops it.`);
+          sessionResults.set(session.id, { session, outcome: 'preserved' });
+          continue;
+        }
+        const result = await releaseCapturedSessionAsync(this.root, {
+          ...session,
+          binding: captured.binding,
+        });
+        sessionResults.set(session.id, { session, ...result });
+        if (result.outcome === 'stopped')
+          Log.progress(
+            `Stopped EAS Simulator session ${session.id}${session.origin === 'started' ? ', created by this run' : ''}.`
+          );
+        else if (result.detail) Log.warn(`EAS Simulator session ${session.id}: ${result.detail}`);
+        if (result.outcome === 'unknown')
+          this.cleanupFailure = result.detail ?? 'Session cleanup could not be confirmed.';
+      }
+      for (const binding of this.bindings) {
+        if (binding.device.backend === 'cloud') continue;
+        const previous = deviceResults.get(binding);
+        if (previous && previous.released !== null) continue;
+        if (!local) {
+          deviceResults.set(binding, {
+            ...deviceReport(binding),
+            released: null,
+            reason: 'Kept by this run; --release releases it.',
+          });
+          continue;
+        }
+        try {
+          const [released] = await releaseWorktreeDevicesAsync(this.root, {
+            platform: binding.device.platform,
+            expected: binding,
+          });
+          const result = released ?? {
+            ...deviceReport(binding),
+            released: null,
+            reason: 'The captured device binding changed before cleanup.',
+          };
+          deviceResults.set(binding, result);
+          if (result.released === false)
+            this.cleanupFailure = result.reason ?? 'Device cleanup could not be confirmed.';
+        } catch (error) {
+          this.cleanupFailure = error instanceof Error ? error.message : String(error);
+          deviceResults.set(binding, {
+            ...deviceReport(binding),
+            released: false,
+            reason: this.cleanupFailure,
+          });
+        }
+      }
+      const unreadable = this.unreadable.find(({ backend }) => (backend === 'cloud' ? eas : local));
+      if (unreadable)
+        this.cleanupFailure = `The captured binding at ${unreadable.file} cannot be read.`;
+    } while (eas !== Boolean(this.intent?.eas) || local !== Boolean(this.intent?.release));
     return {
-      metro: this.metro,
-      cleanup: { sessions: [], devices: [] },
+      metro,
+      cleanup: { sessions: [...sessionResults.values()], devices: [...deviceResults.values()] },
     };
   }
 }
@@ -153,7 +267,7 @@ export async function withDevRunAsync<T>(
   options: { request: StartupRequest; detached: DetachedIdentity | null },
   work: (run: DevRun) => Promise<T>
 ): Promise<T> {
-  const run = new WorkScope(options.request);
+  const run = new WorkScope(options.request, root, options.detached !== null);
   const onInterrupt = () => run.cancel({ signal: 'SIGINT' });
   const onTerminate = () => run.cancel({ signal: 'SIGTERM' });
   process.on('SIGINT', onInterrupt);
@@ -170,6 +284,7 @@ export async function withDevRunAsync<T>(
         },
         { inspect: () => run.progress, cancel: (intent) => run.cancel(intent) }
       );
+    run.captureInitialBindings();
     run.signal.throwIfAborted();
     return await work(run);
   } finally {

@@ -88,6 +88,7 @@ export interface EnsureEasSessionOptions {
 /** What making sure there is a session with the app on it amounted to. */
 export interface EnsureEasSessionReport {
   binding?: CloudBinding;
+  bindingAtSubmission?: CloudBinding | null;
   unaccounted?: string;
   /** A session on this platform is up, with the app on it (started) or at least drivable (reused). */
   ok: boolean;
@@ -213,11 +214,22 @@ export async function ensureEasSessionAsync(
         origin: session.started ? 'started' : 'dotenv',
         signal: options.signal,
         start: session.started
-          ? { at: startedAt, dotenvId: () => readCloudSessionIdSync(projectRoot) }
+          ? {
+              at: startedAt,
+              dotenvId: () => readCloudSessionIdSync(projectRoot),
+              expected: options.signal ? (session.bindingAtSubmission ?? null) : undefined,
+            }
           : undefined,
       });
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
+      if (
+        options.signal &&
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'CLOUD_BINDING_CHANGED'
+      )
+        return { ...session, ok: false, reason: why };
       if (options.signal)
         return {
           ...session,
@@ -541,6 +553,7 @@ async function ensureSessionAsync(
         sessionId,
         sessionUrl,
         started: sessionId != null,
+        bindingAtSubmission: claim.binding ?? null,
         ...(!sessionId
           ? { unaccounted: 'The submitted EAS session command returned no session receipt.' }
           : {}),
@@ -551,6 +564,7 @@ async function ensureSessionAsync(
     ok: true,
     sessionId,
     started: true,
+    bindingAtSubmission: claim.binding ?? null,
     tunnelHost,
     openUrl,
     sessionUrl,

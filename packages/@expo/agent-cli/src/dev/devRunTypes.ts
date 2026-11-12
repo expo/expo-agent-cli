@@ -25,7 +25,6 @@ export type OpenSettlement = ({ kind: 'settled' } | { kind: 'unaccounted'; detai
 export type OpenWork = Readonly<{
   kind: 'local' | 'eas';
   runAsync(input: { metro: MetroReady; stillWanted: () => boolean }): Promise<OpenSettlement>;
-  finishAsync?(): Promise<void>;
 }>;
 export type EasOpenEvidence =
   | { kind: 'waiting' }
@@ -57,7 +56,12 @@ export type CapturedCleanup = {
   devices: ReleasedDevice[];
 };
 export type CapturedStopOutcome =
-  | { kind: 'finished'; metro: MetroEvidence; cleanup: CapturedCleanup; admission: 'released' }
+  | {
+      kind: 'finished';
+      metro: Exclude<MetroEvidence, { kind: 'ready' }>;
+      cleanup: CapturedCleanup;
+      admission: 'released';
+    }
   | { kind: 'pending'; last: RunProgress; acknowledged: boolean }
   | { kind: 'interrupted'; attempt: AttemptReference }
   | { kind: 'uncertain'; detail: string };

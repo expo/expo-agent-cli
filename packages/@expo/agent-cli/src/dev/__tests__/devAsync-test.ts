@@ -799,7 +799,6 @@ describe('EAS session lifecycle of the dev-server step', () => {
   const lifecycle = {
     kind: 'eas' as const,
     runAsync: vi.fn(async () => ({ kind: 'settled' as const })),
-    finishAsync: vi.fn(),
   };
   beforeEach(() => {
     mockProjectState();
@@ -852,7 +851,10 @@ describe('EAS session lifecycle of the dev-server step', () => {
     async (platform) => {
       let finish!: () => void;
       const finalization = new Promise<void>((resolve) => (finish = resolve));
-      lifecycle.finishAsync.mockImplementationOnce(() => finalization);
+      lifecycle.runAsync.mockImplementationOnce(async () => {
+        await finalization;
+        return { kind: 'settled' };
+      });
       const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
       let returned = false;
       const run = devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--eas'])).then(
@@ -862,7 +864,7 @@ describe('EAS session lifecycle of the dev-server step', () => {
         }
       );
       try {
-        await vi.waitFor(() => expect(lifecycle.finishAsync).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() => expect(lifecycle.runAsync).toHaveBeenCalledTimes(1));
         process.emit('SIGTERM', 'SIGTERM');
         expect(exit).not.toHaveBeenCalled();
         expect(returned).toBe(false);

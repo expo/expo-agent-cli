@@ -21,7 +21,6 @@
 // Never throws: `dev`'s server outlives a failed open, the same as for a local device.
 
 import { claimable, readCloudBindings } from '../deviceBinding/cloud';
-import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
 
 import {
   probeCloudSessionAsync,
@@ -249,11 +248,10 @@ export function easOpenWork(
     signal: AbortSignal;
   }
 ): OpenWork {
-  let session: OpenAppOnEasReport | null = null;
   return {
     kind: 'eas',
     async runAsync({ metro, stillWanted }) {
-      session = await openAppOnEasForRunAsync(projectRoot, {
+      const session = await openAppOnEasForRunAsync(projectRoot, {
         ...options,
         devServerUrl: metro.url,
         stillWanted,
@@ -275,16 +273,6 @@ export function easOpenWork(
             }
           : {}),
       };
-    },
-    async finishAsync() {
-      if (options.keepSession || !session?.started || !session.sessionId) return;
-      const release = await releaseStartedSessionAsync(projectRoot, session.sessionId, 'dev');
-      if (release.outcome === 'stopped')
-        Log.progress(`Stopped EAS Simulator session ${session.sessionId}, created by this run.`);
-      else if (release.outcome === 'kept')
-        Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
-      else
-        Log.warn(`Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`);
     },
   };
 }

@@ -114,6 +114,7 @@ it('a claim renews an expired own binding, so another worktree does not reap it'
   vi.setSystemTime(later);
   tools.clock.now = later;
   expect(await claimCloudBindingsAsync(root, 'ios', tools)).toEqual({
+    binding: expect.objectContaining({ device: expect.objectContaining({ id: 'A' }) }),
     boundIds: ['A'],
     unreadable: null,
     renewed: expect.objectContaining({ id: 'A' }),

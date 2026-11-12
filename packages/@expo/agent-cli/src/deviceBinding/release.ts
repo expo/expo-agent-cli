@@ -177,7 +177,7 @@ function expireLease(file: string, binding: Binding, tools: DeviceTools): void {
 }
 
 /** Compare the acquisition too: a later dev may have rebound the same device. */
-function sameBinding(a: Binding, b: Binding): boolean {
+export function sameBinding(a: Binding, b: Binding): boolean {
   const identity = ({ projectRoot, boundAt, device }: Binding) => [
     projectRoot,
     boundAt,

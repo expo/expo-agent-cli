@@ -11,7 +11,8 @@ import {
   withRegistryLockAsync,
   writeBindingFile,
 } from './registry';
-import { WRITE_LOCK_WAIT_MS } from './release';
+import { sameBinding, WRITE_LOCK_WAIT_MS } from './release';
+import { CommandError } from '../utils/errors';
 import { defaultTools } from './tools';
 import type { Binding, BoundDevice, DevicePlatform, DeviceTools } from './types';
 
@@ -82,7 +83,12 @@ export async function claimCloudBindingsAsync(
   platform: DevicePlatform,
   tools: DeviceTools = defaultTools(),
   signal?: AbortSignal
-): Promise<{ boundIds: string[]; unreadable: string | null; renewed: RenewedLease | null }> {
+): Promise<{
+  boundIds: string[];
+  unreadable: string | null;
+  renewed: RenewedLease | null;
+  binding?: CloudBinding | null;
+}> {
   try {
     return await withRegistryLockAsync(
       async () => {
@@ -110,6 +116,7 @@ export async function claimCloudBindingsAsync(
           boundIds: claimable(bindings, platform, tools.now()).map(({ device }) => device.id),
           unreadable: null,
           renewed,
+          binding: read.kind === 'binding' && isCloudBinding(read.binding) ? read.binding : null,
         };
       },
       { waitMs: WRITE_LOCK_WAIT_MS, tools }
@@ -162,7 +169,7 @@ export async function acquireCloudBindingAsync(
     id: string;
     origin: 'started' | 'dotenv';
     /** Only a run that started the session: when it began, and the id the dotenv names now. */
-    start?: { at: Date; dotenvId: () => string | null };
+    start?: { at: Date; dotenvId: () => string | null; expected?: CloudBinding | null };
     tools?: DeviceTools;
     signal?: AbortSignal;
   }
@@ -176,6 +183,16 @@ export async function acquireCloudBindingAsync(
       if (read.kind === 'unreadable')
         throw deviceUnavailableError('unreadable', { platform, path: file });
       const before = read.kind === 'binding' && isCloudBinding(read.binding) ? read.binding : null;
+      if (
+        start?.expected !== undefined &&
+        (start.expected === null
+          ? before !== null
+          : before === null || !sameBinding(before, start.expected))
+      )
+        throw new CommandError(
+          'CLOUD_BINDING_CHANGED',
+          'A later EAS session binding was preserved; the late session receipt was not bound.'
+        );
       const lease = leaseFrom(tools.now());
       const binding: CloudBinding =
         before?.device.id === id
@@ -188,6 +205,7 @@ export async function acquireCloudBindingAsync(
             };
       const raced =
         start != null &&
+        start.expected === undefined &&
         before != null &&
         before.device.id !== id &&
         Date.parse(before.boundAt) >= start.at.getTime();
