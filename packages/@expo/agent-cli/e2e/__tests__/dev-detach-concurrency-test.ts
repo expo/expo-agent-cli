@@ -323,9 +323,18 @@ it.each(['live', 'dead-during-work', 'unreadable', 'dead-before-work'])(
         await executeAgentCliAsync(f.root, [...next.command.split(' ').slice(2), '--json']);
         f.release();
         expect((await f.start().result).exitCode).toBe(0);
+      } else if (state === 'live') {
+        expect(next).toMatchObject({
+          command: 'npx @expo/agent-cli dev:logs',
+          recovery: { kind: 'observe', attempt: { pid } },
+          steps: [],
+        });
       } else {
-        expect(next).toMatchObject({ command: 'npx @expo/agent-cli dev:logs', steps: [] });
-        expect(next.why).toContain('ownership');
+        expect(next).toMatchObject({
+          command: 'npx @expo/agent-cli status',
+          recovery: { kind: 'uncertain' },
+          steps: [],
+        });
       }
     } finally {
       await f.cleanup();

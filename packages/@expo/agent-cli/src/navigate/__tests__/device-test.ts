@@ -475,7 +475,9 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(spawn).toHaveBeenCalled();
     expect(error.code).toBe('NO_BOUND_DEVICE');
     expect(error.message).toContain('The bound ios EAS session is expired.');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
+    expect(error.suggestedCommand).toBe(
+      'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+    );
   });
 
   function writeUnreadableCloudFile(): void {

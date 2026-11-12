@@ -143,7 +143,6 @@ describe('the flags this CLI writes onto a command line', () => {
         [
           "--detach  src/smoke/deps/startArgs.ts",
           "--device  src/device/installDevBuild.ts",
-          "--eas  src/navigate/cloudRecovery.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
           "--is-inside-work-tree  src/new/git.ts",
@@ -163,7 +162,6 @@ describe('the flags this CLI writes onto a command line', () => {
           "--platform  src/deploy/deployAsync.ts",
           "--platform  src/project/fingerprint.ts",
           "--port  src/dev/forwardedArgs.ts",
-          "--port  src/navigate/cloudRecovery.ts",
           "--preset  src/project/fingerprint.ts",
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",

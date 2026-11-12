@@ -242,7 +242,7 @@ describe(cloudRungAsync, () => {
     const error = await cloudRungAsync(ROOT, 'ios', 'required', fakeTools()).catch((e) => e);
 
     expect(error.message).toContain('The bound ios EAS session is expired.');
-    expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
   it('refuses an expired binding with state-aware recovery', async () => {
