@@ -181,7 +181,8 @@ describe('@expo/agent-cli dev', () => {
           {
             env: {
               STUB_EXPO_LISTEN: '1',
-              STUB_EXPO_BUILD_DELAY_MS: '4000',
+              // Long enough that the foreign server below has left before the stub binds the port.
+              STUB_EXPO_BUILD_DELAY_MS: '6000',
               STUB_EXPO_DELAY_MS: '30000',
             },
           }
@@ -197,12 +198,13 @@ describe('@expo/agent-cli dev', () => {
               30_000
             )
           ).toBe(true);
+          // The lock first: the run checks the named port at the spawn and publishes nothing on a
+          // port another project already answers on, so the foreign server binds after it.
+          const building = { pid: child.pid, port, phase: 'building' };
+          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject(building);
           await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
-          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
-            pid: child.pid,
-            phase: 'building',
-          });
           await new Promise((resolve) => setTimeout(resolve, 1500));
+          expect(await readDevLockAsync(projectRoot)).toMatchObject(building);
           await new Promise((resolve) => foreign.close(resolve));
 
           const deadline = Date.now() + 20_000;
