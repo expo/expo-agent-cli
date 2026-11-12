@@ -156,7 +156,7 @@ export function printHumanReport(report: DevStopResultJson, finishing: boolean):
   }
   if (report.pid != null) {
     lines.push(
-      chalk`{bold Process} ${report.pid}${report.signal ? chalk.dim(` · sent ${report.signal}`) : chalk.dim(' · not signalled')}`
+      chalk`{bold Process} ${report.pid}${report.signal ? chalk.dim(` · stop requested with ${report.signal}`) : chalk.dim(' · no confirmed shutdown request')}`
     );
   }
   if (report.url != null || report.port != null) {
@@ -169,12 +169,10 @@ export function printHumanReport(report: DevStopResultJson, finishing: boolean):
   // Said out loud on the success path too, because "Stopped yes" and a port that still answers is
   // the one combination a reader would otherwise take for a contradiction.
   if (report.stopped && report.portStillAnswering && report.port != null) {
-    lines.push(
-      chalk`{bold Port} ${report.port}${chalk.dim(' · still answering, by something else')}`
-    );
+    lines.push(chalk`{bold Port} ${report.port}${chalk.dim(' · still answering')}`);
     lines.push(
       chalk.dim(
-        ` The process this command signalled is gone. Another listener has that port number — a second project's dev server, or one on the other IP stack, since this check is over 127.0.0.1 and a listener on ::1 is a different socket.`
+        ` The stop outcome does not establish that this port is free. A surviving subprocess or another server may still be listening.`
       )
     );
   }

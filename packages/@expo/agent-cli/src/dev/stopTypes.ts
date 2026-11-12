@@ -81,7 +81,7 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
    * {@link detail} instead.
    */
   lockHeld: boolean;
-  /** Signal that was sent, or null when nothing was signalled. */
+  /** Shutdown signal delivered directly or acknowledged by the owner; null when unconfirmed. */
   signal: string | null;
   /** The dev server was killed after `--force`, rather than asked to stop. */
   forced: boolean;
@@ -98,9 +98,8 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
    *
    * After a signal, this is the primary evidence about the stop. False beside `stopped: false`
    * means the process is gone but something else — the lock, below — remains, so SIGKILL is not
-   * the recovery. True beside `stopped: true` and an {@link easPlatform} means the `dev --eas` run's
-   * dev server is gone (its lock answers `finishing`) and the process is finishing its session
-   * start; it leaves by itself. On a refusal,
+   * the recovery. True beside `stopped: true` means Metro ended while its owner still accounts
+   * for startup or cleanup obligations. On a refusal,
    * this is an observation only; it grants no permission to signal.
    */
   processStillRunning: boolean | null;
@@ -119,8 +118,8 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
    *
    * Secondary evidence, reported rather than acted on. True beside `stopped: true` is the split
    * IPv4/IPv6 stack of llp/0005 §Stopping the app, or simply a second project's
-   * dev server that was there all along: the process this command signalled is gone, and the port
-   * number it was using is in use by something else. A caller that cares which reads it here
+   * dev server that was there all along. The port can stay occupied after the selected run's
+   * Metro or wrapper ends. A caller that cares which reads it here
    * instead of inferring it from an exit code that has nothing to say about it.
    */
   portStillAnswering: boolean | null;
