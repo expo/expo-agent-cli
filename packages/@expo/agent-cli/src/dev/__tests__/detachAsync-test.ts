@@ -683,11 +683,14 @@ describe('the EAS session under --wait-ready', () => {
     await vi.runAllTimersAsync();
     const error = await result;
 
-    expect(error).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING', exitCode: 22 });
+    expect(error).toMatchObject({
+      code: 'DEV_DETACH_SESSION_PENDING',
+      exitCode: 22,
+      data: { recovery: { kind: 'stop-and-start' } },
+      suggestedCommand:
+        'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --eas --port 8082 --detach --wait-ready',
+    });
     expect(Date.now()).toBeLessThan(10_000);
-    expect(error.message).toContain('already returned without a session binding');
-    expect(error.message).toContain('dev:stop');
-    expect(error.message).not.toContain('keeps going');
   });
 
   it('exits 22 with DEV_DETACH_SESSION_PENDING, the pid and the tunnel when the wait runs out', async () => {
@@ -698,10 +701,15 @@ describe('the EAS session under --wait-ready', () => {
     expect(error).toMatchObject({
       code: 'DEV_DETACH_SESSION_PENDING',
       exitCode: 22,
-      data: { pid: 4242, url: lock.url, tunnelUrl: tunnel.url, platform: 'ios' },
+      data: {
+        pid: 4242,
+        url: lock.url,
+        tunnelUrl: tunnel.url,
+        platform: 'ios',
+        recovery: { kind: 'observe' },
+      },
+      suggestedCommand: 'npx @expo/agent-cli status',
     });
-    expect(error.suggestedCommand).toContain('dev:logs');
-    expect(error.message).toContain('dev:stop --eas');
     expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
     expect(Date.now()).toBeGreaterThanOrEqual(180_000);
     expect(Date.now()).toBeLessThan(210_000);
