@@ -1,51 +1,19 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
-// Stop this project's dev server.
-//
-// The friction this replaces is a shell incantation an agent has to compose and get right:
-// `lsof -ti tcp:8081 | xargs kill`. Every part of it is a guess — which port, whether the pid on
-// it is this project's dev server, whether SIGTERM was enough — and a wrong guess kills something
-// the caller did not mean to.
-//
-// The lock already answers all of it. `src/devLock/` holds a socket for as long as an
-// `@expo/agent-cli`-started dev server runs, and the line it answers with carries the wrapper's `pid`
-// alongside the URL and port. Signalling that pid is enough for the whole tree: both spawn paths
-// install forwarders for `SIGINT`/`SIGTERM` and pass them to the `expo start` child
-// [observed — `src/utils/subprocess.ts`, `src/utils/expoCli.ts` `runExpoAsync`], so the wrapper
-// takes Metro with it and releases the lock on the way out.
-//
-// A port with no lock has no ownership proof. The lock may have been lost, so report the
-// listener and leave it running rather than claiming this CLI never started it.
-//
-// **The pid is the primary evidence that the stop worked; the port is secondary.** These answer two
-// different questions — "is the process I signalled alive?" and "does something answer 8081?" — and
-// this command used to require both before it would say the dev server had stopped. That is wrong
-// whenever anything else is on the port, and the case that forces it is a split IPv4/IPv6 stack
-// (llp/0005 §Stopping the app): the lock publishes `http://127.0.0.1:<port>`, so
-// every check here is over IPv4, while a dev server that bound `::1` is a different listener on the
-// same port number. A stranger on `127.0.0.1:8081` therefore kept `dev:stop` reporting
-// `still-running` — exit 20 — about a process that was already gone, with a `How:` line offering
-// `--signal SIGKILL` for a pid nothing could signal.
-
 import { stopCloudSessionsAsync } from './stopCloudSessions';
 import { stopLockedDevServerAsync } from './stopLocked';
+import { resolveStopTargetAsync } from './stopTarget';
+import { stopOwnerAsync, type OwnerStop } from './stopOwner';
 import { emptyStopReport } from './stopReport';
 
-import {
-  lockAddressFor,
-  probeDevServerLockAsync,
-  readDevServerLockAsync,
-  type DevServerLockInfo,
-} from '../devLock';
+import { lockAddressFor, probeDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { event as cliEvent } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
 import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
-import { env } from '../utils/env';
-import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
-import { debugEvent, event } from './events';
-import { discardDetachedRunAsync, readDetachedRunWarning } from './detachedOwnership';
+import { event } from './events';
+import { discardDetachedRunAsync } from './detachedOwnership';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
 import { stopDevicesAsync } from './stopDevices';
@@ -81,55 +49,47 @@ export async function devStopAsync(
   { print = true, onReport, ownedChild }: DevStopReportOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
-  if (options.discardRun != null) {
-    return discardRunAsync(projectRoot, options.discardRun, startedAt, options, {
+  const target = await resolveStopTargetAsync(
+    projectRoot,
+    options,
+    ownedChild === undefined ? { kind: 'project' } : { kind: 'owned-child', child: ownedChild },
+    startedAt + options.timeoutMs
+  );
+  if (target.kind === 'skip') return EXIT_OK;
+  if (target.kind === 'discard')
+    return discardRunAsync(projectRoot, target.id, startedAt, options, { print, onReport });
+  if (target.kind === 'owner') {
+    const { report, status } = await stopOwnerAsync(target, options, startedAt);
+    return finishStopReport(report, options, {
+      finishing: false,
+      sessionPending: false,
       print,
       onReport,
+      status,
     });
   }
-  const lock = await readDevServerLockAsync(projectRoot);
-  if (
-    ownedChild !== undefined &&
-    (!lock ||
-      !ownedChild ||
-      lock.pid !== ownedChild.pid ||
-      ownedChild.exitCode !== null ||
-      ownedChild.signalCode !== null)
-  ) {
-    return EXIT_OK;
-  }
-
-  // `--port` names the target, and a lock is only evidence about the port it holds.
-  //
-  // This used to be `lock ? locked : unlocked`, which meant `--port 8195` signalled the pid of the
-  // dev server on 8190 and reported `Stopped yes` naming a port the caller never asked about
-  // [observed — friction run 7, F60]. It is the one destructive verb in this surface, so a target
-  // it was not given is the one thing it must never act on: when `--port` disagrees with the lock,
-  // the lock is set aside and the port is answered for on its own evidence.
-  // @ref llp/0021-honest-reports.rfc.md §How they show up
-  const lockOwnsTarget = lock != null && (options.port == null || lock.port === options.port);
-  debugEvent('stop_lock_read', {
-    held: lock != null,
-    pid: lock?.pid ?? null,
-    ownsTarget: lockOwnsTarget,
-  });
-
-  const { report, finishing } =
-    lock != null && lockOwnsTarget
-      ? await stopLockedDevServerAsync(lock, options, startedAt)
-      : {
-          report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
-          finishing: false,
-        };
-
-  if ((report.stopped && !report.recoveryCommand) || (!lock && report.reason === 'not-running')) {
-    const warning = await readDetachedRunWarning(projectRoot);
-    if (warning) {
-      report.admission = 'retained';
-      if (!report.stopped) report.reason = 'ownership-retained';
-      report.detail = warning.message;
-      report.recoveryCommand = warning.suggestedCommand ?? null;
-    }
+  const lock = target.kind === 'locked' ? target.lock : null;
+  const { report, finishing } = lock
+    ? await stopLockedDevServerAsync(lock, options, startedAt)
+    : {
+        report: await stopUnlockedDevServerAsync(
+          projectRoot,
+          options,
+          startedAt,
+          target.kind === 'unlocked' ? target.elsewhereLock : null
+        ),
+        finishing: false,
+      };
+  if (target.kind === 'unlocked' && !target.cleanResources) {
+    Object.assign(report, {
+      devices: [],
+      reaped: [],
+      deviceError:
+        options.eas || options.release
+          ? 'Resources were kept because the requested port does not identify the detached owner.'
+          : null,
+    });
+    return finishStopReport(report, options, { finishing, sessionPending: false, print, onReport });
   }
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
@@ -137,10 +97,8 @@ export async function devStopAsync(
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing run binds the
   // session its start returns, so `--eas` waits for that start before it looks for sessions.
   let sessionPending = false;
-  let runFinishing = finishing;
   if (options.eas && finishing && lock != null) {
-    sessionPending = !(await waitForEasOpenAsync(lock));
-    runFinishing = sessionPending;
+    sessionPending = !(await waitForEasOpenAsync(lock, startedAt + options.timeoutMs));
     if (sessionPending) {
       report.session = {
         id: null,
@@ -153,9 +111,6 @@ export async function devStopAsync(
   const cloud = options.eas && !sessionPending ? await stopCloudSessionsAsync(projectRoot) : null;
   if (cloud) report.session = cloud.session;
   Object.assign(report, await stopDevicesAsync(projectRoot, options, report, cloud));
-  report.followups = followUpsEnabled(options.followups)
-    ? buildFollowUps(report, runFinishing)
-    : [];
 
   return finishStopReport(report, options, { finishing, sessionPending, print, onReport });
 }
@@ -168,13 +123,16 @@ function finishStopReport(
     sessionPending,
     print,
     onReport,
+    status = 'complete',
   }: {
     finishing: boolean;
     sessionPending: boolean;
     print: boolean;
     onReport: DevStopReportOptions['onReport'];
+    status?: OwnerStop['status'];
   }
 ): number {
+  report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report, finishing) : [];
   const devServerOk = report.stopped || report.reason === 'not-running';
   event('stop_done', {
     stopped: report.stopped,
@@ -191,11 +149,14 @@ function finishStopReport(
 
   // A session that was asked to stop and did not is a thing still running — and billing.
   const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
-  const exitCode = sessionPending
-    ? EXIT_OUTCOME_TIMEOUT
-    : devServerOk && sessionOk && !report.deviceError
-      ? EXIT_OK
-      : EXIT_OUTCOME_FAILED;
+  const exitCode =
+    sessionPending || status === 'pending'
+      ? EXIT_OUTCOME_TIMEOUT
+      : status === 'uncertain'
+        ? EXIT_OUTCOME_FAILED
+        : devServerOk && sessionOk && !report.deviceError
+          ? EXIT_OK
+          : EXIT_OUTCOME_FAILED;
   onReport?.(report);
 
   // The event above is emitted whatever happens: a caller that suppresses the report is still
@@ -235,7 +196,7 @@ async function discardRunAsync(
   const report = emptyStopReport(null, startedAt);
   report.admission = removed ? 'discarded' : null;
   report.discardedRun = removed ? id : null;
-  report.reason = removed ? 'record-discarded' : 'not-running';
+  report.reason = 'not-running';
   report.detail = `${removed ? 'Discarded' : 'No record remains for'} attempt ${id}. No processes were stopped and no EAS sessions or devices were released.`;
   Object.assign(report, { devices: [], reaped: [], deviceError: null });
   onReport?.(report);
@@ -364,11 +325,7 @@ function lockElsewhereClause(lock: DevServerLockInfo | null): string {
  *
  * @returns false when the start still runs at the deadline.
  */
-async function waitForEasOpenAsync(lock: DevServerLockInfo): Promise<boolean> {
-  const deadline = Math.min(
-    Date.parse(lock.startedAt) + EAS_TUNNEL_WAIT_MS + EAS_SESSION_START_TIMEOUT_MS,
-    Date.now() + env.AGENT_CLI_EAS_SESSION_WAIT_MS
-  );
+async function waitForEasOpenAsync(lock: DevServerLockInfo, deadline: number): Promise<boolean> {
   const { address } = lockAddressFor(lock.projectRoot);
   let announced = false;
   for (;;) {

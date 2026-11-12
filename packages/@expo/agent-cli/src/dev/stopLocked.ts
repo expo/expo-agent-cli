@@ -11,7 +11,8 @@ import type { DevStopResultJson } from './stopTypes';
 export async function stopLockedDevServerAsync(
   lock: DevServerLockInfo,
   options: DevStopOptions,
-  startedAt: number
+  startedAt: number,
+  capturedRun: ReturnType<typeof captureDetachedRun> = null
 ): Promise<{ report: DevStopResultJson; finishing: boolean }> {
   const base: DevStopResultJson = {
     admission: null,
@@ -49,7 +50,6 @@ export async function stopLockedDevServerAsync(
   // A signal that cannot be delivered is not a failure to stop: a lock answering for a pid that
   // is gone is the one case the socket cannot produce on its own, but a lock held by a *different*
   // user's process can, and `ESRCH` there means the thing is already not running.
-  const capturedRun = captureDetachedRun(lock.projectRoot, lock.pid);
   const sent = await signalProcessAsync(lock.pid, options.signal);
   base.signal = sent.delivered ? options.signal : null;
   debugEvent('stop_signalled', { pid: lock.pid, signal: options.signal, ok: sent.delivered });

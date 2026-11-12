@@ -13,8 +13,6 @@ import type { StoppedDevices } from './stopDevices';
 export type DevStopSkipReason =
   /** Nothing was running: no lock answered and nothing listens on the port. */
   | 'not-running'
-  | 'ownership-retained'
-  | 'record-discarded'
   /** Something listens, but no lock proves this project's ownership of it. */
   | 'foreign-dev-server'
   /** The signal was sent and the dev server was still there when the wait ran out. */

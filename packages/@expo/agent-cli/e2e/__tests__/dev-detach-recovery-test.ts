@@ -50,7 +50,7 @@ it.skipIf(process.platform !== 'win32')(
       const owner = JSON.parse(started.stdout);
       const failed = await executeAgentCliAsync(
         f.root,
-        ['dev:stop', '--timeout', '200ms', '--json'],
+        ['dev:stop', '--signal', 'SIGKILL', '--timeout', '200ms', '--json'],
         {
           reject: false,
           env: {
@@ -95,6 +95,7 @@ it.skipIf(process.platform === 'win32')(
       expect(discarded.exitCode, discarded.all).toBe(0);
       expect(JSON.parse(discarded.stdout)).toMatchObject({
         discardedRun: id,
+        admission: 'discarded',
         stopped: false,
         devices: [],
         reaped: [],
@@ -149,6 +150,8 @@ it.skipIf(process.platform === 'win32').each([true, false])(
       const discarded = await f.run(['dev:stop', '--discard-run', id, '--json']);
       expect(discarded.exitCode, discarded.all).toBe(0);
       if (survives) {
+        expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
+        expect(() => process.kill(f.serverPid(), 0)).not.toThrow();
         const foreign = await f.start();
         expect(foreign.exitCode, foreign.all).toBe(20);
         expect(JSON.parse(foreign.stdout).error.code).toBe('PORT_IN_USE');
@@ -217,7 +220,11 @@ it.for(['discard', 'Windows stop'])(
       }
       delayed = executeAgentCliAsync(
         f.root,
-        ['dev:stop', ...(operation === 'discard' ? ['--discard-run', id] : []), '--json'],
+        [
+          'dev:stop',
+          ...(operation === 'discard' ? ['--discard-run', id] : ['--signal', 'SIGKILL']),
+          '--json',
+        ],
         {
           reject: false,
           env: {

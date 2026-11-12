@@ -114,10 +114,10 @@ async function waitForProcessGoneAsync(
 }
 
 /** Whether nothing listens on the port: a refused connection, not a slow answer. */
-export async function isPortFreeAsync(port: number): Promise<boolean> {
+export async function isPortFreeAsync(port: number, timeoutMs = 400): Promise<boolean> {
   try {
     await fetch(`http://127.0.0.1:${port}/status`, {
-      signal: AbortSignal.timeout(400),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return false;
   } catch (error: unknown) {

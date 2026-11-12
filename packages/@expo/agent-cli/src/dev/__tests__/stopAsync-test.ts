@@ -638,7 +638,7 @@ describe('dev:stop --eas', () => {
           : { connected: true, info: { ...finishingLock, easOpenFinished: true } }
       );
 
-      const code = devStopAsync(projectRoot, options({ eas: true }));
+      const code = devStopAsync(projectRoot, options({ eas: true, timeoutMs: 32_000 }));
       await vi.advanceTimersByTimeAsync(31_000);
 
       await expect(code).resolves.toBe(EXIT_OK);
@@ -652,7 +652,7 @@ describe('dev:stop --eas', () => {
       });
 
       const code = devStopAsync(projectRoot, options({ eas: true, followups: true }));
-      await vi.advanceTimersByTimeAsync(200_000);
+      await vi.advanceTimersByTimeAsync(500);
 
       await expect(code).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
       const report = JSON.parse(printed());
