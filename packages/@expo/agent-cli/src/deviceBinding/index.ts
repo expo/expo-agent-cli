@@ -68,9 +68,16 @@ export interface AcquireDeviceOptions {
   reuseOnly?: boolean;
   tools?: DeviceTools;
   explicit?: ExplicitRequest;
+  signal?: AbortSignal;
+  onBound?: (binding: Binding) => void;
 }
 
-type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: ExplicitRequest };
+type SectionOptions = {
+  reuseOnly: boolean;
+  tools: DeviceTools;
+  explicit?: ExplicitRequest;
+  signal?: AbortSignal;
+};
 
 /**
  * Bind this worktree's device and boot it.
@@ -84,15 +91,25 @@ type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: Expli
 export async function acquireDeviceAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  { reuseOnly = false, tools = defaultTools(), explicit }: AcquireDeviceOptions = {}
+  {
+    reuseOnly = false,
+    tools = defaultTools(),
+    explicit,
+    signal,
+    onBound,
+  }: AcquireDeviceOptions = {}
 ): Promise<AcquireResult> {
+  signal?.throwIfAborted();
   const section =
     platform === 'ios'
-      ? await acquireIosAsync(projectRoot, { reuseOnly, tools, explicit })
-      : await acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit });
+      ? await acquireIosAsync(projectRoot, { reuseOnly, tools, explicit, signal })
+      : await acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit, signal });
   clearInspectCache();
   const { binding, action, boot } = section;
+  onBound?.(binding);
+  signal?.throwIfAborted();
   const result = await boot();
+  signal?.throwIfAborted();
   if (!result.ok) {
     await releaseWorktreeDevicesAsync(projectRoot, { platform, tools, expected: binding });
     throw deviceUnavailableError('boot-failed', { platform, detail: result.reason ?? undefined });
@@ -109,12 +126,13 @@ interface Acquired {
 
 async function acquireIosAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: SectionOptions
+  { reuseOnly, tools, explicit, signal }: SectionOptions
 ): Promise<Acquired> {
   const { binding, wasBooted, action } = await bindIosAsync(projectRoot, {
     reuseOnly,
     tools,
     explicit,
+    signal,
   });
   const udid = deviceIdOf(binding.device);
   return {
@@ -127,7 +145,7 @@ async function acquireIosAsync(
 
 async function acquireAndroidAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: SectionOptions,
+  { reuseOnly, tools, explicit, signal }: SectionOptions,
   forceAvds = false
 ): Promise<Acquired> {
   const { inventory, isCurrent } = await readAndroidBindingInventoryAsync(
@@ -136,34 +154,41 @@ async function acquireAndroidAsync(
     explicit !== undefined,
     forceAvds
   );
-  const section = await acquireSectionAsync(projectRoot, tools, async (actions) => {
-    if (explicit === undefined) {
-      if (!isCurrent()) return null;
-      return bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools });
-    }
-    const candidates = inventory.runningSerials.map((serial) => ({
-      backend: 'local-android' as const,
-      platform: 'android' as const,
-      serial,
-      origin: { kind: 'explicit' as const },
-    }));
-    return {
-      ...bindExplicitSection(
-        projectRoot,
-        'android',
-        candidates,
-        explicit,
-        reuseOnly,
-        tools,
-        actions,
-        inventory.unready
-      ),
-      handle: null,
-    };
-  });
+  const section = await acquireSectionAsync(
+    projectRoot,
+    tools,
+    async (actions) => {
+      signal?.throwIfAborted();
+      if (explicit === undefined) {
+        if (!isCurrent()) return null;
+        return bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+      }
+      const candidates = inventory.runningSerials.map((serial) => ({
+        backend: 'local-android' as const,
+        platform: 'android' as const,
+        serial,
+        origin: { kind: 'explicit' as const },
+      }));
+      return {
+        ...bindExplicitSection(
+          projectRoot,
+          'android',
+          candidates,
+          explicit,
+          reuseOnly,
+          tools,
+          actions,
+          inventory.unready
+        ),
+        handle: null,
+      };
+    },
+    undefined,
+    signal
+  );
   // Refresh the full inventory outside the lock, at most once.
   if (section === null)
-    return acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit }, true);
+    return acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit, signal }, true);
   const { binding, action, handle } = section;
   const serial = deviceIdOf(binding.device);
   return {
@@ -199,7 +224,10 @@ function instanceWatcher(
 }
 
 /** Each inventory belongs to the binding identity observed before the device list was read. */
-async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }: SectionOptions) {
+async function bindIosAsync(
+  projectRoot: string,
+  { reuseOnly, tools, explicit, signal }: SectionOptions
+) {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = readBindingFile(file);
@@ -240,7 +268,8 @@ async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }:
           ),
         };
       },
-      inventory
+      inventory,
+      signal
     );
     if (bound != null) return bound;
   }

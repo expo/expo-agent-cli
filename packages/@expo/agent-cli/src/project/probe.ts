@@ -47,7 +47,10 @@ export async function probeProjectStateAsync(
     isInstalledDependencyAsync(projectRoot, dependencyNames, 'expo-dev-client'),
     isInstalledDependencyAsync(projectRoot, dependencyNames, 'react-native-web'),
     checkExpoGoCompatibilityAsync(projectRoot),
-    generateFingerprintAsync(projectRoot, { cache: options.fingerprintCache }),
+    generateFingerprintAsync(projectRoot, {
+      cache: options.fingerprintCache,
+      signal: options.signal,
+    }),
   ]);
 
   options.signal?.throwIfAborted();

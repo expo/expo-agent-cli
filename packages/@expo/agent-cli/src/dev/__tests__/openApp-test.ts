@@ -135,7 +135,12 @@ describe(openAppOnDeviceAsync, () => {
       device: BOUND,
     });
 
-    expect(installExpoGoAsync).toHaveBeenCalledWith('UDID-1', 'ios', '54.0.0');
+    expect(installExpoGoAsync).toHaveBeenCalledWith(
+      'UDID-1',
+      'ios',
+      '54.0.0',
+      expect.objectContaining({ stillWanted: expect.any(Function) })
+    );
     expect(report).toMatchObject({ opened: true, installedExpoGo: true });
   });
 

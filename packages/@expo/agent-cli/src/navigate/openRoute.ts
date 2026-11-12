@@ -50,6 +50,7 @@ import {
 } from './routeResolution';
 
 export interface OpenRouteOptions extends RouteUrlOptions {
+  beforeOpen?: () => void;
   /**
    * How long to wait for an app on this platform to register a debugger target, in milliseconds.
    *
@@ -242,6 +243,7 @@ export async function openRouteAsync(
   // The **dev server's** URL when a launcher open is about to happen: what has to be reachable then
   // is the origin the launcher will fetch the bundle from. The launcher URL carries it in a query
   // parameter, so reading the URL's own host would forward nothing (F123).
+  options.beforeOpen?.();
   const reverse =
     device.platform === 'android' && device.adb != null
       ? await reverseLoopbackPortAsync({
@@ -267,10 +269,12 @@ export async function openRouteAsync(
     budgetMs,
   });
 
+  options.beforeOpen?.();
   const result = await openUrlOnBackendAsync(device, {
     projectRoot,
     url: resolved.url,
     appId,
+    beforeOpen: options.beforeOpen,
   });
 
   const attach = await confirmAttachAsync({
@@ -343,13 +347,21 @@ async function openUrlOnBackendAsync(
     url,
     appId,
     launchActivity,
-  }: { projectRoot: string; url: string; appId?: string; launchActivity?: string }
+    beforeOpen,
+  }: {
+    projectRoot: string;
+    url: string;
+    appId?: string;
+    launchActivity?: string;
+    beforeOpen?: () => void;
+  }
 ): Promise<{ command: string; stdout: string; stderr: string; exitCode: number | null }> {
   if (device.backend !== 'cloud') {
     return await openUrlOnDeviceAsync({
       platform: device.platform,
       deviceId: device.deviceId,
       url,
+      beforeOpen,
       appId,
       // @ref src/device/approveScheme §appIdForScheme. Passed on the **local** branch too, which
       // it was not: this parameter existed for the cloud path, which needs it to find the session,
@@ -364,6 +376,7 @@ async function openUrlOnBackendAsync(
     });
   }
 
+  beforeOpen?.();
   const result = await openUrlOnCloudSimulatorAsync({
     projectRoot,
     sessionId: device.deviceId,

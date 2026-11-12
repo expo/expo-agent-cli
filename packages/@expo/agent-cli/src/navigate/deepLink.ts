@@ -447,7 +447,7 @@ export interface OpenUrlResult {
  * is not installed is a `CommandError`, because there is nothing the output can say about it.
  */
 export async function openUrlOnDeviceAsync(
-  params: BuildOpenUrlCommandParams
+  params: BuildOpenUrlCommandParams & { beforeOpen?: () => void }
 ): Promise<OpenUrlResult> {
   const { bin, args, display } = buildOpenUrlCommand(params);
 
@@ -490,13 +490,17 @@ export async function openUrlOnDeviceAsync(
     // default: there is one spawn seam per call path, so a caller that has stubbed the tool for
     // this file has stubbed it for the write too.
     await approveSchemeForUrlAsync(params.deviceId, params.url, params.appId, {
-      spawn: spawnCaptureAsync,
+      spawn: params.beforeOpen
+        ? (command, args, options) =>
+            spawnCaptureAsync(command, args, { ...options, beforeSpawn: params.beforeOpen })
+        : spawnCaptureAsync,
       // The project, because `--app-id` is almost never passed and the app config is what actually
       // names the bundle identifier (@ref src/device/approveScheme §appIdForScheme).
       projectRoot: params.projectRoot ?? undefined,
     });
   }
 
+  params.beforeOpen?.();
   const { stdout, stderr, exitCode, spawnError } = await spawnCaptureAsync(bin, args);
 
   if (spawnError) {

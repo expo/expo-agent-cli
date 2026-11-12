@@ -125,7 +125,8 @@ export class DevServerStepRunner {
                 openPlatform,
                 metro.url,
                 stillWanted,
-                acquired
+                acquired,
+                steps.run.signal
               );
               return { kind: 'settled' };
             },
@@ -279,7 +280,8 @@ async function openAppForRunAsync(
   platform: NativePlatform,
   devServerUrl: string,
   stillWanted: () => boolean,
-  acquired: AcquireResult | null
+  acquired: AcquireResult | null,
+  signal: AbortSignal
 ): Promise<void> {
   const { openAppOnDeviceAsync, openAppFailureLine } =
     require('./openApp') as typeof import('./openApp');
@@ -289,6 +291,7 @@ async function openAppForRunAsync(
       expoGo: plan.target === 'expo-go',
       devServerUrl,
       stillWanted,
+      signal,
       interactive: isInteractive(),
       device: acquired?.device ?? null,
       justBooted: acquired?.justBooted ?? false,

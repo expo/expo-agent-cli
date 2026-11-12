@@ -38,6 +38,7 @@ export interface SpawnCaptureOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   drainOnAbort?: boolean;
+  beforeSpawn?: () => void;
 }
 
 /**
@@ -112,6 +113,7 @@ function spawnCaptureNowAsync(
 ): Promise<SpawnCaptureBufferResult> {
   if (options.signal?.aborted) return Promise.reject(options.signal.reason);
   return new Promise<SpawnCaptureBufferResult>((resolve, reject) => {
+    options.beforeSpawn?.();
     // A `fingerprint` resolved inside a project is a batch shim on Windows, which needs `cmd.exe`.
     const target = resolveSpawnTarget(command, args, process.env);
     assertSubprocessDeadline();

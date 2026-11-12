@@ -42,6 +42,7 @@ export interface OpenAppOptions {
    * but no further stage begins for a server that is gone.
    */
   stillWanted?: () => boolean;
+  signal?: AbortSignal;
   /** Whether a person is watching, which is when the Simulator window is worth surfacing. */
   interactive?: boolean;
   /**
@@ -100,7 +101,7 @@ export async function openAppOnDeviceAsync(
   // The window, for a person: `open -a Simulator` is LaunchServices and needs no Automation
   // grant, unlike the osascript check the Expo CLI runs. Fire and forget — a headless simulator
   // answers `simctl openurl` all the same, so nothing below depends on it.
-  if (platform === 'ios' && options.interactive) {
+  if (platform === 'ios' && options.interactive && stillWanted()) {
     surfaceSimulatorWindow();
   }
 
@@ -117,14 +118,17 @@ export async function openAppOnDeviceAsync(
         : await androidHasAppAsync(deviceId, appId);
     const version =
       has === true ? await checkExpoGoVersionAsync(deviceId, platform, sdkVersion) : null;
-    if (has !== true || version?.verdict === 'mismatch') {
+    if (stillWanted() && (has !== true || version?.verdict === 'mismatch')) {
       Log.progress(
         has === true
           ? `Replacing Expo Go with the release SDK ${sdkVersion ?? '(unknown)'} ships. A download of a few hundred megabytes — nothing is stuck.`
           : `Installing Expo Go for SDK ${sdkVersion ?? '(unknown)'}. A download of a few hundred megabytes — nothing is stuck.`
       );
       event('open_app_install_expo_go', { platform, replaced: has === true });
-      const installed = await installExpoGoAsync(deviceId, platform, sdkVersion);
+      const installed = await installExpoGoAsync(deviceId, platform, sdkVersion, {
+        stillWanted,
+        signal: options.signal,
+      });
       if (!installed.ok) {
         return stopped(installed.reason ?? 'Expo Go could not be installed', {
           deviceId,
@@ -153,6 +157,9 @@ export async function openAppOnDeviceAsync(
       devServerUrlSource: 'discovered',
       routeCheck: false,
       command: 'navigate',
+      beforeOpen: () => {
+        if (!stillWanted()) throw new Error('The dev server stopped before the app was opened.');
+      },
       device: bound ? navigateDeviceOf(bound) : undefined,
     });
     if (result.exitCode !== 0) {

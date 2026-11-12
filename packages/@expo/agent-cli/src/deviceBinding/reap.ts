@@ -164,16 +164,18 @@ export async function acquireSectionAsync<T>(
   projectRoot: string,
   tools: DeviceTools,
   work: (actions: Cleanup[]) => Promise<T>,
-  inventory?: IosInventory
+  inventory?: IosInventory,
+  signal?: AbortSignal
 ): Promise<T> {
   const actions: Cleanup[] = [];
   try {
     return await withRegistryLockAsync(
       async () => {
+        signal?.throwIfAborted();
         try {
           return await work(actions);
         } finally {
-          reapSection(projectRoot, tools, inventory, actions);
+          if (!signal?.aborted) reapSection(projectRoot, tools, inventory, actions);
         }
       },
       { tools, waitMs: WRITE_LOCK_WAIT_MS }

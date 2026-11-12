@@ -353,8 +353,9 @@ function deviceCallbackFor(
     run?.signal.throwIfAborted();
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
       explicit: explicitRequestOf(options.device, options.callerArgv),
+      signal: run?.signal,
+      onBound: (binding) => run?.captureBinding(binding),
     });
-    if (acquired.binding) run?.captureBinding(acquired.binding);
     run?.signal.throwIfAborted();
     Log.progress(acquireLine(acquired));
     return acquired;

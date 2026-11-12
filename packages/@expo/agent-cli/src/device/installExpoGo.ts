@@ -63,6 +63,8 @@ export interface InstallExpoGoResult {
 
 export interface InstallExpoGoOptions {
   spawn?: typeof spawnCaptureAsync;
+  signal?: AbortSignal;
+  stillWanted?: () => boolean;
   /**
    * Which `adb` to install through, for an Android device.
    *
@@ -239,7 +241,9 @@ export async function installExpoGoAsync(
   platform: 'ios' | 'android',
   sdkVersion: string | null,
   {
-    spawn = spawnCaptureAsync,
+    spawn: invoke = spawnCaptureAsync,
+    signal,
+    stillWanted,
     tempDirAsync = makeTempDirAsync,
     cleanupAsync = removeDirAsync,
     // Resolved lazily rather than eagerly would be tidier, and is not worth it: this is a
@@ -247,12 +251,28 @@ export async function installExpoGoAsync(
     adb = resolveAdb(),
   }: InstallExpoGoOptions = {}
 ): Promise<InstallExpoGoResult> {
+  const checkpoint = () => {
+    signal?.throwIfAborted();
+    if (stillWanted?.() === false)
+      throw new Error('The dev server stopped before Expo Go was installed.');
+  };
+  const spawn: typeof spawnCaptureAsync =
+    signal || stillWanted
+      ? (command, args, options) =>
+          invoke(command, args, {
+            ...options,
+            ...(signal ? { signal } : {}),
+            beforeSpawn: checkpoint,
+          })
+      : invoke;
+  checkpoint();
   // Read before anything is downloaded, so the report can tell a replacement from an addition. A
   // failure to read is not a failure to install: it only means the report says less.
   const replaced = await readInstalledVersionAsync(deviceId, platform).catch(() => null);
 
   const dir = await tempDirAsync();
   try {
+    checkpoint();
     const downloaded = await spawn(
       'npx',
       ['--yes', 'expo-go', 'download', platform, sdkVersion ?? 'latest', '--json'],
@@ -291,12 +311,13 @@ export async function installExpoGoAsync(
       };
     }
 
+    checkpoint();
     const put = await putOnDeviceAsync(deviceId, platform, payload.path, { spawn, adb });
     if (!put.ok) {
       return { ok: false, version: null, replaced, reason: put.reason };
     }
 
-    if (platform === 'ios') {
+    if (platform === 'ios' && stillWanted?.() !== false && !signal?.aborted) {
       // An install is not finished until the link works, and on a freshly installed app on iOS it
       // does not: iOS asks first, and nobody answers (@ref ./installExpoGo §approveSchemesAsync).
       // Android needs none of it — Expo Go's `exp://` intent filter is in its manifest, so the
