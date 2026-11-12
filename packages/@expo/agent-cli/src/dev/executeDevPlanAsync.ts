@@ -35,6 +35,7 @@ import { isDevServerStep } from './forwardedArgs';
 import { type DevOptions } from './resolveOptions';
 import { DevServerStepRunner } from './runDevServerStep';
 import { withRunAsync, type RunSteps } from './runSteps';
+import type { DevRun } from './devRun';
 
 export interface ExecutedDevPlan {
   /** The final plan, including the serving step's actual arguments and port when known. */
@@ -83,12 +84,18 @@ export async function executeDevPlanAsync(
   plan: StartPlan,
   state: ProjectState,
   options: DevOptions,
-  acquired: AcquireResult | null
+  acquired: AcquireResult | null,
+  owned: DevRun
 ): Promise<ExecutedDevPlan> {
   const output = stepOutputFor(options);
   const server = new DevServerStepRunner(projectRoot, plan, options, acquired, output);
-  const outcome = await withRunAsync(projectRoot, plan, server.easPlatform, (lock, steps) =>
-    runPlanStepsAsync(projectRoot, plan, state, options, output, server, { lock, steps })
+  const outcome = await withRunAsync(
+    projectRoot,
+    plan,
+    server.easPlatform,
+    (lock, steps) =>
+      runPlanStepsAsync(projectRoot, plan, state, options, output, server, { lock, steps }),
+    owned
   );
   if (outcome.status === 'failed') {
     const { failure } = outcome;
@@ -113,6 +120,7 @@ async function runPlanStepsAsync(
   let easBuildId = plan.easBuild?.id ?? null;
   let serving: ServingStep | null = null;
   for (const [index, step] of plan.steps.entries()) {
+    scope.steps.assertNotInterrupted();
     assertRunnableStep(step);
     let args = step.argv.slice(1);
     planEvent('start_plan_step', {

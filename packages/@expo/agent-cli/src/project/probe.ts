@@ -23,6 +23,7 @@ export interface ProbeOptions {
    * @see llp/0023-fingerprint-caching.rfc.md
    */
   fingerprintCache?: boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -36,6 +37,7 @@ export async function probeProjectStateAsync(
   projectRoot: string,
   options: ProbeOptions = {}
 ): Promise<ProjectState> {
+  options.signal?.throwIfAborted();
   const packageJson = await readProjectPackageJsonAsync(projectRoot);
   const dependencyNames = listDependencyNames(packageJson);
 
@@ -48,6 +50,7 @@ export async function probeProjectStateAsync(
     generateFingerprintAsync(projectRoot, { cache: options.fingerprintCache }),
   ]);
 
+  options.signal?.throwIfAborted();
   return {
     projectRoot,
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — the same read as the

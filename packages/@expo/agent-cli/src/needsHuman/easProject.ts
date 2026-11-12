@@ -8,7 +8,11 @@ import { spawnSubprocessAsync } from '../utils/subprocess';
 import { needsHumanError } from './error';
 
 /** Check the evaluated config before starting Metro, building, or detaching a cloud run. */
-export async function assertEasProjectConfiguredAsync(projectRoot: string): Promise<void> {
+export async function assertEasProjectConfiguredAsync(
+  projectRoot: string,
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<void> {
+  signal?.throwIfAborted();
   // Use the project's CLI so dynamic configs and environment-dependent project IDs are respected.
   // `eas project:info` can link a project as part of resolving its context, so it is not this check.
   const cli = resolveExpoCli(projectRoot, ['config', '--json']);
@@ -17,7 +21,9 @@ export async function assertEasProjectConfiguredAsync(projectRoot: string): Prom
     output: 'capture',
     env: { CI: '1' },
     timeoutMs: 30_000,
+    signal,
   });
+  signal?.throwIfAborted();
   let config: { extra?: { eas?: { projectId?: unknown } } };
   try {
     if (result.exitCode !== 0 || result.spawnError || result.timedOut) {

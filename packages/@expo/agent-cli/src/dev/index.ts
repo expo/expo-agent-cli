@@ -114,7 +114,10 @@ export const agentCliDev: Command = async (argv) => {
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
     const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
-    const options = resolveDevOptions(argv ?? [], readAgentCliSettings(projectRoot).settings);
+    const { settings } = readAgentCliSettings(projectRoot);
+    const options = resolveDevOptions(argv ?? [], settings);
+    const { startupRequestFrom } = require('./startupRequest') as typeof import('./startupRequest');
+    const request = startupRequestFrom(options, settings);
     assertDependenciesInstalledSync(projectRoot);
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — Renamed: the
@@ -122,8 +125,16 @@ export const agentCliDev: Command = async (argv) => {
     const { devAsync } = require('./devAsync') as typeof import('./devAsync');
     if (options.detachedChild) {
       const { withDetachedRunAsync } = require('./detachedRun') as typeof import('./detachedRun');
-      process.exitCode = await withDetachedRunAsync(projectRoot, options, () =>
-        devAsync(projectRoot, options)
+      process.exitCode = await withDetachedRunAsync(
+        projectRoot,
+        options,
+        (run) => devAsync(projectRoot, options, run),
+        request
+      );
+    } else if (options.mode === 'run' && !options.detach) {
+      const { withDevRunAsync } = require('./devRun') as typeof import('./devRun');
+      process.exitCode = await withDevRunAsync(projectRoot, { request, detached: null }, (run) =>
+        devAsync(projectRoot, options, run)
       );
     } else {
       process.exitCode = await devAsync(projectRoot, options);

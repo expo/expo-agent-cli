@@ -35,6 +35,8 @@ import {
 } from '../toolchain/runsOn';
 import { CommandError } from '../utils/errors';
 import { detachedPidLine } from './childVerdict';
+import { withDevRunAsync, type DevRun } from './devRun';
+import { startupRequestFrom } from './startupRequest';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import {
   findUntrackedDevServerAsync,
@@ -56,7 +58,18 @@ import { devServerRunningStopAsync } from './runningDevServer';
  *
  * @returns 0 after a successful foreground run or plan, or the detached parent's result.
  */
-export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
+export async function devAsync(
+  projectRoot: string,
+  options: DevOptions,
+  owned?: DevRun
+): Promise<number> {
+  if (!owned && options.mode === 'run' && !options.detach)
+    return withDevRunAsync(
+      projectRoot,
+      { request: startupRequestFrom(options), detached: null },
+      (run) => devAsync(projectRoot, options, run)
+    );
+  owned?.signal.throwIfAborted();
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
   // log, so a parent can tell which run wrote it.
   if (options.detachedChild) {
@@ -66,7 +79,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     throw deviceNotBindableError(options);
   }
   if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
-    await assertEasProjectConfiguredAsync(projectRoot);
+    await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
+    owned?.signal.throwIfAborted();
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
@@ -88,17 +102,26 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
       eas: options.deviceBackend === 'eas',
     });
   }
+  owned?.signal.throwIfAborted();
   recordLastDevRequest(projectRoot, options);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.
   const orphan = await findUntrackedDevServerAsync(projectRoot, lock, options);
 
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
+    signal: owned?.signal,
   });
+  owned?.signal.throwIfAborted();
   // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — the resolver binds the device for a
   // draft that builds nothing, before its presence probe; a draft that builds is bound below, after
   // the refusals, so no simulator is created for a run that then refuses.
-  const acquireDevice = deviceCallbackFor(projectRoot, options, lock, orphan.claim.claimedPort);
+  const acquireDevice = deviceCallbackFor(
+    projectRoot,
+    options,
+    lock,
+    orphan.claim.claimedPort,
+    owned
+  );
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
@@ -110,6 +133,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     dropped,
   } = await resolveDevPlanAsync(projectRoot, state, options, acquireDevice);
 
+  owned?.signal.throwIfAborted();
   let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options, orphan.claim);
   warnDroppedExpoArgs(plan, dropped);
 
@@ -143,9 +167,11 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   }
 
   if (options.deviceBackend !== 'eas' && plan.buildLocation?.runsOn === 'eas') {
-    await assertEasProjectConfiguredAsync(projectRoot);
+    await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
+    owned?.signal.throwIfAborted();
   }
 
+  owned?.signal.throwIfAborted();
   plan = await replaceUntrackedDevServerAsync(projectRoot, plan, orphan, options);
   if (bindsHere) {
     acquired = await acquireDevice(plan);
@@ -191,7 +217,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // above, and then it runs. `dev` was asked to get this app onto a device, and a build is how that
   // is done; there is no second act of consent, in a terminal or out of one. `--plan` is the run
   // that stops.
-  const run = await executeDevPlanAsync(projectRoot, plan, state, options, acquired);
+  owned?.signal.throwIfAborted();
+  const run = await executeDevPlanAsync(projectRoot, plan, state, options, acquired, owned!);
 
   if (options.json) {
     await reportRunResultAsync(projectRoot, run, options);
@@ -301,7 +328,8 @@ function deviceCallbackFor(
   projectRoot: string,
   options: DevOptions,
   lock: DevServerLockInfo | null,
-  claimedPort: number | null // a killed run's dev server's port, busy until this run replaces it
+  claimedPort: number | null,
+  run?: DevRun
 ): (draft: StartPlan) => Promise<AcquireResult | null> {
   return async (draft) => {
     if (lock) {
@@ -322,9 +350,12 @@ function deviceCallbackFor(
         throw await portDemandedError(options.port, options.platform);
       }
     }
+    run?.signal.throwIfAborted();
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
       explicit: explicitRequestOf(options.device, options.callerArgv),
     });
+    if (acquired.binding) run?.captureBinding(acquired.binding);
+    run?.signal.throwIfAborted();
     Log.progress(acquireLine(acquired));
     return acquired;
   };
