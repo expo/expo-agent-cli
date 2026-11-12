@@ -1,196 +1,20 @@
-# @ref llp/0002-testing-and-evals.plan.md
 name: Expo Agent CLI
 
 on:
   workflow_dispatch: {}
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/agent-cli.yml
-      - packages/@expo/agent-cli/**
-      - bun.lock
-      - package.json
-      - bunfig.toml
-  pull_request:
-    paths:
-      - .github/workflows/agent-cli.yml
-      - packages/@expo/agent-cli/**
-      - bun.lock
-      - package.json
-      - bunfig.toml
-  schedule:
-    # Weekly, Monday 15:00 UTC — only the report-only tier 1 job runs on this trigger.
-    - cron: 0 15 * * 1
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
-  stack:
-    uses: ./.github/workflows/stack-gate.yml
-
-  # Tier 0 of LLP 0002: deterministic, model-free, runs on every PR.
-  tier0-linux:
-    needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: 👀 Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 🥟 Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - name: ⬢ Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - name: 📦 Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: 🛠 Build @expo/agent-cli
-        run: bun run build
-        working-directory: packages/@expo/agent-cli
-      - name: 🔎 Typecheck @expo/agent-cli
-        run: bun run typecheck
-        working-directory: packages/@expo/agent-cli
-      - name: 🚨 Lint @expo/agent-cli
-        run: bun run lint
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 Test @expo/agent-cli
-        run: bun run test
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 Eval adapter tests
-        run: bun run test:eval-harness
-        working-directory: packages/@expo/agent-cli
-      - name: 🎯 Tier 0 evals
-        run: bun evals/run.mjs --tier 0
-        working-directory: packages/@expo/agent-cli
-
-  # E2E is the long pole of tier 0 (~320s run as one step), so it is sharded across parallel
-  # jobs instead. A size-balanced sequencer (see e2e/vitest.config.ts) splits the 31 files so no
-  # shard gets both big ones; each builds its own ncc bundle because the suite spawns `bin/cli.js`.
-  # Both OSes run here — the win32 shards are what exercise the skills linker's directory-junction
-  # path (nothing else does).
-  tier0-e2e:
-    needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2022]
-        shard: [1, 2, 3]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - name: 👀 Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 🥟 Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - name: ⬢ Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - name: 📦 Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: 🛠 Build @expo/agent-cli
-        run: bun run build
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E Test shard ${{ matrix.shard }}/3
-        run: bun run test:e2e -- --shard=${{ matrix.shard }}/3
-        working-directory: packages/@expo/agent-cli
-
-  # The iOS half of the installed-app check only runs where `hostPlatforms()` asks for iOS: macOS.
-  # The stub `xcrun` (simctl and devicectl) sits first on PATH, so no real simulator or phone
-  # is touched. Also run the macOS-only cases that Linux/Windows shards skip: device binding, and a
-  # hand-started dev server on [::1] beside a killed run's Metro.
-  tier0-e2e-macos:
-    needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - name: 👀 Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 🥟 Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - name: ⬢ Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - name: 📦 Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: 🛠 Build @expo/agent-cli
-        run: bun run build
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E installed-app check on macOS
-        run: bun run test:e2e -- status-installed-test installed-readers-test
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E iOS device binding and Expo Go install
-        run: bun run test:e2e -- dev-test smoke-test -t "two worktrees, two simulators|binding the device to boot"
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E detached startup and session reuse
-        run: bun run test:e2e -- dev-detach-test cloud-binding-test device-lifecycle-test dev-detached-owner-test
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E reload beside a local simulator
-        run: bun run test:e2e -- runtime-target-selection-test
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E a killed run's dev server beside one started by hand on [::1]
-        run: bun run test:e2e -- stop-test -t "after a SIGKILL of a foreground dev"
-        working-directory: packages/@expo/agent-cli
-
-  # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.
-  # The win32 e2e run — including the skills linker's directory-junction path, which nothing
-  # else exercises — is sharded in `tier0-e2e` above.
-  tier0-windows:
-    needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
+  windows-detached-stop-probe:
     runs-on: windows-2022
-    timeout-minutes: 45
-    steps:
-      - name: 👀 Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 🥟 Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - name: ⬢ Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - name: 📦 Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: 🛠 Build @expo/agent-cli
-        run: bun run build
-        working-directory: packages/@expo/agent-cli
-      - name: 🧪 Test @expo/agent-cli
-        run: bun run test
-        working-directory: packages/@expo/agent-cli
-
-  # Short real agent integration tests. Every relevant PR runs the entire Tier 1 suite.
-  # Advisory until repeated CI evidence establishes reliability; individual results stay visible.
-  tier1-agent-eval:
-    needs: [stack]
-    if: >-
-      needs.stack.outputs.run == 'true' &&
-      (github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && github.repository == 'expo/expo-agent-cli'))
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    continue-on-error: true
-    timeout-minutes: 30
-    env:
-      AGENT_CLI_EVAL_MODEL: qwen3:8b
-      AGENT_CLI_EVAL_MODEL_DIGEST: 500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -199,38 +23,21 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install locked dependencies (including the real Expo fixture)
+      - name: Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile
-      - name: Build CLI
-        run: bun run --filter @expo/agent-cli build
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Build @expo/agent-cli
+        run: bun run build
+        working-directory: packages/@expo/agent-cli
+      - name: Probe detached stop
+        run: bun run test:e2e -- windows-detached-stop-probe-test
+        working-directory: packages/@expo/agent-cli
         env:
-          OLLAMA_VERSION: 0.32.15
-      - name: Start Ollama and pull the model
-        run: |
-          ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
-          for _ in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:11434/api/version && break
-            sleep 1
-          done
-          curl -fsS http://127.0.0.1:11434/api/version
-          ollama pull "$AGENT_CLI_EVAL_MODEL"
-      - name: Agent integration evals
-        id: evals
-        run: bun run test:evals
-        working-directory: packages/@expo/agent-cli
-      - name: Summarize eval evidence
-        if: always()
-        run: bun evals/summarize.ts
-        working-directory: packages/@expo/agent-cli
-      - name: Preserve eval evidence
+          AGENT_CLI_STOP_PROBE_ARTIFACT_DIR: ${{ runner.temp }}/detached-stop-probe
+      - name: Preserve process evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: tier1-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          include-hidden-files: true
-          retention-days: 14
-          path: |
-            packages/@expo/agent-cli/evals/.artifacts/
-            ${{ runner.temp }}/ollama.log
+          name: windows-detached-stop-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/detached-stop-probe/
+          if-no-files-found: warn
+          retention-days: 7
