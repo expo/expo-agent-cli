@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        os: [windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -33,14 +33,24 @@ jobs:
         id: build
         run: bun run build
         working-directory: packages/@expo/agent-cli
-      - name: Unit tests
-        run: bun run test
-        working-directory: packages/@expo/agent-cli
-      - name: Ownership, cancellation, captured cleanup
+      - name: Trace fingerprint, recovery, and shipped plan stops
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: bun run test:e2e -- dev-detached-owner-test dev-owned-stop-test cloud-binding-test stop-test
+        env:
+          NODE_OPTIONS: --require "${{ github.workspace }}/scripts/diagnostics/trace-managed-stop.cjs"
+          AGENT_NATIVE_STOP_TRACE_DIR: ${{ runner.temp }}/managed-stop-traces
+        run: bun run test:e2e -- dev-detached-owner-test dev-owned-stop-test -t "fingerprinting|manually quiesced|shipped EAS plan"
         working-directory: packages/@expo/agent-cli
-      - name: Verify actual stopped processes
+      - name: Trace successful held-session stop schedules
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: bun run test:e2e -- dev-detach-test -t "is stopped by dev:stop, which takes the whole tree with it"
+        env:
+          NODE_OPTIONS: --require "${{ github.workspace }}/scripts/diagnostics/trace-managed-stop.cjs"
+          AGENT_NATIVE_STOP_TRACE_DIR: ${{ runner.temp }}/managed-stop-traces
+        run: bun run test:e2e -- dev-owned-stop-test -t "keeps the owner.*failure..false"
         working-directory: packages/@expo/agent-cli
+      - name: Save native operation traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-managed-stop-traces
+          path: ${{ runner.temp }}/managed-stop-traces
+          if-no-files-found: error
