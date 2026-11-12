@@ -8,6 +8,7 @@ import { publishPlannedPortAsync, withRunLockAsync, type RunLock } from '../devL
 import { isDevServerStep } from './forwardedArgs';
 import type { StartPlan } from '../project/types';
 import { CommandError } from '../utils/errors';
+import { assertStartupActive, canOpenStartup } from '../utils/startupTasks';
 
 /** How a run marks its steps, so a signal knows whether a step has to end first. */
 export interface RunSteps {
@@ -38,10 +39,13 @@ export async function withRunAsync<T>(
   easPlatform: 'ios' | 'android' | null,
   run: (lock: RunLock, steps: RunSteps) => Promise<T>
 ): Promise<T> {
+  assertStartupActive();
   return await withRunLockAsync(projectRoot, async (lock) => {
     const port = plan.devServerPort?.port;
     if (port != null && plan.steps.findIndex(isDevServerStep) > 0) {
       await publishPlannedPortAsync(lock, projectRoot, port, easPlatform);
+      canOpenStartup();
+      assertStartupActive();
     }
     return await withSignalsAsync((steps) => run(lock, steps));
   });
@@ -72,6 +76,7 @@ async function withSignalsAsync<T>(run: (steps: RunSteps) => Promise<T>): Promis
       return signal != null;
     },
     assertNotInterrupted() {
+      assertStartupActive();
       if (signal) throw interruptedError(signal);
     },
   };

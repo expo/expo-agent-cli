@@ -1,3 +1,4 @@
+import { spawn } from 'child_process';
 import { probeDevServerLockAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { findPortListenerAsync, findPortListenersAsync, isPortInUseAsync } from '../portListener';
@@ -137,9 +138,81 @@ afterEach(() => {
     globalThis.fetch = originalFetch;
   }
   killSpy.mockRestore();
+  vol.rmSync(`${projectRoot}/.expo/dev/detached-claim`, { recursive: true, force: true });
 });
 
 describe(devStopAsync, () => {
+  it.each(['new-lock', 'changed-id', 'changed-pid', 'changed-port', 'gone', 'scoped-eas'] as const)(
+    'keeps detached dispatch scoped across %s and releases only its plain grant',
+    async (race) => {
+      const id = '00000000-0000-4000-8000-000000000001';
+      const owned = lock({ detachedAttemptId: id });
+      if (race !== 'new-lock') {
+        const directory = `${projectRoot}/.expo/dev/detached-claim/${id}`;
+        vol.mkdirSync(directory, { recursive: true });
+        vol.writeFileSync(
+          `${directory}/owner.json`,
+          JSON.stringify({
+            id,
+            directory,
+            projectRoot,
+            request: '[]',
+            pid: owned.pid,
+            port: owned.port,
+            logFile: `${projectRoot}/.expo/dev/logs/dev-detached-${id}.log`,
+            control: { port: 12345, token: id },
+          })
+        );
+      }
+      const changed =
+        race === 'gone'
+          ? null
+          : {
+              ...owned,
+              ...(race === 'changed-id' ? { detachedAttemptId: 'another' } : {}),
+              ...(race === 'changed-pid' ? { pid: owned.pid + 1 } : {}),
+              ...(race === 'changed-port' ? { port: owned.port + 1 } : {}),
+            };
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(changed).mockResolvedValueOnce(owned);
+      const requests: string[] = [];
+      globalThis.fetch = (async (url, request) => {
+        const action = new URL(String(url)).pathname;
+        requests.push(`${request?.method} ${action}`);
+        return new Response(
+          action === '/cancel' ? JSON.stringify({ id, drained: true, sessions: [] }) : null,
+          {
+            status: action === '/release' ? 204 : 200,
+            headers: { 'x-detached-attempt': id, 'x-detached-grant': id },
+          }
+        );
+      }) as typeof fetch;
+      const stopped = devStopAsync(
+        projectRoot,
+        options({ port: owned.port, eas: race === 'scoped-eas' }),
+        {
+          print: false,
+          expectedAttempt:
+            race === 'scoped-eas'
+              ? JSON.parse(
+                  String(
+                    vol.readFileSync(`${projectRoot}/.expo/dev/detached-claim/${id}/owner.json`)
+                  )
+                )
+              : undefined,
+        }
+      );
+      if (race === 'scoped-eas') {
+        expect(await stopped).toBe(EXIT_OUTCOME_FAILED);
+        expect(spawn).not.toHaveBeenCalled();
+      } else if (race === 'gone') expect(await stopped).toBe(EXIT_OK);
+      else await expect(stopped).rejects.toMatchObject({ exitCode: 20 });
+      expect(killed).toEqual([]);
+      expect(requests.filter((request) => request === 'POST /release')).toHaveLength(
+        race === 'new-lock' || race === 'scoped-eas' ? 0 : 1
+      );
+    }
+  );
+
   describe('observations when no stop is authorized', () => {
     beforeEach(() => {
       vi.mocked(readDevServerLockAsync).mockResolvedValue(null);

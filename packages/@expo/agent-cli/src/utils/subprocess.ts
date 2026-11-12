@@ -9,6 +9,7 @@ import { env } from './env';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
+import { assertStartupActive, startupSignal, trackStartupChild } from './startupTasks';
 
 /** What happens to the output of the subprocess. */
 export type SubprocessOutput =
@@ -102,8 +103,8 @@ const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 /**
  * Run another CLI and wait for it to finish.
  *
- * Never rejects, except with the reason of an `options.signal` aborted before the spawn: a non-zero
- * exit code and a missing binary are both results the caller reports,
+ * Rejects when startup admission is closed or `options.signal` aborts before the spawn. A non-zero
+ * exit code and a missing binary are results the caller reports,
  * so the message can name the tool instead of the exception.
  *
  * **stdin is never attached.** Zero TTY is the contract of every command here (llp/0006
@@ -124,6 +125,8 @@ export function spawnSubprocessAsync(
   args: string[],
   options: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
+  options = { ...options, signal: startupSignal(options.signal) };
+  if (options.signal?.aborted) return Promise.reject(options.signal.reason);
   const key = runnerSpawnKey(command, args);
   if (key == null) {
     return spawnNowAsync(command, args, options);
@@ -188,6 +191,7 @@ function spawnNowAsync(
     const spawnEnv = childEnv ? { ...process.env, ...childEnv } : undefined;
     // `eas`, `create-expo` and `npx` all resolve to a batch shim on Windows, which needs `cmd.exe`.
     const target = resolveSpawnTarget(command, args, spawnEnv ?? process.env);
+    assertStartupActive();
     const child = spawn(target.command, target.args, {
       cwd,
       stdio: stdioFor(output),
@@ -199,6 +203,7 @@ function spawnNowAsync(
       ...(spawnEnv ? { env: spawnEnv } : null),
     });
 
+    trackStartupChild(child);
     let stdout = '';
     let stderr = '';
     /** Set when the guard below kills the child, so `close` knows why it is closing. */
@@ -264,9 +269,7 @@ function spawnNowAsync(
       // A tool that ends without a trailing newline still said what it said.
       toOut.flush();
       toErr.flush();
-      for (const { signal, forward } of listeners) {
-        process.off(signal, forward);
-      }
+      for (const { signal, forward } of listeners) process.off(signal, forward);
     };
 
     child.on('error', (spawnError: NodeJS.ErrnoException) => {

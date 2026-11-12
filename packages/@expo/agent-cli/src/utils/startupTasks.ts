@@ -1,22 +1,139 @@
 import { AsyncLocalStorage } from 'async_hooks';
+import type { ChildProcess } from 'child_process';
 
-const tasks = new AsyncLocalStorage<Set<Promise<unknown>>>();
+import { CommandError } from './errors';
+import { createTreeKillEvidence, killProcessTree } from './processGroup';
+
+export type StartupDrain = 'drained' | 'uncertain';
+
+export type StartupSession = { id: string; platform: 'ios' | 'android' };
+
+export function createStartupScope() {
+  const controller = new AbortController();
+  const pending = new Set<Promise<unknown>>();
+  const children = new Set<ChildProcess>();
+  const treeKills = createTreeKillEvidence();
+  let locked = false;
+  let phase: 'created' | 'running' | 'settled' = 'created';
+  let settle!: (result: StartupDrain) => void;
+  const drained = new Promise<StartupDrain>((resolve) => (settle = resolve));
+  const finish = () => {
+    phase = 'settled';
+    settle(treeKills.failed ? 'uncertain' : 'drained');
+  };
+  const abort = (message: string) => {
+    if (locked || controller.signal.aborted) return;
+    const error = new CommandError('DEV_INTERRUPTED', message);
+    error.exitCode = 20;
+    controller.abort(error);
+    for (const child of children) killProcessTree(child, 'SIGKILL');
+  };
+  const assertActive = () => {
+    if (treeKills.failed) abort('Detached startup could not stop its managed subprocess tree.');
+    controller.signal.throwIfAborted();
+  };
+  return {
+    controller,
+    treeKills,
+    assertActive,
+    pending,
+    children,
+    sessions: new Map<string, StartupSession>(),
+    drained,
+    begin() {
+      if (phase !== 'created') throw new Error('Startup scope already started or settled.');
+      phase = 'running';
+    },
+    finish,
+    finishIfNeverStarted() {
+      if (phase === 'created') finish();
+    },
+    abort,
+    cancel(allowed = true) {
+      if (locked) return 'locked' as const;
+      if (!allowed) return 'unsupported' as const;
+      abort(
+        'Detached startup was stopped. An already submitted EAS build continues on EAS; "eas build:cancel" ends it.'
+      );
+      return 'accepted' as const;
+    },
+    handoff() {
+      if (treeKills.failed) abort('Detached startup could not stop its managed subprocess tree.');
+      if (controller.signal.aborted) return false;
+      treeKills.handoff();
+      locked = true;
+      return true;
+    },
+    canOpen() {
+      if (!locked) abort('Detached startup could not publish a stoppable dev-server lock.');
+      return locked;
+    },
+  };
+}
+
+const tasks = new AsyncLocalStorage<ReturnType<typeof createStartupScope>>();
+
+export function startupSignal(signal?: AbortSignal): AbortSignal | undefined {
+  const startup = tasks.getStore()?.controller.signal;
+  return startup && signal ? AbortSignal.any([startup, signal]) : (startup ?? signal);
+}
+
+export function recordStartupSession(
+  id: string | null,
+  platform: StartupSession['platform']
+): void {
+  if (id) tasks.getStore()?.sessions.set(id, { id, platform });
+}
+
+export function assertStartupActive(): void {
+  tasks.getStore()?.assertActive();
+}
+
+export const handoffStartup = () => tasks.getStore()?.handoff() ?? true;
+export const canOpenStartup = () => tasks.getStore()?.canOpen() ?? true;
+export const failStartupLock = () =>
+  tasks.getStore()?.abort('Detached startup could not publish a stoppable dev-server lock.');
 
 export function trackStartupTask<T>(work: Promise<T>): Promise<T> {
-  const pending = tasks.getStore();
+  const pending = tasks.getStore()?.pending;
   pending?.add(work);
   const remove = () => pending?.delete(work);
   void work.then(remove, remove);
   return work;
 }
 
-export async function withStartupTasksAsync<T>(run: () => Promise<T>): Promise<T> {
-  const pending = new Set<Promise<unknown>>();
-  return tasks.run(pending, async () => {
+export function trackStartupChild(child: ChildProcess): void {
+  const scope = tasks.getStore();
+  if (!scope) return;
+  scope.treeKills.track(child);
+  scope.children.add(child);
+  trackStartupTask(
+    new Promise<void>((resolve) => {
+      const closed = () => {
+        scope.children.delete(child);
+        resolve();
+      };
+      child.once('close', closed);
+      child.once('error', () => {
+        if (child.pid == null) closed();
+      });
+    })
+  );
+  if (scope.controller.signal.aborted || scope.treeKills.failed) killProcessTree(child, 'SIGKILL');
+}
+
+export async function withStartupTasksAsync<T>(
+  run: () => Promise<T>,
+  scope = createStartupScope()
+): Promise<T> {
+  scope.begin();
+  return tasks.run(scope, async () => {
     try {
       return await run();
     } finally {
-      while (pending.size) await Promise.allSettled(pending);
+      while (scope.pending.size) await Promise.allSettled(scope.pending);
+      scope.finish();
+      assertStartupActive();
     }
   });
 }

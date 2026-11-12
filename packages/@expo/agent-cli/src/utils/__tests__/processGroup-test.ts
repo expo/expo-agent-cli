@@ -10,7 +10,7 @@
 import { spawn, spawnSync } from 'child_process';
 import { EventEmitter } from 'events';
 
-import { killProcessTree, USE_PROCESS_GROUP } from '../processGroup';
+import { createTreeKillEvidence, killProcessTree, USE_PROCESS_GROUP } from '../processGroup';
 import { spawnSubprocessAsync } from '../subprocess';
 import { windowsTaskkillCommand } from '../windowsShim';
 import type { Mock } from 'vitest';
@@ -57,24 +57,30 @@ describe(killProcessTree, () => {
     }
   });
 
-  it(`defaults to SIGTERM, which is what a deadline and the prompt guard send`, () => {
-    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    const child = fakeChild({ pid: 77 });
-    const taskkill = mockSpawnSync(0);
+  it.each(['unowned', 'prelock', 'handed-off'])(
+    `forces termination only before startup handoff (%s)`,
+    (phase) => {
+      const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+      const child = fakeChild({ pid: 77 });
+      const evidence = createTreeKillEvidence();
+      if (phase !== 'unowned') evidence.track(child as any);
+      if (phase === 'handed-off') evidence.handoff();
+      const taskkill = mockSpawnSync(0);
 
-    killProcessTree(child as any);
+      killProcessTree(child as any);
 
-    if (USE_PROCESS_GROUP) {
-      expect(kill).toHaveBeenCalledWith(-77, 'SIGTERM');
-    } else {
-      expect(taskkill).toHaveBeenCalledWith(
-        windowsTaskkillCommand(),
-        ['/PID', '77', '/T', '/F'],
-        expect.objectContaining({ stdio: 'ignore', windowsHide: true })
-      );
-      expect(child.kill).not.toHaveBeenCalled();
+      if (USE_PROCESS_GROUP) {
+        expect(kill).toHaveBeenCalledWith(-77, phase === 'prelock' ? 'SIGKILL' : 'SIGTERM');
+      } else {
+        expect(taskkill).toHaveBeenCalledWith(
+          windowsTaskkillCommand(),
+          ['/PID', '77', '/T', '/F'],
+          expect.objectContaining({ stdio: 'ignore', windowsHide: true })
+        );
+        expect(child.kill).not.toHaveBeenCalled();
+      }
     }
-  });
+  );
 
   it(`falls back to the direct kill when there is no group to signal`, () => {
     // Two ways to get here: a child that never started (no pid), and a group that is already gone.
@@ -151,3 +157,40 @@ describe('the spawn that makes a group possible', () => {
     expect((vi.mocked(spawn).mock.calls[0]![2] as any).detached).toBe(USE_PROCESS_GROUP);
   });
 });
+
+it.each(
+  ['exception', 'error', 'signal', 'status', 'success'].flatMap((outcome) =>
+    [false, true].map((handedOff) => ({ outcome, handedOff }))
+  )
+)(
+  'records pre-lock taskkill failure before direct fallback and retains it (%j)',
+  ({ outcome, handedOff }) => {
+    mockPlatform('win32');
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error(), { code: 'ESRCH' });
+    });
+    const evidence = createTreeKillEvidence();
+    const child = fakeChild({ pid: 4321 });
+    evidence.track(child as any);
+    if (handedOff) evidence.handoff();
+    const failed = !handedOff && outcome !== 'success';
+    child.kill.mockImplementation(() => {
+      expect(evidence.failed).toBe(failed);
+    });
+    vi.mocked(spawnSync).mockImplementation(() => {
+      if (outcome === 'exception') throw new Error('taskkill unavailable');
+      return {
+        status: outcome === 'status' ? 1 : 0,
+        error: outcome === 'error' ? new Error() : undefined,
+        signal: outcome === 'signal' ? 'SIGTERM' : null,
+      } as ReturnType<typeof spawnSync>;
+    });
+    killProcessTree(child as any);
+    expect(evidence.failed).toBe(failed);
+    expect(child.kill).toHaveBeenCalledTimes(outcome === 'success' ? 0 : 1);
+    mockSpawnSync(0);
+    killProcessTree(child as any);
+    child.emit('close', 0);
+    expect(evidence.failed).toBe(failed);
+  }
+);

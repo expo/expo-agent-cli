@@ -47,6 +47,7 @@ import {
   warnPortMove,
 } from './devServerPort';
 import { executeDevPlanAsync, type ExecutedDevPlan } from './executeDevPlanAsync';
+import { assertStartupActive } from '../utils/startupTasks';
 import { isDevServerStep, withDevice, withForwardedExpoArgs } from './forwardedArgs';
 import { recordLastDevRequest } from './lastRequest';
 import { resolvePlannedPortAsync } from './portCollision';
@@ -102,6 +103,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
       eas: options.deviceBackend === 'eas',
     });
   }
+  assertStartupActive();
   recordLastDevRequest(projectRoot, options);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.
   const orphan = await findUntrackedDevServerAsync(projectRoot, lock, options);
@@ -337,6 +339,7 @@ function deviceCallbackFor(
         throw await portDemandedError(options.port, options.platform);
       }
     }
+    assertStartupActive();
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
       explicit: explicitRequestOf(options.device, options.callerArgv),
     });

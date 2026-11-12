@@ -16,6 +16,24 @@ import { spawnSync, type ChildProcess } from 'child_process';
 
 import { windowsTaskkillCommand } from './windowsShim';
 
+type TreeKillEvidence = { failed: boolean; handedOff: boolean };
+const startupTrees = new WeakMap<ChildProcess, TreeKillEvidence>();
+
+export function createTreeKillEvidence() {
+  const evidence: TreeKillEvidence = { failed: false, handedOff: false };
+  return {
+    track(child: ChildProcess) {
+      startupTrees.set(child, evidence);
+    },
+    handoff() {
+      evidence.handedOff = true;
+    },
+    get failed() {
+      return evidence.failed;
+    },
+  };
+}
+
 /**
  * Whether a spawn should be put in a process group of its own.
  *
@@ -29,39 +47,30 @@ import { windowsTaskkillCommand } from './windowsShim';
  */
 export const USE_PROCESS_GROUP = process.platform !== 'win32';
 
-/**
- * Signal a child and everything it started.
- *
- * The negative pid is the whole group. It can fail for two ordinary reasons — the child is already
- * gone (`ESRCH`), or it never started and has no pid — and both mean there is nothing to signal, so
- * the fallback is the plain kill and a failure there is nothing either.
- */
+/** Signal the managed group/tree, retaining a failed pre-lock attempt before direct fallback. */
 export function killProcessTree(child: ChildProcess, signal?: NodeJS.Signals): void {
+  const evidence = startupTrees.get(child);
+  const prelock = evidence && !evidence.handedOff;
+  const requested = prelock ? 'SIGKILL' : (signal ?? 'SIGTERM');
   if (USE_PROCESS_GROUP && child.pid != null) {
     try {
-      process.kill(-child.pid, signal ?? 'SIGTERM');
+      process.kill(-child.pid, requested);
       return;
-    } catch {
-      // Already gone, or never in a group of its own. The direct kill below is the honest fallback.
+    } catch (error) {
+      if (prelock && (error as NodeJS.ErrnoException).code !== 'ESRCH') evidence.failed = true;
     }
   }
   if (process.platform === 'win32' && child.pid != null) {
-    // `child.kill()` signals cmd.exe when the spawn went through a shell; `/T` takes the tree.
     try {
       const killed = spawnSync(windowsTaskkillCommand(), ['/PID', String(child.pid), '/T', '/F'], {
         stdio: 'ignore',
         windowsHide: true,
       });
-      if (killed?.status === 0) {
-        return;
-      }
-    } catch {
-      // taskkill missing, or spawnSync could not run. Direct kill is the fallback.
-    }
+      if (killed?.status === 0 && !killed.error && !killed.signal) return;
+    } catch {}
+    if (prelock) evidence.failed = true;
   }
   try {
-    child.kill(signal ?? 'SIGTERM');
-  } catch {
-    // A child that cannot be signalled is a child that is not running.
-  }
+    child.kill(requested);
+  } catch {}
 }

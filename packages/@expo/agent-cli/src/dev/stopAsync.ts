@@ -27,9 +27,8 @@
 // `still-running` — exit 20 — about a process that was already gone, with a `How:` line offering
 // `--signal SIGKILL` for a pid nothing could signal.
 
-import { stopCloudSessionsAsync } from './stopCloudSessions';
+import { stopDetachedStartupAsync, prepareDetachedStopAsync } from './stopDetachedStartup';
 import {
-  inspectDetachedStopAsync,
   readDetachedAttemptAsync,
   retireDetachedAttempt,
   type DetachedAttemptRef,
@@ -52,7 +51,7 @@ import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { debugEvent, event } from './events';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
-import { captureDetachedDevices, stopDevicesAsync, type StoppedDevices } from './stopDevices';
+import type { StoppedDevices } from './stopDevices';
 import {
   isPortFreeAsync,
   POLL_INTERVAL_MS,
@@ -183,7 +182,7 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   portStillAnswering: boolean | null;
   /** Why nothing was stopped. Null exactly when {@link stopped} is true. */
   reason: DevStopSkipReason | null;
-  /** One sentence of detail for {@link reason}. Null exactly when {@link stopped} is true. */
+  /** Detail about the stop, including work that continues after it. */
   detail: string | null;
   /**
    * No lock answered, and the dev server is the one a killed run left: the run's record names the
@@ -226,17 +225,30 @@ export interface DevStopReportOptions {
 export async function devStopAsync(
   projectRoot: string,
   options: DevStopOptions,
-  { print = true, onReport, expectedAttempt }: DevStopReportOptions = {}
+  reportOptions: DevStopReportOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
-  const { attempt, lock, authorized } = await inspectDetachedStopAsync(
+  const captured = await prepareDetachedStopAsync(
     projectRoot,
     options,
-    expectedAttempt
+    reportOptions.expectedAttempt
   );
-  if (!authorized) return EXIT_OUTCOME_FAILED;
+  try {
+    return await stopCapturedAsync(projectRoot, options, reportOptions, startedAt, captured);
+  } finally {
+    await captured.control?.releaseAsync();
+  }
+}
 
-  const releaseCaptured = captureDetachedDevices(projectRoot, options, expectedAttempt);
+async function stopCapturedAsync(
+  projectRoot: string,
+  options: DevStopOptions,
+  { print = true, onReport }: DevStopReportOptions,
+  startedAt: number,
+  captured: Awaited<ReturnType<typeof prepareDetachedStopAsync>>
+): Promise<number> {
+  const { ref, lock, control } = captured;
+  if (!captured.authorized) return EXIT_OUTCOME_FAILED;
 
   // `--port` names the target, and a lock is only evidence about the port it holds.
   //
@@ -254,12 +266,22 @@ export async function devStopAsync(
   });
 
   const { report, finishing } =
-    lock != null && lockOwnsTarget
-      ? await stopLockedDevServerAsync(lock, options, startedAt, attempt?.ref ?? null)
-      : {
-          report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
+    control && (control.state === 'accepted' || !lock)
+      ? {
+          report: await stopDetachedStartupAsync(ref!, control, options.timeoutMs, startedAt),
           finishing: false,
-        };
+        }
+      : lock != null && lockOwnsTarget
+        ? await stopLockedDevServerAsync(
+            lock,
+            options,
+            startedAt,
+            options.eas ? null : (ref ?? null)
+          )
+        : {
+            report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
+            finishing: false,
+          };
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
@@ -279,18 +301,8 @@ export async function devStopAsync(
       };
     }
   }
-  const cloud =
-    options.eas && !sessionPending && !expectedAttempt
-      ? await stopCloudSessionsAsync(projectRoot)
-      : null;
-  if (cloud) report.session = cloud.session;
-  const devServerOk = report.stopped || report.reason === 'not-running';
-  Object.assign(
-    report,
-    releaseCaptured
-      ? await releaseCaptured(devServerOk)
-      : await stopDevicesAsync(projectRoot, options, report, cloud)
-  );
+  sessionPending = await captured.cleanupAsync(report, sessionPending);
+  await control?.releaseAsync();
   report.followups = followUpsEnabled(options.followups)
     ? buildFollowUps(report, runFinishing)
     : [];
@@ -308,6 +320,7 @@ export async function devStopAsync(
     reason: report.reason,
   });
 
+  const devServerOk = report.stopped || report.reason === 'not-running';
   // A session that was asked to stop and did not is a thing still running — and billing.
   const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
   const exitCode = sessionPending

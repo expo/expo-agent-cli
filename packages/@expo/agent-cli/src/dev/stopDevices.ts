@@ -27,6 +27,7 @@ export function captureDetachedDevices(
   attempt?: DetachedAttemptRef
 ) {
   if (!attempt) return null;
+  const kept = keptDevices(root, options.platform);
   const bindings = ownBindingFiles(root)
     .filter(
       ({ platform, backend }) =>
@@ -37,7 +38,7 @@ export function captureDetachedDevices(
       return read.kind === 'binding' ? [read.binding] : [];
     });
   return async (stopped: boolean): Promise<StoppedDevices> => {
-    const report: StoppedDevices = { devices: [], reaped: [], deviceError: null };
+    const report: StoppedDevices = { devices: [...kept], reaped: [], deviceError: null };
     const canRelease = async () => {
       const current = await readDetachedAttemptAsync(root);
       if (!current || current.ref?.id === attempt.id) return true;
@@ -48,6 +49,9 @@ export function captureDetachedDevices(
     if (!options.release || !stopped || devicesDisabled() || !(await canRelease())) return report;
     try {
       for (const binding of bindings) {
+        report.devices = report.devices.filter(
+          (device) => device.backend === 'cloud' || device.platform !== binding.device.platform
+        );
         report.devices.push(
           ...(await releaseWorktreeDevicesAsync(root, {
             platform: binding.device.platform,
