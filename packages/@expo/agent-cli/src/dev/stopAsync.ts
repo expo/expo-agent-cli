@@ -4,7 +4,7 @@ import { stopCloudSessionsAsync } from './stopCloudSessions';
 import { stopLockedDevServerAsync } from './stopLocked';
 import { resolveStopTargetAsync } from './stopTarget';
 import { stopOwnerAsync, type OwnerStop } from './stopOwner';
-import { emptyStopReport } from './stopReport';
+import { emptyStopReport, retainedOwnerEvidence } from './stopReport';
 
 import { lockAddressFor, probeDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { event as cliEvent } from '../events';
@@ -40,13 +40,13 @@ import {
 export async function devStopAsync(
   projectRoot: string,
   options: DevStopOptions,
-  { print = true, onReport, ownedChild }: DevStopReportOptions = {}
+  { print = true, onReport, target: constraint = { kind: 'project' } }: DevStopReportOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
   const target = await resolveStopTargetAsync(
     projectRoot,
     options,
-    ownedChild === undefined ? { kind: 'project' } : { kind: 'owned-child', child: ownedChild },
+    constraint,
     startedAt + options.timeoutMs
   );
   if (target.kind === 'skip') return EXIT_OK;
@@ -63,7 +63,7 @@ export async function devStopAsync(
       status,
     });
   }
-  const lock = target.kind === 'locked' ? target.lock : null;
+  const lock = target.kind === 'locked' || target.kind === 'foreground' ? target.lock : null;
   const { report, finishing } = lock
     ? await stopLockedDevServerAsync(lock, options, startedAt)
     : {
@@ -75,6 +75,19 @@ export async function devStopAsync(
         ),
         finishing: false,
       };
+  if (target.kind === 'foreground') {
+    const retained = retainedOwnerEvidence(target.observation, target.devices, null);
+    Object.assign(report, retained, {
+      detail: [report.detail, retained.detail].filter(Boolean).join(' '),
+      devices: target.devices,
+      reaped: [],
+      deviceError:
+        options.eas || options.release
+          ? 'Resources were kept because they may belong to another detached run.'
+          : null,
+    });
+    return finishStopReport(report, options, { finishing, sessionPending: false, print, onReport });
+  }
   if (target.kind === 'unlocked' && !target.cleanResources) {
     Object.assign(report, {
       devices: [],

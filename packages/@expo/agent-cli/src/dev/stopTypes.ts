@@ -139,9 +139,13 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   followups: FollowUp[];
 }
 
+export type StopTargetConstraint =
+  | { kind: 'project' }
+  | { kind: 'owned-child'; child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'> };
+
 export interface DevStopReportOptions {
-  /** Internal cleanup: skip all side effects unless this still-live child owns the lock. */
-  ownedChild?: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'> | null;
+  /** Internal cleanup may act only on the still-live child the caller actually spawned. */
+  target?: StopTargetConstraint;
   /**
    * Whether to print the report at all.
    *

@@ -13,8 +13,16 @@ export async function stopOwnedDevServerAsync(
   projectRoot: string,
   platform: NativePlatform,
   release: boolean,
-  child: ChildProcess | null
+  child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'> | null
 ): Promise<SmokeReleaseResult> {
+  if (!child)
+    return {
+      ok: !release,
+      target: null,
+      reason: release
+        ? 'this run spawned no server; device cleanup was skipped to protect other runs'
+        : null,
+    };
   const captured: { report: DevStopResultJson | null } = { report: null };
   await devStopAsync(
     projectRoot,
@@ -25,7 +33,7 @@ export async function stopOwnedDevServerAsync(
     },
     {
       print: false,
-      ownedChild: child,
+      target: { kind: 'owned-child', child },
       onReport: (stopped) => {
         captured.report = stopped;
       },
@@ -34,7 +42,7 @@ export async function stopOwnedDevServerAsync(
   const stopped = captured.report;
   const serverStopped = stopped
     ? stopped.stopped || stopped.reason === 'not-running'
-    : !release && (!child || child.exitCode !== null || child.signalCode !== null);
+    : !release && (child.exitCode !== null || child.signalCode !== null);
   return {
     ok: serverStopped,
     target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),

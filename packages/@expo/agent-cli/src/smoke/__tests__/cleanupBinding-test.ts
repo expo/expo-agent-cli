@@ -6,6 +6,7 @@ import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import * as deviceTools from '../../deviceBinding/tools';
 import { devStopAsync } from '../../dev/stopAsync';
 import { resolveSmokeOptions } from '../resolveOptions';
+import { stopOwnedDevServerAsync } from '../cleanupDevServer';
 import { buildSmokeDeps } from '../smokeAsync';
 
 vi.mock('../../log');
@@ -31,6 +32,7 @@ vi.mock('../../runtime/discoverDevServer', () => ({
   })),
 }));
 const root = '/work/app';
+const child = { pid: 4242, exitCode: null, signalCode: null };
 beforeEach(() => {
   vol.reset();
   fs.mkdirSync(root, { recursive: true });
@@ -74,31 +76,8 @@ it('a start whose device check did not answer keeps the bound device on cleanup'
   const start = await deps.startDevServer();
   await deps.stopDevServer();
   expect(start.bound).toMatchObject({ id: 'A', action: 'existing' });
-  expect(devStopAsync).toHaveBeenCalledWith(
-    root,
-    expect.objectContaining({ release: false }),
-    expect.anything()
-  );
+  expect(devStopAsync).not.toHaveBeenCalled();
 });
-
-// The route is read when the server stops, so a route the walk sets after the deps are built
-// counts the same as `--eas`.
-it.each([
-  ['--eas', ['--ios', '--eas'], false],
-  ['the walk', ['--ios'], true],
-] as const)(
-  'cloud smoke stops its server without releasing local devices (route from %s)',
-  async (_, argv, setByWalk) => {
-    const deps = buildSmokeDeps(root, resolveSmokeOptions([...argv]));
-    if (setByWalk) deps.cloudRoute.current = 'required';
-    await deps.stopDevServer();
-    expect(devStopAsync).toHaveBeenCalledWith(
-      root,
-      expect.objectContaining({ release: false }),
-      expect.anything()
-    );
-  }
-);
 
 it('cloud smoke reports no device rows for the local devices dev:stop kept', async () => {
   const kept = {
@@ -120,10 +99,7 @@ it('cloud smoke reports no device rows for the local devices dev:stop kept', asy
     } as any);
     return 0;
   });
-  const result = await buildSmokeDeps(
-    root,
-    resolveSmokeOptions(['--ios', '--eas'])
-  ).stopDevServer();
+  const result = await stopOwnedDevServerAsync(root, 'ios', false, child);
   expect(result.devices).toBeUndefined();
 });
 
@@ -148,7 +124,7 @@ it('a release dev:stop refused gives its reason to each device it kept', async (
     } as any);
     return 0;
   });
-  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  const result = await stopOwnedDevServerAsync(root, 'ios', true, child);
   expect(result.devices).toEqual([
     {
       ...kept,
@@ -172,7 +148,7 @@ it('the dev server cleanup carries the devices dev:stop released', async () => {
     onReport?.({ stopped: true, devices: [device], deviceError: null } as any);
     return 0;
   });
-  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  const result = await stopOwnedDevServerAsync(root, 'ios', true, child);
   expect(result.devices).toEqual([device]);
 });
 
@@ -196,7 +172,7 @@ it('a device that dev:stop could not release does not mark the dev server as sti
     } as any);
     return 20;
   });
-  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  const result = await stopOwnedDevServerAsync(root, 'ios', true, child);
   expect(result.ok).toBe(true);
   expect(result.devices).toEqual([device]);
 });

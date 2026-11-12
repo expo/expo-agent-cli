@@ -5,6 +5,8 @@
 // unit test cannot see: `dev:stop` signals a **real process**, and the property that matters is
 // that it signals the one the lock names and nothing else; `runtime:stop` runs a **real device
 // tool**, and the property that matters is the exact argv it hands it.
+import { randomUUID } from 'node:crypto';
+import { lockAddressFor } from '../../src/devLock/address';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -113,6 +115,57 @@ describe('@expo/agent-cli dev:stop', () => {
     } finally {
       releaseLock();
       recorder.stop();
+    }
+  });
+
+  it('stops a different foreground holder while retaining interrupted detached evidence', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const otherRoot = await setupFixtureAsync('go-app');
+    const foreground = await startSignalRecorderAsync(projectRoot);
+    const other = await startSignalRecorderAsync(otherRoot);
+    const id = randomUUID();
+    const directory = path.join(projectRoot, '.expo', 'dev', 'detached-run');
+    fs.mkdirSync(directory, { recursive: true });
+    const marker = path.join(directory, `owner-${id}.json`);
+    fs.writeFileSync(
+      marker,
+      JSON.stringify({
+        id,
+        pid: other.pid,
+        logFile: path.join(otherRoot, 'owner.log'),
+        endpoint: lockAddressFor(projectRoot, { name: `detached-${id}` }).address,
+      })
+    );
+    const port = await freePortAsync();
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      pid: foreground.pid,
+      port,
+      projectRoot,
+      url: `http://127.0.0.1:${port}`,
+      startedAt: new Date().toISOString(),
+    });
+    const release = setTimeout(releaseLock, 500);
+    try {
+      const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+        reject: false,
+      });
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        stopped: true,
+        reason: null,
+        pid: foreground.pid,
+        admission: 'retained',
+        recoveryCommand: expect.stringContaining(`--discard-run ${id}`),
+      });
+      expect(() => process.kill(foreground.pid, 0)).toThrow();
+      expect(() => process.kill(other.pid, 0)).not.toThrow();
+      expect(other.signalled()).toBeNull();
+      expect(fs.existsSync(marker)).toBe(true);
+    } finally {
+      clearTimeout(release);
+      releaseLock();
+      foreground.stop();
+      other.stop();
     }
   });
 

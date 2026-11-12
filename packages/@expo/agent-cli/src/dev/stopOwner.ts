@@ -5,7 +5,7 @@ import { isProcessAlive } from './processLiveness';
 import { isPortFreeAsync } from './processStop';
 import type { DevStopOptions } from './resolveStopOptions';
 import { stopLockedDevServerAsync } from './stopLocked';
-import { emptyStopReport } from './stopReport';
+import { emptyStopReport, retainedOwnerEvidence } from './stopReport';
 import { ownerPortOf, type StopTarget } from './stopTarget';
 import type { DevStopResultJson } from './stopTypes';
 
@@ -19,15 +19,10 @@ export async function stopOwnerAsync(
 ): Promise<OwnerStop> {
   const { observation, lock } = target;
   const report = ownerReport(target, startedAt);
-  if (observation.kind !== 'live') {
-    if (observation.kind === 'interrupted')
-      report.recoveryCommand = discardRunCommand(observation.attempt.id);
-    report.detail +=
-      observation.kind === 'uncertain'
-        ? ` ${observation.detail}`
-        : ' The owner ended without releasing admission. Discarding the record stops no processes or sessions.';
+  if (options.eas || options.release)
+    report.deviceError = 'Requested cleanup is not confirmed while detached admission remains.';
+  if (observation.kind !== 'live')
     return { report, status: report.stopped ? 'complete' : 'uncertain' };
-  }
   if (options.signal === 'SIGKILL') {
     if (!lock) {
       report.detail +=
@@ -119,17 +114,7 @@ function ownerReport(target: OwnerTarget, startedAt: number): DevStopResultJson 
   report.devices = devices;
   report.reaped = [];
   report.deviceError = null;
-  report.detail = [
-    `Detached run ${attempt?.id ?? 'unknown'}; admission was retained.`,
-    attempt?.pid ? `Diagnostic pid ${attempt.pid}.` : '',
-    attempt?.logFile ? `Log: ${attempt.logFile}.` : '',
-    port != null ? `Port ${port}.` : '',
-    ...devices
-      .filter((device) => device.backend === 'cloud')
-      .map((device) => `Session ${device.id} was retained.`),
-  ]
-    .filter(Boolean)
-    .join(' ');
+  Object.assign(report, retainedOwnerEvidence(observation, devices, port));
   return report;
 }
 
