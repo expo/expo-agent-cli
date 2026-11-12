@@ -683,8 +683,11 @@ it.each(['ios', 'android'] as const)(
       parent.kill('SIGKILL');
       await finished;
       const contender = await executeAgentCliAsync(f.root, args, { env, reject: false });
-      expect(contender.exitCode, contender.all).toBe(20);
-      expect(JSON.parse(contender.stdout).error.code).toBe('DEV_START_BUSY');
+      expect(contender.exitCode, contender.all).toBe(22);
+      expect(JSON.parse(contender.stdout).error).toMatchObject({
+        code: 'DEV_START_IN_PROGRESS',
+        data: { recovery: { kind: 'observe' } },
+      });
       expect(f.marks('config')).toHaveLength(1);
       fs.writeFileSync(path.join(f.barrier, 'release-config'), '');
       expect(

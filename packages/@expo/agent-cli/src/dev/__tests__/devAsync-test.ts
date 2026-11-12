@@ -52,8 +52,10 @@ vi.mock('../portCollision', async (importOriginal) => {
   };
 });
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
-vi.mock('../openAppEas', () => ({
+vi.mock('../openAppEas', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../openAppEas')>()),
   easOpenWork: vi.fn(),
+  otherPlatformSessionAsync: vi.fn(async () => null),
 }));
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));
 vi.mock('../../plan/events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
