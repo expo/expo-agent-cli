@@ -25,7 +25,7 @@ export async function observeOwnedStopAsync(
   options: DevStopOptions,
   startedAt: number
 ): Promise<{ report: DevStopResultJson; finishing: boolean; pending: boolean }> {
-  let deadline = startedAt + options.timeoutMs;
+  let deadline = control.deadline;
   let receipt: StartupSession[] | null | undefined;
   void control.completion.then((value) => {
     receipt = value;
@@ -102,14 +102,15 @@ export async function prepareDetachedStopAsync(
   let lock = inspected.lock;
   try {
     if (control?.action === 'stop-run') {
-      lock = await readDevServerLockAsync(root);
+      const current = await readDevServerLockAsync(root);
       if (
-        lock &&
-        (lock.detachedAttemptId !== ref!.id ||
-          lock.pid !== ref!.pid ||
-          (options.port != null && options.port !== lock.port))
+        current &&
+        (current.detachedAttemptId !== ref!.id ||
+          current.pid !== ref!.pid ||
+          (options.port != null && options.port !== current.port))
       )
         throw stopUncertainError();
+      lock = current ?? lock;
     }
   } catch (error) {
     await control?.releaseAsync();

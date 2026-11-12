@@ -77,6 +77,11 @@ if (role === 'leaf') {
   response.end = function (body, ...args) {
     if (['/stop', '/cancel'].includes(this.req.url) && [200, 202].includes(this.statusCode))
       log('receipt', { body: body ?? '' });
+    if (mode === 'locked-release-closing' && this.req.url === '/stop' && body) {
+      log('receipt-held');
+      wait('release-receipt').then(() => end.call(this, body, ...args));
+      return this;
+    }
     return end.call(this, body, ...args);
   };
   const source = path.resolve(__dirname, '../../src');
@@ -153,15 +158,6 @@ if (role === 'leaf') {
               held.release();
               log('queue-ended');
             }
-          } else if (mode === 'locked-between') {
-            await steps.stepAsync(() =>
-              spawnSubprocessAsync(process.execPath, ['-e', 'process.exit(0)'])
-            );
-            log('boundary');
-            await wait('release-boundary');
-            await runTool();
-          } else if (mode === 'locked-handoff') {
-            await runTool();
           } else {
             await runTool();
           }

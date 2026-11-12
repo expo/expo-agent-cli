@@ -51,7 +51,11 @@ export function createTreeKillEvidence() {
 export const USE_PROCESS_GROUP = process.platform !== 'win32';
 
 /** Stop the managed tree, retaining uncertainty even when direct fallback closes its parent. */
-export function killProcessTree(child: ChildProcess, signal?: NodeJS.Signals): boolean {
+export function killProcessTree(
+  child: ChildProcess,
+  signal?: NodeJS.Signals,
+  timeoutMs?: number
+): boolean {
   const evidence = startupTrees.get(child);
   const prelock = evidence && !evidence.handedOff;
   const requested = prelock ? 'SIGKILL' : (signal ?? 'SIGTERM');
@@ -69,6 +73,7 @@ export function killProcessTree(child: ChildProcess, signal?: NodeJS.Signals): b
       const killed = spawnSync(windowsTaskkillCommand(), ['/PID', String(child.pid), '/T', '/F'], {
         stdio: 'ignore',
         windowsHide: true,
+        ...(timeoutMs == null ? {} : { timeout: timeoutMs, killSignal: 'SIGKILL' as const }),
       });
       if (killed?.status === 0 && !killed.error && !killed.signal) return true;
     } catch {}

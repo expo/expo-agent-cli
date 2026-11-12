@@ -143,30 +143,32 @@ afterEach(() => {
   vol.rmSync(claimDirectory, { recursive: true, force: true });
 });
 
+function writeOwnedAttempt() {
+  const id = '00000000-0000-4000-8000-000000000001';
+  const owned = lock({ detachedAttemptId: id });
+  const directory = path.join(claimDirectory, id);
+  const ref = {
+    id,
+    directory,
+    projectRoot,
+    request: '[]',
+    pid: owned.pid,
+    port: owned.port,
+    logFile: path.join(projectRoot, '.expo', 'dev', 'logs', `dev-detached-${id}.log`),
+    control: { port: 12345, token: id },
+  };
+  vol.mkdirSync(directory, { recursive: true });
+  vol.writeFileSync(path.join(directory, 'owner.json'), JSON.stringify(ref));
+  return ref;
+}
+
 describe(devStopAsync, () => {
   it.each(['new-lock', 'changed-id', 'changed-pid', 'changed-port', 'gone', 'scoped-eas'] as const)(
     'keeps detached dispatch scoped across %s and releases only its plain grant',
     async (race) => {
       const id = '00000000-0000-4000-8000-000000000001';
       const owned = lock({ detachedAttemptId: id });
-      const directory = path.join(claimDirectory, id);
-      const ownerFile = path.join(directory, 'owner.json');
-      if (race !== 'new-lock') {
-        vol.mkdirSync(directory, { recursive: true });
-        vol.writeFileSync(
-          ownerFile,
-          JSON.stringify({
-            id,
-            directory,
-            projectRoot,
-            request: '[]',
-            pid: owned.pid,
-            port: owned.port,
-            logFile: path.join(projectRoot, '.expo', 'dev', 'logs', `dev-detached-${id}.log`),
-            control: { port: 12345, token: id },
-          })
-        );
-      }
+      const attempt = race === 'new-lock' ? undefined : writeOwnedAttempt();
       const changed =
         race === 'gone'
           ? null
@@ -198,8 +200,7 @@ describe(devStopAsync, () => {
         options({ port: owned.port, eas: race === 'scoped-eas' }),
         {
           print: false,
-          expectedAttempt:
-            race === 'scoped-eas' ? JSON.parse(String(vol.readFileSync(ownerFile))) : undefined,
+          expectedAttempt: race === 'scoped-eas' ? attempt : undefined,
         }
       );
       if (race === 'scoped-eas') {
@@ -225,21 +226,7 @@ describe(devStopAsync, () => {
     async (responseKind) => {
       const id = '00000000-0000-4000-8000-000000000001';
       const owned = lock({ detachedAttemptId: id });
-      const directory = path.join(claimDirectory, id);
-      vol.mkdirSync(directory, { recursive: true });
-      vol.writeFileSync(
-        path.join(directory, 'owner.json'),
-        JSON.stringify({
-          id,
-          directory,
-          projectRoot,
-          request: '[]',
-          pid: owned.pid,
-          port: owned.port,
-          logFile: path.join(projectRoot, '.expo', 'dev', 'logs', `dev-detached-${id}.log`),
-          control: { port: 12345, token: id },
-        })
-      );
+      const { directory } = writeOwnedAttempt();
       vi.mocked(readDevServerLockAsync).mockResolvedValue(null).mockResolvedValueOnce(owned);
       const requests: string[] = [];
       globalThis.fetch = (async (url, request) => {

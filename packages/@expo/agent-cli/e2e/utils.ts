@@ -540,6 +540,7 @@ export type DevLockInfo = {
   pid: number;
   startedAt: string;
   projectRoot: string;
+  detachedAttemptId?: string;
   /** The platform of the EAS Simulator session a `dev --eas` server runs. */
   easPlatform?: 'ios' | 'android';
   /** What the run does now; a lock with no phase reads as `serving`. */

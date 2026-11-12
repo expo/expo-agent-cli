@@ -27,31 +27,45 @@ import {
   expoHomeOf,
   readDevLockAsync,
   readJsonLines,
+  readStubExpoInvocations,
   waitForAsync,
 } from '../utils';
 
 it.concurrent.for([
   ...(['ios', 'android'] as const).flatMap((platform) =>
-    (['plain', 'eas', 'natural'] as const).map((mode) => ({ platform, mode, failure: false }))
+    (['plain', 'eas', 'natural'] as const).map((mode) => ({
+      platform,
+      mode,
+      failure: false,
+      nativeTimeout: false,
+    }))
   ),
-  { platform: 'ios' as const, mode: 'plain' as const, failure: true },
-  { platform: 'android' as const, mode: 'eas' as const, failure: true },
-  { platform: 'android' as const, mode: 'deadline' as const, failure: false },
+  { platform: 'ios' as const, mode: 'plain' as const, failure: true, nativeTimeout: false },
+  { platform: 'android' as const, mode: 'eas' as const, failure: true, nativeTimeout: false },
+  { platform: 'android' as const, mode: 'deadline' as const, failure: false, nativeTimeout: false },
+  { platform: 'ios' as const, mode: 'inventory' as const, failure: false, nativeTimeout: false },
+  { platform: 'ios' as const, mode: 'eas' as const, failure: true, nativeTimeout: true },
 ])(
   'keeps the owner and late EAS start outside the selected tree (%j)',
-  async ({ platform, mode, failure }, { expect }) => {
+  async ({ platform, mode, failure, nativeTimeout }, { expect, skip }) => {
+    if (nativeTimeout && process.platform !== 'win32') skip();
     const fixture = await setupDetachedFixtureAsync();
     const root = canonicalizeExistingPath(fixture.root);
     const release = (name: string) => fs.writeFileSync(path.join(root, name), '');
     const records = () =>
-      readJsonLines<{ event: string; pid: number; body?: string }>(
-        path.join(root, 'owned-stop.jsonl')
-      );
+      readJsonLines<{
+        event: string;
+        pid: number;
+        body?: string;
+        timeout?: number;
+        error?: string;
+      }>(path.join(root, 'owned-stop.jsonl'));
     const env = {
       ...fixture.env,
       NODE_OPTIONS: `${fixture.env.NODE_OPTIONS} --require ${JSON.stringify(path.resolve(__dirname, '../fixtures/owned-stop.cjs'))}`,
       OWNED_STOP_ROOT: root,
-      OWNED_STOP_FAILURE: failure ? '1' : '0',
+      OWNED_STOP_FAILURE: nativeTimeout ? 'timeout' : failure ? '1' : '0',
+      OWNED_STOP_DELAY_CLOSE: mode === 'inventory' ? '1' : '0',
       STUB_EXPO_DELAY_MS: mode === 'natural' ? '3000' : '90000',
       STUB_SIM_START_ID: 'late-owned',
     };
@@ -125,7 +139,16 @@ it.concurrent.for([
       stopping = run(['dev:stop', ...(plain ? [] : ['--eas']), '--timeout', '1s'], {
         STUB_SIM_STOP_RELEASE_FILE: path.join(root, 'release-cleanup'),
         ...(mode === 'deadline' ? { AGENT_CLI_EAS_SESSION_WAIT_MS: '200' } : {}),
+        OWNED_STOP_HOLD_INVENTORY: mode === 'inventory' ? '1' : '0',
       });
+      if (mode === 'inventory') {
+        expect(
+          await waitForAsync(() => records().some(({ event }) => event === 'inventory'), 5000)
+        ).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 1250));
+        expect(records().some(({ event }) => event === 'grant')).toBe(false);
+        release('release-inventory');
+      }
       expect(
         await waitForAsync(() => records().some(({ event }) => event === 'grant'), 10000)
       ).toBe(true);
@@ -139,8 +162,22 @@ it.concurrent.for([
       if (failure) {
         expect((await readDevLockAsync(root))?.phase).not.toBe('finishing');
         const result = await stopping;
-        expect(result.exitCode, result.all).toBe(plain ? 20 : 22);
-        expect(JSON.parse(result.stdout)).toMatchObject({ stopped: false, signal: null });
+        if (nativeTimeout) {
+          expect([20, 22], result.all).toContain(result.exitCode);
+          expect(records().find(({ event }) => event === 'native-timeout')).toMatchObject({
+            error: 'ETIMEDOUT',
+            timeout: expect.any(Number),
+          });
+          expect(
+            records().find(({ event }) => event === 'native-timeout')!.timeout
+          ).toBeLessThanOrEqual(1000);
+          expect(
+            isProcessRunning(records().find(({ event }) => event === 'native-waiter')!.pid)
+          ).toBe(false);
+        } else {
+          expect(result.exitCode, result.all).toBe(plain ? 20 : 22);
+          expect(JSON.parse(result.stdout)).toMatchObject({ stopped: false, signal: null });
+        }
       } else if (mode === 'deadline') {
         const result = await stopping;
         expect(result.exitCode, result.all).toBe(22);
@@ -155,9 +192,18 @@ it.concurrent.for([
         expect(result.exitCode, result.all).toBe(0);
         expect(JSON.parse(result.stdout)).toMatchObject({
           stopped: true,
+          reason: null,
+          pid: owner.pid,
+          lockHeld: true,
           signal: null,
           processStillRunning: true,
           easPlatform: platform,
+          followups: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'stop-session',
+              command: expect.stringMatching(/dev:stop --eas$/),
+            }),
+          ]),
         });
         expect((await readDevLockAsync(root))?.phase).toBe('finishing');
         if (mode === 'natural')
@@ -174,6 +220,12 @@ it.concurrent.for([
             5000
           )
         ).toBe(true);
+        let completed = false;
+        void stopping.then(() => {
+          completed = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1250));
+        expect(completed).toBe(false);
         const concurrent = await run(['dev:stop']);
         expect(concurrent.exitCode, concurrent.all).toBe(20);
       }
@@ -236,6 +288,7 @@ it.concurrent.for([
           stopped: true,
           signal: null,
           processStillRunning: false,
+          session: { id: 'late-owned', stopped: true },
         });
         expect(stops()).toHaveLength(2);
         expect(stops()).toEqual(
@@ -256,6 +309,7 @@ it.concurrent.for([
     } finally {
       release('release-session');
       release('release-cleanup');
+      release('release-inventory');
       await stopping;
       for (const { pid } of records())
         if (isProcessRunning(pid)) await signalProcessAsync(pid, 'SIGKILL');
@@ -269,13 +323,12 @@ it.concurrent.for([
 
 it.each([
   'handoff',
-  'between',
   'queued',
-  'active',
   'port-move',
   'helper-failure',
   'disconnect',
   'crash',
+  'release-closing',
 ] as const)(
   'latches owned stop at the %s boundary without cancelling finishing helpers',
   async (schedule) => {
@@ -312,7 +365,7 @@ it.each([
       const ready =
         schedule === 'helper-failure'
           ? 'late'
-          : ['active', 'port-move', 'disconnect', 'crash'].includes(schedule)
+          : ['port-move', 'disconnect', 'crash', 'release-closing'].includes(schedule)
             ? 'leaf'
             : 'boundary';
       expect(
@@ -320,6 +373,40 @@ it.each([
         output.all
       ).toBe(true);
       const owner = (await readDetachedAttemptAsync(root))!.ref!;
+      if (schedule === 'release-closing') {
+        const headers = {
+          Authorization: owner.control.token,
+          'x-detached-attempt': owner.id,
+          'x-detached-port': 'null',
+          'x-detached-policy': 'default',
+          'x-detached-eas': 'false',
+          'x-detached-timeout': '10000',
+        };
+        const response = await fetch(`http://127.0.0.1:${owner.control.port}/stop`, {
+          method: 'POST',
+          headers,
+        });
+        expect(response.status).toBe(200);
+        const receipt = response.json();
+        void receipt.catch(() => {});
+        release('release-tree-task');
+        expect(
+          await waitForAsync(() => records().some(({ event }) => event === 'receipt-held'), 5000)
+        ).toBe(true);
+        const releaseGrant = () =>
+          fetch(`http://127.0.0.1:${owner.control.port}/release`, {
+            method: 'POST',
+            headers: { ...headers, 'x-detached-grant': response.headers.get('x-detached-grant')! },
+          });
+        expect((await releaseGrant()).status).toBe(204);
+        expect((await releaseGrant()).status).toBe(409);
+        release('release-receipt');
+        expect(await receipt).toMatchObject({ id: owner.id, drained: true });
+        await exited;
+        expect(fs.existsSync(owner.directory)).toBe(false);
+        return;
+      }
+
       if (schedule === 'disconnect' || schedule === 'crash') {
         await writeCloudBindingAsync(expoHomeOf(root), root, { id: 'captured', platform: 'ios' });
         const stopper = spawnAgentCli(root, ['dev:stop', '--eas', '--json', '--timeout', '2s'], {
@@ -369,13 +456,7 @@ it.each([
         return;
       }
 
-      const options = resolveDevStopOptions([
-        '--port',
-        String(fixture.port),
-        '--timeout',
-        '10s',
-        ...(schedule === 'active' ? ['--force'] : schedule === 'between' ? ['--release'] : []),
-      ]);
+      const options = resolveDevStopOptions(['--port', String(fixture.port), '--timeout', '10s']);
       const failure = schedule === 'helper-failure';
       if (schedule === 'port-move') {
         await expect(requestOwnedStopAsync(owner, options)).rejects.toMatchObject({
@@ -400,7 +481,7 @@ it.each([
         expect(
           await waitForAsync(() => records().some(({ event }) => event === 'queue-ended'), 5000)
         ).toBe(true);
-      if (['active', 'port-move', 'disconnect', 'crash'].includes(schedule)) {
+      if (['port-move', 'disconnect', 'crash', 'release-closing'].includes(schedule)) {
         expect(
           await waitForAsync(
             () =>
@@ -427,7 +508,7 @@ it.each([
       expect(isProcessAlive(owner.pid)).toBe(false);
       expect(await readDevLockAsync(root)).toBeNull();
       expect(fs.existsSync(owner.directory)).toBe(failure);
-      if (['handoff', 'between', 'queued'].includes(schedule))
+      if (['handoff', 'queued'].includes(schedule))
         expect(
           records().filter(({ event }) => ['tool', 'leaf', 'unexpected-spawn'].includes(event))
         ).toEqual([]);
@@ -436,8 +517,99 @@ it.each([
       release('release-boundary');
       release('release-late');
       release('release-tree-task');
+      release('release-receipt');
       control?.dispose();
       await killAsync(child, 'SIGKILL');
+      for (const { pid } of records())
+        if (isProcessRunning(pid)) await signalProcessAsync(pid, 'SIGKILL');
+      expect(
+        await waitForAsync(() => records().every(({ pid }) => !isProcessRunning(pid)), 5000)
+      ).toBe(true);
+      await fixture.cleanup();
+    }
+  }
+);
+
+it.concurrent.for(
+  (['ios', 'android'] as const).flatMap((platform) =>
+    (['build', 'lookup'] as const).map((stage) => ({ platform, stage }))
+  )
+)(
+  'stops the shipped EAS plan during %j without a later Metro or open',
+  async ({ platform, stage }, { expect }) => {
+    const fixture = await setupDetachedFixtureAsync();
+    const root = canonicalizeExistingPath(fixture.root);
+    const records = () =>
+      readJsonLines<{ event: string; pid: number }>(path.join(root, 'owned-stop.jsonl'));
+    const env = {
+      ...fixture.env,
+      NODE_OPTIONS: `${fixture.env.NODE_OPTIONS} --require ${JSON.stringify(path.resolve(__dirname, '../fixtures/owned-stop.cjs'))}`,
+      OWNED_STOP_ROOT: root,
+      OWNED_STOP_PLAN_BOUNDARY: stage,
+    };
+    const run = (args: string[]) =>
+      executeAgentCliAsync(root, [...args, '--json'], { env, reject: false });
+    let stopping: ReturnType<typeof run> | undefined;
+    try {
+      const started = await run([
+        'dev',
+        `--${platform}`,
+        '--eas',
+        '--detach',
+        '--port',
+        String(fixture.port),
+      ]);
+      expect(started.exitCode, started.all).toBe(0);
+      expect(
+        await waitForAsync(
+          () => records().some(({ event }) => event === (stage === 'build' ? 'leaf' : 'lookup')),
+          10000
+        )
+      ).toBe(true);
+      const owner = (await readDetachedAttemptAsync(root))!.ref!;
+      expect(await readDevLockAsync(root)).toMatchObject({
+        pid: owner.pid,
+        detachedAttemptId: owner.id,
+        phase: 'building',
+      });
+      expect(records().every(({ pid }) => isProcessRunning(pid))).toBe(true);
+      const flags = platform === 'android' ? [stage === 'build' ? '--force' : '--release'] : [];
+      stopping = run(['dev:stop', ...flags, '--timeout', '5s']);
+      expect(await waitForAsync(() => records().some(({ event }) => event === 'grant'), 5000)).toBe(
+        true
+      );
+      if (stage === 'lookup') {
+        expect(isProcessRunning(owner.pid)).toBe(true);
+        expect(isProcessRunning(records().find(({ event }) => event === 'lookup')!.pid)).toBe(true);
+        let completed = false;
+        void stopping.then(() => {
+          completed = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(completed).toBe(false);
+        fs.writeFileSync(path.join(root, 'release-plan'), '');
+      }
+      const result = await stopping;
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        stopped: true,
+        signal: null,
+        pid: owner.pid,
+        lockHeld: true,
+        processStillRunning: false,
+      });
+      expect(records().every(({ pid }) => !isProcessRunning(pid))).toBe(true);
+      expect(await readDevLockAsync(root)).toBeNull();
+      expect(fs.existsSync(owner.directory)).toBe(false);
+      expect(readStubExpoInvocations(root).filter(({ args }) => args[0] === 'start')).toEqual([]);
+      expect(
+        stubEasArgs(root).filter(([verb]) =>
+          ['simulator:start', 'simulator', 'simulator:stop'].includes(verb!)
+        )
+      ).toEqual([]);
+    } finally {
+      fs.writeFileSync(path.join(root, 'release-plan'), '');
+      await stopping;
       for (const { pid } of records())
         if (isProcessRunning(pid)) await signalProcessAsync(pid, 'SIGKILL');
       expect(

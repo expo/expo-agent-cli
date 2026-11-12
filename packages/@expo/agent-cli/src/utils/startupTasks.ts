@@ -21,6 +21,9 @@ export function createStartupScope() {
   const runStop = new AbortController();
   let lockedPort: (() => number | null) | undefined;
   let stoppedChild: ChildProcess | undefined;
+  let stopDeadline: number | undefined;
+  const stopBudget = () =>
+    stopDeadline == null ? undefined : Math.max(1, stopDeadline - Date.now());
   const pending = new Set<Promise<unknown>>();
   const children = new Set<ChildProcess>();
   const treeKills = createTreeKillEvidence();
@@ -34,10 +37,8 @@ export function createStartupScope() {
   };
   const abort = (message: string) => {
     if (locked || controller.signal.aborted) return;
-    const error = new CommandError('DEV_INTERRUPTED', message);
-    error.exitCode = 20;
-    controller.abort(error);
-    for (const child of children) killProcessTree(child, 'SIGKILL');
+    controller.abort(interruptionError(message));
+    for (const child of children) killProcessTree(child, 'SIGKILL', stopBudget());
   };
   const assertActive = () => {
     if (treeKills.failed) abort('Detached startup could not stop its managed subprocess tree.');
@@ -69,22 +70,20 @@ export function createStartupScope() {
       if (port != null && port !== (locked ? lockedPort?.() : configuredPort)) return null;
       return locked ? 'stop-run' : 'cancel-startup';
     },
-    requestStop(action: OwnedStopAction) {
+    requestStop(action: OwnedStopAction, timeoutMs?: number) {
+      stopDeadline ??= timeoutMs == null ? undefined : Date.now() + timeoutMs;
       if (action === 'cancel-startup') {
         abort(
           'Detached startup was stopped. An already submitted EAS build continues on EAS; "eas build:cancel" ends it.'
         );
       } else {
-        const error = new CommandError(
-          'DEV_INTERRUPTED',
-          'The detached dev run was stopped. No later step will run.'
+        runStop.abort(
+          interruptionError('The detached dev run was stopped. No later step will run.')
         );
-        error.exitCode = 20;
-        runStop.abort(error);
       }
     },
     stopChild(child: ChildProcess) {
-      stoppedChild = killProcessTree(child, 'SIGKILL') ? child : undefined;
+      stoppedChild = killProcessTree(child, 'SIGKILL', stopBudget()) ? child : undefined;
     },
     assertActive,
     pending,
@@ -112,6 +111,12 @@ export function createStartupScope() {
       return locked && !runStop.signal.aborted;
     },
   };
+}
+
+function interruptionError(message: string): CommandError {
+  const error = new CommandError('DEV_INTERRUPTED', message);
+  error.exitCode = 20;
+  return error;
 }
 
 const tasks = new AsyncLocalStorage<ReturnType<typeof createStartupScope>>();

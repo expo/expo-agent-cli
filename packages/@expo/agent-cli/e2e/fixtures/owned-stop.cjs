@@ -12,18 +12,45 @@ if (process.argv[2] === 'owned-leaf') {
   log('leaf');
   setInterval(() => {}, 1000);
 } else if (root) {
-  const script = process.argv[1] ? fs.realpathSync(process.argv[1]) : '';
-  if (script.startsWith(root) && process.argv[2] === 'start') {
+  const script = process.argv[1] ? fs.realpathSync.native(process.argv[1]) : '';
+  if (
+    script.startsWith(root) &&
+    (process.argv[2] === 'start' ||
+      (process.argv[2] === 'build' && process.env.OWNED_STOP_PLAN_BOUNDARY === 'build'))
+  ) {
     cp.spawn(process.execPath, [__filename, 'owned-leaf'], {
       stdio: 'ignore',
       detached: process.platform === 'win32',
       env: { ...process.env, NODE_OPTIONS: '' },
     }).unref();
-    log('expo');
+    log(process.argv[2] === 'start' ? 'expo' : 'build');
+    if (process.argv[2] === 'build') {
+      while (!fs.existsSync(path.join(root, 'release-plan')))
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+  if (
+    script.startsWith(root) &&
+    process.argv[2] === 'build:list' &&
+    !process.argv.includes('--fingerprint-hash') &&
+    process.env.OWNED_STOP_PLAN_BOUNDARY === 'lookup'
+  ) {
+    log('lookup');
+    while (!fs.existsSync(path.join(root, 'release-plan')))
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   if (script.startsWith(root) && ['simulator:start', 'simulator'].includes(process.argv[2])) {
     log('eas-start');
     while (!fs.existsSync(path.join(root, 'release-session')))
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  if (
+    script.startsWith(root) &&
+    process.argv[2] === 'simulator:list' &&
+    process.env.OWNED_STOP_HOLD_INVENTORY === '1'
+  ) {
+    log('inventory');
+    while (!fs.existsSync(path.join(root, 'release-inventory')))
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   if (process.env.__EXPO_AGENT_CLI_DETACHED === '1' && !script.startsWith(root)) {
@@ -36,6 +63,16 @@ if (process.argv[2] === 'owned-leaf') {
         /\bstart\b/.test((args ?? []).join(' '))
       )
         selected = child;
+      if (selected === child && process.env.OWNED_STOP_DELAY_CLOSE === '1') {
+        const emit = child.emit;
+        child.emit = function (event, ...values) {
+          if (event === 'close') {
+            setTimeout(() => emit.call(child, event, ...values), 200);
+            return true;
+          }
+          return emit.call(child, event, ...values);
+        };
+      }
       return child;
     };
     const kill = process.kill;
@@ -46,6 +83,17 @@ if (process.argv[2] === 'owned-leaf') {
     };
     const spawnSync = cp.spawnSync;
     cp.spawnSync = function (command, args, options) {
+      if (
+        process.env.OWNED_STOP_FAILURE === 'timeout' &&
+        args?.[0] === '/PID' &&
+        args[1] === String(selected?.pid)
+      ) {
+        const script = `require('node:fs').appendFileSync(${JSON.stringify(path.join(root, 'owned-stop.jsonl'))}, JSON.stringify({event:'native-waiter',pid:process.pid})+'\\n');setInterval(()=>{},1000);`;
+        const result = spawnSync(process.execPath, ['-e', script], options);
+        log('native-timeout', { timeout: options.timeout, error: result.error?.code });
+        return result;
+      }
+
       if (
         process.env.OWNED_STOP_FAILURE === '1' &&
         args?.[0] === '/PID' &&

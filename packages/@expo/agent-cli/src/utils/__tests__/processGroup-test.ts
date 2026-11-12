@@ -60,25 +60,16 @@ describe(killProcessTree, () => {
   it.each(['unowned', 'prelock', 'handed-off'])(
     `forces termination only before startup handoff (%s)`,
     (phase) => {
+      mockPlatform('darwin');
       const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
       const child = fakeChild({ pid: 77 });
       const evidence = createTreeKillEvidence();
       if (phase !== 'unowned') evidence.track(child as any);
       if (phase === 'handed-off') evidence.handoff();
-      const taskkill = mockSpawnSync(0);
 
       killProcessTree(child as any);
 
-      if (USE_PROCESS_GROUP) {
-        expect(kill).toHaveBeenCalledWith(-77, phase === 'prelock' ? 'SIGKILL' : 'SIGTERM');
-      } else {
-        expect(taskkill).toHaveBeenCalledWith(
-          windowsTaskkillCommand(),
-          ['/PID', '77', '/T', '/F'],
-          expect.objectContaining({ stdio: 'ignore', windowsHide: true })
-        );
-        expect(child.kill).not.toHaveBeenCalled();
-      }
+      expect(kill).toHaveBeenCalledWith(-77, phase === 'prelock' ? 'SIGKILL' : 'SIGTERM');
     }
   );
 
@@ -159,16 +150,13 @@ describe('the spawn that makes a group possible', () => {
 });
 
 it.each(
-  ['exception', 'error', 'signal', 'status', 'success'].flatMap((outcome) =>
+  ['exception', 'timeout', 'signal', 'status', 'success'].flatMap((outcome) =>
     [false, true].map((handedOff) => ({ outcome, handedOff }))
   )
 )(
   'records taskkill failure before direct fallback and retains it (%j)',
   ({ outcome, handedOff }) => {
     mockPlatform('win32');
-    vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw Object.assign(new Error(), { code: 'ESRCH' });
-    });
     const evidence = createTreeKillEvidence();
     const child = fakeChild({ pid: 4321 });
     evidence.track(child as any);
@@ -181,16 +169,20 @@ it.each(
       if (outcome === 'exception') throw new Error('taskkill unavailable');
       return {
         status: outcome === 'status' ? 1 : 0,
-        error: outcome === 'error' ? new Error() : undefined,
+        error:
+          outcome === 'timeout' ? Object.assign(new Error(), { code: 'ETIMEDOUT' }) : undefined,
         signal: outcome === 'signal' ? 'SIGTERM' : null,
       } as ReturnType<typeof spawnSync>;
     });
-    killProcessTree(child as any);
+    killProcessTree(child as any, undefined, 100);
+    expect(vi.mocked(spawnSync).mock.calls[0]![2]).toMatchObject({
+      timeout: 100,
+      killSignal: 'SIGKILL',
+    });
     expect(evidence.failed).toBe(failed);
     expect(child.kill).toHaveBeenCalledTimes(outcome === 'success' ? 0 : 1);
     mockSpawnSync(0);
     killProcessTree(child as any);
-    child.emit('close', 0);
     expect(evidence.failed).toBe(failed);
   }
 );

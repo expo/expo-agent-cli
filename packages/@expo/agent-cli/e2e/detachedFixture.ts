@@ -41,6 +41,24 @@ export async function setupDetachedFixtureAsync() {
     if (owner || (script?.startsWith(${JSON.stringify(root)}) && ['start', 'build'].includes(process.argv[2]))) {
       require('node:fs').appendFileSync(${JSON.stringify(spawned)}, JSON.stringify({ pid: process.pid, owner }) + '\\n');
     }
+    if (owner) {
+      const http = require('node:http');
+      const observed = (event) => require('node:fs').appendFileSync(
+        ${JSON.stringify(path.join(root, 'control.jsonl'))}, JSON.stringify({ pid: process.pid, ...event }) + '\\n'
+      );
+      const attempt = process.env.__EXPO_AGENT_CLI_DETACHED_ATTEMPT;
+      const emit = http.Server.prototype.emit;
+      http.Server.prototype.emit = function (event, ...args) {
+        if (event === 'request' && ['/', '/stop', '/cancel', '/release'].includes(args[0].url)) {
+          const [request, response] = args;
+          observed({ event: 'request', method: request.method, path: request.url, matches: request.headers['x-detached-attempt'] === attempt });
+          response.once('finish', () => observed({ event: 'finish', path: request.url, status: response.statusCode }));
+          response.once('close', () => observed({ event: 'close', path: request.url, status: response.statusCode, ended: response.writableEnded }));
+        }
+        return emit.call(this, event, ...args);
+      };
+      process.on('exit', (code) => observed({ event: 'exit', code }));
+    }
     if (owner && ['1', 'smoke'].includes(process.env.HOLD_CANDIDATE)) {
       const release = process.env.HOLD_CANDIDATE === 'smoke' ? ${JSON.stringify(smokeCandidate)} : ${JSON.stringify(candidates)};
       while (!require('node:fs').existsSync(release)) {
@@ -83,6 +101,7 @@ export async function setupDetachedFixtureAsync() {
     env,
     heldPids,
     processes,
+    controlEvents: () => readJsonLines<Record<string, unknown>>(path.join(root, 'control.jsonl')),
     releaseCandidates,
     releaseSmokeCandidate,
     releaseFingerprint,

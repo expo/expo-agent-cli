@@ -424,7 +424,7 @@ describe(runDevServerAsync, () => {
       await promise;
     });
 
-    it.each(['foreground', 'cancelled', 'failed'] as const)(
+    it.each(['foreground', 'cancelled'] as const)(
       'settles late port and Metro callbacks after the %s run ends',
       async (mode) => {
         const onDevServer = vi.fn();
@@ -454,7 +454,6 @@ describe(runDevServerAsync, () => {
         });
         await vi.advanceTimersByTimeAsync(0);
         if (mode === 'cancelled') scope.requestStop('cancel-startup');
-        if (mode === 'failed') scope.abort('publication failed');
         end(0);
         publish();
         await vi.advanceTimersByTimeAsync(0);

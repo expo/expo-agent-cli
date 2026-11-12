@@ -15,6 +15,8 @@ import path from 'node:path';
 
 import { list as listSessions, tap } from '2g/api';
 
+import { signalProcessAsync } from '../../src/dev/processStop';
+import { readDetachedAttemptAsync } from '../../src/dev/detachedOwner';
 import { detachedLogPath } from '../../src/dev/logFile';
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import { rerunDevCommand } from '../../src/plan/rerun';
@@ -716,6 +718,15 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(recordedPid).not.toBe(pid);
       expect(recordedPid).not.toBe(process.pid);
       childPid = recordedPid;
+      const owner = (await readDetachedAttemptAsync(canonicalizeExistingPath(projectRoot)))!.ref!;
+      expect(owner.pid).toBe(pid);
+      expect(
+        await waitForAsync(async () => {
+          const current = await readDevLockAsync(projectRoot);
+          return current !== null && current.pid === pid && current.detachedAttemptId === owner.id;
+        }, 5000)
+      ).toBe(true);
+
       expect(isAlive(recordedPid)).toBe(true);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
@@ -741,11 +752,7 @@ describe('@expo/agent-cli dev --detach', () => {
         await cleanUpDetachedAsync(projectRoot);
       } finally {
         if (childPid && isAlive(childPid)) {
-          try {
-            process.kill(childPid, 'SIGKILL');
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-          }
+          await signalProcessAsync(childPid, 'SIGKILL');
           expect(await waitForAsync(() => !isAlive(childPid!), 5000)).toBe(true);
         }
       }

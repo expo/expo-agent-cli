@@ -120,12 +120,15 @@ export async function inspectDetachedStopAsync(
 export const supportsStartupCancellation = (options: DevStopOptions) =>
   !options.force && !options.release && options.signal === 'SIGTERM';
 
-export async function requestOwnedStopAsync(ref: DetachedAttemptRef, options: DevStopOptions) {
+export async function requestOwnedStopAsync(
+  ref: DetachedAttemptRef,
+  options: DevStopOptions,
+  deadline = Date.now() + options.timeoutMs
+) {
   if (options.signal !== 'SIGTERM') throw stopUncertainError();
   const controller = new AbortController();
   let released = false;
-  const deadline = Date.now() + options.timeoutMs;
-  let timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  let timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
   const dispose = () => {
     clearTimeout(timer);
     controller.abort();
@@ -140,6 +143,7 @@ export async function requestOwnedStopAsync(ref: DetachedAttemptRef, options: De
         'x-detached-port': String(options.port),
         'x-detached-policy': options.force || options.release ? 'locked-only' : 'default',
         'x-detached-eas': String(options.eas),
+        'x-detached-timeout': String(Math.max(1, deadline - Date.now())),
       },
       signal: controller.signal,
     });
@@ -181,6 +185,7 @@ export async function requestOwnedStopAsync(ref: DetachedAttemptRef, options: De
       .finally(() => clearTimeout(timer));
     return {
       action: response.headers.get('x-detached-stop') as OwnedStopAction,
+      deadline,
       extendCompletionDeadline,
       completion,
       dispose,
@@ -411,15 +416,15 @@ function createControlServer(
       response.writeHead(401, { Connection: 'close' }).end();
       return;
     }
-    if (closing) {
-      response.writeHead(409).end();
-      return;
-    }
     if (release) {
       const matches =
         grant && !grant.retainClaim && grant.nonce === request.headers['x-detached-grant'];
       if (matches) grant = undefined;
       response.writeHead(matches ? 204 : 409).end();
+      return;
+    }
+    if (closing) {
+      response.writeHead(409).end();
       return;
     }
     if (!cancel && !stop) {
@@ -429,10 +434,14 @@ function createControlServer(
     const portHeader = request.headers['x-detached-port'];
     const port = portHeader === 'null' ? null : Number(portHeader);
     const policy = request.headers['x-detached-policy'];
+    const timeoutMs = Number(request.headers['x-detached-timeout']);
     const valid = cancel
       ? request.headers['x-detached-cancel'] === 'true'
       : (port === null || (Number.isInteger(port) && port > 0 && port <= 65535)) &&
         (policy === 'default' || policy === 'locked-only') &&
+        Number.isSafeInteger(timeoutMs) &&
+        timeoutMs > 0 &&
+        timeoutMs <= 2147483647 &&
         ['true', 'false'].includes(String(request.headers['x-detached-eas']));
     const action =
       !grant && valid
@@ -443,7 +452,7 @@ function createControlServer(
       return;
     }
     grant = { nonce: randomUUID(), retainClaim: request.headers['x-detached-eas'] === 'true' };
-    startup.requestStop(action);
+    startup.requestStop(action, cancel ? undefined : timeoutMs);
     response.writeHead(action === 'cancel-startup' ? 202 : 200, {
       Connection: 'close',
       'x-detached-attempt': id,

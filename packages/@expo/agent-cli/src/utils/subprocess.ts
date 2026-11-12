@@ -254,9 +254,7 @@ function spawnNowAsync(
       const text = chunk.toString();
       stdout += text;
       guard?.sawOutput();
-      if (output === 'tee') {
-        toOut.write(text);
-      }
+      if (output === 'tee') toOut.write(text);
     });
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString();

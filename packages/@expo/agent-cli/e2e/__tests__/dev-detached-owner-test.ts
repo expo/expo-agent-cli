@@ -334,7 +334,9 @@ it.concurrent.for(platforms)(
         expect(started.exitCode, started.all).toBe(0);
         const pid = JSON.parse(started.stdout).pid;
         const stopped = await run(['dev:stop']);
-        expect(stopped.exitCode, stopped.all).toBe(0);
+        expect(stopped.exitCode, stopped.all + '\n' + JSON.stringify(fixture.controlEvents())).toBe(
+          0
+        );
         expect(await waitForAsync(() => !isProcessAlive(pid) && !fs.existsSync(claim), 5000)).toBe(
           true
         );
