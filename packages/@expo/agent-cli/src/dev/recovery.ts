@@ -17,6 +17,12 @@ export interface RecoveryMetadata {
   attempt?: AttemptReference;
 }
 
+export interface RecoveryAdvice {
+  command: string;
+  why: string | null;
+  recovery: RecoveryMetadata;
+}
+
 /** Admission already classified the conflict; preserve its contender request when rendering it. */
 export function renderStartRefusal(refusal: StartRefusal) {
   switch (refusal.kind) {
@@ -76,11 +82,7 @@ export function decideRecovery({
   return { kind: lock || ownership.kind === 'live' ? 'stop-and-start' : 'start', request, why };
 }
 
-export function renderRecovery(action: RecoveryAction): {
-  command: string;
-  why: string | null;
-  recovery: RecoveryMetadata;
-} {
+export function renderRecovery(action: RecoveryAction): RecoveryAdvice {
   const attempt = 'attempt' in action ? action.attempt : null;
   const recovery: RecoveryMetadata = {
     kind: action.kind,

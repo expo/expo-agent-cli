@@ -76,6 +76,16 @@ it.each(
         platform,
         expiresAt: new Date(0).toISOString(),
       });
+      const missingServer = await run([
+        'navigate',
+        '/',
+        `--${platform}`,
+        '--dev-server-url',
+        'http://127.0.0.1:1',
+        '--json',
+      ]);
+      const missingServerAdvice = JSON.parse(missingServer.stdout).error.suggestedCommand;
+      expect(missingServerAdvice).toMatch(detached ? /dev:logs/ : /status/);
       const status = await run(['status', '--json']);
       expect(status.exitCode, status.all).toBe(0);
       const next = JSON.parse(status.stdout).next;

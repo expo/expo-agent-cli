@@ -349,7 +349,7 @@ describe(resolveDeepLinkUrl, () => {
 
     const error = expectError(result);
     expect(error).toContain('the dev server URL is unknown');
-    expect(error).toContain('npx @expo/agent-cli dev --detach');
+    expect(error).toContain('npx @expo/agent-cli status');
   });
 
   it(`should use the config scheme for a development build`, () => {
@@ -563,9 +563,9 @@ describe(resolveDeepLinkUrl, () => {
         platform,
       });
 
-      expect(expectError(result)).toContain(`npx @expo/agent-cli dev --detach --${platform}`);
+      expect(expectError(result)).toContain(`npx @expo/agent-cli status --${platform}`);
       expect(result.ok === false && result.suggestedCommand).toBe(
-        `npx @expo/agent-cli dev --detach --${platform}`
+        `npx @expo/agent-cli status --${platform}`
       );
     });
 
@@ -588,7 +588,7 @@ describe(resolveDeepLinkUrl, () => {
       const result = resolveDeepLinkUrl({ route: '/profile/42', config: config(), isExpoGo: true });
 
       expect(result.ok === false && result.suggestedCommand).toBe(
-        `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
+        `npx @expo/agent-cli status --${process.platform === 'darwin' ? 'ios' : 'android'}`
       );
     });
   });
@@ -688,7 +688,7 @@ describe('the Try: line of a URL that could not be resolved', () => {
     read: { kind: 'none' },
   };
 
-  it(`answers a missing dev server with the command that starts one`, () => {
+  it(`asks status about a missing dev server when no run context is supplied`, () => {
     const result = resolveDeepLinkUrl({
       route: '/notes',
       config,
@@ -701,10 +701,10 @@ describe('the Try: line of a URL that could not be resolved', () => {
       return;
     }
     expect(result.suggestedCommand).toBe(
-      `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
+      `npx @expo/agent-cli status --${process.platform === 'darwin' ? 'ios' : 'android'}`
     );
     // The How: and the Try: name the same action, which they did not.
-    expect(result.error).toContain('npx @expo/agent-cli dev --detach');
+    expect(result.error).toContain('npx @expo/agent-cli status');
   });
 
   // The one case where a person has to supply a value this CLI cannot know, so the runnable

@@ -6,8 +6,8 @@ import {
   type DevServerHostType,
   type DevServerReach,
 } from '../dev/advertisedUrl';
-import { PROGRAM_PREFIX } from '../programName';
-import { hostPlatform } from '../smoke/suggest';
+import { readRecoveryFactsAsync } from '../dev/readRecovery';
+import { decideRecovery, renderRecovery, type RecoveryAdvice } from '../dev/recovery';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
 import { readProjectNativeDirsAsync } from '../project/nativeCode';
 import {
@@ -196,8 +196,19 @@ export async function loadRouteFactsAsync(projectRoot: string, options: RouteUrl
   // failure was not acted on. Attributed to the *caller* rather than to discovery's own label: a
   // URL a phase of this run found reaches discovery as `flag` too, and blaming a flag nobody passed
   // sends a reader to check an argument they never wrote (F96).
-  if (devServer.source === 'flag' && isCallerNamedDevServer(options) && !devServer.reachable) {
-    throw unreachableNamedDevServerError(devServerUrl, devServer.reason, platform);
+  const recovery = devServer.reachable
+    ? null
+    : renderRecovery(
+        decideRecovery({
+          ...(await readRecoveryFactsAsync(projectRoot, {
+            platform,
+            deviceBackend: options.cloud === 'required' ? 'eas' : 'local',
+          })),
+          needsStart: true,
+        })
+      );
+  if (devServer.source === 'flag' && isCallerNamedDevServer(options) && recovery) {
+    throw unreachableNamedDevServerError(devServerUrl, devServer.reason, recovery);
   }
 
   const usesDevClient = await isInstalledDependencyAsync(
@@ -215,6 +226,7 @@ export async function loadRouteFactsAsync(projectRoot: string, options: RouteUrl
     expoGo,
     usesDevClient,
     routeCheck,
+    recovery,
     automation: process.env.EXPO_NO_DEV_MENU !== '0',
   };
 }
@@ -249,6 +261,7 @@ export function finalizeRouteUrl(facts: RouteFacts, decisionTargets: CdpTarget[]
     // The flag the caller typed, so the commands this recovers into ask for the same platform
     // this run was asked for (F142).
     platform,
+    recovery: facts.recovery ?? undefined,
   });
   if (!resolved.ok) {
     const error = new CommandError('DEEP_LINK_UNRESOLVED', resolved.error);
@@ -407,18 +420,17 @@ function hostnameOf(host: string): string {
 function unreachableNamedDevServerError(
   devServerUrl: string,
   reason: string | undefined,
-  platform?: NavigatePlatform
+  recovery: RecoveryAdvice
 ): CommandError {
-  // Stated even when the caller named none: `dev` requires one now.
-  const platformFlag = ` --${platform ?? hostPlatform()}`;
   const error = new CommandError(
     'DEEP_LINK_UNRESOLVED',
     [
       `No Expo dev server answered at ${devServerUrl}, which --dev-server-url named, so nothing was opened.`,
       `Why: the request for its debugger target list failed (${reason ?? 'no answer'}). Opening a route against a dev server that is not running loads the app onto the device with nothing to bundle for it, which looks like a crash rather than like a wrong URL.`,
-      `How: start the dev server ("${PROGRAM_PREFIX} dev --detach --wait-ready${platformFlag}"), or drop --dev-server-url and let this command find the project's own — it asks the dev-server lock first, then the port the project last logged.`,
+      ...(recovery.why ? [`Why: ${recovery.why}`] : []),
+      `How: run "${recovery.command}", or drop --dev-server-url and let this command find the project's own server.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach --wait-ready${platformFlag}`;
+  error.suggestedCommand = recovery.command;
   return error;
 }

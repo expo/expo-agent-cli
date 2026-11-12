@@ -83,6 +83,8 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
 }
 
 export interface ResolveDeepLinkUrlParams {
+  /** Recovery already decided from the current run when no server is available. */
+  recovery?: { command: string; why: string | null };
   /** Route path (`/profile/42`) or a full URL (`myapp://profile/42`). */
   route: string;
   /** Scheme supplied with `--scheme`, which wins over anything detected. */
@@ -179,6 +181,7 @@ function resolveUrl({
   devServerUrl,
   reachHost,
   platform,
+  recovery,
 }: ResolveDeepLinkUrlParams): ResolveDeepLinkUrlResult {
   // Carried onto every command the failures below name, and onto nothing else: the URL is the same
   // URL whichever device opens it (F142).
@@ -220,7 +223,7 @@ function resolveUrl({
   }
 
   if (isExpoGo) {
-    return resolveExpoGoUrl({ routePath, devServerUrl, reachHost, platformFlag });
+    return resolveExpoGoUrl({ routePath, devServerUrl, reachHost, platformFlag, recovery });
   }
 
   return resolveConfigUrl(routePath, config);
@@ -232,28 +235,29 @@ function resolveExpoGoUrl({
   devServerUrl,
   reachHost,
   platformFlag,
+  recovery,
 }: {
   routePath: string;
   devServerUrl: string | null | undefined;
   reachHost: string | null | undefined;
   platformFlag: string;
+  recovery?: ResolveDeepLinkUrlParams['recovery'];
 }): ResolveDeepLinkUrlResult {
   // The tunnel host first: it is the one address every device can use, and the only one a cloud
   // simulator can.
   const tunnelHost = nonEmptyString(reachHost);
   const host = tunnelHost ?? (devServerUrl != null ? hostFromUrl(devServerUrl) : null);
   if (host == null) {
+    const command = recovery?.command ?? `${PROGRAM_PREFIX} status${platformFlag}`;
     return {
       ok: false,
       error: [
         'Cannot build an Expo Go URL because the dev server URL is unknown.',
         'Why: Expo Go deep links have the shape exp://<host>/--/<route>, so they need the running dev server host.',
-        `How: start the dev server with \`${PROGRAM_PREFIX} dev --detach${platformFlag}\` and run this command again, or pass --scheme to target a development build instead.`,
+        ...(recovery?.why ? [`Why: ${recovery.why}`] : []),
+        `How: run \`${command}\` and retry this command, or pass --scheme to target a development build instead.`,
       ].join('\n'),
-      // The How: and the Try: named different commands here, which is a failure telling a reader
-      // two things [observed — friction run 5]. Both are the one action that fixes this, and both
-      // keep the platform the caller named (F142).
-      suggestedCommand: `${PROGRAM_PREFIX} dev --detach${platformFlag}`,
+      suggestedCommand: command,
     };
   }
   const where = tunnelHost
