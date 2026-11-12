@@ -31,6 +31,7 @@ import {
   deviceInventoryForSelectionAsync,
   withAndroidReverseAsync,
 } from '../runtime/targetSelection';
+import { withSessionTargetLivenessAsync } from '../runtime/targetLiveness';
 import { scopedListClassifier } from '../runtime/waitReady';
 import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
 import { openUrlOnDeviceAsync } from './deepLink';
@@ -414,11 +415,12 @@ type AttachWaiter = (deadline: number) => Promise<number>;
 async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDevice) {
   const targetSelection = targetSelectionOf({ flags: { platform: null, eas: false }, device });
   const first = await probeDevServerAsync(devServerUrl);
-  const inventory = await deviceInventoryForSelectionAsync(
+  // The ended session's app the probe drops stays dropped on every poll: the waiter's inventory
+  // starts from this one.
+  const inventory = await withSessionTargetLivenessAsync(
     first.targets,
     targetSelection,
-    null,
-    devServerUrl
+    await deviceInventoryForSelectionAsync(first.targets, targetSelection, null, devServerUrl)
   );
   return {
     decisionTargets: first.reachable
