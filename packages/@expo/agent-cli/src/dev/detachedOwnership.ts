@@ -130,13 +130,16 @@ function uncertain(detail: string, attempt: AttemptReference | null = null): Det
   return { kind: 'uncertain', attempt, detail };
 }
 
-export async function observeDetachedRunAsync(root: string): Promise<DetachedObservation> {
+export async function observeDetachedRunAsync(
+  root: string,
+  { deadline }: { deadline?: number } = {}
+): Promise<DetachedObservation> {
   const evidence = readEvidence(root);
   if ('kind' in evidence) return evidence;
   const { attempt, endpoint, request, valid } = evidence;
   if (!endpoint)
     return uncertain('The recorded startup endpoint is unknown; ownership was retained.', attempt);
-  const exchange = await exchangeAttemptAsync(endpoint, attempt.id);
+  const exchange = await exchangeAttemptAsync(endpoint, attempt.id, undefined, deadline);
   if (exchange.connection === 'absent') return { kind: 'interrupted', attempt };
   if (exchange.connection === 'uncertain' || !valid)
     return uncertain(
@@ -161,7 +164,12 @@ export async function cancelDetachedRunAsync(
   if (!target)
     return { kind: 'uncertain', detail: 'No captured live endpoint identifies this attempt.' };
   const { deadline, ...intent } = options;
-  const result = await exchangeAttemptAsync(target.endpoint, attempt.id, intent, deadline);
+  let result = await exchangeAttemptAsync(target.endpoint, attempt.id, intent, deadline);
+  while (!result.finished && result.acknowledged && Date.now() < deadline) {
+    const next = await exchangeAttemptAsync(target.endpoint, attempt.id, intent, deadline);
+    result = { ...next, acknowledged: result.acknowledged || next.acknowledged };
+    if (next.connection !== 'live') break;
+  }
   if (result.finished) return result.finished;
   if (result.connection === 'absent') {
     const evidence = readEvidence(target.root);

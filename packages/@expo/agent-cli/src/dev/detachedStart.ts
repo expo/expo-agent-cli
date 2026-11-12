@@ -4,9 +4,10 @@ import { CommandError } from '../utils/errors';
 import type { AttemptReference, DetachedObservation } from './devRunTypes';
 import { equivalentStartupRequest, type StartupRequest } from './startupRequest';
 
-export type StartRefusal =
+export type StartRefusal = (
   | { kind: 'observe' | 'stop-and-start' | 'observe-stop' | 'discard'; attempt: AttemptReference }
-  | { kind: 'uncertain'; attempt: AttemptReference | null; detail: string };
+  | { kind: 'uncertain'; attempt: AttemptReference | null; detail: string }
+) & { request?: StartupRequest };
 
 export function classifyDetachedStart(
   observation: DetachedObservation,
@@ -27,15 +28,16 @@ export function classifyDetachedStart(
         attempt.request &&
         equivalentStartupRequest(request, attempt.request)
       )
-        return { kind: 'observe', attempt };
+        return { kind: 'observe', attempt, request };
       if (progress.kind === 'unaccounted')
-        return { kind: 'uncertain', attempt, detail: progress.detail };
+        return { kind: 'uncertain', attempt, detail: progress.detail, request };
       return {
         kind:
           progress.kind === 'stopping' || progress.kind === 'unknown'
             ? 'observe-stop'
             : 'stop-and-start',
         attempt,
+        request,
       };
     }
   }
