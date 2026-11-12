@@ -2,6 +2,7 @@
 // The body of the managed block: the project facts an agent would otherwise guess at, and the
 // commands that answer in a shape it can parse. Pure text generation — no I/O, no timestamps, so
 // the same project always produces the same block and a rerun rewrites nothing.
+import { ON_RAMP_POINTER } from '../help/onRamp';
 import { PROGRAM_PREFIX } from '../programName';
 import type { ProjectState } from '../project/types';
 import { defaultSmokePlatform, devCommand, smokeCommand } from '../smoke/suggest';
@@ -53,6 +54,8 @@ export function generateAgentsMdBlock({
     'For the operations listed below, use `@expo/agent-cli` in place of the equivalent commands elsewhere in this file or in loaded skills. Package installation still uses Expo’s SDK-compatible version resolution. Use `bunx` instead of `npx` when `bun.lock` is present.',
     '',
     'Most commands take `--json` for a machine-readable report.',
+    '',
+    `New to this CLI? Run \`${ON_RAMP_POINTER}\`: the commands in order, the exit codes, and the \`--json\` contract.`,
     '',
     `- \`${PROGRAM_PREFIX} status\` — where the project is right now, and what would happen next: which sources changed since the last build, whether an update can ship over the air, and whether EAS already has a build for this fingerprint`,
     `- \`${PROGRAM_PREFIX} status --json\` — the same report as one object, with the raw project probe under \`probe\``,

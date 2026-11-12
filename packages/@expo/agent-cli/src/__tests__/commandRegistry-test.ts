@@ -22,7 +22,7 @@ import {
 } from '../help/listing';
 import { ON_RAMP_POINTER } from '../help/onRamp';
 import type { CommandHelp } from '../help/types';
-import { oneTimeSetup, workflow } from '../help/workflow';
+import { beforeYouStart, workflow } from '../help/workflow';
 import type { Command } from '../types';
 
 /**
@@ -772,13 +772,13 @@ describe(formatTopLevelHelp, () => {
   // vocabulary rather than an instruction [confirmed, 2026-08-28: "i'm not clear
   // specifically what they mean"].
   it('titles the steps with plain phrases rather than labels', () => {
-    expect([...workflow, oneTimeSetup].map(({ title }) => title)).toEqual([
+    expect([beforeYouStart, ...workflow].map(({ title }) => title)).toEqual([
+      'Before you start',
       'Check the project',
       'Start the app',
       'Edit and reload',
       "Verify before you're done",
       'Deploy',
-      'One-time setup',
     ]);
   });
 
@@ -786,7 +786,7 @@ describe(formatTopLevelHelp, () => {
   // title is a phrase in sentence case, and never one of the six words that failed.
   it('never goes back to the one-word labels', () => {
     const retired = ['orient', 'run', 'iterate', 'gate', 'ship', 'once'];
-    for (const { title } of [...workflow, oneTimeSetup]) {
+    for (const { title } of [beforeYouStart, ...workflow]) {
       expect(retired).not.toContain(title.toLowerCase());
       expect(title).toMatch(/^[A-Z][a-z]/);
       expect(title).not.toMatch(/[:_]/);
@@ -819,7 +819,7 @@ describe(formatTopLevelHelp, () => {
 // running a rung and being told the command does not exist.
 describe('workflow', () => {
   it('names commands that all resolve', () => {
-    for (const { rungs } of [...workflow, oneTimeSetup]) {
+    for (const { rungs } of [beforeYouStart, ...workflow]) {
       for (const { run } of rungs) {
         const [command, ...rest] = run.split(' ');
         expect(resolveCommand(command!, rest).kind).toMatch(/^(command|passthrough)$/);

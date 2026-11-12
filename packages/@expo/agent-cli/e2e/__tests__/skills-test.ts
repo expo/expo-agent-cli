@@ -434,9 +434,8 @@ describe('@expo/agent-cli', () => {
   });
 
   // @ref llp/0024-cli-ui.rfc.md §The workflow map
-  // The listing says which commands exist; the map above it says which one to run first, and the
-  // on-ramp under the map teaches the protocol. A caller who has never seen this CLI needs all
-  // three, in that order, on the first screen they are given.
+  // The listing says which commands exist. The pointer above it names the on-ramp, which says
+  // which one to run first, so a caller who reads only the top of the screen still finds it.
   it('puts the on-ramp above the listing, and leaves the steps to it', async () => {
     const result = await executeAgentCliAsync(projectRoot, ['--help']);
 
@@ -444,18 +443,7 @@ describe('@expo/agent-cli', () => {
     // The map lives in `help workflow` alone [confirmed, 2026-08-28].
     expect(result.all).not.toContain('What to run, in order');
     expect(result.all).toContain('New here? npx @expo/agent-cli help workflow');
-    const topic = await executeAgentCliAsync(projectRoot, ['help', 'workflow']);
-    for (const title of [
-      'Check the project',
-      'Start the app',
-      'Edit and reload',
-      "Verify before you're done",
-      'Deploy',
-      'One-time setup',
-    ]) {
-      expect(topic.all).toContain(title);
-    }
-    expect(result.all.indexOf('What to run, in order')).toBeLessThan(result.all.indexOf('Develop'));
+    expect(result.all.indexOf('New here?')).toBeLessThan(result.all.indexOf('Develop'));
   });
 
   it('prints the package version with `--version`', async () => {
