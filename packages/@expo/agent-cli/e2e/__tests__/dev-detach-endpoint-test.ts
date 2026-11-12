@@ -29,7 +29,10 @@ it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
       expect(JSON.parse(discard.stdout).error.code).toBe('DEV_START_BUSY');
 
       const status = await executeAgentCliAsync(f.root, ['status', '--json'], { env });
-      expect(JSON.parse(status.stdout).next.why).toContain(`Detached run ${id}`);
+      expect(JSON.parse(status.stdout).next.recovery).toMatchObject({
+        kind: 'observe',
+        attempt: { id, pid: ownerPid },
+      });
       expect(JSON.parse(status.stdout).next.command).not.toContain('--discard-run');
       const contender = await f.start(env).result;
       expect(contender.exitCode, contender.all).toBe(20);
