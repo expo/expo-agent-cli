@@ -10,10 +10,20 @@ it.each(['ios', 'android'] as const)(
     try {
       const started = f.start();
       expect(await waitForAsync(() => f.marks('entered').length === 1, 15_000)).toBe(true);
+      const configPid = Number(f.marks('entered')[0]!.slice('entered-'.length));
       expect(fs.existsSync(f.record(started.id))).toBe(true);
       const stopped = await f.run(['dev:stop', '--json']);
       expect(stopped.exitCode, stopped.all).toBe(0);
-      expect(await waitForAsync(() => f.marks('cancelled').length === 1, 5000)).toBe(true);
+      expect(
+        await waitForAsync(() => {
+          try {
+            process.kill(configPid, 0);
+            return false;
+          } catch (error) {
+            return (error as NodeJS.ErrnoException).code === 'ESRCH';
+          }
+        }, 5000)
+      ).toBe(true);
       expect(await waitForAsync(() => !fs.existsSync(f.record(started.id)), 5000)).toBe(true);
       expect(f.marks('entered')).toHaveLength(1);
       expect((await started.result).exitCode).not.toBe(0);

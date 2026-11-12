@@ -28,7 +28,6 @@ export async function detachedControlFixture(platform: 'ios' | 'android') {
         const directory = ${JSON.stringify(barrier)};
         fs.writeFileSync(path.join(directory, 'entered-' + process.pid), '');
         process.on('SIGTERM', () => {
-          fs.writeFileSync(path.join(directory, 'cancelled-' + process.pid), '');
           process.exit(0);
         });
         await new Promise((resolve) => {
