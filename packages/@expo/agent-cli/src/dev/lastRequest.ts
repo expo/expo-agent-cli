@@ -14,7 +14,20 @@ const FILE = 'agent-cli-last-dev.json';
 export function readLastDevRequest(projectRoot: string): LastDevRequest | null {
   try {
     const value = JSON.parse(fs.readFileSync(path.join(projectRoot, '.expo', FILE), 'utf8'));
-    return value?.version === 2 ? parseStartupRequest(value.request) : null;
+    if (value?.version === 2) return parseStartupRequest(value.request);
+    if (value?.version !== 1) return null;
+    return parseStartupRequest({
+      platform: value.platform,
+      build: value.buildBackend === null ? 'auto' : value.buildBackend,
+      deviceBackend: value.buildBackend === 'eas' ? 'eas' : 'local',
+      target: value.runTarget === null ? 'auto' : value.runTarget,
+      port: value.port === null ? 'auto' : value.port,
+      device: value.device === undefined ? 'auto' : value.device,
+      open: true,
+      fingerprintCache: true,
+      agentSkills: true,
+      expo: { host: 'auto', flags: {}, opaqueTail: [] },
+    });
   } catch {
     return null;
   }

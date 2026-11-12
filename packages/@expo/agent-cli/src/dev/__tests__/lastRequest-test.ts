@@ -31,6 +31,37 @@ it('stores the accepted canonical request without observer-only choices', () => 
   expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 2, request });
 });
 
+it.each(
+  (['ios', 'android'] as const).flatMap((platform) =>
+    ([null, 'local', 'eas'] as const).map((backend) => ({ platform, backend }))
+  )
+)(
+  'keeps published recovery preferences for $platform with $backend builds',
+  ({ platform, backend }) => {
+    const options = resolveDevOptions([
+      `--${platform}`,
+      '--port',
+      '19082',
+      '--dev-client',
+      ...(backend ? [`--${backend}`] : []),
+      ...(backend === 'eas' ? [] : ['--device', 'Saved device']),
+    ]);
+    const { port, device, buildBackend, runTarget } = options;
+    vol.fromJSON({
+      [file]: JSON.stringify({ version: 1, platform, port, device, buildBackend, runTarget }),
+    });
+    const expected = startupRequestFrom(options);
+    expect(readLastDevRequest(root)).toMatchObject({
+      platform: expected.platform,
+      port: expected.port,
+      device: expected.device,
+      build: expected.build,
+      deviceBackend: expected.deviceBackend,
+      target: expected.target,
+    });
+  }
+);
+
 it('does not write a dry run or erase the preceding real request', () => {
   recordLastDevRequest(root, resolveDevOptions(['--ios', '--plan']));
   expect(fs.existsSync(file)).toBe(false);
