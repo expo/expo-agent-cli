@@ -48,51 +48,33 @@ One summary, one place. The one-line summary lives on the registry entry, not in
 
 ## The workflow map
 
-`help workflow` states what to run. `@expo/agent-cli --help` does not repeat the map; it points at the topic above the listing, so the two screens cannot disagree.
+`help workflow` says what to run, in order. `--help` does not repeat the map. It points at the topic, so the two screens cannot disagree.
 
 ```
   What to run, in order
        Before you start
-         agents:setup           install Expo agent skills, then restart the agent
-         new <directory>        no project yet? create one
     1  Check the project
-         status                 what this project is, and what to run next
     2  Start the app
-         dev --detach           start the dev server, keep this terminal
-         navigate /             open a route in the app on a device
     3  Edit and reload
-         runtime:reload         after your edit, run the code on disk
-         runtime:errors         what the app threw, over a time window
-         runtime:tree           what is on screen, and its testIDs
-         runtime:tap <testID>   tap it; --verify says what changed
-         install <package>      add it at the version this SDK wants
     4  Verify before you're done
-         smoke --ios|--android  bundle, boot and error window, one exit code
-         typecheck              the type errors neither of those can see
-         doctor                 what expo-doctor finds wrong with the setup
     5  Deploy
-         deploy                 publish the web app to EAS Hosting
 ```
 
-The titles are plain phrases, never labels. If a title needs a legend, it is the wrong title. The title sits above its commands rather than in a third column. A unit test pins the titles, and the `help workflow` e2e test pins their order.
+Each step lists its commands, one line each, with what the command gets you.
 
-`Before you start` is unnumbered and comes first. It is not a step of the loop: it runs once per user or per project, not once per change. It comes first because `agents:setup` takes effect only in an agent session started after it. `install` is in step 3, because a package is added during a change, not once.
+- The titles are plain phrases, never labels. If a title needs a legend, it is the wrong title.
+- `Before you start` has no number and comes first. It runs once per user or project, not once per change, and `agents:setup` takes effect only in an agent session started after it.
+- The map is data, not text. Every command in it must resolve against the registry, so a rename cannot leave the map stale.
 
-The map is data (`beforeYouStart` and `workflow` in `src/commandRegistry.ts`). A unit test resolves every rung, so a rename cannot leave the map naming a command that no longer exists. The on-ramp prints the same data with `npx @expo/agent-cli ` in front of it.
+Tests: `src/__tests__/commandRegistry-test.ts` pins the titles and resolves every command; `e2e/__tests__/help-test.ts` pins their order.
 
-The listing under it keeps its sections but loses its prose: one line per command, the summary in a column, and at most one short note per section. A listing is for finding the command.
+The `--help` listing keeps its sections: one line per command, the summary in a column, and at most one short note per section. A listing is for finding the command.
 
 ## The on-ramp
 
-`npx @expo/agent-cli help workflow` is one screen written for an agent that has never seen this CLI: the five steps, which commands read and which act, the five exit-code bands and what to do about each, the `--json` contract including the failure envelope, the `Try:` convention, and the one command that asks EAS anything. Every help block ends with `New here? npx @expo/agent-cli help workflow`, and so does the top-level screen. The AGENTS.md block that `agents:setup` writes names it too, because an agent reads that file before it runs any command.
+`help workflow` is one screen for an agent that has never seen this CLI: the map, which commands read and which act, the exit-code bands, the `--json` contract, and the recovery lines. Three places point at it: the top-level screen, the foot of every help block, and the AGENTS.md block that `agents:setup` writes. An agent reads AGENTS.md before it runs any command.
 
-A topic is a positional argument, not a flag. `git help workflows`, `npm help folders`: a topic is a thing you ask for. It is `workflow`, not `how-to`. A topic is named after what it is about.
-
-`help` is a command. `@expo/agent-cli help` prints the top-level screen, `@expo/agent-cli help <topic>` a topic, and `@expo/agent-cli help <command>` that command's own help, by resolving the name through `resolveCommand` and running the command with `--help`. There is no second place for a help block to come from. Topics are looked up first, so a command that one day takes a topic's word cannot take its answer.
-
-The mechanism is a list (`src/help/topics.ts`), so `help` stays one registry entry however many topics there come to be. Only `workflow` ships. The name itself is one string, `ON_RAMP_TOPIC` in `src/help/onRamp.ts`.
-
-Five spellings that are not the on-ramp are answered with the one that is, through the absent-capability table: `help:workflow`, the bare `workflow`, and `help:how-to`, `how-to`, and `--how-to`.
+A topic is a positional argument, not a flag, as in `git help workflows`. `help <name>` looks up topics first, then commands, so a command's help has one source: its own `--help`. A wrong spelling such as `help:workflow` gets a `Try:` line with the right one.
 
 ## Colors are for humans
 
