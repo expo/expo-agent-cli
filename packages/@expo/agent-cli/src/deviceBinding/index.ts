@@ -87,12 +87,7 @@ type SectionOptions = {
 export async function acquireDeviceAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  {
-    tools = defaultTools(),
-    explicit,
-    signal,
-    onBound,
-  }: AcquireDeviceOptions = {}
+  { tools = defaultTools(), explicit, signal, onBound }: AcquireDeviceOptions = {}
 ): Promise<AcquireResult> {
   signal?.throwIfAborted();
   const section =
@@ -180,8 +175,7 @@ async function acquireAndroidAsync(
     signal
   );
   // Refresh the full inventory outside the lock, at most once.
-  if (section === null)
-    return acquireAndroidAsync(projectRoot, { tools, explicit, signal }, true);
+  if (section === null) return acquireAndroidAsync(projectRoot, { tools, explicit, signal }, true);
   const { binding, action, handle } = section;
   const serial = deviceIdOf(binding.device);
   return {

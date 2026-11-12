@@ -86,8 +86,7 @@ export async function bindIosAsync(
           throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
         }
         if (bindingIdentity(read) !== bindingIdentity(before)) return null;
-        if (explicit === undefined)
-          return bindIosSectionAsync(projectRoot, { inventory, tools });
+        if (explicit === undefined) return bindIosSectionAsync(projectRoot, { inventory, tools });
         const candidates = inventory.simulators
           .filter((sim) => sim.isAvailable)
           .map((sim) => ({
