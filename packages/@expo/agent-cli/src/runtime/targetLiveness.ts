@@ -16,8 +16,9 @@
 
 import type { WebSocket } from 'ws';
 
-import { createInspectorWebSocket, type CdpTarget } from './cdpClient';
+import type { CdpTarget } from './cdpClient';
 import { debugEvent } from './events';
+import { createInspectorWebSocket } from './inspectorSocket';
 
 /** How long one handshake gets before the target is called unreachable. */
 const LIVENESS_TIMEOUT_MS = 1500;
