@@ -240,7 +240,7 @@ describe(devStopAsync, () => {
       });
     });
 
-    it(`should say whose listener the port is not, rather than leaving the contradiction`, async () => {
+    it(`should report that a surviving subprocess or another server may still hold the port`, async () => {
       vi.mocked(readDevServerLockAsync)
         .mockResolvedValueOnce(lock() as never)
         .mockResolvedValue(null as never);
@@ -248,9 +248,10 @@ describe(devStopAsync, () => {
 
       await devStopAsync(projectRoot, options({ timeoutMs: 200, json: false, followups: true }));
 
-      expect(printed()).toContain('still answering, by something else');
-      expect(printed()).toContain('::1');
-      // The rung comes first, because it is what settles which listener that is.
+      expect(printed()).toContain('Port 8081 · still answering');
+      expect(printed()).toContain(
+        'A surviving subprocess or another server may still be listening.'
+      );
       expect(printed()).toContain('npx @expo/agent-cli dev:stop --port 8081');
     });
 
