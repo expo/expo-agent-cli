@@ -104,10 +104,10 @@ describe('whether the shared observations are watched after the mechanism that s
       unwatched: 'nothing-can-prove',
     },
     {
-      name: '--method runtime',
+      name: 'expo.reloadAppAsync answered beside a skipped app: it keeps the page id',
       prepared: besideClone,
-      attempts: [attempt('runtime', true)],
-      unwatched: null,
+      attempts: [attempt('runtime', false, true)],
+      unwatched: 'nothing-can-prove',
     },
   ])('$name', async ({ prepared, attempts, mechanismProof = null, unwatched }) => {
     globalThis.fetch = (async () =>

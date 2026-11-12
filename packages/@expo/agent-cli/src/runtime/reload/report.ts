@@ -264,7 +264,7 @@ export function explainReloadFailure(
       state.rungOne?.kind === 'unprovable'
         ? `How: no app of this worktree could keep the marker that proves a Page.reload, so none was sent. Run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch.`
         : report.appsConnected > 0
-          ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${report.attempts.some((attempt) => attempt.method === 'page-reload') ? 'Page.reload' : 'the broadcast'} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
+          ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${triedMechanisms(report)} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. ${report.attempts.some((attempt) => attempt.method === 'runtime') ? 'The deliberate method left is' : `The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and`} "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
           : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
     ].join('\n');
   }
@@ -287,4 +287,17 @@ export function explainReloadFailure(
     `Why: ${report.devServerUrl}/json/list still names ${report.appsConnected === 1 ? 'the same debugger target' : `only the same ${report.appsConnected} debugger targets`} it named before the reload, and the dev server never reuses a target id — so the runtime that answers now is the one from before, not a reloaded one. Its errors and its state describe the run this reload was meant to replace.`,
     `How: run this command again with a longer --timeout, or run "${smokeBase}" and read the app after it. Do not believe "${PROGRAM_PREFIX} runtime:errors" until a reload reports a reconnected app.`,
   ].join('\n');
+}
+
+/** The in-place mechanisms this run tried, in the words of what they are. */
+function triedMechanisms(report: ReloadResultJson): string {
+  const words = {
+    'dev-server': 'the broadcast',
+    'page-reload': 'Page.reload',
+    runtime: 'expo.reloadAppAsync',
+  } as const;
+  const tried = report.attempts.flatMap((attempt) =>
+    attempt.method === 'device' ? [] : [words[attempt.method]]
+  );
+  return tried.length > 0 ? tried.join(' and ') : 'this run';
 }
