@@ -80,7 +80,7 @@ export function renderRecovery(action: RecoveryAction): {
     case 'discard-record':
       return {
         command: `${PROGRAM_PREFIX} dev:stop --discard-run ${quoteArgument(action.attempt.id)}`,
-        why: `Run ${action.attempt.id} was interrupted. Discard only its ownership record after checking its log and surviving resources. This does not stop processes or sessions.`,
+        why: `Run ${action.attempt.id} was interrupted. This discards only its ownership record. It does not stop processes or sessions.`,
         recovery,
       };
     case 'start':
