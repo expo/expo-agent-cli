@@ -1,0 +1,9 @@
+{
+  "name": "windows-lifetime-census-toolchain-audit",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "expo": "58.0.5",
+    "eas-cli": "22.4.0"
+  }
+}

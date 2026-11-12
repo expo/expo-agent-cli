@@ -34,6 +34,7 @@ static int nativeCreator(int argc, wchar_t** argv) {
   unsigned attempt = 0;
   auto spawnOne = [&](const char* phase, DWORD lifetime) {
     ++attempt; auto began = now();
+    fixtureLog(dir, logName, "create-begin", ",\"phase\":\"%s\",\"attempt\":%u", phase, attempt);
     std::wstring childId = id + L"-" + std::to_wstring(attempt);
     std::wstring line = fixtureQuote(executable) + L" --native-sleeper " + fixtureQuote(dir) + L" " + fixtureQuote(childId) + L" " + std::to_wstring(lifetime) + L" " + std::to_wstring(attempt);
     STARTUPINFOEXW si = {}; si.StartupInfo.cb = nested ? sizeof si : sizeof(STARTUPINFOW);
@@ -55,14 +56,19 @@ static int nativeCreator(int argc, wchar_t** argv) {
   spawnOne("initial", 20000); spawnOne("initial", 20000);
   DWORD creationError; auto created = creation(GetCurrentProcess(), &creationError);
   fixtureLog(dir, logName, "creator-ready", ",\"created\":\"%llu\",\"creationError\":%lu,\"nested\":%s", created, creationError, nested ? "true" : "false");
-  bool postSealDone = false; auto expiry = now() + 20000;
+  bool churnDone = false; auto expiry = now() + 20000;
   while (now() < expiry && !fixtureExists(dir, L"shutdown")) {
-    if (fixtureExists(dir, L"post-seal") && !postSealDone) {
-      postSealDone = true;
-      for (int i = 0; i < 8; ++i) spawnOne("post-seal", 500);
-      fixtureLog(dir, logName, "post-seal-done");
+    if (fixtureExists(dir, L"churn") && !churnDone) {
+      churnDone = true;
+      for (int i = 0; i < 8; ++i) { spawnOne("churn", 75); Sleep(1); }
+      for (size_t i = 2; i < held.size(); ++i) {
+        DWORD wait = WaitForSingleObject(held[i], 5000), error = wait == WAIT_FAILED ? GetLastError() : 0;
+        DWORD ce; auto identity = creation(held[i], &ce);
+        fixtureLog(dir, logName, "retired-child", ",\"childPid\":%lu,\"created\":\"%llu\",\"creationError\":%lu,\"wait\":%lu,\"error\":%lu", GetProcessId(held[i]), identity, ce, wait, error);
+      }
+      fixtureLog(dir, logName, "churn-done");
     }
-    if (fixtureExists(dir, L"churn") && !postSealDone) spawnOne("churn", 500);
+    if (fixtureExists(dir, L"race")) spawnOne("racing", 75);
     Sleep(1);
   }
   for (HANDLE process : held) CloseHandle(process);

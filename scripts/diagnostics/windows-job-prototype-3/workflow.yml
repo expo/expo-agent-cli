@@ -1,0 +1,58 @@
+name: Windows native lifetime census prototype 3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-job-probe:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      PROBE_DIRECTORY: ${{ github.workspace }}\scripts\diagnostics\windows-job-prototype-3
+      EXPO_NO_TELEMETRY: '1'
+      NO_UPDATE_NOTIFIER: '1'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Compile isolated Win32 helper with installed MSVC
+        shell: pwsh
+        run: '& "$env:PROBE_DIRECTORY\build.ps1"'
+      - name: Install exact audit-only Expo and EAS pins without package scripts
+        shell: pwsh
+        run: '& "$env:PROBE_DIRECTORY\install-tools.ps1"'
+      - name: Run actual Node controller and local tool subprocesses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node "$env:PROBE_DIRECTORY\controller.mjs" "$env:PROBE_DIRECTORY\job-helper.exe" "$env:PROBE_DIRECTORY\results" 2>&1 | Tee-Object -FilePath "$env:PROBE_DIRECTORY\results\controller.log"
+          exit $LASTEXITCODE
+      - name: Upload native observations and exact executable
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-job-prototype-3-${{ github.sha }}
+          if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            scripts/diagnostics/windows-job-prototype-3/results/
+            scripts/diagnostics/windows-job-prototype-3/job-helper.exe
+            scripts/diagnostics/windows-job-prototype-3/job-helper.cpp
+            scripts/diagnostics/windows-job-prototype-3/native-fixture.h
+            scripts/diagnostics/windows-job-prototype-3/ORIGIN-V2.sha256
+            scripts/diagnostics/windows-job-prototype-3/controller.mjs
+            scripts/diagnostics/windows-job-prototype-3/fixture.mjs
+            scripts/diagnostics/windows-job-prototype-3/build.ps1
+            scripts/diagnostics/windows-job-prototype-3/install-tools.ps1
+            scripts/diagnostics/windows-job-prototype-3/toolchain/package.json
+            scripts/diagnostics/windows-job-prototype-3/toolchain/config-project/
+            scripts/diagnostics/windows-job-prototype-3/workflow.yml
+            scripts/diagnostics/windows-job-prototype-3/README.md
+            scripts/diagnostics/windows-job-prototype-3/todo.md
+            scripts/diagnostics/windows-job-prototype-3/MANIFEST.sha256
+            .github/workflows/agent-cli.yml
