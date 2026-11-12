@@ -130,7 +130,7 @@ App kind, route URL, launcher choice, and attachment use the same concrete devic
 
 Device-facing URLs prefer a current tunnel host over the listen address [confirmed, Kudo, 2026-08-25]. The lock records `http://127.0.0.1:<port>`. That is the right answer for every command that talks to the dev server over HTTP. It is the wrong one for a link a device opens.
 
-`src/dev/advertisedUrl.ts` reads the `Waiting on <url>` line the dev server prints. That URL is the tunnel origin whenever an `AsyncWsTunnel` is running. A detached run captures it in `.expo/dev/logs/dev-detached.log`. A dev server started attached writes that line to a terminal, so it is reported as unknown rather than guessed at.
+`src/dev/advertisedUrl.ts` reads the `Waiting on <url>` line the dev server prints. That URL is the tunnel origin whenever an `AsyncWsTunnel` is running. A detached run captures it in the private log selected by the owner-published current-log pointer. The fixed `dev-detached.log` path remains a compatibility fallback. A dev server started attached writes that line to a terminal, so it is reported as unknown rather than guessed at.
 
 The log has to belong to the dev server that is up. `dev --detach` gives each candidate a private log; only its owner publishes the current-log pointer. The comparison is the log's mtime against the lock's `startedAt`. This document owns which URL `@expo/agent-cli` prints. A tunnel whose transport has died still advertises the tunnel host.
 

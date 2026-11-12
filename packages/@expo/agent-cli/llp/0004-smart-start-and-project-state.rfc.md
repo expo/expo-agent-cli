@@ -480,52 +480,23 @@ and launches the app (`@expo/cli` 58), so `/status` is the first sign that its b
 in every output mode. A reader treats a line without `phase` as `serving`. A lock answers
 `building` only for a plan with a dev-server step: a plan that serves nothing takes no lock.
 
-Transitions. One writer changes the run's lock, and one table decides each change. The
-run's state is the phase it answers, `unlocked` (it holds no lock: before the take, after
-a foreign port, or when the take failed), or `released`. Beside the phase the run keeps
-its EAS open (`none`, `running`, `returned`) and, while it holds the lock, the port the
-lock names. A cell names the phase and the EAS open after the event.
+Startup completes only after the run's own Metro is ready and its required app-open
+work has settled. A `serving` lock alone does not prove either fact. Metro exit and
+cancellation prevent a later readiness callback from opening the app. A run makes
+no busy-port retry after any open starts, whether local or on EAS. Cleanup waits for
+captured work that remains unsettled; [[0036-detached-run-ownership]] owns that contract.
 
-| state \ event      | published(p) | foreign port      | Metro reports a port | `/status` answers | EAS open starts   | EAS open returns   | Metro exits        | run ends |
-| ------------------ | ------------ | ----------------- | -------------------- | ----------------- | ----------------- | ------------------ | ------------------ | -------- |
-| unlocked, none     | p, none      | unchanged         | unchanged            | unchanged         | unlocked, running | illegal            | unchanged          | released |
-| unlocked, running  | p, running   | unchanged         | unchanged            | unchanged         | illegal           | unlocked, returned | unchanged          | released |
-| unlocked, returned | p, returned  | unchanged         | unchanged            | unchanged         | illegal           | illegal            | unchanged          | released |
-| building, none     | p, none      | unlocked, release | new port             | serving, none     | building, running | illegal            | unchanged          | released |
-| building, running  | p, running   | unlocked, release | new port             | serving, running  | illegal           | building, returned | finishing, running | released |
-| building, returned | p, returned  | unlocked, release | new port             | serving, returned | illegal           | illegal            | released           | released |
-| serving, none      | p, none      | unlocked, release | new port             | unchanged         | serving, running  | illegal            | unchanged          | released |
-| serving, running   | p, running   | unlocked, release | new port             | unchanged         | illegal           | serving, returned  | finishing, running | released |
-| serving, returned  | p, returned  | unlocked, release | new port             | unchanged         | illegal           | illegal            | released           | released |
-| finishing, running | illegal      | illegal           | new port             | unchanged         | illegal           | released           | illegal            | released |
-| released           | illegal      | unchanged         | unchanged            | unchanged         | unchanged         | unchanged          | unchanged          | released |
+The lock projects the run's progress; it is not the authority for completion or admission.
+A failed lock publication does not release a live owner. The contracts for observing and
+stopping a detached owner are in [[0036-detached-run-ownership]].
 
-`published` is the take before a build step, a dev-server spawn, or a busy-port retry,
-with the step's phase, port, spawn time and EAS platform; the lock then names that port.
-When Metro reports a port, a held lock names it, with `portReported`. `published` is legal
-whatever the EAS open does; no publish follows an open, because the run makes no
-busy-port retry after one (below). A step tells its caller a port only after the lock
-names it, so the caller's `/status` wait never answers a lock not yet taken. An EAS open starts once per run and returns only
-after it started; any other open event is illegal. When Metro exits with no EAS open
-started, the lock keeps its phase, because a busy-port retry may follow on the same lock,
-and the run releases it when it ends. Metro's exit is said after the step's port watch
-ends, so no event of a step lands after it. A `released` run ignores late reports. An
-illegal pair changes nothing and is reported on the debug event stream as
-`cli:dev_lock_illegal_transition`; the lock is never the reason a run fails. Test:
-runState-test, one case per cell.
-
-A run makes no busy-port retry after any open starts, local or on EAS. The run keeps that
-rule, because the table sees only the EAS open: a local open has no exit work, and the
-lock must not say `finishing` for it.
-
-What each reader does with the phase:
-
-| Reader                           | `building`                                                                                                                                | `serving`                                                            | `finishing`                                                                          |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `dev:stop`                       | signals the pid; the run stops before its next step                                                                                       | signals the pid, waits for it and the lock to go, or for `finishing` | no signal; reports the dev server stopped, the pid alive, and `dev:stop --eas` first |
-| `dev --detach` parent and re-run | reports the run at once, exit 0, `phase: "building"`; with `--wait-ready` waits, and at the deadline exits 22 `DEV_DETACH_STILL_BUILDING` | as §Daemonization                                                    | refuses: the run still binds a session                                               |
-| foreground `dev`                 | stops with `DEV_SERVER_RUNNING`, worded for the phase                                                                                     | same                                                                 | same                                                                                 |
-| `status`                         | next step `dev:logs`                                                                                                                      | as today                                                             | next step `dev:stop --eas`                                                           |
+| Reader                           | Building                                                                                                                                      | Serving                                                                               | Finishing                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Original `dev --detach` observer | Without `--wait-ready`, reports its own run with exit 0. With it, observes until ready or its deadline, then returns 22 while work continues. | Reports its own server under §Daemonization.                                          | Reports the lost server and pending cleanup.                |
+| Repeated `dev --detach`          | Matching startup options return 22 and observe. Changed options return 20 and stop-then-start advice.                                         | While app opening is unfinished, the startup rule applies. After startup, returns 20. | Observes cleanup without starting another run.              |
+| `dev:stop`                       | Cancels the selected owner and waits within its budget.                                                                                       | Cancels the selected owner and accounts for captured work.                            | Reports server termination separately from pending cleanup. |
+| Foreground `dev`                 | Refuses an existing lock with `DEV_SERVER_RUNNING`.                                                                                           | Same.                                                                                 | Same.                                                       |
+| `status`                         | Observes the starting run and its log.                                                                                                        | Observes unfinished app opening; otherwise follows current server/device facts.       | Observes pending cleanup.                                   |
 
 Tests: lock-test (`phase` on the wire, a line without it), stopAsync-test and
 dev-eas-test (each `dev:stop` column), dev-eas-test and dev-detach-test (the detached
@@ -652,12 +623,12 @@ the parent keeps waiting for its own server. The missing-header compatibility ru
 §A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
 reject a foreign root. Without the flag `ready` is `null`.
 
-One detached startup run per project, owned by its child before project probing. Overlapping
-detached starts refuse with exit 20 and that owner's PID/log path, even if its parent exits before a server exists. A live
-server lock is also checked before spawning and again by the elected child. A project that
-already has a server refuses with exit 20 and its PID/port, even for identical options.
-Use `status` to inspect it, or explicitly stop and restart to change options. Detached
-success reports the server this invocation started; `alreadyRunning` stays false.
+One detached startup run per project, owned by its child before project probing.
+The original observer reports only its own child; `alreadyRunning` stays false.
+A matching retry during startup observes with exit 22. An incompatible request or a
+request after startup completes refuses with exit 20. Neither path adopts the child,
+reopens an app or starts competing work. [[0036-detached-run-ownership]] defines the
+request identity, lifecycle evidence and recovery contracts.
 
 Detached candidates write separate attempt logs. Only the owning child selects the current
 log read by `dev:logs`; each observer retains its own child's log. A losing start cannot truncate
@@ -670,16 +641,16 @@ fenced as untrusted per [[0008-guardrails]]. A dev server started attached has n
 all, and the command says that.
 
 A detached run may not say "the dev server started on `<url>`" while the plan is still
-compiling. The run's lock is the one source: `building` while a step before the
+compiling. The run's lock reports `building` while a step before the
 dev-server step runs, and through an `expo run:*` dev-server step until `/status`
 answers. `dev --detach --json` carries that `phase`. The child's log names only the
-dev-server step, which decides the window after a claim when the step also opens the
-app ([[0021-honest-reports]]).
+dev-server step. Live lifecycle evidence, rather than a window inferred from that log,
+decides whether app opening is still pending ([[0036-detached-run-ownership]]).
 
 The child prints `Detached dev run, pid <n>.` as line 1 of its log, before anything
-else. Only line 1 is read, so later output cannot fake it. Status reads it to tell
-whether the run that holds the lock is the run that wrote the log
-([[0035-one-device-per-worktree]] §Preserved sessions).
+else. Only line 1 is read as that header. It is diagnostic evidence, not proof that
+startup or app opening completed. Status observes the live owner under
+[[0036-detached-run-ownership]].
 
 Tests: childVerdict-test (the pid on line 1 only) and devAsync-test (the pid line).
 
@@ -695,22 +666,22 @@ says `building`: exit 0, `phase: "building"`, the pid and the URL the dev server
 take. With `--wait-ready`, it waits while the lock says `building`. At the deadline,
 with the child alive and still `building`, it exits 22 `DEV_DETACH_STILL_BUILDING` with
 the pid and the private log file. Read that log and use `status` to observe progress.
-A repeated start refuses even while the first child builds. A child that ends in its
+A matching repeated start observes with exit 22 while the first child builds; changed startup options refuse with exit 20. A child that ends in its
 build is reported as failed, and the observer starts no replacement. The budget is
 120 s (`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
 
-A run stops on SIGINT or SIGTERM between steps. The step that was running gets the
-signal and ends, and the run starts no later step and exits 130 or 143. So a plain
-`dev:stop` stops a run in `building`, and no dev server starts after the interrupted
-build. An `eas build` that was already submitted keeps running on EAS; `eas build:cancel`
-ends it. On Windows `dev:stop` ends the process tree at once, with the same result.
+SIGINT, SIGTERM and cooperative stop request the same run cancellation. No later
+startup step begins, captured local work settles, and already-submitted EAS work is
+accounted for. Stopping its local observer does not cancel a remote EAS build;
+`eas build:cancel` is a separate action. Forced-stop recovery and platform differences
+follow [[0036-detached-run-ownership]].
 
 Exit codes. `dev --detach` exits 0 only for its own child, including a child still
-building when `--wait-ready` was not requested. A live startup owner or published
-server refuses with exit 20. Exit 22 `DEV_START_IN_PROGRESS` means the observer's
-pre-lock budget expired; the child keeps running and its private log is named in the
-error. `DEV_DETACH_STILL_BUILDING` also exits 22 when the owned child is still building
-at the deadline. Read its log and `status` to observe progress.
+building when `--wait-ready` was not requested. A matching startup retry exits 22
+with an observe action. Incompatible requests and requests after startup complete
+exit 20. `DEV_START_IN_PROGRESS` also means the original observer's pre-lock budget
+expired; the child keeps running and its private log is named in the error.
+`DEV_DETACH_STILL_BUILDING` exits 22 when that child is still building at the deadline.
 `DEV_DETACH_SESSION_PENDING` exits 22 when the owned child's EAS session is not bound
 in time. A finished open without a binding requires explicit stop/start. The child's
 specific failure is relayed when available. `dev:logs` exits 0 for a log and 1

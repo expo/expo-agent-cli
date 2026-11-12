@@ -102,11 +102,7 @@ export interface SmokeFollowUpInput {
    * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
    */
   serverStopped: boolean;
-  /**
-   * This run released the device it bound, so `navigate` refuses `NO_BOUND_DEVICE`. On Android the
-   * release removes a spawned instance's binding, so `dev --detach` refuses `not-reusable` while
-   * this worktree's dev server still runs; a parked simulator keeps its binding.
-   */
+  /** This run released its device binding, so navigation requires a new binding. */
   deviceReleased: boolean;
   /** The caller's `--port`, for a repeated run on the same dev server. */
   port: string | null;
