@@ -36,11 +36,10 @@ export function buildInstallFollowUps({
   const rebuild = reports.filter((report) => REBUILD_ACTIONS.includes(report.action));
 
   if (rebuild.length) {
-    const names = rebuild.map((report) => report.packageName).join(', ');
     followups.push({
       id: 'dev',
       command: devCommand(hostPlatform()),
-      why: `The app that is running now cannot load ${names}, which changed the native surface: this plans and makes the development build that can.`,
+      why: `${rebuildReason(rebuild)}: this plans and makes the development build that has it.`,
     });
   } else {
     // The command named here used to be `runtime:errors`, which reloads nothing — so the sentence
@@ -105,4 +104,25 @@ function reloadReason(reports: InstallImpactReport[]): string {
   return bundled.length === reports.length
     ? `${carried}: reloading the app is enough to pick it up. A project that builds its own runtime would need a new build.`
     : `${carried}, and the rest changed JavaScript only: reloading the app is enough to pick the packages up.`;
+}
+
+/**
+ * Why a build is owed, in the words of what each package's own report found. A native module adds
+ * code the running app lacks; a config plugin adds none of its own and changes the native project
+ * at prebuild. A set that has both names each kind once.
+ */
+function rebuildReason(rebuild: InstallImpactReport[]): string {
+  const of = (impact: InstallImpactReport['impact']) =>
+    rebuild.filter((report) => report.impact === impact).map((report) => report.packageName);
+  const ships = (names: string[]) => `${names.join(', ')} ${names.length === 1 ? 'ships' : 'ship'}`;
+  const native = of('native-module');
+  const plugins = of('config-plugin');
+  return [
+    native.length ? `${ships(native)} native code that the app running now does not have` : null,
+    plugins.length
+      ? `${ships(plugins)} a config plugin that changes the native project at prebuild`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(', and ');
 }
