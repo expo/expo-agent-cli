@@ -143,7 +143,7 @@ jobs:
         run: bun run test:e2e -- dev-detach-concurrency-test device-lifecycle-test
         working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E detached ownership
-        run: bun run test:e2e -- dev-detach-ownership-test dev-detach-endpoint-test dev-detach-control-test dev-detach-metadata-test dev-detach-session-test
+        run: bun run test:e2e -- dev-detach-ownership-test dev-detach-endpoint-test dev-detach-control-test dev-detach-metadata-test dev-detach-session-test dev-stop-target-test
         working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E detached recovery
         run: bun run test:e2e -- dev-detach-recovery-test status-detached-recovery-test dev-detach-long-build-test
