@@ -51,7 +51,10 @@ it('a silent ownership endpoint prevents admission regardless of its diagnostic 
   const id = randomUUID();
   const endpoint = lockAddressFor(f.root, { name: `detached-${id}` }).address;
   fs.mkdirSync(path.join(f.root, '.expo'), { recursive: true });
-  const server = net.createServer((socket) => socket.end());
+  const server = net.createServer((socket) => {
+    socket.resume();
+    socket.end();
+  });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(endpoint, resolve);
