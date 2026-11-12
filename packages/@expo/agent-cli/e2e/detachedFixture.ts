@@ -68,7 +68,7 @@ export async function setupDetachedFixtureAsync() {
   );
   const env = {
     ...detachEnv(root, port),
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --require ${JSON.stringify(preload)}`,
+    NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
     STUB_EXPO_LISTEN: '1',
     STUB_EXPO_TUNNEL_HOST: 'owned.tunnel.example',
     STUB_SIM_SESSIONS: '0',

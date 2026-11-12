@@ -135,7 +135,7 @@ export async function prepareDetachedStopAsync(
         };
       }
       if (control && options.eas && !pending) report.processStillRunning = false;
-      control?.dispose();
+      if (options.eas) control?.dispose();
       const cloud =
         options.eas && !pending && !expected && (!control || report.stopped)
           ? await stopCloudSessionsAsync(root, captured, sessions ?? [])

@@ -7,6 +7,25 @@ const log = (event, extra = {}) =>
     path.join(root, 'owned-stop.jsonl'),
     JSON.stringify({ event, pid: process.pid, ...extra }) + '\n'
   );
+const wait = (name) =>
+  new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (fs.existsSync(path.join(root, name))) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 10);
+  });
+if (root && process.env.OWNED_STOP_RELEASE_CLOSED && process.argv.includes('dev:stop')) {
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (new URL(String(url)).pathname === '/release') {
+      log('release-held');
+      await wait('release-request');
+    }
+    return fetch(url, options);
+  };
+}
 if (process.argv[2] === 'owned-leaf') {
   process.on('SIGTERM', () => {});
   log('leaf');
@@ -24,6 +43,8 @@ if (process.argv[2] === 'owned-leaf') {
       env: { ...process.env, NODE_OPTIONS: '' },
     }).unref();
     log(process.argv[2] === 'start' ? 'expo' : 'build');
+    if (process.argv[2] === 'start' && process.env.OWNED_STOP_EXPO_EXIT === '1')
+      wait('release-expo').then(() => process.exit(0));
     if (process.argv[2] === 'build') {
       while (!fs.existsSync(path.join(root, 'release-plan')))
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
@@ -61,8 +82,12 @@ if (process.argv[2] === 'owned-leaf') {
       if (
         [command, ...(args ?? [])].join(' ').includes('expo') &&
         /\bstart\b/.test((args ?? []).join(' '))
-      )
+      ) {
         selected = child;
+        log('selected', { pid: child.pid });
+        child.once('exit', () => log('selected-exit', { pid: child.pid }));
+        child.once('close', () => log('selected-close', { pid: child.pid }));
+      }
       if (selected === child && process.env.OWNED_STOP_DELAY_CLOSE === '1') {
         const emit = child.emit;
         child.emit = function (event, ...values) {
@@ -102,7 +127,16 @@ if (process.argv[2] === 'owned-leaf') {
         return { status: 1, signal: null, error: undefined };
       return spawnSync(command, args, options);
     };
-    const response = require('node:http').ServerResponse.prototype;
+    const http = require('node:http');
+    if (process.env.OWNED_STOP_RELEASE_CLOSED) {
+      wait('release-exit').then(() => log('exit-released'));
+      const close = http.Server.prototype.close;
+      http.Server.prototype.close = function (...args) {
+        this.once('close', () => log('listener-closed'));
+        return close.apply(this, args);
+      };
+    }
+    const response = http.ServerResponse.prototype;
     const flush = response.flushHeaders;
     response.flushHeaders = function () {
       if (['/stop', '/cancel'].includes(this.req.url) && [200, 202].includes(this.statusCode))
@@ -111,6 +145,8 @@ if (process.argv[2] === 'owned-leaf') {
     };
     const end = response.end;
     response.end = function (body, ...args) {
+      if (process.env.OWNED_STOP_RELEASE_CLOSED === 'closed-empty' && this.req.url === '/stop')
+        body = '';
       if (['/stop', '/cancel'].includes(this.req.url) && [200, 202].includes(this.statusCode))
         log('receipt', { body: body ?? '' });
       return end.call(this, body, ...args);

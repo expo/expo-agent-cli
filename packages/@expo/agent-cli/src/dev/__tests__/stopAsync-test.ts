@@ -264,6 +264,47 @@ describe(devStopAsync, () => {
     }
   );
 
+  it.each(['receipt', 'empty', 'wrong-id', 'denied'] as const)(
+    'requires exact completion proof after a plain release transport failure (%s)',
+    async (reply) => {
+      const ref = writeOwnedAttempt();
+      livePids.add(ref.pid);
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(
+        lock({ detachedAttemptId: ref.id, phase: 'finishing' })
+      );
+      globalThis.fetch = (async (url) => {
+        const action = new URL(String(url)).pathname;
+        if (action === '/release') {
+          if (reply === 'denied') return new Response(null, { status: 409 });
+          throw new Error('connect ECONNREFUSED');
+        }
+        return new Response(
+          action === '/stop'
+            ? reply === 'empty'
+              ? ''
+              : JSON.stringify({
+                  id: reply === 'wrong-id' ? 'other' : ref.id,
+                  drained: true,
+                  sessions: [],
+                })
+            : null,
+          {
+            headers: {
+              'x-detached-attempt': ref.id,
+              'x-detached-grant': ref.id,
+              'x-detached-stop': 'stop-run',
+            },
+          }
+        );
+      }) as typeof fetch;
+      const stopped = devStopAsync(projectRoot, options({ timeoutMs: 1500.5 }), { print: false });
+      if (reply === 'receipt') expect(await stopped).toBe(EXIT_OK);
+      else await expect(stopped).rejects.toMatchObject({ code: 'DEV_DETACHED_STOP_UNCERTAIN' });
+      expect(killed).toEqual([]);
+      expect(vol.existsSync(ref.directory)).toBe(true);
+    }
+  );
+
   describe('observations when no stop is authorized', () => {
     beforeEach(() => {
       vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
