@@ -565,18 +565,21 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
   });
 
   // `--eas` asks the service even with no binding and no dotenv: the reader named the backend.
-  it(`names how to start a session when --eas finds none`, async () => {
-    cloudProject(null);
-    mockSpawnQueue(noSessions);
+  it.each(['ios', 'android'] as const)(
+    `names how to start a %s session when --eas finds none`,
+    async (platform) => {
+      cloudProject(null);
+      mockSpawnQueue(noSessions);
 
-    const error = await resolveDeviceAsync(undefined, { cloud: 'required', projectRoot }).catch(
-      (e) => e
-    );
+      const error = await resolveDeviceAsync(platform, { cloud: 'required', projectRoot }).catch(
+        (e) => e
+      );
 
-    expect(spawn).toHaveBeenCalled();
-    expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
-    expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
-  });
+      expect(spawn).toHaveBeenCalled();
+      expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
+      expect(error.message).toContain(`npx @expo/agent-cli dev --${platform} --eas`);
+    }
+  );
 
   // A tool that did not answer has said nothing, and "start a session" would start a second one.
   it(`does not claim there is no session when the eas run could not be read`, async () => {
