@@ -899,7 +899,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       env: suiteEnv(),
     });
     expectExit(contender, 20);
-    expect(parseJson(contender).error.code).toBe('DEV_SERVER_RUNNING');
+    expect(parseJson(contender).error).toMatchObject({
+      code: 'DEV_START_BUSY',
+      data: { pid: parseJson(started).pid, logFile: parseJson(started).logFile },
+    });
 
     const file = bindingPathFor(projectRoot, CLOUD_PLATFORM, 'cloud');
     const binding = readBindingFile(file);
