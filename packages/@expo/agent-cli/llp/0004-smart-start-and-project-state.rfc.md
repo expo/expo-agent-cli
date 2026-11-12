@@ -981,6 +981,8 @@ One verdict per platform:
 
 The reason `cloud-session` has no commands. Its recommendation reads "not checked; this check reads local devices, and the app runs on EAS Simulator session <id>".
 
+**No simulator bound here.** Without `--device`, the iOS check reads only the simulator bound to this worktree (llp/0035). So iOS `no-device` means "none is bound to this worktree", not "none is booted". The recommendation never says "boot one", because a second simulator breaks the one-device rule. It names the booted simulators, when there are any: "1 iOS simulator is booted (iPhone 17 Pro), and none is bound to this worktree." It then gives the command that binds one. With none booted it says "No iOS simulator is bound to this worktree." and gives the same command. The names are in `unboundSimulators`, and a `cloud-session` row adds the same sentence. The check reads none of these simulators, because another worktree can use it.
+
 An equal hash is a match whatever produced it. Two hashes that differ are only comparable when the
 same `@expo/fingerprint` version produced both: reason tags and hashing change between versions, so
 an unchanged project hashes differently across a version bump. Two known, different versions with
@@ -1026,6 +1028,8 @@ fingerprint and every device read together, carried by `AsyncLocalStorage` so th
 register their children without the caller threading anything through. When it expires, every
 subprocess under it is killed, no further one starts, and the section reports the timeout in
 `errors.installed` while the rest of the report stands.
+
+**Who the connected apps belong to.** An app on a booted local simulator can connect to this dev server by itself. The dev-server line then splits the count: "2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (iPhone 17 Pro)". A live target is "on a local simulator not bound here" when every booted simulator with its device name is a simulator that this worktree did not bind. A target on a simulator another worktree bound is named as that worktree's. A target counts as "on this worktree's EAS session" only when the worktree records a session, binds no local simulator, and the target is not an Android app. The split costs one `simctl` list and no EAS call. A line with nothing to split stays "N apps connected". `--json` adds `localApps`, `otherWorktreeApps` and `sessionApps` to `devServer` only when the split applies.
 
 **This is a report, not a gate.** `status` exits `0` unless `--assert` turned it into one, and
 `--assert` is about impact class, not about this. A caller that wants to branch reads

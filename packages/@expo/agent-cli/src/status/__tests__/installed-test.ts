@@ -116,6 +116,24 @@ describe(withCloudSessions, () => {
     ]);
   });
 
+  it(`adds the booted simulators that are not bound here to the session row`, () => {
+    const status = withCloudSessions(
+      {
+        outcome: 'unknown',
+        platforms: [{ ...noDevice('ios'), unboundSimulators: ['iPhone 17 Pro', 'iPhone 16'] }],
+      },
+      [{ platform: 'ios', id: 'sess-1' }]
+    );
+
+    expect(status.platforms[0]).toMatchObject({
+      reason: 'cloud-session',
+      unboundSimulators: ['iPhone 17 Pro', 'iPhone 16'],
+      recommendation: expect.stringContaining(
+        '2 iOS simulators are booted (iPhone 17 Pro, iPhone 16), and none is bound to this worktree'
+      ),
+    });
+  });
+
   it(`keeps a row that read a local device`, () => {
     const stale = {
       ...noDevice('ios'),

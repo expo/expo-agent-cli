@@ -505,6 +505,8 @@ export interface InstalledPlatformStatus {
   deviceName: string | null;
   installedHash: string | null;
   currentHash: string | null;
+  /** Booted iOS simulators this worktree did not bind, when no device answered. */
+  unboundSimulators?: string[];
 }
 
 /** What the apps installed on this machine's devices say about the project. */
