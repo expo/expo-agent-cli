@@ -273,6 +273,38 @@ it.each([
   }
 );
 
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — rung 1 reads the target list again
+it('reload with ios-cloud proves its reload on the session app beside an ended session app', async () => {
+  const { root, env } = await setupBoundAsync('ios-cloud');
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [apps.ended, apps.cloud],
+    inspectorSilent: ['ended'],
+    inspectorEvaluate: () => undefined,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'runtime:reload',
+        '--dev-server-url',
+        server.url,
+        '--method',
+        'dev-server',
+        '--timeout',
+        '5s',
+        '--json',
+        '--no-followups',
+      ],
+      { reject: false, env }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ reloaded: true, appsConnected: 1 });
+  } finally {
+    await server.close();
+  }
+});
+
 const refusalCases: {
   name: string;
   binding: BindingKind;

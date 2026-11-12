@@ -1084,13 +1084,20 @@ export async function startStubDevServerAsync({
     }
   };
 
-  /** The same targets under page ids the dev server has never used, which is what a reload does. */
+  /**
+   * The same targets under page ids the dev server has never used, which is what a reload does. A
+   * silent device's page has no app behind it to register again, so it keeps its id.
+   */
   const reloadedTargets = (current: unknown[]): unknown[] => {
     const pageId = nextPageId++;
-    return current.map((target) => ({
-      ...(target as Record<string, unknown>),
-      id: `${(target as { id?: string }).id ?? 'device'}-reloaded-${pageId}`,
-    }));
+    return current.map((target) =>
+      inspectorSilent.includes(listedDevice(target) ?? '')
+        ? target
+        : {
+            ...(target as Record<string, unknown>),
+            id: `${(target as { id?: string }).id ?? 'device'}-reloaded-${pageId}`,
+          }
+    );
   };
 
   const renamedTarget = (target: unknown): unknown => reloadedTargets([target])[0];
