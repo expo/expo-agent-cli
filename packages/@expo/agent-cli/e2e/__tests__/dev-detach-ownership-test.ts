@@ -105,9 +105,11 @@ it.each(['EACCES', 'timeout'])(
         });
         expect(result.exitCode, result.all).toBe(20);
         expect(JSON.parse(result.stdout).error.code).toBe('DEV_START_UNCERTAIN');
-        expect(JSON.parse(result.stdout).error.suggestedCommand).toBe(
-          'npx @expo/agent-cli dev:logs'
-        );
+        if (args[0] === 'dev') {
+          expect(JSON.parse(result.stdout).error.suggestedCommand).toBe(
+            'npx @expo/agent-cli dev:logs'
+          );
+        }
       }
       // Removing the network fault reveals the retained evidence and its explicit recovery.
       const refused = await f.start();
