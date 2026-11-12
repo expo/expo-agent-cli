@@ -7,9 +7,22 @@
 
 import { buildSmokeFollowUps, type SmokeFollowUpInput } from '../smoke';
 import { MAX_FOLLOWUPS } from '../types';
+import { recoveryRequestFor } from '../../dev/recoveryRequest';
+import { renderRecovery, type RecoveryAction } from '../../dev/recovery';
 
 function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput {
   return {
+    recovery: {
+      kind: overrides.deviceReleased && !overrides.serverStopped ? 'stop-and-start' : 'start',
+      request: {
+        ...recoveryRequestFor(overrides.platform ?? 'ios', null, {
+          deviceBackend: overrides.cloud ? 'eas' : 'local',
+          port: overrides.port ? Number(overrides.port) : null,
+        }),
+        ...(overrides.appMismatchKind === 'expo-go-incompatible' ? { target: 'dev-build' } : {}),
+      },
+      why: null,
+    },
     outcome: 'passed',
     devServerFound: true,
     bootstrap: true,
@@ -42,6 +55,32 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
 function commands(overrides: Partial<SmokeFollowUpInput> = {}): string[] {
   return buildSmokeFollowUps(input(overrides)).map((followup) => followup.command);
 }
+
+it.each(['ios', 'android'] as const)(
+  'keeps %s recovery intent and observes unfinished work',
+  (platform) => {
+    const request = {
+      ...recoveryRequestFor(platform, null),
+      port: 8173,
+      device: "Ada's device",
+      expo: { host: 'tunnel' as const, flags: {}, opaqueTail: [] },
+    };
+    const actions: RecoveryAction[] = [
+      { kind: 'stop-and-start', request, why: null },
+      {
+        kind: 'observe',
+        phase: 'starting',
+        attempt: { id: 'pending', pid: 123, logFile: '/owner.log' },
+      },
+      { kind: 'uncertain', attempt: null, detail: 'The run did not answer.' },
+    ];
+    for (const recovery of actions) {
+      expect(commands({ platform, recovery, devServerFound: false })[0]).toBe(
+        renderRecovery(recovery).command
+      );
+    }
+  }
+);
 
 describe(buildSmokeFollowUps, () => {
   it(`never prints more than the budget`, () => {
@@ -124,7 +163,7 @@ describe(buildSmokeFollowUps, () => {
         port: '8092',
       })
     ).toEqual([
-      'npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli dev --android --port 8092 --detach --wait-ready',
       'npx @expo/agent-cli navigate / --android',
       'npx @expo/agent-cli smoke --android --port 8092',
     ]);
@@ -142,7 +181,7 @@ describe(buildSmokeFollowUps, () => {
         port: '8092',
       })
     ).toEqual([
-      'npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli dev --android --port 8092 --detach --wait-ready',
       'npx @expo/agent-cli navigate / --android',
       'npx @expo/agent-cli smoke --android --port 8092',
     ]);
@@ -172,7 +211,7 @@ describe(buildSmokeFollowUps, () => {
       })
     );
     expect(followups.map((followup) => followup.command)).toEqual([
-      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --port 8092 --detach --wait-ready',
       'npx @expo/agent-cli navigate / --android',
       'npx @expo/agent-cli smoke --android --port 8092',
     ]);
@@ -181,18 +220,18 @@ describe(buildSmokeFollowUps, () => {
 
   it(`leads a passed run that released its device beside a reused dev server with the device again`, () => {
     expect(commands({ deviceReleased: true, port: '8091' })).toEqual([
-      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --detach --wait-ready --port 8091',
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --port 8091 --detach --wait-ready',
       'npx @expo/agent-cli typecheck',
       'open /project/.expo/agent-cli/smoke.png',
     ]);
     expect(commands({ platform: 'android', deviceReleased: true, port: '8091' })[0]).toBe(
-      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --detach --wait-ready --port 8091'
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --port 8091 --detach --wait-ready'
     );
   });
 
   it(`leads a failed run that released its device beside a reused dev server with the device again`, () => {
     expect(commands({ failing: 1, outcome: 'failed', deviceReleased: true, port: '8091' })[0]).toBe(
-      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --detach --wait-ready --port 8091'
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --port 8091 --detach --wait-ready'
     );
   });
 
@@ -392,7 +431,9 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   };
 
   it(`leads with the build that can run the project`, () => {
-    expect(commands(mismatched)[0]).toBe('npx @expo/agent-cli dev --ios');
+    expect(commands(mismatched)[0]).toBe(
+      'npx @expo/agent-cli dev --ios --dev-client --detach --wait-ready'
+    );
   });
 
   // The rule itself: never offer a re-run of this gate for a state a re-run cannot change.
@@ -403,7 +444,7 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   // And it keeps the platform, like every other follow-up here (F58).
   it(`names the platform the run was about`, () => {
     expect(commands({ ...mismatched, platform: 'android' })[0]).toBe(
-      'npx @expo/agent-cli dev --android'
+      'npx @expo/agent-cli dev --android --dev-client --detach --wait-ready'
     );
   });
 });

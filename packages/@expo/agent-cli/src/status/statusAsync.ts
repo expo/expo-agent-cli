@@ -11,6 +11,7 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { observeDetachedRunAsync } from '../dev/detachedOwnership';
+import { decideRecovery, renderRecovery } from '../dev/recovery';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { judgeEndedRunAsync } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
@@ -446,6 +447,16 @@ export async function collectStatusReportAsync(
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
+    const recovery = decideRecovery({ ownership, lock: ownLock, needsStart: false });
+    if (recovery) {
+      report.next = {
+        ...renderRecovery(recovery),
+        rule: 'project-unreadable',
+        target: 'none',
+        steps: [],
+        buildLocation: null,
+      };
+    }
   }
 
   if ('value' in skills) {

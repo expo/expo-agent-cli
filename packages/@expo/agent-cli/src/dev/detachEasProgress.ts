@@ -7,15 +7,16 @@ import { live, readCloudBindings } from '../deviceBinding/cloud';
 import { isExpired } from '../deviceBinding/lease';
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import * as Log from '../log';
-import { rerunDevCommand } from '../plan/rerun';
 import type { NativePlatform } from '../plan/types';
-import { PROGRAM_PREFIX } from '../programName';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { parseDetachedChildPid } from './childVerdict';
 import { detachedLogPath, readDetachedLogFileSync } from './logFile';
 import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { isProcessAlive } from './processLiveness';
+
+import { readRecoveryFactsAsync } from './readRecovery';
+import { decideRecovery, renderRecovery } from './recovery';
 
 const WHOLE_LOG = Number.MAX_SAFE_INTEGER;
 
@@ -97,7 +98,6 @@ export async function waitForEasSessionAsync(
     since,
     knownId,
     hasExited,
-    callerArgv,
     timeoutMs = env.AGENT_CLI_EAS_SESSION_WAIT_MS,
   }: {
     platform: NativePlatform;
@@ -128,7 +128,6 @@ export async function waitForEasSessionAsync(
   Log.progress(
     `Waiting up to ${Math.round(timeoutMs / 1000)} s for the EAS Simulator session of the detached run (pid ${lock.pid}). A start takes a few minutes.`
   );
-  let openReturned = false;
   for (;;) {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.max(0, Math.min(EAS_SESSION_POLL_MS, deadline - Date.now())))
@@ -141,28 +140,19 @@ export async function waitForEasSessionAsync(
       return id;
     }
     if (hasExited()) return null;
-    if (openFinished) {
-      openReturned = true;
-      break;
-    }
+    if (openFinished) break;
     if (Date.now() >= deadline) break;
   }
 
-  const rerun = rerunDevCommand(platform, callerArgv);
+  const facts = await readRecoveryFactsAsync(projectRoot, { platform, deviceBackend: 'eas' });
+  const recovery = renderRecovery(decideRecovery({ ...facts, needsStart: true }));
   const waitedS = Math.round((Date.now() - waitStarted) / 1000);
   const error = new CommandError(
     'DEV_DETACH_SESSION_PENDING',
     [
       `The dev server is up on ${lock.url}${tunnelUrl ? ` (tunnel ${tunnelUrl})` : ''}, and its EAS Simulator session is not bound after ${waitedS} s.`,
-      ...(openReturned
-        ? [
-            `Why: the open of the detached run (pid ${lock.pid}) already returned without a session binding, so that run binds none later.`,
-            `How: inspect "${PROGRAM_PREFIX} dev:logs", then run "${PROGRAM_PREFIX} dev:stop" followed by "${rerun}" to bind the session. Plain dev:stop preserves existing sessions; "${PROGRAM_PREFIX} dev:stop --eas" ends them.`,
-          ]
-        : [
-            `Why: the detached run (pid ${lock.pid}) starts the session after the dev server, and a start takes a few minutes. The run keeps going and binds the session to this worktree when it is up. The session bills from its start.`,
-            `How: read "${PROGRAM_PREFIX} dev:logs" and check "${PROGRAM_PREFIX} status" for progress. The original run continues. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
-          ]),
+      `Why: ${recovery.why ?? 'There is no usable session binding for this platform.'}`,
+      `How: run "${recovery.command}".`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
@@ -172,9 +162,8 @@ export async function waitForEasSessionAsync(
     tunnelUrl,
     platform,
     waitedMs: Date.now() - waitStarted,
+    recovery: recovery.recovery,
   };
-  error.suggestedCommand = openReturned
-    ? `${PROGRAM_PREFIX} dev:stop`
-    : `${PROGRAM_PREFIX} dev:logs`;
+  error.suggestedCommand = recovery.command;
   throw error;
 }

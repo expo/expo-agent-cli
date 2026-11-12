@@ -81,11 +81,31 @@ it.each(
       const next = JSON.parse(status.stdout).next;
       expect(next.command, next.why).toMatch(detached ? /dev:logs/ : /status/);
       expect(next.command).not.toContain('dev:stop');
+      const packageFile = path.join(root, 'package.json');
+      const packageJson = fs.readFileSync(packageFile, 'utf8');
+      let unreadable;
+      try {
+        fs.writeFileSync(packageFile, '{');
+        unreadable = await run(['status', '--json']);
+      } finally {
+        fs.writeFileSync(packageFile, packageJson);
+      }
+      expect(JSON.parse(unreadable.stdout).next.recovery.kind, unreadable.all).toBe('observe');
       const navigation = await run(['navigate', '/', `--${platform}`, '--eas', '--json']);
       expect(navigation.exitCode, navigation.all).toBe(20);
       const advice = JSON.parse(navigation.stdout).error.suggestedCommand as string;
       expect(advice).toMatch(detached ? /dev:logs/ : /status/);
       expect(advice).not.toContain('dev:stop');
+      const smoke = await run([
+        'smoke',
+        `--${platform}`,
+        '--eas',
+        '--no-start',
+        '--timeout',
+        '1s',
+        '--json',
+      ]);
+      expect(JSON.parse(smoke.stdout).followups[0].command, smoke.all).toBe(advice);
       const observed = await runRecoveryCommand(root, advice, env);
       expect(observed.exitCode, observed.all).toBe(0);
       expect(fs.existsSync(released)).toBe(false);

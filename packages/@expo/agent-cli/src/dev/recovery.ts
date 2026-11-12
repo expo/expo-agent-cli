@@ -4,6 +4,7 @@ import { quoteArgument } from '../utils/consent';
 import type { AttemptReference, DetachedObservation, RunProgress } from './devRunTypes';
 import { recoveryStartCommand } from './recoveryRequest';
 import type { StartupRequest } from './startupRequest';
+import type { StartRefusal } from './detachedStart';
 
 export type RecoveryAction =
   | { kind: 'observe'; phase: RunProgress['kind']; attempt: AttemptReference | null }
@@ -16,13 +17,32 @@ export interface RecoveryMetadata {
   attempt?: AttemptReference;
 }
 
-interface RecoveryFacts {
+/** Admission already classified the conflict; preserve its contender request when rendering it. */
+export function renderStartRefusal(refusal: StartRefusal) {
+  switch (refusal.kind) {
+    case 'observe':
+      return renderRecovery({ kind: 'observe', phase: 'starting', attempt: refusal.attempt });
+    case 'observe-stop':
+      return renderRecovery({ kind: 'observe', phase: 'unknown', attempt: refusal.attempt });
+    case 'discard':
+      return renderRecovery({ kind: 'discard-record', attempt: refusal.attempt });
+    case 'uncertain':
+      return renderRecovery(refusal);
+    case 'stop-and-start':
+      return refusal.request
+        ? renderRecovery({ kind: 'stop-and-start', request: refusal.request, why: null })
+        : renderRecovery({ kind: 'observe', phase: 'unknown', attempt: refusal.attempt });
+  }
+}
+
+type RecoveryFacts = {
   ownership?: DetachedObservation;
   lock: DevServerLockInfo | null;
-  request: StartupRequest;
-  needsStart: boolean;
   why?: string | null;
-}
+} & (
+  | { needsStart: true; request: StartupRequest }
+  | { needsStart: false; request?: StartupRequest }
+);
 
 export function decideRecovery(facts: RecoveryFacts & { needsStart: true }): RecoveryAction;
 export function decideRecovery(facts: RecoveryFacts): RecoveryAction | null;

@@ -8,6 +8,8 @@
 // and each is the same function the command that owns the question already calls.
 
 import { event } from '../events';
+import { readRecoveryFactsAsync } from '../dev/readRecovery';
+import { decideRecovery } from '../dev/recovery';
 import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
@@ -72,7 +74,9 @@ export async function smokeAsync(projectRoot: string, options: SmokeOptions): Pr
     phases: run.phases.map((phase) => ({ id: phase.id, status: phase.status, ms: phase.ms })),
   });
 
-  const followups = followUpsEnabled(options.followups) ? buildFollowUps(run, options) : [];
+  const followups = followUpsEnabled(options.followups)
+    ? await buildFollowUpsAsync(projectRoot, run, options)
+    : [];
 
   if (options.json) {
     Log.log(JSON.stringify(smokeResultToJson(run, options, followups), null, 2));
@@ -88,8 +92,19 @@ export async function smokeAsync(projectRoot: string, options: SmokeOptions): Pr
 }
 
 /** The follow-ups of one run, from the facts it established. */
-function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
+async function buildFollowUpsAsync(projectRoot: string, run: SmokeRun, options: SmokeOptions) {
+  const facts = await readRecoveryFactsAsync(projectRoot, {
+    platform: options.platform,
+    deviceBackend: run.cloudRoute === 'required' ? 'eas' : 'local',
+  });
+  const port = startPortArgs(options.devServerUrl)[1];
+  facts.request = {
+    ...facts.request,
+    ...(port ? { port: Number(port) } : {}),
+    ...(run.appMismatchKind === 'expo-go-incompatible' ? { target: 'dev-build' } : {}),
+  };
   return buildSmokeFollowUps({
+    recovery: decideRecovery({ ...facts, needsStart: true }),
     outcome: run.outcome,
     devServerFound: run.discovery?.reachable ?? false,
     bootstrap: options.bootstrap,

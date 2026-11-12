@@ -7,10 +7,12 @@
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
 import { PROGRAM_PREFIX } from '../programName';
+import { renderRecovery, type RecoveryAction } from '../dev/recovery';
 import type { SmokeAppMismatchKind } from '../smoke/contract';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface SmokeFollowUpInput {
+  recovery: RecoveryAction;
   outcome: 'passed' | 'failed' | 'inconclusive';
   /** Whether a dev server answered at all. */
   devServerFound: boolean;
@@ -112,10 +114,11 @@ export interface SmokeFollowUpInput {
 
 // oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
+  const recovery = renderRecovery(input.recovery);
+  if (input.recovery.kind !== 'start' && input.recovery.kind !== 'stop-and-start') {
+    return [{ id: 'observe-run', command: recovery.command, why: recovery.why! }];
+  }
   const sameRoute = input.route == null ? '' : ` --route ${input.route}`;
-  // Every command that takes `--eas` keeps it, so a suggested run is the run the caller asked
-  // for. The commands that do not take it — `dev --detach`, `typecheck`, `status`,
-  // `runtime:errors` — are unaffected: none of them is about a device.
   const onCloud = input.cloud ? ' --eas' : '';
   // The flag first, so a reader sees what the command is about before what it opens.
   const onPort = input.port == null ? '' : ` --port ${input.port}`;
@@ -183,7 +186,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     return capFollowUps([
       {
         id: 'dev-build',
-        command: `${PROGRAM_PREFIX} dev --${input.platform}`,
+        command: recovery.command,
         why: 'This project needs a development build to run at all, and that is the command that makes one and starts the dev server for it. Expo Go cannot load its native code, so no reading taken through Expo Go is about this project.',
       },
       {
@@ -220,7 +223,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         : []),
       {
         id: 'dev-detach',
-        command: `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready`,
+        command: recovery.command,
         why: input.bootstrap
           ? 'This run tried to start a dev server and could not, so starting one on its own reports what stops it — and leaves it running rather than taking it away again.'
           : 'Nothing answered as a dev server, and --no-start made this run attach-only. That starts one and gives the terminal back.',
@@ -266,14 +269,13 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
-  const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`;
   const deviceBack: FollowUp[] =
     !input.deviceReleased || input.serverStopped || input.cloud
       ? []
       : [
           {
             id: 'dev-restart',
-            command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
+            command: recovery.command,
             why: 'This run released its device, and the dev server it found still runs. Stop that server before starting a run that binds the device again.',
           },
         ];
@@ -287,7 +289,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         ? [
             {
               id: 'dev-detach',
-              command: start,
+              command: recovery.command,
               why: input.deviceReleased
                 ? 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.'
                 : 'This run stopped the dev server it started, so no dev server is left to open the app on. This starts it again and keeps it running.',
