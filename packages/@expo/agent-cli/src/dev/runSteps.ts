@@ -18,23 +18,27 @@ export async function withRunAsync<T>(
   work: (lock: RunLock, steps: RunSteps) => Promise<T>,
   run: DevRun
 ): Promise<T> {
-  return withRunLockAsync(projectRoot, async (lock) => {
-    run.signal.throwIfAborted();
-    const port = plan.devServerPort?.port;
-    if (port != null && plan.steps.findIndex(isDevServerStep) > 0) {
-      await publishPlannedPortAsync(lock, projectRoot, port, easPlatform);
-    }
-    run.signal.throwIfAborted();
-    return work(lock, {
-      run,
-      stepAsync: (step) => {
-        run.signal.throwIfAborted();
-        return step(run.signal);
-      },
-      get interrupted() {
-        return run.signal.aborted;
-      },
-      assertNotInterrupted: () => run.signal.throwIfAborted(),
-    });
-  });
+  return withRunLockAsync(
+    projectRoot,
+    async (lock) => {
+      run.signal.throwIfAborted();
+      const port = plan.devServerPort?.port;
+      if (port != null && plan.steps.findIndex(isDevServerStep) > 0) {
+        await publishPlannedPortAsync(lock, projectRoot, port, easPlatform);
+      }
+      run.signal.throwIfAborted();
+      return work(lock, {
+        run,
+        stepAsync: (step) => {
+          run.signal.throwIfAborted();
+          return step(run.signal);
+        },
+        get interrupted() {
+          return run.signal.aborted;
+        },
+        assertNotInterrupted: () => run.signal.throwIfAborted(),
+      });
+    },
+    () => run.easOpenEvidence
+  );
 }

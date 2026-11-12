@@ -31,7 +31,7 @@ import { findPortListenerAsync, findPortListenersAsync } from '../portListener';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
-import { easRunLifecycle } from '../openAppEas';
+import { easOpenWork } from '../openAppEas';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { Log } from '../../log';
@@ -53,7 +53,7 @@ vi.mock('../portCollision', async (importOriginal) => {
 });
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openAppEas', () => ({
-  easRunLifecycle: vi.fn(),
+  easOpenWork: vi.fn(),
 }));
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));
 vi.mock('../../plan/events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -268,6 +268,7 @@ describe(devAsync, () => {
         easPlatform: null,
         lock: expect.any(RunLock),
         phase: 'building',
+        onDevServer: expect.any(Function),
       });
     });
 
@@ -796,14 +797,13 @@ describe(devAsync, () => {
 // child carry is not observable through the stub `eas`.
 describe('EAS session lifecycle of the dev-server step', () => {
   const lifecycle = {
-    platform: 'ios' as const,
-    open: vi.fn(),
+    kind: 'eas' as const,
+    runAsync: vi.fn(async () => ({ kind: 'settled' as const })),
     finishAsync: vi.fn(),
-    finished: new Promise<void>(() => {}),
   };
   beforeEach(() => {
     mockProjectState();
-    vi.mocked(easRunLifecycle).mockImplementation((_root, { platform }) => ({
+    vi.mocked(easOpenWork).mockImplementation((_root, { platform }) => ({
       ...lifecycle,
       platform,
     }));
@@ -824,7 +824,7 @@ describe('EAS session lifecycle of the dev-server step', () => {
 
     await devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']));
 
-    expect(easRunLifecycle).toHaveBeenCalledWith(
+    expect(easOpenWork).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({ platform: 'ios', keepSession })
     );

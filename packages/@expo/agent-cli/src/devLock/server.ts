@@ -32,11 +32,11 @@ export type DevServerLockResult =
  * a dev server and a lock it could not take must not change that.
  */
 export async function acquireDevServerLockAsync(
-  info: DevServerLockInfo
+  info: DevServerLockInfo,
+  project?: (info: DevServerLockInfo) => DevServerLockInfo
 ): Promise<DevServerLockResult> {
   const { kind, address } = lockAddressFor(info.projectRoot);
-  // One line, then the end of the connection: a reader needs no protocol beyond "read until
-  // close". Serialized once per info, so every answer between two updates is byte-identical.
+  let current = info;
   let answer = `${JSON.stringify(info)}\n`;
 
   if (kind === 'unix') {
@@ -55,7 +55,7 @@ export async function acquireDevServerLockAsync(
     // A reader that hangs up mid-write is normal (it may have timed out), and must not throw
     // inside the dev server's process.
     socket.on('error', () => {});
-    socket.end(answer);
+    socket.end(project ? `${JSON.stringify(project(current))}\n` : answer);
   });
   // The lock never keeps the CLI alive on its own: it lives exactly as long as the dev server the
   // caller is already waiting on.
@@ -108,7 +108,6 @@ export async function acquireDevServerLockAsync(
     debugEvent('dev_lock_server_error', { address, error: debugEvent.error(serverError) });
   });
 
-  let current = info;
   const update = (next: DevServerLockInfo) => {
     current = next;
     answer = `${JSON.stringify(next)}\n`;

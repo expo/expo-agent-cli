@@ -40,20 +40,16 @@ describe(RunLock, () => {
     const projectRoot = makeTempProject();
     await withRunLockAsync(projectRoot, async (lock) => {
       await lock.publishAsync({ ...published, phase: 'serving' });
-      lock.apply({ type: 'eas-open-started' });
-      lock.apply({ type: 'server-exited' });
+      lock.apply({ type: 'run-ended' });
 
       await lock.publishAsync({ ...published, phase: 'building', port: 8322 });
 
-      expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
-        phase: 'finishing',
-        port: 8321,
-      });
+      expect(await readDevServerLockAsync(projectRoot)).toBeNull();
     });
     expect(await loggedEventsAsync()).toContainEqual(
       expect.objectContaining({
         _e: 'cli:dev_lock_illegal_transition',
-        phase: 'finishing',
+        phase: 'released',
         event: 'published',
       })
     );

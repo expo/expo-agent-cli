@@ -4,9 +4,6 @@
 import type { ResolvedDevServerPort } from './port';
 import type { DevServerLockInfo } from './types';
 
-/** The run's EAS open: not started, running, or returned (bound or failed). */
-export type EasOpen = 'none' | 'running' | 'returned';
-
 /** Where the lock points: the last `published` port, or the port Metro reported since. */
 export interface LockPort {
   port: number;
@@ -16,16 +13,11 @@ export interface LockPort {
 }
 
 /** A state in which the run holds the lock; its phase is the one the lock answers. */
-export type HeldRunState = LockPort &
-  (
-    | { phase: 'building' | 'serving'; easOpen: EasOpen }
-    /** Metro exited while the EAS open runs. */
-    | { phase: 'finishing'; easOpen: 'running' }
-  );
+export type HeldRunState = LockPort & { phase: 'building' | 'serving' };
 
 export type RunState =
   /** The run holds no lock: before the take, after a foreign port, or when the take failed. */
-  | { phase: 'unlocked'; easOpen: EasOpen }
+  | { phase: 'unlocked' }
   | HeldRunState
   /** The run ended and let go of its lock. Nothing moves it again. */
   | { phase: 'released' };
@@ -39,10 +31,6 @@ export type RunEvent =
   | { type: 'port-reported'; port: number }
   /** `/status` answers for this project while the step runs. */
   | { type: 'status-answered' }
-  | { type: 'eas-open-started' }
-  | { type: 'eas-open-returned' }
-  /** The dev-server step's child exited, and its port watch ended. */
-  | { type: 'server-exited' }
   | { type: 'run-ended' };
 
 export function isHeld(state: RunState): state is HeldRunState {
@@ -52,31 +40,17 @@ export function isHeld(state: RunState): state is HeldRunState {
 /** The next state, or null for an illegal pair: one that no caller should produce. */
 export function nextRunState(state: RunState, event: RunEvent): RunState | null {
   if (state.phase === 'released') return event.type === 'published' ? null : state;
-  const finishing = state.phase === 'finishing';
-  const { easOpen } = state;
   switch (event.type) {
     case 'published': {
-      if (finishing) return null;
       const { type: _, ...published } = event;
-      return { ...published, easOpen };
+      return published;
     }
     case 'foreign-port':
-      return finishing ? null : { phase: 'unlocked', easOpen };
+      return { phase: 'unlocked' };
     case 'port-reported':
       return isHeld(state) ? { ...state, port: event.port, source: 'reported' } : state;
     case 'status-answered':
       return state.phase === 'building' ? { ...state, phase: 'serving' } : state;
-    case 'eas-open-started':
-      return easOpen !== 'none' || finishing ? null : { ...state, easOpen: 'running' };
-    case 'eas-open-returned':
-      if (easOpen !== 'running') return null;
-      return finishing ? { phase: 'released' } : { ...state, easOpen: 'returned' };
-    case 'server-exited':
-      if (finishing) return null;
-      if (state.phase === 'unlocked' || easOpen === 'none') return state;
-      return easOpen === 'running'
-        ? { ...state, phase: 'finishing', easOpen }
-        : { phase: 'released' };
     case 'run-ended':
       return { phase: 'released' };
   }

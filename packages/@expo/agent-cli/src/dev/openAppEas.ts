@@ -40,6 +40,7 @@ import type { CommandError } from '../utils/errors';
 import { firstLine } from '../utils/text';
 import { parseCachedBuild } from '../impact/buildCache';
 import { event } from './events';
+import type { OpenWork } from './devRunTypes';
 import {
   EAS_TUNNEL_WAIT_MS,
   ensureEasSessionAsync,
@@ -228,64 +229,43 @@ export function openAppOnEasFailureLine(platform: NativePlatform, reason: string
   return `The app was not opened on an EAS Simulator session: ${reason}. The dev server is up; once a session is, "${PROGRAM_PREFIX} navigate / --eas --${platform}" opens the app on it.`;
 }
 
-/** The EAS session work of one dev-server step that opens the app. */
-export interface EasRunLifecycle {
-  /** The EAS platform the dev-server lock records for this run. */
-  platform: NativePlatform;
-  /** Opens the app alongside Metro. A failed open never stops Metro. */
-  open(run: { devServerUrl: string; stillWanted: () => boolean; buildId: string | null }): void;
-  /** Resolves when the open returns, bound or failed. Never resolves without an open. */
-  finished: Promise<void>;
-  /**
-   * Waits for the open, so an in-flight session start cannot escape cleanup. Then stops and
-   * releases a session this run started, unless the run keeps it.
-   */
-  finishAsync(): Promise<void>;
-}
-
-/**
- * The EAS session lifecycle of one dev-server step. A foreground `dev` stops the session it started
- * when Metro exits; a detached child keeps it for the worktree. The signal handlers stay installed
- * until {@link EasRunLifecycle.finishAsync} returns.
- */
 // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-export function easRunLifecycle(
+export function easOpenWork(
   projectRoot: string,
-  {
-    platform,
-    expoGo,
-    fingerprintCache,
-    keepSession,
-  }: {
+  options: {
     platform: NativePlatform;
     expoGo: boolean;
     fingerprintCache?: boolean;
     keepSession: boolean;
+    buildId: string | null;
   }
-): EasRunLifecycle {
-  let task: Promise<OpenAppOnEasReport | null> | undefined;
-  let markFinished!: () => void;
-  const finished = new Promise<void>((resolve) => (markFinished = resolve));
+): OpenWork {
+  let session: OpenAppOnEasReport | null = null;
   return {
-    platform,
-    finished,
-    open({ devServerUrl, stillWanted, buildId }) {
-      task = openAppOnEasForRunAsync(projectRoot, {
-        platform,
-        expoGo,
-        devServerUrl,
-        buildId,
-        fingerprintCache,
+    kind: 'eas',
+    async runAsync({ metro, stillWanted }) {
+      session = await openAppOnEasForRunAsync(projectRoot, {
+        ...options,
+        devServerUrl: metro.url,
         stillWanted,
-        keepSession,
       });
-      void task.finally(markFinished);
+      if (!session)
+        return { kind: 'unaccounted', detail: 'The EAS open failed without a receipt.' };
+      return {
+        kind: 'settled',
+        ...(session.sessionId
+          ? {
+              session: {
+                id: session.sessionId,
+                platform: options.platform,
+                origin: session.started ? 'started' : 'reused',
+              },
+            }
+          : {}),
+      };
     },
     async finishAsync() {
-      if (!task) return;
-      Log.progress('Finishing EAS session work before exiting.');
-      const session = await task;
-      if (keepSession || !session?.started || !session.sessionId) return;
+      if (options.keepSession || !session?.started || !session.sessionId) return;
       const release = await releaseStartedSessionAsync(projectRoot, session.sessionId, 'dev');
       if (release.outcome === 'stopped')
         Log.progress(`Stopped EAS Simulator session ${session.sessionId}, created by this run.`);

@@ -19,7 +19,7 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import {
   buildLatestSimulatorBuildArgs,
-  easRunLifecycle,
+  easOpenWork,
   findLatestSimulatorBuildIdAsync,
   openAppOnEasAsync,
   otherPlatformSessionAsync,
@@ -577,28 +577,21 @@ describe('the session half on its own', () => {
   });
 });
 
-// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-// `finished` feeds `easOpenFinished` on the dev lock, which a detached `--wait-ready` re-run reads;
-// a foreground run waits for the open itself, so no e2e run hangs when `finished` never settles.
-describe(easRunLifecycle, () => {
-  it.each([
-    { name: 'an open that bound a session', open: true, failed: false },
-    { name: 'an open that failed', open: true, failed: true },
-    { name: 'no open', open: false, failed: false },
-  ])(`settles finished only after an open: $name`, async ({ open, failed }) => {
+describe(easOpenWork, () => {
+  it.each([false, true])(`accounts for a completed open (failed: %s)`, async (failed) => {
     if (failed) vi.mocked(resolveEasCli).mockReturnValue(null);
-    const eas = easRunLifecycle(projectRoot, { platform: 'ios', expoGo: true, keepSession: true });
-    let settled = false;
-    void eas.finished.then(() => (settled = true));
-
-    if (open) eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
-    await eas.finishAsync();
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(settled).toBe(open);
+    const eas = easOpenWork(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      keepSession: true,
+      buildId: null,
+    });
+    const result = await eas.runAsync({
+      metro: { url: DEV_SERVER, port: 8081 },
+      stillWanted: () => true,
+    });
+    expect(result.kind).toBe('settled');
     expect(vi.mocked(Log.warn).mock.calls.length).toBe(failed ? 1 : 0);
-    const progress = vi.mocked(Log.progress).mock.calls.map(([line]) => String(line));
-    expect(progress.some((line) => line.startsWith('Finishing EAS session work'))).toBe(open);
   });
 });
 

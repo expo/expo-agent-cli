@@ -443,7 +443,7 @@ describe(runDevServerAsync, () => {
       expect(onDevServer).not.toHaveBeenCalled();
       onResolved?.({ port: 8082, source: 'default' });
       onResolved?.({ port: 8082, source: 'reported' });
-      expect(onDevServer).toHaveBeenCalledTimes(1);
+      expect(onDevServer).not.toHaveBeenCalled();
     });
 
     // The lock tells `arg` at the spawn and `log` when Metro reports: one open, not two.
@@ -467,9 +467,8 @@ describe(runDevServerAsync, () => {
       await promise;
     });
 
-    // The `/status` poll is still pending when Metro logs its port: the log opens, and the poll
-    // that answers afterwards opens nothing.
-    it(`should open once through the log while the /status poll is pending`, async () => {
+    // A port report names the candidate; a positive answer proves readiness.
+    it(`should wait for /status after Metro reports its port`, async () => {
       const onDevServer = vi.fn();
       const end = mockLongRunningStart();
       vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
@@ -485,8 +484,7 @@ describe(runDevServerAsync, () => {
       expect(onDevServer).not.toHaveBeenCalled();
 
       onResolved?.({ port: 8082, source: 'reported' });
-      expect(onDevServer).toHaveBeenCalledTimes(1);
-      expect(onDevServer).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8082', port: 8082 });
+      expect(onDevServer).not.toHaveBeenCalled();
 
       vi.mocked(probeBundlerAsync).mockResolvedValue(ours);
       const probes = vi.mocked(probeBundlerAsync).mock.calls.length;

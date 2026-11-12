@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the one writer of a run's lock.
 
 import * as Log from '../log';
+import type { EasOpenEvidence } from '../dev/devRunTypes';
 import { PROGRAM_NAME } from '../programName';
 import { lockAddressOrEmpty } from './address';
 import { debugEvent, event } from './events';
@@ -20,10 +21,13 @@ type Published = Extract<RunEvent, { type: 'published' }>;
  */
 export class RunLock {
   readonly #projectRoot: string;
-  #state: RunState = { phase: 'unlocked', easOpen: 'none' };
+  #state: RunState = { phase: 'unlocked' };
   #handle: DevServerLockHandle | null = null;
 
-  constructor(projectRoot: string) {
+  constructor(
+    projectRoot: string,
+    private readonly easOpen?: () => EasOpenEvidence
+  ) {
     this.#projectRoot = projectRoot;
   }
 
@@ -38,13 +42,13 @@ export class RunLock {
     const handle = await acquireAsync(
       this.#projectRoot,
       lockInfo(this.#projectRoot, next),
-      published.source
+      published.source,
+      (info) => projectOpen(info, this.easOpen?.())
     );
     if (!handle) return;
     // The run ended while the take ran: the lock has nothing left to answer for.
     if (this.#state.phase === 'released') return handle.release();
-    // Again from the state now: an EAS open can start while the take runs. A state the publish
-    // no longer holds the lock in keeps no socket.
+    // A run that ended while the take ran keeps no socket.
     const now = nextRunState(this.#state, published);
     if (!now || !isHeld(now)) {
       handle.release();
@@ -102,9 +106,10 @@ export class RunLock {
  */
 export async function withRunLockAsync<T>(
   projectRoot: string,
-  run: (lock: RunLock) => Promise<T>
+  run: (lock: RunLock) => Promise<T>,
+  easOpen?: () => EasOpenEvidence
 ): Promise<T> {
-  const lock = new RunLock(projectRoot);
+  const lock = new RunLock(projectRoot, easOpen);
   try {
     return await run(lock);
   } finally {
@@ -122,7 +127,7 @@ function lockInfo(projectRoot: string, state: HeldRunState): DevServerLockInfo {
     startedAt: new Date(state.since).toISOString(),
     projectRoot,
     easPlatform: state.easPlatform,
-    easOpenFinished: state.easOpen === 'returned',
+    easOpenFinished: false,
     phase: state.phase,
   };
 }
@@ -131,11 +136,12 @@ function lockInfo(projectRoot: string, state: HeldRunState): DevServerLockInfo {
 async function acquireAsync(
   projectRoot: string,
   info: DevServerLockInfo,
-  source: Published['source']
+  source: Published['source'],
+  project: (info: DevServerLockInfo) => DevServerLockInfo
 ): Promise<DevServerLockHandle | null> {
   const address = lockAddressOrEmpty(projectRoot);
   try {
-    const result = await acquireDevServerLockAsync(info);
+    const result = await acquireDevServerLockAsync(info, project);
     switch (result.status) {
       case 'acquired': {
         if (result.lock.replacedStale) {
@@ -183,4 +189,16 @@ async function acquireAsync(
     });
     return null;
   }
+}
+
+function projectOpen(
+  info: DevServerLockInfo,
+  open: EasOpenEvidence | undefined
+): DevServerLockInfo {
+  if (!info.easPlatform || !open) return info;
+  return {
+    ...info,
+    easOpenFinished: open.kind === 'settled' && open.accounted,
+    phase: open.kind === 'pending' && open.metroExited ? 'finishing' : info.phase,
+  };
 }

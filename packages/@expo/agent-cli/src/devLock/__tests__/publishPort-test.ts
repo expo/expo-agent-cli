@@ -5,6 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import type { EasOpenEvidence } from '../../dev/devRunTypes';
+
 import { readDevServerLockAsync } from '../client';
 import { publishDevServerPortAsync } from '../publishPort';
 import { readDevRunRecord } from '../runRecord';
@@ -137,8 +139,9 @@ describe(publishDevServerPortAsync, () => {
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
   it(`answers easOpenFinished once the EAS open returns, and keeps it across the port update from the report`, async () => {
     const projectRoot = makeTempProject();
-    const runLock = runLockFor(projectRoot);
-    runLock.apply({ type: 'eas-open-started' });
+    let open: EasOpenEvidence = { kind: 'pending', metroExited: false };
+    const runLock = new RunLock(projectRoot, () => open);
+    held.push(runLock);
 
     const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8308'], {
       lock: runLock,
@@ -156,7 +159,9 @@ describe(publishDevServerPortAsync, () => {
       )
     ).toMatchObject({ port: 8308, easOpenFinished: false });
 
-    runLock.apply({ type: 'eas-open-returned' });
+    open = { kind: 'pending', metroExited: true };
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ phase: 'finishing' });
+    open = { kind: 'settled', accounted: true };
     expect(
       await eventuallyAsync(
         () => readDevServerLockAsync(projectRoot),

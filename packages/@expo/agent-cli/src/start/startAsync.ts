@@ -107,8 +107,7 @@ export async function runDevServerAsync(
     /** Aborted before the spawn, no dev server starts and the call rejects with its reason. */
     signal?: AbortSignal;
     /**
-     * Told once, the moment the dev server reports where it listens, or `/status` answers on the
-     * port the arguments name.
+     * Told once after this invocation is still active and its Metro answers `/status`.
      *
      * `dev` hangs its app-open on this (llp/0026): the port is only knowable after the spawn, and
      * the subprocess does not return until the dev server stops.
@@ -116,9 +115,11 @@ export async function runDevServerAsync(
     onDevServer?: (server: { url: string; port: number }) => void;
   }
 ): Promise<DevServerRun> {
+  let running = true;
   let timer: NodeJS.Timeout | undefined;
   if (agentSkills) {
     timer = setTimeout(() => {
+      if (!running || signal?.aborted) return;
       autoSyncSkillsAsync(projectRoot, { silent: output === 'capture' }).catch(() => {});
     }, SKILLS_SYNC_IDLE_DELAY_MS);
     // Don't let a pending sync hold the CLI open.
@@ -129,7 +130,6 @@ export async function runDevServerAsync(
   // reports one. `publishDevServerPortAsync` swallows every failure: a lock is a convenience, and
   // the dev server is the command.
   const startedAt = Date.now();
-  let running = true;
   let port: ResolvedDevServerPort | null = null;
   const serverAt = ({ port }: ResolvedDevServerPort) => ({
     url: `http://127.0.0.1:${port}`,
@@ -138,34 +138,30 @@ export async function runDevServerAsync(
   // The lock answers `arg` at the spawn and `reported` when Metro reports, so the open is guarded here.
   let opened = false;
   const open = (server: { url: string; port: number }) => {
-    if (!opened) {
+    if (!opened && running && !signal?.aborted) {
       opened = true;
       onDevServer?.(server);
     }
   };
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a step that builds says
-  // `serving` once this project's Metro answers `/status`, and a step that opens the app opens it
-  // then. The wait reads the latest port each time, so a port Metro reports later counts. Plain
-  // `start` neither builds nor opens, and sends no probe.
-  const answers = phase === 'building' || onDevServer != null;
-  let waiting = false;
+  const readinessStop = new AbortController();
+  let readiness: Promise<void> | undefined;
   const waitForAnswer = (first: ResolvedDevServerPort) => {
-    waiting = true;
-    // A step that does not build has nothing left to wait for once its open went on Metro's report.
-    const wanted = () => running && (phase === 'building' || !opened);
-    void waitForOwnMetroAsync(() => serverAt(port ?? first).url, projectRoot, wanted).then(
-      (answered) => {
-        // Metro that exited meanwhile has nothing to answer for or to open the app on.
-        if (!answered || !running) return;
-        runLock.apply({ type: 'status-answered' });
-        open(serverAt(port ?? first));
-      }
-    );
+    readiness = waitForOwnMetroAsync(
+      () => serverAt(port ?? first).url,
+      projectRoot,
+      () => running && !opened && !signal?.aborted,
+      readinessStop.signal
+    ).then((answered) => {
+      if (!answered || !running || signal?.aborted) return;
+      runLock.apply({ type: 'status-answered' });
+      open(serverAt(port ?? first));
+    });
   };
   const run = withLeaseExtendedAsync(projectRoot, () =>
     spawnDevServerAsync(projectRoot, args, output, signal)
   ).finally(() => {
     running = false;
+    readinessStop.abort();
   });
   const published = publishDevServerPortAsync(projectRoot, args, {
     since: startedAt,
@@ -185,18 +181,10 @@ export async function runDevServerAsync(
       () => undefined,
       () => undefined
     ),
-    // What the dev server itself said, which is the only thing a caller may claim about it.
-    // `reported` is the dev server saying where it listens, so the open goes at once. `arg` is only
-    // the port the command line named, which `dev` always passes, so the step waits until this
-    // project's Metro answers `/status` there, and never opens when the dev server exits first.
-    // `default` is a guess, and an open aimed at a guessed port is the false green the lock exists
-    // to prevent.
     onResolved: (resolved) => {
+      if (!running || signal?.aborted) return;
       port = resolved;
-      if (resolved.source === 'reported') open(serverAt(resolved));
-      // A building step waits on any port: the answer must come from this project's Metro anyway.
-      const worthWaiting = resolved.source !== 'default' || phase === 'building';
-      if (answers && !waiting && worthWaiting) waitForAnswer(resolved);
+      if (!readiness && (onDevServer || phase === 'building')) waitForAnswer(resolved);
     },
   });
 
@@ -211,7 +199,7 @@ export async function runDevServerAsync(
     clearTimeout(timer);
     // After the port watch, so every event of this step lands before Metro's exit.
     await published;
-    runLock.apply({ type: 'server-exited' });
+    await readiness;
   }
 }
 
@@ -233,7 +221,8 @@ export const STATUS_POLL_INTERVAL_MS = 500;
 async function waitForOwnMetroAsync(
   url: () => string,
   projectRoot: string,
-  isRunning: () => boolean
+  isRunning: () => boolean,
+  stopped: AbortSignal
 ): Promise<boolean> {
   while (isRunning()) {
     const probe = await probeBundlerAsync(url(), {
@@ -243,7 +232,17 @@ async function waitForOwnMetroAsync(
     if (probe.answering && probe.projectRootMatched !== false) {
       return true;
     }
-    await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
+    if (!isRunning()) return false;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        stopped.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, STATUS_POLL_INTERVAL_MS);
+      stopped.addEventListener('abort', done, { once: true });
+      if (stopped.aborted) done();
+    });
   }
   return false;
 }

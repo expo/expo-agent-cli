@@ -17,7 +17,8 @@ import type { SubprocessOutput } from '../utils/subprocess';
 import { portDemandedError, warnPortMove } from './devServerPort';
 import { event as devEvent } from './events';
 import { buildsBeforeServing, withPortArg } from './forwardedArgs';
-import { easRunLifecycle } from './openAppEas';
+import { easOpenWork } from './openAppEas';
+import type { OpenWork } from './devRunTypes';
 import {
   defaultMetroPort,
   detectPortCollision,
@@ -33,6 +34,7 @@ interface DevServerAttempt {
   args: string[];
   spawnedAt: number;
   result: DevServerRun;
+  mayRetry: boolean;
 }
 
 /** A runner for one plan. Reuse it across serving attempts to keep one app-open attempt. */
@@ -40,7 +42,6 @@ export class DevServerStepRunner {
   /** The EAS device platform to publish on the run lock, when EAS opening is enabled. */
   readonly easPlatform: NativePlatform | null;
   private readonly openPlatform: NativePlatform | null;
-  private openAttempted = false;
 
   constructor(
     private readonly projectRoot: string,
@@ -76,11 +77,9 @@ export class DevServerStepRunner {
     }
     const askedPort = readPortArg(args) ?? defaultMetroPort();
     scope.steps.assertNotInterrupted();
-    // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-    // Once opening starts, the run can release its lock when the open and server both end.
-    const retry = this.openAttempted
-      ? null
-      : await retryOnFreePortAsync(collision, args, this.plan.devServerPort, runAttempt);
+    const retry = first.mayRetry
+      ? await retryOnFreePortAsync(collision, args, this.plan.devServerPort, runAttempt)
+      : null;
     const last = retry ?? first;
     if (portCollisionIn(this.projectRoot, last) != null) {
       planEvent('start_plan_step_exit', { id: step.id, code: last.result.exitCode });
@@ -107,53 +106,47 @@ export class DevServerStepRunner {
     // `expo run:*` installs and launches the app itself.
     const openPlatform = step.argv[1] === 'start' ? this.openPlatform : null;
     const spawnedAt = Date.now();
-    // Session cleanup stays inside the active step so interruption waits for it.
-    const result = await steps.stepAsync(async (signal) => {
-      let attemptActive = true;
-      const stillWanted = () => attemptActive && !steps.interrupted;
-      const easPlatform = openPlatform ? this.easPlatform : null;
-      const eas = easPlatform
-        ? easRunLifecycle(projectRoot, {
-            platform: easPlatform,
-            expoGo: plan.target === 'expo-go',
-            fingerprintCache: options.fingerprintCache,
-            keepSession: options.detachedChild,
-          })
+    const easPlatform = openPlatform ? this.easPlatform : null;
+    const open: OpenWork | null = easPlatform
+      ? easOpenWork(projectRoot, {
+          platform: easPlatform,
+          expoGo: plan.target === 'expo-go',
+          fingerprintCache: options.fingerprintCache,
+          keepSession: options.detachedChild,
+          buildId: easBuildId,
+        })
+      : openPlatform
+        ? {
+            kind: 'local',
+            async runAsync({ metro, stillWanted }) {
+              await openAppForRunAsync(
+                projectRoot,
+                plan,
+                openPlatform,
+                metro.url,
+                stillWanted,
+                acquired
+              );
+              return { kind: 'settled' };
+            },
+          }
         : null;
-      return await runDevServerAsync(projectRoot, args, {
-        agentSkills: options.agentSkills,
-        output,
-        signal,
-        lock,
-        phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
-        // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-        easPlatform: eas?.platform ?? null,
-        onDevServer: openPlatform
-          ? ({ url }) => {
-              if (this.openAttempted) return;
-              this.openAttempted = true;
-              if (eas) {
-                lock.apply({ type: 'eas-open-started' });
-                eas.open({ devServerUrl: url, stillWanted, buildId: easBuildId });
-                void eas.finished.then(() => lock.apply({ type: 'eas-open-returned' }));
-              } else {
-                void openAppForRunAsync(
-                  projectRoot,
-                  plan,
-                  openPlatform,
-                  url,
-                  stillWanted,
-                  acquired
-                );
-              }
-            }
-          : undefined,
-      }).finally(async () => {
-        attemptActive = false;
-        await eas?.finishAsync();
-      });
-    });
-    return { args, spawnedAt, result };
+    const attempt = await steps.stepAsync((signal) =>
+      steps.run.serveAsync(
+        (onDevServer) =>
+          runDevServerAsync(projectRoot, args, {
+            agentSkills: options.agentSkills,
+            output,
+            signal,
+            lock,
+            phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
+            easPlatform,
+            onDevServer,
+          }),
+        open
+      )
+    );
+    return { args, spawnedAt, ...attempt };
   }
 }
 
