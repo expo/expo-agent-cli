@@ -66,7 +66,7 @@ import {
   type PreparedRungOne,
   type RungOneOutcome,
 } from './rungOne';
-import { reloadOverRuntimeAsync } from './runtimeReload';
+import { askableInPlace, reloadOverRuntimeAsync } from './inPlace';
 import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
 import { printHumanReport, explainReloadFailure } from './report';
 
@@ -457,6 +457,22 @@ async function preflightAsync(
   };
 }
 
+/**
+ * The targets rung 2 asks, or null when it does not run: all own targets under a pinned
+ * `--method runtime`; in `auto`, the own targets that are not Expo Go, after a rung 1 that did not
+ * prove the reload.
+ */
+function rungTwoTargetsOf(
+  method: ReloadOptions['method'],
+  relaunchWhy: string | null,
+  prepared: PreparedRungOne
+): CdpTarget[] | null {
+  if (method === 'runtime') return prepared.classifiedTargets.read;
+  if (method !== 'auto' || relaunchWhy == null) return null;
+  const askable = askableInPlace(prepared.classifiedTargets.read);
+  return askable.length > 0 ? askable : null;
+}
+
 async function climbLadderAsync(
   projectRoot: string,
   options: ReloadOptions,
@@ -518,11 +534,11 @@ async function climbLadderAsync(
   let cloudUrl: string | null = null;
   let rungOne: RungOneOutcome | null = null;
   /**
-   * Why rung 1 did not prove the reload, or null when it did or did not run.
+   * Why rungs 1 and 2 did not prove the reload, or null when one did or none ran.
    *
    * The one fact that makes `auto` climb (F99). Separate from `method`, which names `dev-server`
    * for a delivered reload: the report has to say a mechanism ran, and the ladder has to know it
-   * was not *proved* — those are the two halves F97 split apart, and this is the half rung two
+   * was not *proved* — those are the two halves F97 split apart, and this is the half rungs two and three
    * reads.
    */
   let relaunchWhy: string | null = null;
@@ -546,29 +562,30 @@ async function climbLadderAsync(
     relaunchWhy = settled.relaunchWhy;
   }
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — the cloud loop, K2.
-  // **Never in `auto`**, and that is a live finding rather than caution: on Expo Go this call
-  // takes the app off the screen and nothing re-registers [observed — Expo Go SDK 57, iOS 26.5
-  // simulator, 2026-08-27: `runtime:eval "expo.reloadAppAsync()"` left `/json/list` empty and the
-  // device on its home screen, 13 s later]. It reloaded a cloud app, so the mechanism is
-  // real and runtime-dependent — which makes it a method a caller chooses, not one this command
-  // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
-  // a less predictable one.
-  if (method == null && options.method === 'runtime') {
-    const attempt = await reloadOverRuntimeAsync(actionConnection, observedApps);
-    attempts.push(attempt);
-    if (attempt.ok) {
-      // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
-      // made" and the proof is the wait below.
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — rung 2.
+  //
+  // **Rung two: the app reloads itself**, `expo.reloadAppAsync(reason)`, proved on its target as
+  // `Page.reload` is. In `auto` it follows a rung 1 that proved nothing, and never asks Expo Go,
+  // where the call can close the app. A pinned `--method runtime` is this rung alone, on any app.
+  const rungTwoTargets = rungTwoTargetsOf(options.method, relaunchWhy, prepared);
+  if (rungTwoTargets != null) {
+    const rungTwo = await reloadOverRuntimeAsync(devServerUrl, rungTwoTargets, remainingMs());
+    attempts.push(rungTwo.attempt);
+    if (rungTwo.kind === 'proved') {
       method = 'runtime';
+      mechanismProof = 'debugger-context-replaced';
+      relaunchWhy = null;
+    } else {
+      method ??= rungTwo.attempt.delivered ? 'runtime' : null;
+      relaunchWhy &&= `${rungTwo.clause}, so the app was relaunched on this worktree's device instead`;
     }
   }
 
-  // **Rung two: the relaunch, on the device backend in play.** `--eas` names *which* backend may
+  // **Rung three: the relaunch, on the device backend in play.** `--eas` names *which* backend may
   // act: the session's controller (`./cloudReload.ts`, wave 19's two verbs) or a device booted on
   // this machine.
   //
-  // Reached whenever rung 1 did not prove the reload (`relaunchWhy`), and the second state is F99
+  // Reached whenever rungs 1 and 2 did not prove the reload (`relaunchWhy`), and the second state is F99
   // — the ladder climbing rather than stopping:
   //
   //  1. the reload reached no app: the socket had no client, or no own target took `Page.reload`;

@@ -6,6 +6,8 @@ import { CdpClient, isMethodNotFoundError } from '../../runtime/cdpClient';
 import { probeDevServerAsync } from '../../runtime/devServer';
 import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../../runtime/reload/evidence';
+import type { ReloadAttempt } from '../../runtime/reload/attempt';
+import { askableInPlace, reloadOverRuntimeAsync } from '../../runtime/reload/inPlace';
 import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { symbolicateRuntimeErrorsAsync } from '../../runtime/symbolicate';
@@ -160,11 +162,11 @@ async function checkAppFitsProject(
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
 //
-// `runtime:reload`'s rung 1, and its proofs, through the same functions — the whole point of
-// this command being one process (llp/0005 §The smoke gate). Deliberately **only** rung 1: the
-// rungs above it stop the app and start it again, and a gate is not allowed to take the
-// caller's app away in order to answer a question about it. An app the broadcast cannot reach
-// is a fact this phase reports, not a licence to relaunch.
+// `runtime:reload`'s rungs 1 and 2, and their proofs, through the same functions — the whole
+// point of this command being one process (llp/0005 §The smoke gate). Deliberately **never** the
+// relaunch: it stops the app and starts it again, and a gate is not allowed to take the caller's
+// app away in order to answer a question about it. An app neither rung reloads is a fact this
+// phase reports, not a licence to relaunch.
 //
 // The bundle mark is taken *before* the broadcast because that is what makes the log a proof:
 // `dev-server-bundle` says a bundle was served after this run acted, which is only readable
@@ -183,27 +185,40 @@ async function reloadApp(
   });
   const bundleMark = markBundleSignalSync(projectRoot);
   const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
+  const attempts: ReloadAttempt[] = [rungOne.attempt];
+  const settled = settleRungOne(rungOne);
+  let ran = settled.ran;
+  let proof = settled.proof;
+  // Rung 2 keeps the app's process too, so the gate may take it; never on Expo Go.
+  const askable =
+    settled.relaunchWhy == null ? [] : askableInPlace(prepared.classifiedTargets.read);
+  if (askable.length > 0) {
+    const rungTwo = await reloadOverRuntimeAsync(devServerUrl, askable, remainingMs());
+    attempts.push(rungTwo.attempt);
+    ran ||= rungTwo.attempt.delivered === true;
+    if (rungTwo.kind === 'proved') proof = 'debugger-context-replaced';
+  }
+  const last = attempts[attempts.length - 1]!;
   const result = {
     knownTargetIds: prepared.targets.map((target) => target.id),
     commandSocketReconnected: rungOne.churn.reconnected > 0,
-    targetOutcomes: rungOne.attempt.method === 'page-reload' ? rungOne.attempt.outcomes : [],
+    targetOutcomes: attempts.flatMap((attempt) => ('outcomes' in attempt ? attempt.outcomes : [])),
   };
-  const settled = settleRungOne(rungOne);
-  if (!settled.ran) {
+  if (!ran) {
     return {
       ...result,
       ok: false,
       verifiedBy: null,
       freshTargets: 0,
       bundleServed: false,
-      reason: rungOne.attempt.reason,
+      reason: last.reason,
     };
   }
   const { verifiedBy, evidence } = await observeReloadAsync(devServerUrl, projectRoot, {
     prepared,
-    mechanismProof: settled.proof,
+    mechanismProof: proof,
     churn: rungOne.churn,
-    attempts: [rungOne.attempt],
+    attempts,
     bundleMark,
     timeoutMs: remainingMs(),
   });
@@ -213,7 +228,7 @@ async function reloadApp(
     verifiedBy,
     freshTargets: evidence?.freshTargets ?? 0,
     bundleServed: evidence?.bundle.observed ?? false,
-    reason: verifiedBy == null ? rungOne.attempt.reason : null,
+    reason: verifiedBy == null ? last.reason : (attempts.find((each) => each.ok)?.reason ?? null),
   };
 }
 

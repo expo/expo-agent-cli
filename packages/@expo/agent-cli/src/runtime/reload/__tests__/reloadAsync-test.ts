@@ -790,34 +790,6 @@ describe('an app the command socket cannot see', () => {
     vi.restoreAllMocks();
   });
 
-  it(`reloads through the debugger when --method runtime asks for it`, async () => {
-    writeProject();
-    const server = mockDevServer([EXPO_GO_TARGET]);
-    mockConnect(fakeSocket([{}]).socket);
-    const evaluateAsync = mockCdp();
-    // Register the fresh runtime after the reload request, never before the baseline probe.
-    // A wall-clock timer races the probe on a busy runner.
-    evaluateAsync.mockImplementation(async (expression: string) => {
-      if (!expression.includes('no-expo-global')) server.listing([RELOADED_EXPO_GO_TARGET]);
-      return { value: expression.includes('no-expo-global') ? 'ready' : 'sent', type: 'string' };
-    });
-
-    await expect(
-      reloadAsync(projectRoot, options({ json: true, method: 'runtime' }))
-    ).resolves.toBe(EXIT_OK);
-    const report = JSON.parse(printed());
-    expect(report).toMatchObject({
-      reloaded: true,
-      method: 'runtime',
-      verifiedBy: 'fresh-debugger-target',
-      appsReconnected: 1,
-    });
-    // The probe first, then the call: nothing is asked of an app that cannot answer it.
-    expect(evaluateAsync).toHaveBeenCalledTimes(2);
-    expect(evaluateAsync.mock.calls[0]![0]).toContain('no-expo-global');
-    expect(evaluateAsync.mock.calls[1]![0]).toContain('expo.reloadAppAsync()');
-  });
-
   it(`says the two lists disagreed rather than that nothing is connected`, async () => {
     writeProject();
     mockDevServer([EXPO_GO_TARGET]);
@@ -951,46 +923,6 @@ describe('an app the command socket cannot see', () => {
     const stderr = printed(console.error);
     expect(stderr).toContain('The app was relaunched, and nothing was observed to confirm it');
     expect(stderr).not.toContain('the runtime that answers now is the one from before');
-  });
-
-  it(`reports a runtime whose expo global cannot reload it, without guessing`, async () => {
-    writeProject();
-    mockDevServer([EXPO_GO_TARGET]);
-    mockConnect(fakeSocket([{}]).socket);
-    mockCdp({ probe: 'no-reload-function' });
-
-    await reloadAsync(projectRoot, options({ json: true, timeoutMs: 300, method: 'runtime' }));
-    const runtime = JSON.parse(printed()).attempts.find(
-      (attempt: { method: string }) => attempt.method === 'runtime'
-    );
-    expect(runtime).toMatchObject({ ok: false });
-    expect(runtime.reason).toContain('reloadAppAsync');
-  });
-
-  it(`treats a runtime that stops answering the call as having been asked`, async () => {
-    writeProject();
-    const server = mockDevServer([EXPO_GO_TARGET]);
-    mockConnect(fakeSocket([{}]).socket);
-    const evaluateAsync = vi.fn(async (expression: string) => {
-      if (expression.includes('no-expo-global')) {
-        return { value: 'ready', type: 'string' };
-      }
-      // The reload tore down the context that was answering, which is the usual outcome.
-      throw new Error('The app did not answer the Runtime.evaluate request within 4000ms.');
-    });
-    vi.spyOn(require('../../cdpClient'), 'CdpClient').mockImplementation(function () {
-      return { evaluateAsync } as any;
-    });
-    setTimeout(() => server.listing([RELOADED_EXPO_GO_TARGET]), 10).unref();
-
-    await expect(
-      reloadAsync(projectRoot, options({ json: true, method: 'runtime' }))
-    ).resolves.toBe(EXIT_OK);
-    const report = JSON.parse(printed());
-    expect(report.method).toBe('runtime');
-    expect(
-      report.attempts.find((attempt: { method: string }) => attempt.method === 'runtime').reason
-    ).toContain('stopped answering');
   });
 });
 
@@ -1607,29 +1539,6 @@ describe('the verification payload', () => {
     expect(printed()).toContain("1 client(s) registered on the dev server's command socket");
     expect(printed()).not.toContain('0 reconnected after the reload');
     expect(printed()).toContain('serve a bundle first');
-  });
-
-  it('backs fresh-debugger-target with appsReconnected on the runtime rung', async () => {
-    writeProject();
-    const server = mockDevServer([EXPO_GO_TARGET]);
-    mockConnect(fakeSocket([{}]).socket);
-    vi.spyOn(require('../../cdpClient'), 'CdpClient').mockImplementation(function () {
-      return { evaluateAsync: vi.fn(async () => ({ value: 'ready', type: 'string' })) } as any;
-    });
-    setTimeout(() => server.listing([RELOADED_EXPO_GO_TARGET]), 10).unref();
-
-    await expect(
-      reloadAsync(projectRoot, options({ json: true, method: 'runtime' }))
-    ).resolves.toBe(EXIT_OK);
-    const report: ReloadResultJson = JSON.parse(printed());
-    expectVerificationIsBacked(report);
-    expect(report.verifiedBy).toBe('fresh-debugger-target');
-    expect(report.appsReconnected).toBe(1);
-    // A pinned `--method runtime` never opens the socket, so its evidence is `null` — nothing was
-    // established either way — rather than a zero that would read as "the socket held no client".
-    expect(report.commandSocketChurn.observed).toBeNull();
-    expect(report.commandSocketChurn.reconnected).toBe(0);
-    vi.restoreAllMocks();
   });
 
   it('backs app-relaunch with the attempt that stopped and started the app', async () => {

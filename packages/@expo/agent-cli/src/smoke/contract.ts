@@ -343,8 +343,8 @@ export interface SmokeDeps {
    * Put an app that was already attached back on the bundle the dev server is serving.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
-   * `runtime:reload`'s rung 1 and its proofs, asked here through the same functions. Only rung 1:
-   * the rungs above it stop the app and start it again, and a gate is not allowed to take the
+   * `runtime:reload`'s rungs 1 and 2 and their proofs, asked here through the same functions. Never
+   * the relaunch: it stops the app and starts it again, and a gate is not allowed to take the
    * caller's app away to answer a question about it.
    */
   reloadApp(devServerUrl: string, timeoutMs: number): Promise<SmokeReloadResult>;

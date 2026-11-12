@@ -5,6 +5,7 @@ import type { CommandHelp } from '../../help/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import type { Command } from '../../types';
 import { assertWithOptionsArgs, DURATION_HELP_NOTE, DURATION_METAVAR } from '../../utils/args';
+import { RELOAD_REASON } from './attempt';
 
 export const runtimeReloadHelp: CommandHelp = {
   command: 'runtime:reload',
@@ -74,11 +75,12 @@ export const runtimeReloadHelp: CommandHelp = {
   notes: [
     `Run this after an edit, before any gate that reads the app: a component that threw keeps`,
     `running the old code, and runtime:errors replays what it already reported.`,
-    `The command socket picks the rung. dev-server broadcasts a reload where that socket holds a`,
-    `client; where it does not, device relaunches, which costs the app's JavaScript state.`,
-    `The rung is the socket, not the location: --eas only names the device backend.`,
-    `--method runtime asks the app to reload itself with expo.reloadAppAsync(), which auto never`,
-    `picks: on Expo Go that same call closes the app instead [observed — SDK 57, iOS simulator].`,
+    `The command socket picks the rung: dev-server broadcasts a reload where it holds a client.`,
+    `On an iOS EAS session, or beside a skipped app, Page.reload goes to this worktree's app instead.`,
+    `When that proves nothing, the app is asked to reload itself, never on Expo Go, where the`,
+    `call closed the app [observed — SDK 57]. --method runtime is that call alone:`,
+    `expo.reloadAppAsync('${RELOAD_REASON}'). Last, device relaunches the app,`,
+    `which costs the app's JavaScript state. --eas only names the device backend that may relaunch.`,
     `The entry bundle is checked first, so a reload never lands on one that does not compile.`,
     `A reload is reported only when it was observed — a new debugger target, or a new Bundled`,
     `line in the dev server's own output. Start the server with dev --detach so there is output.`,
