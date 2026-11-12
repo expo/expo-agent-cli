@@ -11,6 +11,7 @@ import { liveIosBindings, type LiveIosBinding } from '../deviceBinding/records';
 import { SIMCTL_TIMEOUT_MS } from '../device/simulators';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
+import { endedSessionTargetIdsAsync, SESSION_PROBE_TIMEOUT_MS } from './targetLiveness';
 import { onAndroidModel, platformOfTarget } from './targetPlatform';
 
 /** What this machine's device tools report. Facts only: no decision of this run is in here. */
@@ -492,20 +493,45 @@ export function deviceFactsLost(
 
 /** Read bindings and ask the tools only when their answer can change placement. */
 export async function deviceInventoryForSelectionAsync(
-  targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
+  targets: readonly CdpTarget[],
   targetSelection: TargetSelection,
   projectRoot: string | null,
   devServerUrl: string | null = null,
   timeoutMs: number = SIMCTL_TIMEOUT_MS
 ): Promise<DeviceInventory> {
+  const deadline = Date.now() + timeoutMs;
   const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
-  return await refreshDeviceInventoryAsync(
+  const inventory = await refreshDeviceInventoryAsync(
     targets,
     targetSelection,
     { ...EMPTY_DEVICE_INVENTORY, iosBindings },
     devServerUrl,
     timeoutMs
   );
+  return await withSessionTargetLivenessAsync(targets, targetSelection, inventory, {
+    timeoutMs: Math.max(1, Math.min(SESSION_PROBE_TIMEOUT_MS, deadline - Date.now())),
+  });
+}
+
+/**
+ * Record the targets an ended EAS Simulator session left listed in `deadTargetIds`, so no
+ * classification counts them. Asked only where the one-unplaced-target rule applies and two or
+ * more targets are unplaced (llp/0005 §Target owner).
+ */
+export async function withSessionTargetLivenessAsync(
+  targets: readonly CdpTarget[],
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory,
+  options?: { timeoutMs?: number }
+): Promise<DeviceInventory> {
+  const classified = classifyTargets([...targets], targetSelection, deviceInventory);
+  if (!sessionSlotOpen(targetSelection, classified) || classified.undetermined.length < 2) {
+    return deviceInventory;
+  }
+  const dead = await endedSessionTargetIdsAsync(classified.undetermined, options);
+  return dead.length === 0
+    ? deviceInventory
+    : { ...deviceInventory, deadTargetIds: [...(deviceInventory.deadTargetIds ?? []), ...dead] };
 }
 
 /**

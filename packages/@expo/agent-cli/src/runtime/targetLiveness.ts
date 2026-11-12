@@ -18,12 +18,6 @@ import type { WebSocket } from 'ws';
 
 import { createInspectorWebSocket, type CdpTarget } from './cdpClient';
 import { debugEvent } from './events';
-import {
-  classifyTargets,
-  sessionSlotOpen,
-  type DeviceInventory,
-  type TargetSelection,
-} from './targetSelection';
 
 /** How long one handshake gets before the target is called unreachable. */
 const LIVENESS_TIMEOUT_MS = 1500;
@@ -104,41 +98,31 @@ function opensAsync(
 }
 
 /** How long an unplaced target of an EAS Simulator session gets to answer `Runtime.evaluate`. */
-const SESSION_PROBE_TIMEOUT_MS = 1500;
+export const SESSION_PROBE_TIMEOUT_MS = 1500;
 
 type ProbeAnswer = 'answered' | 'silent' | 'unknown';
 
 /**
- * Record the targets of an ended EAS Simulator session as dead, so no classification counts them.
+ * The ids of the targets an ended EAS Simulator session left listed: each one opened its socket and
+ * answered nothing within the deadline. Empty unless one of `targets` answered.
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
  * An ended session's page stays listed and its socket opens, so the handshake above calls it live.
- * Only a request tells: the page answers nothing. The probe runs only where the one-unplaced-target
- * rule applies and two or more targets are unplaced, and it drops nothing unless one answered.
+ * Only a request tells: the page answers nothing.
  */
-export async function withSessionTargetLivenessAsync(
+export async function endedSessionTargetIdsAsync(
   targets: readonly CdpTarget[],
-  targetSelection: TargetSelection,
-  deviceInventory: DeviceInventory,
   {
     timeoutMs = SESSION_PROBE_TIMEOUT_MS,
     createWebSocket = createInspectorWebSocket,
   }: { timeoutMs?: number; createWebSocket?: (url: string) => WebSocket } = {}
-): Promise<DeviceInventory> {
-  const classified = classifyTargets([...targets], targetSelection, deviceInventory);
-  const unplaced = classified.undetermined;
-  if (!sessionSlotOpen(targetSelection, classified) || unplaced.length < 2) {
-    return deviceInventory;
-  }
+): Promise<string[]> {
   const answers = await Promise.all(
-    unplaced.map((target) => askAsync(target.webSocketDebuggerUrl, timeoutMs, createWebSocket))
+    targets.map((target) => askAsync(target.webSocketDebuggerUrl, timeoutMs, createWebSocket))
   );
-  const dead = unplaced.filter((_, at) => answers[at] === 'silent').map((target) => target.id);
-  debugEvent('target_liveness', { listed: unplaced.length, stale: dead.length });
-  if (!answers.includes('answered') || dead.length === 0) {
-    return deviceInventory;
-  }
-  return { ...deviceInventory, deadTargetIds: [...(deviceInventory.deadTargetIds ?? []), ...dead] };
+  const silent = targets.filter((_, at) => answers[at] === 'silent').map((target) => target.id);
+  debugEvent('target_liveness', { listed: targets.length, stale: silent.length });
+  return answers.includes('answered') ? silent : [];
 }
 
 /**
