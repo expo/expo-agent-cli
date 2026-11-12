@@ -345,6 +345,7 @@ describe('@expo/agent-cli telemetry', () => {
   });
 
   it('records one invocation when dev relaunches itself in the background', async () => {
+    let ownerPid: number | undefined;
     try {
       const result = await executeAgentCliAsync(
         telemetry.projectRoot,
@@ -357,6 +358,7 @@ describe('@expo/agent-cli telemetry', () => {
           },
         }
       );
+      ownerPid = JSON.parse(result.stdout).pid;
       expect(JSON.parse(result.stdout)).toMatchObject({ alreadyRunning: false, ready: null });
       const request = await telemetry.waitForRequest();
       expect(request.body.batch[0]!.properties).toEqual({ action: 'expo-agent-cli dev:run' });
@@ -364,10 +366,15 @@ describe('@expo/agent-cli telemetry', () => {
       // The internal marker is consumed by our child; Expo keeps its own telemetry settings.
       expect(telemetry.readUpstreamEnvironment()).toEqual([{ noTelemetry: '0', offline: '0' }]);
     } finally {
-      await executeAgentCliAsync(telemetry.projectRoot, ['dev:stop', '--json'], {
+      const stopped = await executeAgentCliAsync(telemetry.projectRoot, ['dev:stop', '--json'], {
         env: { ...telemetry.env, EXPO_NO_TELEMETRY: '1' },
         reject: false,
       });
+      expect(stopped.exitCode, stopped.all).toBe(0);
+      if (ownerPid != null) {
+        const pid = ownerPid;
+        expect(await waitForAsync(() => processIsGone(pid), 10_000)).toBe(true);
+      }
     }
   });
 
