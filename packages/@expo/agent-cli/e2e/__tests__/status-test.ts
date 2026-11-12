@@ -13,7 +13,7 @@ import { WebSocketServer } from 'ws';
 import { recordLastDevRequest } from '../../src/dev/lastRequest';
 import { resolveDevOptions } from '../../src/dev/resolveOptions';
 import { lockInfo } from '../../src/devLock/__tests__/fakeLock';
-import { detachedPidLine } from '../../src/dev/childVerdict';
+import { quoteArgument } from '../../src/utils/consent';
 
 import {
   androidBindingFixture,
@@ -41,6 +41,7 @@ import {
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
   lastBuildFilePath,
+  isolatedPath,
   pathEnvVars,
   readEvents,
   readStubExpoInvocations,
@@ -584,24 +585,16 @@ describe('@expo/agent-cli status', () => {
           }),
         },
         {
-          name: 'says the EAS session is starting while the detached child starts it',
-          setup: async (projectRoot, url) => {
-            const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
-            await fs.promises.mkdir(logDir, { recursive: true });
-            await fs.promises.writeFile(
-              path.join(logDir, 'dev-detached.log'),
-              `${detachedPidLine(process.pid)}\n`
-            );
-            return {
-              release: await holdDevLockAsync(projectRoot, {
-                ...lockOf(projectRoot, url),
-                easPlatform: platform,
-              }),
-            };
-          },
+          name: 'observes an EAS open without completion evidence',
+          setup: async (projectRoot, url) => ({
+            release: await holdDevLockAsync(projectRoot, {
+              ...lockOf(projectRoot, url),
+              easPlatform: platform,
+            }),
+          }),
           next: () => ({
-            command: `npx @expo/agent-cli dev:logs`,
-            why: `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`,
+            command: 'npx @expo/agent-cli status',
+            why: 'The run is still starting. Read the foreground terminal and check status again.',
           }),
         },
         {
@@ -613,7 +606,10 @@ describe('@expo/agent-cli status', () => {
             await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
             return {};
           },
-          next: (port) => ({ command: `${dev} --port ${port} --detach --wait-ready`, why: null }),
+          next: (port) => ({
+            command: `${dev} --eas --port ${port} --detach --wait-ready`,
+            why: null,
+          }),
         },
         {
           name: 'removes a binding file that does not parse',
@@ -626,7 +622,7 @@ describe('@expo/agent-cli status', () => {
             return { file };
           },
           next: (port, file) => ({
-            command: `rm -f '${file}' && ${dev} --port ${port} --detach --wait-ready`,
+            command: `rm -f ${quoteArgument(file ?? '')} && ${dev} --port ${port} --detach --wait-ready`,
             why: `The binding file ${file} does not parse; a newer CLI may have written it.`,
           }),
         },
@@ -786,11 +782,12 @@ describe('@expo/agent-cli status', () => {
 
     it('starts nothing and exits 0', async () => {
       const projectRoot = await setupAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, [
-        'status',
-        '--dev-server-url',
-        await getUnusedDevServerUrlAsync(),
-      ]);
+      const env = pathEnvVars(isolatedPath([path.join(projectRoot, '.stub-bin')]));
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env }
+      );
 
       expect(result.exitCode).toBe(0);
       // Status is read-only. It runs `expo whoami` only when the EAS CLI could not answer who this
@@ -2637,17 +2634,7 @@ describe('@expo/agent-cli status', () => {
       'asks EAS once per platform for a saved --eas request beside %s',
       async (_case, builds, lookups) => {
         const projectRoot = await setupWithEasAsync('dev-client-app');
-        await fs.promises.mkdir(path.join(projectRoot, '.expo'), { recursive: true });
-        await fs.promises.writeFile(
-          path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'),
-          JSON.stringify({
-            version: 1,
-            platform: 'ios',
-            port: null,
-            buildBackend: 'eas',
-            runTarget: null,
-          })
-        );
+        recordLastDevRequest(projectRoot, resolveDevOptions(['--ios', '--eas']));
 
         await reportInAsync(projectRoot, [], { STUB_EAS_BUILD_LIST: JSON.stringify(builds) });
 
@@ -3350,15 +3337,13 @@ describe('@expo/agent-cli status', () => {
       recordLastDevRequest(projectRoot, resolveDevOptions([`--${platform}`, '--local', '--go']));
       const stub = await startStubDevServerAsync({ projectRoot: '/somewhere/else', targets: [] });
       // A build can publish its planned port before another project's Metro takes it.
-      const releaseLock = await holdDevLockAsync(
+      const lock = lockInfo({
         projectRoot,
-        lockInfo({
-          projectRoot,
-          url: stub.url,
-          port: Number(new URL(stub.url).port),
-          pid: process.pid,
-        })
-      );
+        url: stub.url,
+        port: Number(new URL(stub.url).port),
+        pid: process.pid,
+      });
+      const releaseLock = await holdDevLockAsync(projectRoot, { ...lock, easPlatform: undefined });
 
       try {
         const result = await executeAgentCliAsync(projectRoot, [
@@ -3374,7 +3359,7 @@ describe('@expo/agent-cli status', () => {
           `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --${platform} --local --go --detach --wait-ready`
         );
         expect(report.next?.why).toBe(
-          'Stop the owned dev-server process before starting another run.'
+          'Stop the owned dev-server process before starting another run. Plain stop preserves sessions.'
         );
       } finally {
         releaseLock();
@@ -3495,16 +3480,9 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await setupAsync('go-app');
       const ownUrl = await getUnusedDevServerUrlAsync();
       const ownPort = Number(new URL(ownUrl).port);
-      await fs.promises.mkdir(path.join(projectRoot, '.expo'), { recursive: true });
-      await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'),
-        JSON.stringify({
-          version: 1,
-          platform: 'android',
-          port: ownPort + 1,
-          buildBackend: 'local',
-          runTarget: 'expo-go',
-        })
+      recordLastDevRequest(
+        projectRoot,
+        resolveDevOptions(['--android', '--local', '--go', '--port', String(ownPort + 1)])
       );
       const releaseLock = await holdDevLockAsync(projectRoot, {
         url: ownUrl,

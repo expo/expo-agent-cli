@@ -344,7 +344,9 @@ describe('@expo/agent-cli smoke', () => {
       expect(result.exitCode).toBe(20);
       expect(result.stderr).toContain('Why:');
       expect(result.stderr).toContain('How:');
-      expect(result.all).toContain('npx @expo/agent-cli dev --ios --detach');
+      expect(result.stdout).toContain(
+        'npx @expo/agent-cli dev --ios --port 59118 --detach --wait-ready'
+      );
     });
   });
 
@@ -1019,7 +1021,7 @@ describe('@expo/agent-cli smoke', () => {
         expect(report.environment).toMatchObject({ devServer: 'reused', device: 'booted' });
         expect(report.environment.boundDevice).toMatchObject({ id: 'E2E-PARKED', released: true });
         expect(report.followups[0].command).toBe(
-          'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --detach --wait-ready'
+          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --port ${stub.port} --detach --wait-ready`
         );
       } finally {
         await stub.close();
@@ -1105,7 +1107,7 @@ describe('@expo/agent-cli smoke', () => {
         // The run put back both the dev server and the device, so `navigate` alone has neither.
         expect(report.outcome).toBe('inconclusive');
         expect(report.followups.map((followup: any) => followup.command)).toEqual([
-          'npx @expo/agent-cli dev --ios --detach --wait-ready --port 9353',
+          'npx @expo/agent-cli dev --ios --port 9353 --no-open --detach --wait-ready',
           'npx @expo/agent-cli navigate / --ios',
           'npx @expo/agent-cli smoke --ios --port 9353',
         ]);

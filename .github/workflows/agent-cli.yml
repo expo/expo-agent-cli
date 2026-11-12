@@ -130,6 +130,9 @@ jobs:
       - name: 🧪 E2E installed-app check on macOS
         run: bun run test:e2e -- status-installed-test installed-readers-test
         working-directory: packages/@expo/agent-cli
+      - name: 🧪 E2E status recovery on macOS
+        run: bun run test:e2e -- status-test
+        working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E iOS device binding and Expo Go install
         run: bun run test:e2e -- dev-test smoke-test -t "two worktrees, two simulators|binding the device to boot"
         working-directory: packages/@expo/agent-cli
