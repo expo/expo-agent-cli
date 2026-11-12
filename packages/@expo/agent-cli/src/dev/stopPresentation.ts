@@ -22,8 +22,7 @@ export function sessionPendingExplanation(report: DevStopResultJson): string {
 }
 
 /**
- * @param finishing the stopped `dev --eas` run's lock answers `finishing`: its dev server is gone,
- * and it binds the session its start returns after this report.
+ * @param finishing the captured EAS open may still be pending after the stop request.
  */
 export function buildFollowUps(report: DevStopResultJson, finishing = false): FollowUp[] {
   const recovery: FollowUp[] = report.recoveryCommand
@@ -114,12 +113,11 @@ function keptSessionFollowUp(
     return easStopFollowUp(
       `EAS Simulator session ${unchecked.id} is recorded for this worktree and was not checked. If it still runs, it bills until this ends it.`
     );
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a finishing `dev --eas`
-  // process binds the session its start returns after this report, so no binding names it yet.
-  // A `dev:stop --eas` that already ran reported a session and asked the listing.
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  // An unfinished EAS open may not have a binding to report yet.
   if (finishing && report.session?.id == null)
     return easStopFollowUp(
-      `pid ${report.pid} is still starting its EAS Simulator session and binds it to this worktree when the start returns. A session it keeps bills until this ends it.`
+      `pid ${report.pid} may still be finishing its EAS session start or cleanup. Any session it keeps bills until this ends it.`
     );
   return null;
 }
@@ -188,7 +186,7 @@ export function printHumanReport(report: DevStopResultJson, finishing: boolean):
   if (finishing && report.pid != null) {
     lines.push(
       chalk.dim(
-        ` pid ${report.pid} has no dev server any more, and is finishing its EAS session start (it can take minutes). It exits by itself.`
+        ` pid ${report.pid} may still be finishing its EAS session start or cleanup (it can take minutes).`
       )
     );
   }

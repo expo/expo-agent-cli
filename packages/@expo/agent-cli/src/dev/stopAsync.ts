@@ -55,7 +55,8 @@ export async function devStopAsync(
   if (target.kind === 'owner') {
     const { report, status } = await stopOwnerAsync(target, options, startedAt);
     return finishStopReport(report, options, {
-      finishing: false,
+      finishing:
+        status === 'pending' && target.lock?.easPlatform != null && !target.lock.easOpenFinished,
       sessionPending: false,
       print,
       onReport,
