@@ -155,24 +155,19 @@ export async function restoreRenewedLeaseAsync(
   }
 }
 
+interface CloudAcquireOptions {
+  platform: DevicePlatform;
+  id: string;
+  origin: 'started' | 'dotenv';
+  /** Only a run that started the session: when it began, and the id the dotenv names now. */
+  start?: { at: Date; dotenvId: () => string | null; expected?: CloudBinding | null };
+  tools?: DeviceTools;
+  signal?: AbortSignal;
+}
+
 export async function acquireCloudBindingAsync(
   projectRoot: string,
-  {
-    platform,
-    id,
-    origin,
-    start,
-    tools = defaultTools(),
-    signal,
-  }: {
-    platform: DevicePlatform;
-    id: string;
-    origin: 'started' | 'dotenv';
-    /** Only a run that started the session: when it began, and the id the dotenv names now. */
-    start?: { at: Date; dotenvId: () => string | null; expected?: CloudBinding | null };
-    tools?: DeviceTools;
-    signal?: AbortSignal;
-  }
+  { platform, id, origin, start, tools = defaultTools(), signal }: CloudAcquireOptions
 ): Promise<CloudBinding> {
   return acquireSectionAsync(
     projectRoot,

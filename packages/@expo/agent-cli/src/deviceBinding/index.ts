@@ -6,12 +6,11 @@ import { bindAndroidSectionAsync, bootEmulatorAsync } from './android';
 import { androidToolsResolve, readAndroidBindingInventoryAsync } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
-import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
-import { bindingIdentity, bindIosSectionAsync } from './iosAcquire';
+import { bootSimulatorAsync } from './ios';
+import { bindIosAsync } from './iosAcquire';
 import { bindExplicitSection, type ExplicitRequest } from './explicit';
 import { acquireSectionAsync } from './reap';
 import { releaseWorktreeDevicesAsync } from './release';
-import { bindingPathFor, readBindingFile } from './registry';
 import { defaultTools } from './tools';
 import {
   deviceIdOf,
@@ -221,57 +220,4 @@ function instanceWatcher(
     return () => (tools.isPidAlive(emulatorPid) ? null : `the emulator pid ${emulatorPid} is gone`);
   }
   return () => null;
-}
-
-/** Each inventory belongs to the binding identity observed before the device list was read. */
-async function bindIosAsync(
-  projectRoot: string,
-  { reuseOnly, tools, explicit, signal }: SectionOptions
-) {
-  const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const before = readBindingFile(file);
-    const inventory = await readIosInventoryAsync(tools);
-    const bound = await acquireSectionAsync(
-      projectRoot,
-      tools,
-      async (actions) => {
-        const read = readBindingFile(file);
-        if (read.kind === 'unreadable') {
-          throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
-        }
-        if (bindingIdentity(read) !== bindingIdentity(before)) return null;
-        if (explicit === undefined)
-          return bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools });
-        const candidates = inventory.simulators
-          .filter((sim) => sim.isAvailable)
-          .map((sim) => ({
-            backend: 'local-ios' as const,
-            platform: 'ios' as const,
-            udid: sim.udid,
-            name: sim.name,
-            origin: 'explicit' as const,
-          }));
-        const result = bindExplicitSection(
-          projectRoot,
-          'ios',
-          candidates,
-          explicit,
-          reuseOnly,
-          tools,
-          actions
-        );
-        return {
-          ...result,
-          wasBooted: inventory.simulators.some(
-            (sim) => sim.udid === deviceIdOf(result.binding.device) && sim.state === 'Booted'
-          ),
-        };
-      },
-      inventory,
-      signal
-    );
-    if (bound != null) return bound;
-  }
-  throw deviceUnavailableError('binding-changed', { platform: 'ios' });
 }
