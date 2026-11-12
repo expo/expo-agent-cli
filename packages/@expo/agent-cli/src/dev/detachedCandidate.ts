@@ -6,9 +6,10 @@ import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { CommandError } from '../utils/errors';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { CALLER_ARGV_ENV } from './deviceOption';
+import { parseDetachedChildPid, type DetachedChildVerdict } from './childVerdict';
 import { DETACHED_ATTEMPT_ENV } from './detachedRun';
 import { event } from './events';
-import { openDetachedLogSync } from './logFile';
+import { detachedLogPath, openDetachedLogSync, readDetachedLogFileSync } from './logFile';
 
 export interface DetachedCandidate {
   logFile: string;
@@ -72,4 +73,28 @@ export function detachedStartupTimeout(run: DetachedCandidate): CommandError {
     ),
     { exitCode: EXIT_OUTCOME_TIMEOUT, data: { pid: run.pid, logFile: run.logFile } }
   );
+}
+
+export function discardRefusedCandidateLog(
+  root: string,
+  run: DetachedCandidate,
+  verdict: DetachedChildVerdict | null
+): void {
+  if (
+    !run.hasExited() ||
+    verdict?.exitCode == null ||
+    !['DEV_START_BUSY', 'DEV_START_IN_PROGRESS', 'DEV_START_UNCERTAIN'].includes(
+      verdict.code ?? ''
+    ) ||
+    detachedLogPath(root) === run.logFile
+  )
+    return;
+  // An elected child writes its PID before startup work; its failure log remains diagnostic.
+  const log = readDetachedLogFileSync(run.logFile, Number.MAX_SAFE_INTEGER);
+  if (!log || parseDetachedChildPid(log.lines) === run.pid) return;
+  try {
+    fs.rmSync(run.logFile, { force: true });
+  } catch {
+    // Cleanup is best effort; retain the admission refusal if the log cannot be removed.
+  }
 }

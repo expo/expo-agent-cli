@@ -37,7 +37,7 @@ import {
 import { CommandError } from '../utils/errors';
 import { detachedPidLine } from './childVerdict';
 import { withDevRunAsync, type DevRun } from './devRun';
-import { startupRequestFrom } from './startupRequest';
+import { startupRequestFrom, type StartupRequest } from './startupRequest';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import {
   findUntrackedDevServerAsync,
@@ -63,21 +63,22 @@ import { devServerRunningStopAsync } from './runningDevServer';
 export async function devAsync(
   projectRoot: string,
   options: DevOptions,
-  owned?: DevRun
+  context?: { run: DevRun; request?: never } | { request: StartupRequest; run?: never }
 ): Promise<number> {
+  const owned = context?.run;
+  const request = owned?.request ?? context?.request ?? startupRequestFrom(options);
   if (!owned && options.mode === 'run' && !options.detach)
-    return withDevRunAsync(
-      projectRoot,
-      { request: startupRequestFrom(options), detached: null },
-      (run) => devInRunAsync(projectRoot, options, run)
+    return withDevRunAsync(projectRoot, { request, detached: null }, (run) =>
+      devInRunAsync(projectRoot, options, run)
     );
-  return devInRunAsync(projectRoot, options, owned);
+  return devInRunAsync(projectRoot, options, owned, request);
 }
 
 async function devInRunAsync(
   projectRoot: string,
   options: DevOptions,
-  owned?: DevRun
+  owned?: DevRun,
+  request?: StartupRequest
 ): Promise<number> {
   owned?.signal.throwIfAborted();
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
@@ -94,7 +95,7 @@ async function devInRunAsync(
   // lets the owning child record the request before doing startup work.
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
-    return await devDetachAsync(projectRoot, options);
+    return await devDetachAsync(projectRoot, options, { request });
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
@@ -178,7 +179,6 @@ async function devInRunAsync(
 
   if (options.deviceBackend !== 'eas' && plan.buildLocation?.runsOn === 'eas') {
     await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
-    owned?.signal.throwIfAborted();
   }
 
   owned?.signal.throwIfAborted();

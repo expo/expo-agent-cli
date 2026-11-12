@@ -42,6 +42,7 @@ import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import type { BundlerReadyResult } from '../runtime/waitReady';
 import { requestsTunnel } from '../start/followUps';
+import { readAgentCliSettings } from '../settings/read';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLog } from './advertisedUrl';
 import {
@@ -54,7 +55,17 @@ import {
 } from './childVerdict';
 import { knownSessionIdSync, waitForEasSessionAsync } from './detachEasProgress';
 import { readDetachedLogFileSync, type DetachedLogRead } from './logFile';
-import { spawnDetachedCandidate, detachedStartupTimeout } from './detachedCandidate';
+import {
+  spawnDetachedCandidate,
+  detachedStartupTimeout,
+  discardRefusedCandidateLog,
+} from './detachedCandidate';
+import {
+  classifyDetachedStart,
+  detachedStartError,
+  observeDetachedRunAsync,
+} from './detachedOwnership';
+import { startupRequestFrom, type StartupRequest } from './startupRequest';
 import { isProcessAlive } from './processLiveness';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
@@ -171,6 +182,7 @@ export function buildDetachSpawn(binPath: string, argv: string[]): DetachSpawn {
 }
 
 export interface DevDetachOptions {
+  request?: StartupRequest;
   /** Capture the actual child before waiting, including starts that fail or lose ownership. */
   onSpawn?: (child: ChildProcess) => void;
   /**
@@ -195,7 +207,11 @@ export interface DevDetachOptions {
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, onSpawn }: DevDetachOptions = {}
+  {
+    print = true,
+    onSpawn,
+    request = startupRequestFrom(options, readAgentCliSettings(projectRoot).settings),
+  }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
 
@@ -219,8 +235,9 @@ export async function devDetachAsync(
       log: readDetachedLogFileSync(logFile, WHOLE_LOG),
     });
 
-  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
-  // lock, so nothing would be able to find it or stop it afterwards.
+  const refusal = classifyDetachedStart(await observeDetachedRunAsync(projectRoot), request);
+  if (refusal) throw detachedStartError(refusal);
+
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
     throw await devServerRunningStopAsync(projectRoot, running, options.platform, {
@@ -260,6 +277,7 @@ export async function devDetachAsync(
       : readChildVerdictSync(logFile);
     const relayed = relayedChildError(verdict);
     if (relayed) {
+      discardRefusedCandidateLog(projectRoot, run, verdict);
       throw relayed;
     }
     if (wait.kind === 'ended' && wait.building) {
@@ -334,7 +352,6 @@ export async function devDetachAsync(
       since: startedAt,
       knownId: keptSessionId,
       hasExited: childIsGone,
-      callerArgv: options.callerArgv,
     });
     if (sessionId == null) {
       const stopped = await waitFailureAsync(logFile, true);

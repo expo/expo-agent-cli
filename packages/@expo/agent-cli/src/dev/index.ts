@@ -128,16 +128,16 @@ export const agentCliDev: Command = async (argv) => {
       process.exitCode = await withDetachedRunAsync(
         projectRoot,
         options,
-        (run) => devAsync(projectRoot, options, run),
+        (run) => devAsync(projectRoot, options, { run }),
         request
       );
     } else if (options.mode === 'run' && !options.detach) {
       const { withDevRunAsync } = require('./devRun') as typeof import('./devRun');
       process.exitCode = await withDevRunAsync(projectRoot, { request, detached: null }, (run) =>
-        devAsync(projectRoot, options, run)
+        devAsync(projectRoot, options, { run })
       );
     } else {
-      process.exitCode = await devAsync(projectRoot, options);
+      process.exitCode = await devAsync(projectRoot, options, { request });
     }
   })().catch(logCmdError);
 };

@@ -81,13 +81,16 @@ These contracts are exercised through the compiled CLI. The tests
 
 | Contract                                        | Enforcing process test                                                            |
 | ----------------------------------------------- | --------------------------------------------------------------------------------- |
-| Election and normal release                     | `simultaneous detached starts elect one owner and normal stop releases it`        |
 | Empty-target recovery                           | `an empty ownership directory does not prevent publication`                       |
 | Endpoint, not PID, establishes liveness         | `a silent ownership endpoint prevents admission regardless of its diagnostic PID` |
 | Ambiguous connection retains evidence           | `an uncertain endpoint (%s) permits neither start nor discard`                    |
 | An unpublished attempt does not block admission | `death before publication leaves admission available`                             |
 
 These tests live in `e2e/__tests__/dev-detach-ownership-test.ts`.
+
+`concurrent %s parents preserve the elected startup result and its log` in
+`dev-detach-parent-admission-test.ts` covers public callers racing past the parent check,
+matching retries, configured request changes, and candidate log attribution.
 
 Cross-environment observation and interrupted recovery are enforced by
 `another TMPDIR cannot discard a live %s owner, but can recover its interrupted run`.

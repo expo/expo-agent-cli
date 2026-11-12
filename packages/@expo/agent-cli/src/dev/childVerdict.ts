@@ -145,6 +145,7 @@ export function isRelayedChildCode(code: string | null): code is string {
     code != null &&
     ([
       'NO_BOUND_DEVICE',
+      'DEV_START_IN_PROGRESS',
       'DEV_START_BUSY',
       'DEV_START_UNCERTAIN',
       'DEV_SERVER_RUNNING',

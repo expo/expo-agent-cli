@@ -67,7 +67,6 @@ export async function waitForEasSessionAsync(
     since: number;
     knownId: string | null;
     hasExited: () => boolean;
-    callerArgv: readonly string[];
     timeoutMs?: number;
   }
 ): Promise<string | null> {

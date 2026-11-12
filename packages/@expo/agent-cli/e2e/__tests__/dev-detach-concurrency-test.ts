@@ -140,7 +140,7 @@ it.each([false, true])(
   async (killParent) => {
     const f = await fixture();
     try {
-      const first = f.start({ DETACH_TEST_BOOT_BARRIER: '1' });
+      const first = f.start({ DETACH_TEST_BOOT_BARRIER: '1' }, ['--clear']);
       expect(await waitForAsync(() => f.marks('child').length === 1, 15_000)).toBe(true);
       if (killParent) {
         first.child.kill('SIGKILL');
@@ -487,21 +487,27 @@ it('smoke cannot stop a competing detached owner when its own bootstrap loses', 
   const f = await fixture();
   let smoke: ReturnType<typeof spawnAgentCli> | undefined;
   try {
-    const first = f.start();
-    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
     smoke = spawnAgentCli(
       f.root,
       ['smoke', '--ios', '--json', '--no-screenshot', '--port', String(f.port), '--timeout', '1s'],
       {
-        env: { ...f.env, ...pathEnvVars(path.join(f.root, '.no-bin')) },
+        env: {
+          ...f.env,
+          ...pathEnvVars(path.join(f.root, '.no-bin')),
+          DETACH_TEST_BOOT_BARRIER: '1',
+        },
       }
     );
     const finished = waitForExitAsync(smoke, collectOutput(smoke));
-    expect(await waitForAsync(() => f.marks('exited').length === 1, 15_000)).toBe(true);
+    expect(await waitForAsync(() => f.marks('child').length === 1, 15_000)).toBe(true);
+    const first = f.start();
+    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
     f.release();
     const started = await first.result;
     expect(started.exitCode, started.all).toBe(0);
     const owner = JSON.parse(started.stdout);
+    fs.writeFileSync(path.join(f.barrier, 'release-boot'), '');
+    expect(await waitForAsync(() => f.marks('exited').length === 1, 15_000)).toBe(true);
     const checked = await finished;
     expect(checked.exitCode, checked.all).not.toBe(0);
     expect(await readDevLockAsync(f.root)).toMatchObject({ pid: owner.pid });
@@ -510,6 +516,7 @@ it('smoke cannot stop a competing detached owner when its own bootstrap loses', 
       1
     );
   } finally {
+    fs.writeFileSync(path.join(f.barrier, 'release-boot'), '');
     if (smoke) await killAsync(smoke, 'SIGKILL');
     await f.cleanup();
   }
