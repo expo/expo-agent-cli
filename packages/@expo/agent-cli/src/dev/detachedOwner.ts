@@ -27,6 +27,7 @@ import { readDevServerLockAsync } from '../devLock/client';
 import type { DetachedChildVerdict } from './childVerdict';
 import type { DevOptions } from './resolveOptions';
 import type { DevStopOptions } from './resolveStopOptions';
+import { isProcessAlive } from './processLiveness';
 
 export const DETACHED_ATTEMPT_ENV = '__EXPO_AGENT_CLI_DETACHED_ATTEMPT';
 export const DETACHED_SETTINGS_ENV = '__EXPO_AGENT_CLI_DETACHED_SETTINGS';
@@ -119,9 +120,11 @@ export async function inspectDetachedStopAsync(
 export const supportsStartupCancellation = (options: DevStopOptions) =>
   !options.force && !options.release && options.signal === 'SIGTERM';
 
-export async function requestOwnedStopAsync(ref: DetachedAttemptRef, options: DevStopOptions) {
-  const timeoutMs = Math.ceil(options.timeoutMs);
-  const deadline = Date.now() + timeoutMs;
+export async function requestOwnedStopAsync(
+  ref: DetachedAttemptRef,
+  options: DevStopOptions,
+  deadline = Date.now() + options.timeoutMs
+) {
   if (options.signal !== 'SIGTERM') throw stopUncertainError();
   const controller = new AbortController();
   let released = false;
@@ -187,26 +190,24 @@ export async function requestOwnedStopAsync(ref: DetachedAttemptRef, options: De
       completion,
       dispose,
       async releaseAsync() {
-        if (options.eas || released) return dispose();
+        dispose();
+        if (options.eas || released) return;
         try {
           const acknowledgment = await fetch(`http://127.0.0.1:${ref.control.port}/release`, {
             method: 'POST',
             redirect: 'error',
-            signal: AbortSignal.timeout(timeoutMs),
+            signal: AbortSignal.timeout(options.timeoutMs),
             headers: {
               Authorization: ref.control.token,
               'x-detached-attempt': ref.id,
               'x-detached-grant': response.headers.get('x-detached-grant')!,
             },
-          }).catch(async () => {
-            if ((await completion) === null) throw stopUncertainError();
-            return null;
           });
-          if (acknowledgment && acknowledgment.status !== 204) throw stopUncertainError();
-          released = true;
-        } finally {
-          dispose();
+          if (acknowledgment.status !== 204) throw stopUncertainError();
+        } catch {
+          if (isProcessAlive(ref.pid)) throw stopUncertainError();
         }
+        released = true;
       },
     };
   } catch {

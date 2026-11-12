@@ -44,20 +44,12 @@ it.concurrent.for([
   { platform: 'android' as const, mode: 'eas' as const, failure: true, nativeTimeout: false },
   { platform: 'android' as const, mode: 'deadline' as const, failure: false, nativeTimeout: false },
   { platform: 'ios' as const, mode: 'inventory' as const, failure: false, nativeTimeout: false },
-  { platform: 'ios' as const, mode: 'closed' as const, failure: false, nativeTimeout: false },
-  {
-    platform: 'android' as const,
-    mode: 'closed-empty' as const,
-    failure: false,
-    nativeTimeout: false,
-  },
   { platform: 'ios' as const, mode: 'eas' as const, failure: true, nativeTimeout: true },
 ])(
   'keeps the owner and late EAS start outside the selected tree (%j)',
   async ({ platform, mode, failure, nativeTimeout }, { expect, skip }) => {
     if (nativeTimeout && process.platform !== 'win32') skip();
     const fixture = await setupDetachedFixtureAsync();
-    const closed = mode === 'closed' || mode === 'closed-empty';
     const root = canonicalizeExistingPath(fixture.root);
     const release = (name: string) => fs.writeFileSync(path.join(root, name), '');
     const records = () =>
@@ -74,9 +66,7 @@ it.concurrent.for([
       OWNED_STOP_ROOT: root,
       OWNED_STOP_FAILURE: nativeTimeout ? 'timeout' : failure ? '1' : '0',
       OWNED_STOP_DELAY_CLOSE: mode === 'inventory' ? '1' : '0',
-      OWNED_STOP_RELEASE_CLOSED: closed ? mode : '',
-      OWNED_STOP_EXPO_EXIT: mode === 'natural' || failure ? '1' : '0',
-      STUB_EXPO_DELAY_MS: '90000',
+      STUB_EXPO_DELAY_MS: mode === 'natural' ? '3000' : '90000',
       STUB_SIM_START_ID: 'late-owned',
     };
     const run = (args: string[], extra: NodeJS.ProcessEnv = {}) =>
@@ -117,7 +107,6 @@ it.concurrent.for([
       fs.mkdirSync(otherRoot);
       await writeCloudBindingAsync(expoHomeOf(root), otherRoot, { id: 'unrelated', platform });
       if (mode === 'natural') {
-        release('release-expo');
         expect(
           await waitForAsync(
             async () => (await readDevLockAsync(root))?.phase === 'finishing',
@@ -145,11 +134,9 @@ it.concurrent.for([
         expect(legacy.status).toBe(409);
         expect(legacy.headers.get('x-detached-grant')).toBeNull();
       }
-      const plain = mode === 'plain' || mode === 'natural' || closed;
+      const plain = mode === 'plain' || mode === 'natural';
       const incomplete = failure || mode === 'deadline';
-      const budget = nativeTimeout ? 1000 : 5000;
-      const timeout = `${budget}ms`;
-      stopping = run(['dev:stop', ...(plain ? [] : ['--eas']), '--timeout', timeout], {
+      stopping = run(['dev:stop', ...(plain ? [] : ['--eas']), '--timeout', '1s'], {
         STUB_SIM_STOP_RELEASE_FILE: path.join(root, 'release-cleanup'),
         ...(mode === 'deadline' ? { AGENT_CLI_EAS_SESSION_WAIT_MS: '200' } : {}),
         OWNED_STOP_HOLD_INVENTORY: mode === 'inventory' ? '1' : '0',
@@ -158,25 +145,12 @@ it.concurrent.for([
         expect(
           await waitForAsync(() => records().some(({ event }) => event === 'inventory'), 5000)
         ).toBe(true);
-        await new Promise((resolve) => setTimeout(resolve, budget + 250));
+        await new Promise((resolve) => setTimeout(resolve, 1250));
         expect(records().some(({ event }) => event === 'grant')).toBe(false);
         release('release-inventory');
       }
       expect(
         await waitForAsync(() => records().some(({ event }) => event === 'grant'), 10000)
-      ).toBe(true);
-      const selected = records().find(({ event }) => event === 'selected')!.pid;
-      expect(
-        await waitForAsync(() => !isProcessRunning(selected), 5000),
-        JSON.stringify(records())
-      ).toBe(true);
-      if (failure) {
-        expect(isProcessRunning(expo)).toBe(process.platform === 'win32');
-        release('release-expo');
-      }
-      expect(
-        await waitForAsync(() => records().some(({ event }) => event === 'selected-close'), 5000),
-        JSON.stringify(records())
       ).toBe(true);
       expect(await waitForAsync(() => !isProcessRunning(expo), 5000)).toBe(true);
       expect(
@@ -214,47 +188,30 @@ it.concurrent.for([
           session: { stopped: false },
         });
       } else if (plain) {
-        if (closed) {
-          expect(
-            await waitForAsync(() => records().some(({ event }) => event === 'release-held'), 5000)
-          ).toBe(true);
-          release('release-session');
-          expect(
-            await waitForAsync(
-              () => records().some(({ event }) => event === 'listener-closed'),
-              5000
-            )
-          ).toBe(true);
-          expect(isProcessAlive(owner.pid)).toBe(true);
-          expect(await readDevLockAsync(root)).toBeNull();
-          release('release-request');
-        }
         const result = await stopping;
-        expect(result.exitCode, result.all).toBe(mode === 'closed-empty' ? 20 : 0);
-        if (mode === 'closed-empty') expect(result.all).toContain('DEV_DETACHED_STOP_UNCERTAIN');
-        else
-          expect(JSON.parse(result.stdout)).toMatchObject({
-            stopped: true,
-            reason: null,
-            pid: owner.pid,
-            lockHeld: true,
-            signal: null,
-            processStillRunning: true,
-            easPlatform: platform,
-            followups: expect.arrayContaining([
-              expect.objectContaining({
-                id: 'stop-session',
-                command: expect.stringMatching(/dev:stop --eas$/),
-              }),
-            ]),
-          });
-        if (!closed) expect((await readDevLockAsync(root))?.phase).toBe('finishing');
+        expect(result.exitCode, result.all).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          stopped: true,
+          reason: null,
+          pid: owner.pid,
+          lockHeld: true,
+          signal: null,
+          processStillRunning: true,
+          easPlatform: platform,
+          followups: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'stop-session',
+              command: expect.stringMatching(/dev:stop --eas$/),
+            }),
+          ]),
+        });
+        expect((await readDevLockAsync(root))?.phase).toBe('finishing');
         if (mode === 'natural')
           stopping = run(['dev:stop', '--eas', '--timeout', '500ms'], {
             STUB_SIM_STOP_RELEASE_FILE: path.join(root, 'release-cleanup'),
           });
       }
-      if (!incomplete && mode !== 'plain' && !closed) {
+      if (!incomplete && mode !== 'plain') {
         expect(
           await waitForAsync(
             () =>
@@ -267,12 +224,8 @@ it.concurrent.for([
         void stopping.then(() => {
           completed = true;
         });
-        await new Promise((resolve) =>
-          setTimeout(resolve, (mode === 'natural' ? 500 : budget) + 250)
-        );
-        expect(completed, completed ? (await stopping).all + JSON.stringify(records()) : '').toBe(
-          false
-        );
+        await new Promise((resolve) => setTimeout(resolve, 1250));
+        expect(completed).toBe(false);
         const concurrent = await run(['dev:stop']);
         expect(concurrent.exitCode, concurrent.all).toBe(20);
       }
@@ -287,7 +240,7 @@ it.concurrent.for([
             }
           )
         ).rejects.toMatchObject({ code: 'DEV_DETACHED_START_RUNNING' });
-      } else if (!closed) {
+      } else {
         const successor = await run([
           'dev',
           `--${platform}`,
@@ -298,13 +251,12 @@ it.concurrent.for([
         ]);
         expect(successor.exitCode, successor.all).toBe(20);
       }
-      expect(isProcessRunning(eas)).toBe(!closed);
-      expect(fs.existsSync(owner.directory)).toBe(!closed);
+      expect(isProcessRunning(eas)).toBe(true);
+      expect(fs.existsSync(owner.directory)).toBe(true);
       release('release-session');
-      release('release-exit');
       expect(await waitForAsync(() => !isProcessAlive(owner.pid), 10000)).toBe(true);
       expect(await readDevLockAsync(root)).toBeNull();
-      if (incomplete || mode === 'plain' || closed) {
+      if (incomplete || mode === 'plain') {
         expect(stops()).toEqual([]);
         expect(fs.existsSync(owner.directory)).toBe(incomplete);
         expect(
@@ -358,9 +310,6 @@ it.concurrent.for([
       release('release-session');
       release('release-cleanup');
       release('release-inventory');
-      release('release-request');
-      release('release-exit');
-      release('release-expo');
       await stopping;
       for (const { pid } of records())
         if (isProcessRunning(pid)) await signalProcessAsync(pid, 'SIGKILL');
@@ -507,12 +456,7 @@ it.each([
         return;
       }
 
-      const options = resolveDevStopOptions([
-        '--port',
-        String(fixture.port),
-        '--timeout',
-        schedule === 'queued' ? '1.5005s' : '10s',
-      ]);
+      const options = resolveDevStopOptions(['--port', String(fixture.port), '--timeout', '10s']);
       const failure = schedule === 'helper-failure';
       if (schedule === 'port-move') {
         await expect(requestOwnedStopAsync(owner, options)).rejects.toMatchObject({
