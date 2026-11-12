@@ -22,7 +22,8 @@ import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
-import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
+import { devDetachAsync } from '../detachAsync';
+import { OPEN_PLATFORM_GRACE_MS } from '../detachHealth';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
@@ -107,6 +108,25 @@ function run() {
     { print: false }
   );
 }
+
+it.each(['ios', 'android'] as const)(
+  'relays an app-open handoff during grace without claiming readiness on %s',
+  async (platform) => {
+    setTimeout(() => {
+      fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
+    }, 300);
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions([`--${platform}`, '--detach', '--local', '--json'])
+    ).catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_NEEDS_HUMAN', exitCode: 7 });
+    expect(waitForBundlerReadyAsync).not.toHaveBeenCalled();
+    expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
+  }
+);
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exits during the
 // wait and the run still binds its session: the detach reports no dev server, and names the stop.
@@ -383,6 +403,30 @@ it('keeps the same grace window for a child that stays healthy', async () => {
   await expect(result).resolves.toBe(0);
   expect(Date.now()).toBe(OPEN_PLATFORM_GRACE_MS);
 });
+
+it.each([false, true])(
+  'keeps a grace failure after status recovers, unless a handoff arrives (handoff=%s)',
+  async (handoff) => {
+    vi.mocked(waitForBundlerReadyAsync)
+      .mockResolvedValueOnce(readiness())
+      .mockResolvedValueOnce(readiness())
+      .mockResolvedValueOnce(readiness(false));
+    if (handoff) {
+      setTimeout(() => {
+        fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
+      }, 300);
+    }
+
+    const result = run().catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({
+      code: handoff ? 'DEV_DETACH_NEEDS_HUMAN' : 'DEV_DETACH_NOT_ANSWERING',
+      exitCode: handoff ? 7 : 20,
+    });
+    expect(Date.now()).toBe(handoff ? 300 : OPEN_PLATFORM_GRACE_MS);
+  }
+);
 
 it('does not wait for a verdict when the child is alive but the bundler stopped answering', async () => {
   vi.mocked(waitForBundlerReadyAsync)

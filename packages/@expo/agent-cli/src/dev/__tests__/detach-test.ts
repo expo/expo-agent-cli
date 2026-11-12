@@ -7,14 +7,9 @@
 import { vol } from 'memfs';
 
 import type { BundlerReadyResult } from '../../runtime/waitReady';
-import {
-  buildDetachSpawn,
-  detachFollowUps,
-  needsOpenPlatformGrace,
-  notReadyError,
-  resolveDetachFailure,
-} from '../detachAsync';
-import type { DevDetachResultJson } from '../detachAsync';
+import { needsOpenPlatformGrace, notReadyError, resolveDetachFailure } from '../detachHealth';
+import { buildDetachSpawn } from '../detachAsync';
+import { detachFollowUps, type DevDetachResultJson } from '../detachReport';
 import { detachedLogPath, openDetachedLogSync, readDetachedLogSync } from '../logFile';
 import { resolveDevLogsOptions, DEFAULT_LOG_TAIL_LINES } from '../resolveLogsOptions';
 import { resolveDevOptions } from '../resolveOptions';

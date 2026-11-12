@@ -1,33 +1,30 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
-// `@expo/agent-cli dev --detach`: start the dev server and give the terminal back.
-//
-// The friction this answers is the plainest one in the CLI. `@expo/agent-cli dev` runs the dev server in
-// the foreground and says nothing about it, so the first thing a driving agent does is burn a
-// command timeout waiting for a command that never returns, and every step after it — `dev:wait`,
-// `navigate`, `runtime:errors` — needs a shell the dev server is not holding [F46, friction run 4].
-//
-// What is new here is only the *spawn*: the child is `@expo/agent-cli dev` again, unchanged, with its
-// output pointed at a file. Everything that makes the dev server discoverable afterwards already
-// exists — the lock publishes its port (`src/devLock/`), `dev:wait` reports its readiness, and
-// `dev:stop` signals the pid the lock names. This is the reason the child is this CLI and not
-// `expo start` directly: the lock is taken by the wrapper, so a detached run has to *be* a wrapper.
-//
-// **One detached dev server per project.** The lock is asked before anything is spawned, and a
-// project that already has one is reported rather than given a second. Two dev servers for one
-// project is a thing people do on purpose in two terminals; two *detached* ones is a process
-// nobody can find, because only one of them can hold the lock that names it.
-
-import type { PlanPlatform } from '../plan/types';
+import { spawn } from 'child_process';
+import fs from 'fs';
 import { otherPlatformSessionError } from '../device/cloudErrors';
+import {
+  buildEndedError,
+  detachFailureError,
+  isOwnBundlerAnsweringAsync,
+  lostDevServerError,
+  needsOpenPlatformGrace,
+  notReadyError,
+  notStartedError,
+  OPEN_PLATFORM_GRACE_MS,
+  readChildVerdictSync,
+  relayedDeviceError,
+  resolveDetachFailure,
+  waitFailureAsync,
+  waitForChildVerdictAsync,
+  watchOpenPlatformGraceAsync,
+} from './detachHealth';
+import { waitForDetachedStartupAsync } from './detachLockWait';
+import { detachEas, reportDetached, WHOLE_LOG } from './detachReport';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
 import { devServerRunningStopAsync } from './runningDevServer';
-import { RUN_PHASE } from './runPhase';
-import { spawn } from 'child_process';
-import fs from 'fs';
 
-import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -36,34 +33,17 @@ import {
   localBackendOf,
 } from '../deviceBinding';
 import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
-import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
-import { PORT_WATCH_TIMEOUT_MS } from '../devLock/port';
-import { detachedEventLogEnv } from '../utils/eventLogEnv';
-import { event as cliEvent } from '../events';
-import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
-import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
+import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import * as Log from '../log';
-import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
-import { findNeedsHumanScenario } from '../needsHuman/registry';
 import type { NativePlatform } from '../plan/types';
-import { rerunDevCommand } from '../plan/rerun';
 import { PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
-import { wrapUntrustedAppOutput } from '../runtime/untrusted';
-import { probeBundlerAsync } from '../runtime/bundlerStatus';
-import type { BundlerReadyResult } from '../runtime/waitReady';
+import { defaultSmokePlatformAsync, statedSmokePlatform } from '../smoke/suggest';
 import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
+import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
-import {
-  isRelayedDeviceCode,
-  childOpensPlatform,
-  parseDetachedChildPort,
-  parseDetachedChildVerdict,
-  VERDICT_LOG_LINES,
-  type DetachedChildVerdict,
-} from './childVerdict';
+import { childOpensPlatform, parseDetachedChildVerdict, VERDICT_LOG_LINES } from './childVerdict';
 import {
   childStartsSessionSync,
   knownSessionIdSync,
@@ -81,85 +61,6 @@ import { isProcessAlive } from './processLiveness';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
 
-/** A dev server that is not on the port the caller expected. */
-export interface PortMove {
-  /** The port the caller expected: the one the plan moved from, or the one it planned. */
-  from: number;
-  /** The port the dev server took, as its lock names it. */
-  to: number;
-}
-
-/** How often the lock is asked while the parent waits for it. */
-const LOCK_POLL_INTERVAL_MS = 200;
-
-/** How many lines of the child's log a failure quotes back. */
-const FAILURE_LOG_LINES = 20;
-
-/**
- * Machine shape of `@expo/agent-cli dev --detach --json`.
- *
- * @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — one JSON object on stdout,
- * every key always present, and a fact the run does not have is null.
- */
-export interface DevDetachResultJson {
-  /** Origin the dev server listens on. */
-  url: string;
-  port: number;
-  /** PID of the detached `@expo/agent-cli` process, which is what `dev:stop` signals. */
-  pid: number;
-  /** Where its output is being written. */
-  logFile: string;
-  /**
-   * Whether the bundler answered `/status`. Null when `--wait-ready` was not asked for, which is
-   * the difference between "not ready" and "not asked".
-   */
-  ready: boolean | null;
-  /** Whether the dev server serves this project, when readiness was checked. */
-  projectRootMatched: boolean | null;
-  /** A dev server was already running for this project, so nothing was started. */
-  alreadyRunning: boolean;
-  /**
-   * What the run's lock says: `building` while a step before the dev server, or an `expo run:*`
-   * step, still compiles, and `serving` after. While it builds, {@link url} is where the dev server
-   * will listen, not one that answers.
-   *
-   * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-   */
-  phase: 'building' | 'serving';
-  /**
-   * The port this run was moved off, and the one it landed on. Null when it did not move.
-   *
-   * A detached run does its port retry in the child, so the move was reported on a stream nobody
-   * was watching: the parent printed `port: 8210` and said nothing about 8081 having been asked
-   * for, and every command and URL a caller had already written still named the old port
-   * [observed — friction run 5, F48-4]. Computed from the plan the child printed to its log and the
-   * lock it published, so it is null when the log holds no plan with a dev-server port.
-   */
-  portMoved: PortMove | null;
-  /**
-   * The tunnel origin this run is reachable at, or null.
-   *
-   * Non-null only for a run started with `--tunnel` whose dev server has advertised a host. It is
-   * the address a device off this machine uses, and {@link url} — where it listens here — is not:
-   * a phone cannot open `http://127.0.0.1:8081`, and neither can a cloud simulator. The tunnel
-   * comes up **after** the bundler answers, so this run waits for it rather than reporting the
-   * local address as though it were the answer.
-   *
-   * @see llp/0005-runtime-loop-tools.rfc.md §Where a device reaches the dev server
-   */
-  tunnelUrl: string | null;
-  /** This worktree's device for the platform, or null when the run binds none. */
-  device: BindingSummary | null;
-  /**
-   * The EAS session of a run that opens the app on EAS, or null for any other run. `sessionId` is
-   * null while no session is bound; `--wait-ready` waits for it (llp/0035 §Preserved sessions).
-   */
-  eas: { sessionId: string | null } | null;
-  /** How long the whole thing took, in milliseconds. */
-  waitedMs: number;
-  followups: FollowUp[];
-}
-
 /** The argv of the detached child, as a value a test can assert without spawning anything. */
 export interface DetachSpawn {
   /** Executable to run: this process' own Node. */
@@ -169,10 +70,6 @@ export interface DetachSpawn {
 
 /**
  * The command line the detached child is started with.
- *
- * Pure, and exported for the test table, because it is the half of this file that can be wrong in a
- * way nothing else notices: a flag left on the child's command line changes what the *dev server*
- * does, and the parent would report success either way.
  *
  * Three flags are stripped, and each for its own reason:
  *
@@ -214,176 +111,201 @@ export interface DevDetachOptions {
   reuseBoundDevice?: boolean;
 }
 
-/**
- * Start the dev server in a process of its own, and report where it landed.
- *
- * @returns the exit code: always `0`, because a detached server that came up — or was already
- * up — is the outcome asked for. Everything else throws.
- * @throws {CommandError} when the child exited before publishing its lock, or the wait ran out.
- */
-// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
+interface DetachContext {
+  projectRoot: string;
+  options: DevOptions;
+  startedAt: number;
+  print: boolean;
+  reuseBoundDevice: boolean;
+  smokePlatform: NativePlatform;
+}
+
+type DetachSource =
+  | { kind: 'spawn' }
+  | { kind: 'existing'; lock: DevServerLockInfo }
+  | { kind: 'building'; lock: DevServerLockInfo };
+
+type ChildExit = { code: number | null; signal: NodeJS.Signals | null };
+type ChildState = { status: 'running' } | { status: 'exited'; exit: ChildExit };
+type DetachedChild = ReturnType<typeof spawnDetachedChild>;
+type Readiness =
+  | { status: 'unchecked'; lock: DevServerLockInfo }
+  | { status: 'ready'; lock: DevServerLockInfo; projectRootMatched: true | null };
+
+/** Start or follow one detached run. Return 0 for a report; throw for a failed outcome. */
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
   { print = true, reuseBoundDevice = false }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
-
-  // The platform the `smoke` follow-up should name: the one the caller asked to run for, else the
-  // project's own default. `smoke` requires a platform now, so a follow-up without one exits 1.
   const smokePlatform =
     statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that builds is
-  // reported at once, with the port its dev server will take, and nothing is waited for.
-  const reportBuildingRunAsync = async (lock: DevServerLockInfo, alreadyRunning: boolean) =>
-    reportDetached(projectRoot, options, {
-      lock,
-      alreadyRunning,
-      eas: detachEas(projectRoot, options),
-      ready: null,
-      projectRootMatched: null,
-      startedAt,
-      print,
-      tunnelUrl: null,
-      device: await boundDeviceAsync(projectRoot, options),
-      smokePlatform,
-    });
+  const context = { projectRoot, options, startedAt, smokePlatform, print, reuseBoundDevice };
+  const source = await resolveDetachSourceAsync(context);
+  switch (source.kind) {
+    case 'building':
+      return await reportBuildingRunAsync(context, source.lock, true);
+    case 'existing':
+      return await reuseRunningAsync(context, source.lock);
+    case 'spawn':
+      return await startDetachedAsync(context);
+  }
+}
 
-  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
-  // lock, so nothing would be able to find it or stop it afterwards.
+async function resolveDetachSourceAsync(context: DetachContext): Promise<DetachSource> {
+  const { projectRoot, options, startedAt } = context;
   let running = await readDevServerLockAsync(projectRoot);
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
-  // followed, not given a second child.
   if (running?.phase === 'building') {
     const followed = running;
-    const wait = await waitPastBuildingAsync(
+    const wait = await waitForDetachedStartupAsync(
       projectRoot,
       options,
       startedAt,
       () => !isProcessAlive(followed.pid)
     );
-    if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, true);
-    // A followed run that ended in its build spawns nothing: its log says why.
-    if (wait.kind === 'ended') {
+    if (wait.kind === 'building') return { kind: 'building', lock: wait.lock };
+    if (wait.kind === 'build-ended' || wait.kind === 'unobserved') {
       const verdict = await waitForChildVerdictAsync(projectRoot);
-      const relayed = relayedDeviceError(verdict);
-      if (relayed) throw relayed;
-      throw buildEndedError(followed, verdict?.exitCode ?? null);
+      throw relayedDeviceError(verdict) ?? buildEndedError(followed, verdict?.exitCode ?? null);
     }
     running = wait.lock;
   }
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
-  // EAS session start has no server to report, and a second child would start a second session.
   if (running?.phase === 'finishing') {
     throw await devServerRunningStopAsync(projectRoot, running, options.platform);
   }
-  if (running) {
-    const runningPid = running.pid;
-    const hasExited = () => !isProcessAlive(runningPid);
-    async function checkReuseFailureAsync(
-      lock: DevServerLockInfo,
-      statusAnswering: boolean | null = null
-    ): Promise<void> {
-      const stopped = await waitFailureAsync(projectRoot, hasExited(), Date.parse(lock.startedAt));
-      if (stopped || statusAnswering === false) {
-        throw detachFailureError(stopped?.failure ?? 'not-answering', {
-          projectRoot,
-          lock,
-          logFile: detachedLogPath(projectRoot),
-          verdict: stopped?.verdict ?? null,
-          childExit: null,
-          platform: options.platform,
-          eas: detachEas(projectRoot, options),
-        });
-      }
-    }
+  return running ? { kind: 'existing', lock: running } : { kind: 'spawn' };
+}
 
-    // Health first: no session is opened next to a server that is dying or not ready.
-    if (!options.waitReady) await checkReuseFailureAsync(running);
-    const checked = options.waitReady
-      ? await waitForDetachedReadyAsync(projectRoot, running, {
-          timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
-          hasExited,
-        })
-      : null;
-    if (checked?.lock.phase === 'finishing') {
-      throw lostDevServerError(checked.lock, detachedLogPath(projectRoot));
-    }
-    if (checked && (!checked.result.ready || checked.result.projectRootMatched === false)) {
-      await checkReuseFailureAsync(checked.lock);
-      throw notReadyError(
-        checked.lock,
-        detachedLogPath(projectRoot),
-        checked.result,
-        options.platform,
-        detachEas(projectRoot, options)
-      );
-    }
-    const lock = checked?.lock ?? running;
-    // Reuse only reads the current tunnel; it does not wait for a new one to appear.
-    const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
-    // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a child still starting
-    // its session is followed: a reopen would start a second one, or exit 1 on a queued one.
-    const sessionPlatform = reuseBoundDevice ? easOpenPlatform(options) : null;
-    const followsSession =
-      sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
-    const easSessionId = followsSession
-      ? options.waitReady
-        ? await waitForEasSessionAsync(projectRoot, {
-            platform: sessionPlatform,
-            lock,
-            tunnelUrl,
-            since: Date.parse(lock.startedAt),
-            knownId: knownSessionIdSync(projectRoot, sessionPlatform),
-            hasExited,
-            callerArgv: options.callerArgv,
-          })
-        : null
-      : reuseBoundDevice
-        ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
-        : null;
-    const device = await boundDeviceAsync(projectRoot, options);
-    const statusAnswering =
-      checked?.result.ready === true
-        ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url)
-        : null;
-    // Read the verdict and PID after all probes: any can outlast the running server.
-    await checkReuseFailureAsync(lock, statusAnswering);
-    return reportDetached(projectRoot, options, {
+async function reportBuildingRunAsync(
+  context: DetachContext,
+  lock: DevServerLockInfo,
+  alreadyRunning: boolean
+): Promise<number> {
+  const { projectRoot, options, startedAt, print, smokePlatform } = context;
+  return reportDetached(projectRoot, options, {
+    lock,
+    alreadyRunning,
+    startedAt,
+    print,
+    smokePlatform,
+    eas: detachEas(projectRoot, options),
+    ready: null,
+    projectRootMatched: null,
+    tunnelUrl: null,
+    device: await boundDeviceAsync(projectRoot, options),
+  });
+}
+
+async function reuseRunningAsync(
+  context: DetachContext,
+  running: DevServerLockInfo
+): Promise<number> {
+  const { projectRoot, options, startedAt, print, smokePlatform } = context;
+  const runningPid = running.pid;
+  const hasExited = () => !isProcessAlive(runningPid);
+
+  // Health first: no session is opened next to a server that is dying or not ready.
+  if (!options.waitReady) await checkReuseFailureAsync(context, hasExited, running);
+  const checked = options.waitReady
+    ? await waitForDetachedReadyAsync(projectRoot, running, {
+        timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
+        hasExited,
+      })
+    : null;
+  if (checked?.lock.phase === 'finishing') {
+    throw lostDevServerError(checked.lock, detachedLogPath(projectRoot));
+  }
+  if (checked && (!checked.result.ready || checked.result.projectRootMatched === false)) {
+    await checkReuseFailureAsync(context, hasExited, checked.lock);
+    throw notReadyError(
+      checked.lock,
+      detachedLogPath(projectRoot),
+      checked.result,
+      options.platform,
+      detachEas(projectRoot, options)
+    );
+  }
+  const lock = checked?.lock ?? running;
+  // Reuse only reads the current tunnel; it does not wait for a new one to appear.
+  const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a child still starting
+  // its session is followed: a reopen would start a second one, or exit 1 on a queued one.
+  const easSessionId = await sessionForExistingRunAsync(context, lock, tunnelUrl, hasExited);
+  const device = await boundDeviceAsync(projectRoot, options);
+  const statusAnswering =
+    checked?.result.ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
+  // Read the verdict and PID after all probes: any can outlast the running server.
+  await checkReuseFailureAsync(context, hasExited, lock, statusAnswering);
+  return reportDetached(projectRoot, options, {
+    lock,
+    alreadyRunning: true,
+    eas: easOpenPlatform(options) ? { sessionId: easSessionId } : null,
+    ready: checked?.result.ready ?? null,
+    projectRootMatched: checked?.result.projectRootMatched ?? null,
+    startedAt,
+    print,
+    tunnelUrl,
+    device,
+    smokePlatform,
+  });
+}
+
+async function checkReuseFailureAsync(
+  context: DetachContext,
+  hasExited: () => boolean,
+  lock: DevServerLockInfo,
+  statusAnswering: boolean | null = null
+): Promise<void> {
+  const { projectRoot, options } = context;
+  const stopped = await waitFailureAsync(projectRoot, hasExited(), Date.parse(lock.startedAt));
+  if (stopped || statusAnswering === false) {
+    throw detachFailureError(stopped?.failure ?? 'not-answering', {
+      projectRoot,
       lock,
-      alreadyRunning: true,
-      eas: easOpenPlatform(options) ? { sessionId: easSessionId } : null,
-      ready: checked?.result.ready ?? null,
-      projectRootMatched: checked?.result.projectRootMatched ?? null,
-      startedAt,
-      print,
-      tunnelUrl,
-      device,
-      smokePlatform,
+      logFile: detachedLogPath(projectRoot),
+      verdict: stopped?.verdict ?? null,
+      childExit: null,
+      platform: options.platform,
+      eas: detachEas(projectRoot, options),
     });
   }
+}
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
-  // exit code. Spawn path only: on a running server the reopen above throws the same refusal.
-  const easPlatform = easOpenPlatform(options);
-  const other = easPlatform ? await otherPlatformSessionAsync(projectRoot, easPlatform) : null;
-  if (easPlatform && other)
-    throw otherPlatformSessionError(other.platform, {
-      wanted: easPlatform,
-      sessionId: other.sessionId,
-      devServerRunning: false,
-    });
-  // The session bound before the spawn, expired or not, is the one the child reuses and renews.
-  const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
+async function sessionForExistingRunAsync(
+  context: DetachContext,
+  lock: DevServerLockInfo,
+  tunnelUrl: string | null,
+  hasExited: () => boolean
+): Promise<string | null> {
+  const { projectRoot, options, reuseBoundDevice } = context;
+  const sessionPlatform = reuseBoundDevice ? easOpenPlatform(options) : null;
+  const followsSession =
+    sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
+  return followsSession
+    ? options.waitReady
+      ? await waitForEasSessionAsync(projectRoot, {
+          platform: sessionPlatform,
+          lock,
+          tunnelUrl,
+          since: Date.parse(lock.startedAt),
+          knownId: knownSessionIdSync(projectRoot, sessionPlatform),
+          hasExited,
+          callerArgv: options.callerArgv,
+        })
+      : null
+    : reuseBoundDevice
+      ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
+      : null;
+}
 
+function spawnDetachedChild(projectRoot: string, options: DevOptions) {
   const { logFile, fd } = openDetachedLogSync(projectRoot);
   const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);
 
   event('detach_spawn', { logFile, argv: args });
   const child = spawn(command, args, {
     cwd: projectRoot,
-    // Its own process group and session, so closing this terminal does not take the dev server
-    // with it — which is the whole point of detaching.
     detached: true,
     // Both streams into the log. `ignore` on stdin, because a detached process has no terminal to
     // read one from, and an inherited stdin would keep this shell attached to it.
@@ -397,118 +319,178 @@ export async function devDetachAsync(
       [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
     },
   });
-  // The child owns the file now; a descriptor left open here would keep the parent alive.
   fs.closeSync(fd);
   child.unref();
 
-  let childExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
-  /**
-   * Aborted when the child is gone, which ends every wait below.
-   *
-   * A wait for a bundler is a wait for the process that would start one, and this run started
-   * exactly one of those. Without it, `--wait-ready` spends its whole budget re-asking a port
-   * nothing can answer on again: the retry that exists so a cold `expo run:ios` build is waited out
-   * (`src/runtime/waitReady.ts`) cannot tell that build apart from a corpse, and both look like a
-   * refused connection.
-   */
+  let state: ChildState = { status: 'running' };
   const childGone = new AbortController();
   child.once('exit', (code, signal) => {
-    childExit = { code, signal };
+    state = { status: 'exited', exit: { code, signal } };
     childGone.abort();
   });
   child.once('error', () => {
-    childExit = { code: null, signal: null };
+    state = { status: 'exited', exit: { code: null, signal: null } };
     childGone.abort();
   });
-  const hasExited = () => childExit != null;
+  return {
+    logFile,
+    pid: child.pid ?? null,
+    signal: childGone.signal,
+    hasExited: () => state.status === 'exited',
+    get exit(): ChildExit | null {
+      return state.status === 'exited' ? state.exit : null;
+    },
+  };
+}
 
-  const wait = await waitPastBuildingAsync(projectRoot, options, startedAt, hasExited);
-  if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, false);
+async function startDetachedAsync(context: DetachContext): Promise<number> {
+  const { projectRoot, options, startedAt, print, smokePlatform } = context;
+  // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
+  // exit code. Reusing a running server delegates the same refusal to reopenEasAsync.
+  const easPlatform = easOpenPlatform(options);
+  const other = easPlatform ? await otherPlatformSessionAsync(projectRoot, easPlatform) : null;
+  if (easPlatform && other)
+    throw otherPlatformSessionError(other.platform, {
+      wanted: easPlatform,
+      sessionId: other.sessionId,
+      devServerRunning: false,
+    });
+  // The session bound before the spawn, expired or not, is the one the child reuses and renews.
+  const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
+
+  const child = spawnDetachedChild(projectRoot, options);
+  const { logFile, hasExited } = child;
+  const wait = await waitForDetachedStartupAsync(projectRoot, options, startedAt, hasExited);
+  if (wait.kind === 'building') return await reportBuildingRunAsync(context, wait.lock, false);
   // A run that ended in its build holds no lock any more, and its log says why.
-  let lock = wait.kind === 'up' ? wait.lock : null;
-  if (!lock) {
+  if (wait.kind === 'finishing') throw lostDevServerError(wait.lock, logFile);
+  if (wait.kind !== 'serving') {
     // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
-    const verdict = childExit
+    const verdict = child.exit
       ? await waitForChildVerdictAsync(projectRoot)
       : readChildVerdictSync(projectRoot);
     const relayed = relayedDeviceError(verdict);
     if (relayed) {
       throw relayed;
     }
-    if (wait.kind === 'ended' && wait.building) {
-      // Read through a cast: the `exit` callback sets it, which the narrowing here cannot see.
-      const exit = childExit as { code: number | null } | null;
-      throw buildEndedError(wait.building, exit?.code ?? verdict?.exitCode ?? null);
+    if (wait.kind === 'build-ended') {
+      throw buildEndedError(wait.lock, child.exit?.code ?? verdict?.exitCode ?? null);
     }
     throw notStartedError(
       projectRoot,
       logFile,
-      childExit,
-      child.pid ?? null,
+      child.exit,
+      child.pid,
       Date.now() - startedAt,
       options.platform
     );
   }
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the child's Metro exited
-  // and its EAS open still runs: there is no dev server to report or probe.
-  if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
 
-  /**
-   * Whether the child this run started is gone, asked of the process rather than of an event.
-   *
-   * `hasExited` above is the parent's *observation* of the exit, and it is the only witness this
-   * file had. It is a good one and it is not the only one available: the lock names the child's
-   * pid, and `isProcessAlive` answers on every platform without touching the process. Reading both
-   * closes the window where a child has ended and the `exit` event has not been delivered yet —
-   * the whole point of the checks below is to be right about a process that is already gone, and
-   * an answer that depends on the event loop having caught up is one more ordering to lose to
-   * (@ref ./detachAsync §waitFailureAsync — F153).
-   */
+  let lock = wait.lock;
   const childPid = lock.pid;
   const childIsGone = () => hasExited() || !isProcessAlive(childPid);
 
-  let ready: boolean | null = null;
-  let projectRootMatched: boolean | null = null;
-  if (options.waitReady) {
-    const checked = await waitForDetachedReadyAsync(projectRoot, lock, {
-      timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
-      hasExited: childIsGone,
-      // @ref ./detachAsync §childGone — a dead child never answers, so the wait ends with it.
-      signal: childGone.signal,
-    });
-    lock = checked.lock;
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exited during
-    // the wait, and the child still binds its session: there is no dev server to call not ready.
-    if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
-    const { result } = checked;
-    ready = result.ready;
-    projectRootMatched = result.projectRootMatched;
-    if (!result.ready || result.projectRootMatched === false) {
-      // The child's own answer outranks this wait's. @ref ./detachAsync §waitFailureAsync
-      const stopped = await waitFailureAsync(projectRoot, childIsGone());
-      if (stopped) {
-        throw detachFailureError(stopped.failure, {
-          projectRoot,
-          lock,
-          logFile,
-          verdict: stopped.verdict,
-          childExit,
-          platform: options.platform,
-          eas: detachEas(projectRoot, options),
-        });
-      }
-      throw notReadyError(lock, logFile, result, options.platform, detachEas(projectRoot, options));
-    }
-  }
+  const readiness = await checkSpawnedReadinessAsync(context, lock, child, childIsGone);
+  lock = readiness.lock;
+  const ready = readiness.status === 'ready' ? true : null;
+  const projectRootMatched = readiness.status === 'ready' ? readiness.projectRootMatched : null;
 
   const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, childIsGone);
   const device = await boundDeviceAsync(projectRoot, options);
 
-  // The last thing before anything is claimed. Everything above is a fact about a moment that has
-  // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
-  // between left the caller with `Bundler ready` and exit 0 for a dev server that was gone
-  // [observed — friction run 7, F61; live run S4]. `ready: true` is only ever printed for a
-  // process that is alive and a `/status` that still answers, here, now.
+  const log = await checkSpawnedHealthAsync(context, lock, child, childIsGone, ready);
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — with `--eas`, ready is the
+  // session binding as well as the bundler.
+  let eas = detachEas(projectRoot, options);
+  if (easPlatform && ready === true) {
+    const sessionId = await waitForEasSessionAsync(projectRoot, {
+      platform: easPlatform,
+      lock,
+      tunnelUrl,
+      since: startedAt,
+      knownId: keptSessionId,
+      hasExited: childIsGone,
+      callerArgv: options.callerArgv,
+    });
+    if (sessionId == null) {
+      const stopped = await waitFailureAsync(projectRoot, true);
+      throw detachFailureError(stopped?.failure ?? 'child-exited', {
+        projectRoot,
+        lock,
+        logFile,
+        verdict: stopped?.verdict ?? null,
+        childExit: child.exit,
+        platform: options.platform,
+        eas,
+      });
+    }
+    eas = { sessionId };
+  }
+
+  return reportDetached(projectRoot, options, {
+    lock,
+    alreadyRunning: false,
+    eas,
+    ready,
+    projectRootMatched,
+    startedAt,
+    print,
+    tunnelUrl,
+    device,
+    log,
+    smokePlatform,
+  });
+}
+
+async function checkSpawnedReadinessAsync(
+  context: DetachContext,
+  lock: DevServerLockInfo,
+  child: DetachedChild,
+  childIsGone: () => boolean
+): Promise<Readiness> {
+  const { projectRoot, options, startedAt } = context;
+  const { logFile } = child;
+  if (!options.waitReady) return { status: 'unchecked', lock };
+  const checked = await waitForDetachedReadyAsync(projectRoot, lock, {
+    timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
+    hasExited: childIsGone,
+    // Abort readiness when the child exits, even before a PID probe notices.
+    signal: child.signal,
+  });
+  lock = checked.lock;
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exited during
+  // the wait, and the child still binds its session: there is no dev server to call not ready.
+  if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
+  const { result } = checked;
+  if (!result.ready || result.projectRootMatched === false) {
+    // Prefer the child's failure to the readiness timeout.
+    const stopped = await waitFailureAsync(projectRoot, childIsGone());
+    if (stopped) {
+      throw detachFailureError(stopped.failure, {
+        projectRoot,
+        lock,
+        logFile,
+        verdict: stopped.verdict,
+        childExit: child.exit,
+        platform: options.platform,
+        eas: detachEas(projectRoot, options),
+      });
+    }
+    throw notReadyError(lock, logFile, result, options.platform, detachEas(projectRoot, options));
+  }
+  return { status: 'ready', lock, projectRootMatched: result.projectRootMatched };
+}
+
+async function checkSpawnedHealthAsync(
+  context: DetachContext,
+  lock: DevServerLockInfo,
+  child: DetachedChild,
+  childIsGone: () => boolean,
+  ready: boolean | null
+): Promise<DetachedLogRead | null> {
+  const { projectRoot, options, startedAt } = context;
+  const { logFile } = child;
   // @ref llp/0021-honest-reports.rfc.md §The rules
   // The probe can outlast the child. Read its state and log only after that await, so a handoff
   // written while the probe was pending outranks the probe's generic "not answering" result.
@@ -524,11 +506,6 @@ export async function devDetachAsync(
     statusAnswering,
   });
 
-  // …and "here, now" was still not enough for one shape of run. @ref
-  // llp/0021-honest-reports.rfc.md §The rules — **F140**. A step that opens the app
-  // has work outstanding when the bundler answers, and the macOS Automation refusal that ends it
-  // arrives a quarter of a second later — after every check above has passed. So the claim is held
-  // open for a moment and the same three facts are asked again.
   if (failure == null && needsOpenPlatformGrace({ ready, opensPlatform })) {
     const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
       hasExited: childIsGone,
@@ -557,403 +534,13 @@ export async function devDetachAsync(
       lock,
       logFile,
       verdict,
-      childExit,
+      childExit: child.exit,
       platform: options.platform,
       eas: detachEas(projectRoot, options),
     });
   }
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — with `--eas`, ready is the
-  // session binding as well as the bundler.
-  let eas = detachEas(projectRoot, options);
-  if (easPlatform && ready === true) {
-    const sessionId = await waitForEasSessionAsync(projectRoot, {
-      platform: easPlatform,
-      lock,
-      tunnelUrl,
-      since: startedAt,
-      knownId: keptSessionId,
-      hasExited: childIsGone,
-      callerArgv: options.callerArgv,
-    });
-    if (sessionId == null) {
-      const stopped = await waitFailureAsync(projectRoot, true);
-      throw detachFailureError(stopped?.failure ?? 'child-exited', {
-        projectRoot,
-        lock,
-        logFile,
-        verdict: stopped?.verdict ?? null,
-        childExit,
-        platform: options.platform,
-        eas,
-      });
-    }
-    eas = { sessionId };
-  }
-
-  return reportDetached(projectRoot, options, {
-    lock,
-    alreadyRunning: false,
-    eas,
-    ready,
-    projectRootMatched,
-    startedAt,
-    print,
-    tunnelUrl,
-    device,
-    log,
-    smokePlatform,
-  });
-}
-
-/**
- * How long a readiness claim is held open when the plan's dev-server step also opens the app.
- *
- * @ref llp/0021-honest-reports.rfc.md §The rules — **F140.**
- *
- * The number is measured rather than chosen. `expo start --go --ios` against an unauthorized machine
- * answered `/status` at 486ms, 448ms and 445ms and the process was gone at 701ms, 700ms and 708ms —
- * a gap of 215ms, 252ms and 263ms [observed — 2026-08-28, three runs against
- * `friction/run9/livecheck`, macOS Automation permission denied]. This is roughly six times the
- * widest of those, which is the margin a cold simulator's slower `ensureExpoGoAsync` needs.
- *
- * **It narrows the window; it does not close it.** A rejection that lands after this has expired
- * still leaves the caller with `Bundler ready`, because the Expo CLI emits no signal for "the app
- * opened" and there is nothing further to wait *for*. What the grace buys is that the shape the
- * walk hit three times in a row is now the shape that is caught.
- */
-export const OPEN_PLATFORM_GRACE_MS = 1500;
-
-/** How often the child is asked again while that grace runs. */
-const OPEN_PLATFORM_POLL_MS = 100;
-
-async function isOwnBundlerAnsweringAsync(projectRoot: string, url: string): Promise<boolean> {
-  const probe = await probeBundlerAsync(url, { projectRoot });
-  return probe.answering && probe.projectRootMatched !== false;
-}
-
-/**
- * Whether this run's claim is re-checked before it is printed.
- *
- * Pure, and exported, for the same reason {@link resolveDetachFailure} is: the cost of the grace is
- * paid by real seconds of a real caller's time, so which runs pay it has to be readable in one
- * place and assertable without a second process.
- *
- * Two conditions, and each excludes runs the grace could only slow down. The plan has to be
- * **serving** — a plan still compiling has started no dev server. And the dev-server step has to be
- * one that **opens the app**, which is where the late rejection comes from; a plan that opens
- * nothing has none on its way and pays nothing.
- *
- * **`ready === false` is the only readiness this declines**, and dropping the rest of that
- * condition is the correction of 2026-09-03 (@ref llp/0021 §The rules). It used to require
- * `ready === true`, on the reasoning that a run which asked for no readiness claims nothing. That
- * reasoning was wrong about what this command prints: `dev --detach --ios` reports
- * `Dev server <url> · detached` over a pid and exits 0, and live that pid was gone with nothing
- * listening on that URL inside a second — the same macOS Automation refusal F140 is about, on the
- * same plan step, caught only when `--wait-ready` was also passed [observed — macOS 25.5, no
- * Automation grant, 2026-09-03]. The hazard is a property of the plan step, not of the flag. A
- * `false` still declines: that run has already failed, and a grace on top would only delay it.
- */
-export function needsOpenPlatformGrace({
-  ready,
-  opensPlatform,
-}: {
-  ready: boolean | null;
-  opensPlatform: boolean;
-}): boolean {
-  return ready !== false && opensPlatform;
-}
-
-/**
- * Ask the three facts again for a while, and report the worst answer the window held.
- *
- * The **first** failure is what the run is reported as, and the loop keeps going after it for one
- * reason: the two processes fail in order. `expo start` dies first, so `/status` stops answering
- * while the wrapper around it is still classifying the failure and writing its handoff — and a
- * report that stopped at the first "not answering" would hand back "the dev server stopped
- * answering" for a stop that has a named scenario, an "Ask the user" line and exit 7 waiting a
- * hundred milliseconds behind it. So a needs-human verdict ends the wait and anything else does not.
- */
-async function watchOpenPlatformGraceAsync(
-  projectRoot: string,
-  url: string,
-  {
-    hasExited,
-    budgetMs,
-    watchStatus,
-  }: {
-    hasExited: () => boolean;
-    budgetMs: number;
-    /**
-     * Whether `/status` is one of the facts this window may fail a run on.
-     *
-     * False for a run that claimed no readiness, and that is what makes the widened grace safe
-     * (@ref ./detachAsync §needsOpenPlatformGrace, 2026-09-03). Such a run never waited for the
-     * bundler, so a bundler that has not answered *yet* is the ordinary state of a first compile
-     * and not a failure — and `resolveDetachFailure` turns a `false` there into `not-answering`.
-     * The two facts that are left are conclusive whatever readiness was claimed: a handoff block in
-     * the log, and a child that is gone. Both are what the refusal this grace exists for produces.
-     */
-    watchStatus: boolean;
-  }
-): Promise<{ failure: DetachFailureKind | null; verdict: DetachedChildVerdict | null }> {
-  const deadline = Date.now() + budgetMs;
-  let verdict = readChildVerdictSync(projectRoot);
-  let failure: DetachFailureKind | null = null;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(OPEN_PLATFORM_POLL_MS, deadline - Date.now()))
-    );
-    const statusAnswering = watchStatus ? await isOwnBundlerAnsweringAsync(projectRoot, url) : null;
-    verdict = readChildVerdictSync(projectRoot);
-    const seen = resolveDetachFailure({
-      exited: hasExited(),
-      verdict,
-      statusAnswering,
-    });
-    if (seen === 'needs-human') {
-      return { failure: seen, verdict };
-    }
-    failure ??= seen;
-  }
-
-  return { failure, verdict };
-}
-
-/**
- * How long a child that has already exited is given to finish writing its verdict.
- *
- * Generous next to the write it waits for, which is one append — the bound exists for the run
- * where the verdict never comes, not for the one where it does.
- */
-const VERDICT_WAIT_MS = 2_000;
-
-/**
- * Read the child's **final** verdict, giving a child that is already gone time to finish writing it.
- *
- * "The child has exited" and "the child's verdict is readable" are two moments, and the second is
- * the later one: the handoff block is written by the dying process. On a slow filesystem the gap is
- * wide enough to be observed [observed — windows-2022 CI, 2026-09-05].
- *
- * **A verdict without a scenario is not the end of that write**, and stopping at the first one was
- * this wait's own bug [observed — windows-2022 CI, 2026-09-06: exit 20 where the child's log named
- * `macos-automation`]. `logCmdError` prints the failure and *then* the handoff block, in two
- * writes (`src/utils/errors.ts`), and `parseDetachedChildVerdict` answers as soon as the first of
- * them is on disk. A reader that landed between the two took `Error: …` as the child's conclusion
- * and reported "the process exited" for a stop that had a named scenario and an "Ask the user"
- * line a beat behind it — the exact misreport this wait exists to prevent, one line further in.
- *
- * So the wait ends on a **scenario**, and the deadline is what ends it otherwise. The cost is
- * bounded and is paid only by a run that has already failed: a child that died with no handoff to
- * write spends {@link VERDICT_WAIT_MS} before it is reported as gone, which is the wrong answer's
- * price for making the right one reachable.
- *
- * @returns the last verdict read, which is null when the child wrote none at all.
- */
-async function waitForChildVerdictAsync(
-  projectRoot: string,
-  since?: number
-): Promise<DetachedChildVerdict | null> {
-  let verdict = readChildVerdictSync(projectRoot, since);
-  const deadline = Date.now() + VERDICT_WAIT_MS;
-  // The code row is the last line `logCmdError` writes, so a verdict with one is complete.
-  while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
-    verdict = readChildVerdictSync(projectRoot, since) ?? verdict;
-  }
-  return verdict;
-}
-
-/**
- * A device refusal the child raised, rebuilt as the child raised it: code, exit and How line.
- *
- * @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the agent's recovery is the
- * child's own `dev` or `dev:stop` command, not `dev:logs`.
- */
-function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError | null {
-  if (verdict == null || !isRelayedDeviceCode(verdict.code)) {
-    return null;
-  }
-  const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
-  error.exitCode = verdict.exitCode ?? EXIT_OUTCOME_FAILED;
-  if (verdict.data) {
-    error.data = verdict.data;
-  }
-  if (verdict.suggestedCommand) {
-    error.suggestedCommand = verdict.suggestedCommand;
-  }
-  return error;
-}
-
-/**
- * Why a `--wait-ready` that never got its answer is the child's failure rather than the wait's.
- *
- * @ref llp/0021-honest-reports.rfc.md §The rules — rule 2, F153, and the F61 family.
- *
- * `waitForBundlerReadyAsync` reports one fact: this bundler did not answer inside the budget. Two
- * very different runs produce it. In one the plan is compiling and nothing has gone wrong, which is
- * what {@link notReadyError} and its `building` wording are for. In the other the child is **gone**,
- * and there that wording is false in every sentence — nothing is "still running", no build is
- * "still going", and the reason it stopped is sitting in the child's log under a scenario name and
- * an "Ask the user" line.
- *
- * Which of the two a `--wait-ready` reported used to depend on the order two processes happened to
- * reach: the child's needs-human classification won only when the parent's last `/status` probe was
- * slower than the child's death, and under load it was not [observed — `dev-detach-test.ts`
- * "refuses to report ready for a child that is about to be gone", exit 20 instead of 7 with 48 busy
- * processes on the machine, 2026-09-06]. An ordering is not evidence, so it is no longer read: the
- * child is asked directly, and its own answer is the report.
- *
- * `statusAnswering` is **null**, not `false`. A bundler that has not answered is the state this
- * whole branch is about, and calling it `not-answering` here would turn every ordinary cold
- * `run:ios` build into a failure. Only the two facts that are conclusive on their own count — a
- * handoff block in the log, and a child that is gone.
- *
- * @returns the failure and the verdict behind it, or null when the wait really was only a wait.
- */
-async function waitFailureAsync(
-  projectRoot: string,
-  exited: boolean,
-  since?: number
-): Promise<{ failure: DetachFailureKind; verdict: DetachedChildVerdict | null } | null> {
-  const verdict = exited
-    ? await waitForChildVerdictAsync(projectRoot, since)
-    : readChildVerdictSync(projectRoot, since);
-  const failure = resolveDetachFailure({ exited, verdict, statusAnswering: null });
-  return failure ? { failure, verdict } : null;
-}
-
-/** Why a detached run that had come up is not something this command may report success for. */
-export type DetachFailureKind =
-  /** The child stopped at a step only a person can complete, and said which. */
-  | 'needs-human'
-  /** The child is gone, and its log holds no handoff. */
-  | 'child-exited'
-  /** The child is alive and the bundler that had answered `/status` no longer does. */
-  | 'not-answering';
-
-/** What the checks said at the moment the report was about to be printed. */
-export interface DetachCheck {
-  /** The child process this run spawned has exited. */
-  exited: boolean;
-  /** The child's own conclusion, read out of its log. */
-  verdict: DetachedChildVerdict | null;
-  /**
-   * Whether `/status` still answered.
-   *
-   * Null when readiness was never established — a run without `--wait-ready` claims nothing about
-   * the bundler, so a bundler that is still working is not a failure of this run.
-   */
-  statusAnswering: boolean | null;
-}
-
-/**
- * Whether a detached run may be reported as a success.
- *
- * Pure, and exported, because it is the whole of the F61 fix: three facts in, one verdict out, and
- * every combination testable without a second process.
- */
-export function resolveDetachFailure({
-  exited,
-  verdict,
-  statusAnswering,
-}: DetachCheck): DetachFailureKind | null {
-  // The handoff block is written by `logCmdError` and by nothing else, so a log that has one is the
-  // log of a process on its way out — conclusive whether or not its exit has been observed yet.
-  if (verdict?.scenario != null) {
-    return 'needs-human';
-  }
-  if (exited) {
-    return 'child-exited';
-  }
-  if (statusAnswering === false) {
-    return 'not-answering';
-  }
-  return null;
-}
-
-/** The child's verdict, read out of the log this run opened. */
-function readChildVerdictSync(projectRoot: string, since?: number): DetachedChildVerdict | null {
-  // A reused foreground server can have an earlier detached run's log beside it. Use the same
-  // freshness rule as resolveDevServerReach, rechecking on each read for a newly written handoff.
-  if (since != null) {
-    try {
-      if (fs.statSync(detachedLogPath(projectRoot)).mtimeMs < since) return null;
-    } catch {
-      return null;
-    }
-  }
-  const read = readDetachedLogSync(projectRoot, VERDICT_LOG_LINES);
-  return read == null ? null : parseDetachedChildVerdict(read.lines);
-}
-
-/**
- * The error for a detached run whose dev server is not there to be reported.
- *
- * Two exit codes, and the difference is the child's own: a stop only a person can complete is
- * `EXIT_NEEDS_HUMAN` with the scenario the child named, because the recovery is not another
- * command. Everything else is `EXIT_OUTCOME_FAILED` — the CLI worked and the dev server did not
- * come up — with the child's log quoted as what it is: output of another program.
- */
-function detachFailureError(
-  kind: DetachFailureKind,
-  {
-    projectRoot,
-    lock,
-    logFile,
-    verdict,
-    childExit,
-    platform,
-    eas,
-  }: {
-    projectRoot: string;
-    lock: DevServerLockInfo;
-    logFile: string;
-    verdict: DetachedChildVerdict | null;
-    childExit: { code: number | null; signal: NodeJS.Signals | null } | null;
-    platform: PlanPlatform;
-    eas: DetachEas | null;
-  }
-): CommandError {
-  const relayed = relayedDeviceError(verdict);
-  if (relayed) {
-    return relayed;
-  }
-  if (kind === 'needs-human' && verdict?.scenario != null) {
-    const scenario = findNeedsHumanScenario(verdict.scenario);
-    const message = [
-      `The detached dev server stopped at a step only a person can complete, so there is no dev server on ${lock.url}.`,
-      `Why: the run was started in a process of its own, and that process ran its plan and stopped. This is its own report of why, from ${logFile}:`,
-      wrapUntrustedAppOutput(verdict.message),
-    ].join('\n');
-    return scenario
-      ? needsHumanErrorFrom(needsHumanOf(scenario, { detectedBy: 'detached-child-log' }), {
-          message,
-          code: 'DEV_DETACH_NEEDS_HUMAN',
-        })
-      : new CommandError('DEV_DETACH_NEEDS_HUMAN', message);
-  }
-
-  const easFlag = eas ? ' --eas' : '';
-  const error = new CommandError(
-    kind === 'child-exited' ? 'DEV_DETACH_DIED' : 'DEV_DETACH_NOT_ANSWERING',
-    [
-      kind === 'child-exited'
-        ? `The dev server is not running any more: the process holding its lock (pid ${lock.pid}) exited${
-            childExit?.signal
-              ? ` on ${childExit.signal}`
-              : childExit?.code != null
-                ? ` with code ${childExit.code}`
-                : ''
-          } before this command could report it.`
-        : `The dev server on ${lock.url} stopped answering before this command could report it.`,
-      `Why: a detached run is two processes, and only this one is being read. The bundler answered while the other one was starting, and it is not there now — so "ready" would be a claim about a moment that has passed.`,
-      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --${platform}${easFlag} --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --${platform}${easFlag}" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${eas ? ` ${easKeptSentence(eas)}` : ''}${logTail(projectRoot)}`,
-    ].join('\n')
-  );
-  error.exitCode = EXIT_OUTCOME_FAILED;
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
-  return error;
+  return log;
 }
 
 /**
@@ -1029,94 +616,6 @@ async function waitForTunnelUrlAsync(
   }
 }
 
-/** Print the report of a detached run, in whichever form was asked for. */
-function reportDetached(
-  projectRoot: string,
-  options: DevOptions,
-  {
-    lock,
-    alreadyRunning,
-    ready,
-    projectRootMatched,
-    startedAt,
-    print,
-    tunnelUrl,
-    device,
-    log = readDetachedLogSync(projectRoot, WHOLE_LOG),
-    smokePlatform,
-    eas,
-  }: {
-    lock: DevServerLockInfo;
-    alreadyRunning: boolean;
-    /** Set when this run opens the app on EAS; `sessionId` when the command reached a session. */
-    eas: DetachEas | null;
-    ready: boolean | null;
-    projectRootMatched: boolean | null;
-    startedAt: number;
-    print: boolean;
-    tunnelUrl: string | null;
-    device: BindingSummary | null;
-    /** The platform the `smoke` follow-up names. See {@link detachFollowUps}. */
-    smokePlatform: NativePlatform;
-    /**
-     * The whole child log the caller already read, when it read one, or null for no log.
-     *
-     * The phase and the port move both scan the whole log (`WHOLE_LOG`), so a run that has just
-     * read it to decide whether to hold its claim open (F140) hands it over rather than paying for
-     * a second read of a log a compiler may have written thousands of lines into.
-     */
-    log?: DetachedLogRead | null;
-  }
-): number {
-  const report: DevDetachResultJson = {
-    url: lock.url,
-    port: lock.port,
-    pid: lock.pid,
-    // The path only when the file is there. A dev server that was already running may have been
-    // started attached, and then its output went to somebody's terminal and there is no log.
-    logFile: log?.logFile ?? '',
-    ready,
-    projectRootMatched,
-    alreadyRunning,
-    // The run's own lock says whether it still builds (llp/0004 §Dev-server lock).
-    phase: lock.phase === 'building' ? 'building' : 'serving',
-    portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
-    tunnelUrl,
-    device,
-    eas,
-    waitedMs: Date.now() - startedAt,
-    followups: [],
-  };
-  report.followups = followUpsEnabled(options.followups)
-    ? detachFollowUps(report, smokePlatform, eas)
-    : [];
-
-  cliEvent('dev_detach', {
-    url: report.url,
-    port: report.port,
-    pid: report.pid,
-    ready: report.ready,
-    alreadyRunning: report.alreadyRunning,
-    phase: report.phase,
-    // The port that was asked for, so an agent reading only the stream sees the same fact the
-    // report carries rather than a port it has no way to question.
-    portMovedFrom: report.portMoved?.from ?? null,
-    tunnelUrl: report.tunnelUrl,
-  });
-
-  // The event above is emitted whatever happens: a caller that suppresses the report is still
-  // starting a dev server, and the stream is how that is visible to anything watching.
-  if (print) {
-    if (options.json) {
-      Log.log(JSON.stringify(report, null, 2));
-    } else {
-      printHumanReport(report, options.platform);
-    }
-    reportFollowUps('dev', report.followups, { json: options.json });
-  }
-  return 0;
-}
-
 /**
  * Put this worktree's device on a running server: the EAS session, through the reopen, or the
  * local device, reuse only. Returns the EAS session id, or null.
@@ -1169,388 +668,6 @@ async function boundDeviceAsync(
       (entry) => entry.backend === backend
     ) ?? null
   );
-}
-
-/**
- * Every line of the child's log, for what the child prints before its first step: the plan table.
- *
- * A `run:*` step writes thousands of lines of compiler output after them, so a tail, which is what
- * `readDetachedLogSync` gives, would miss them on exactly the run they matter for. The whole file
- * is read either way; the number only decides how much of it is handed back.
- */
-const WHOLE_LOG = Number.MAX_SAFE_INTEGER;
-
-/**
- * The move between the port the child's plan expected and the port its lock names.
- *
- * The plan's `movedFrom` is the port the caller expected when the plan already moved; otherwise it
- * is the planned port. A retry after the plan moves the lock again, and the comparison still starts
- * from what the caller expected.
- */
-function plannedPortMove(log: DetachedLogRead | null, lock: DevServerLockInfo): PortMove | null {
-  const planned = log == null ? null : parseDetachedChildPort(log.lines);
-  if (planned == null) {
-    return null;
-  }
-  const expected = planned.movedFrom ?? planned.port;
-  return lock.port === expected ? null : { from: expected, to: lock.port };
-}
-
-function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): void {
-  const label = (name: string) => name.padEnd(13);
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the URL stays on this line
-  // because it is the one the dev server will answer on, and the words after it stop it being read
-  // as a dev server that is up: a run that builds has not started one.
-  const where =
-    report.phase === 'building'
-      ? ' · not listening yet — the plan is still building'
-      : report.alreadyRunning
-        ? ' · already running'
-        : ' · detached';
-  const lines = [`${label('Dev server')}${report.url}${where}`, `${label('Process')}${report.pid}`];
-  // Right under the URL, because that URL is the thing the move made stale: every command and
-  // every link a caller had already written names the port that was asked for, not this one.
-  if (report.portMoved) {
-    lines.push(
-      `${label('Port')}moved · ${report.portMoved.from} was busy, so it took ${report.portMoved.to}`
-    );
-  }
-  if (report.logFile) {
-    lines.push(`${label('Log')}${report.logFile}`);
-  }
-  if (report.ready != null) {
-    lines.push(`${label('Bundler')}${report.ready ? 'ready' : 'not ready'}`);
-  }
-  // Under the listen address it is not: this is the one a device uses, and the difference between
-  // the two is what a whole dogfood session was lost to [observed — 2026-08-24].
-  if (report.tunnelUrl) {
-    lines.push(`${label('Tunnel')}${report.tunnelUrl}`);
-  }
-  if (report.device) {
-    const { name, id, origin } = report.device;
-    lines.push(`${label('Device')}${name} (${id}) · ${origin}`);
-  }
-  if (report.eas) {
-    lines.push(
-      `${label('Session')}${
-        report.eas.sessionId
-          ? `${report.eas.sessionId} · bound to this worktree`
-          : `not bound yet · "${PROGRAM_PREFIX} dev --${platform} --eas --detach --wait-ready" waits for it`
-      }`
-    );
-  }
-  lines.push(`${label('Took')}${report.waitedMs}ms`);
-  if (report.alreadyRunning) {
-    const lead = report.eas?.sessionId
-      ? `This project already had a dev server; this run bound EAS Simulator session ${report.eas.sessionId}.`
-      : 'This project already had a dev server, so nothing was started.';
-    lines.push(
-      ` ${lead} One detached dev server per project: a second one could not hold the lock, and nothing would be able to find or stop it.`
-    );
-  }
-  Log.log(lines.join('\n'));
-}
-
-/**
- * @ref llp/0009-smart-followups.rfc.md §Examples per command
- *
- * Exported for the test table, like `buildDetachSpawn` and `notReadyError`. A pure function of the
- * report and the platform, so the platform the `smoke` follow-up names comes from the caller.
- */
-export function detachFollowUps(
-  report: DevDetachResultJson,
-  smokePlatform: NativePlatform,
-  eas: DetachEas | null = null
-): FollowUp[] {
-  // On an EAS device run, the gate drives the session and the stop ends it (llp/0027 §Stop hints).
-  const onEas = eas ? ' --eas' : '';
-  const followups: FollowUp[] = [];
-  if (report.ready == null) {
-    followups.push({
-      id: 'smoke',
-      command: `${smokeCommand(smokePlatform)}${onEas}`,
-      why: 'The dev server is up, but nothing has said whether its bundler finished, whether this project compiles, or whether the app comes up on it.',
-    });
-  }
-  if (report.logFile) {
-    followups.push({
-      id: 'dev-logs',
-      command: `${PROGRAM_PREFIX} dev:logs`,
-      why: 'The dev server writes to a file now rather than to this terminal, and this is what reads it back.',
-    });
-  }
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  followups.push(
-    eas
-      ? {
-          id: 'dev-stop',
-          command: `${PROGRAM_PREFIX} dev:stop --eas`,
-          why: eas.sessionId
-            ? `A detached dev server outlives this shell, and EAS Simulator session ${eas.sessionId} stays bound to this worktree after a plain dev:stop; this ends both.`
-            : `A detached dev server outlives this shell, and the EAS Simulator session it opens stays bound to this worktree after a plain dev:stop; this ends both. "${PROGRAM_PREFIX} dev:logs" names the session.`,
-        }
-      : {
-          id: 'dev-stop',
-          command: `${PROGRAM_PREFIX} dev:stop`,
-          why: 'A detached dev server outlives this shell, so this is what ends it.',
-        }
-  );
-  return followups;
-}
-
-type DetachEas = { sessionId: string | null };
-
-/** The EAS session a detached `dev --eas` keeps bound, read from this worktree's bindings. */
-function detachEas(projectRoot: string, options: DevOptions): DetachEas | null {
-  if (!easOpenPlatform(options)) {
-    return null;
-  }
-  const bound = liveCloudBindings(projectRoot).find(
-    ({ device }) => device.platform === options.platform
-  );
-  return { sessionId: bound?.device.id ?? null };
-}
-
-function easSessionName(eas: DetachEas): string {
-  return eas.sessionId
-    ? `EAS Simulator session ${eas.sessionId}`
-    : 'the EAS Simulator session it may have started';
-}
-
-/** The How sentence for a failed detached `dev --eas`: plain `dev:stop` keeps its session. */
-function easStopSentence(eas: DetachEas): string {
-  return `Stop it with "${PROGRAM_PREFIX} dev:stop --eas", which also ends ${easSessionName(eas)}; a plain dev:stop keeps that session bound and billing.`;
-}
-
-/** The How sentence for a detached `dev --eas` whose dev server failed: the bound session stays. */
-function easKeptSentence(eas: DetachEas): string {
-  return `To end ${easSessionName(eas)}, run "${PROGRAM_PREFIX} dev:stop --eas"; a plain dev:stop keeps that session bound and billing.`;
-}
-
-/**
- * Poll the project's lock until it names the port the dev server took, the child dies, or the
- * budget runs out.
- *
- * A child whose plan builds first takes its lock before its first step and says `building` until
- * the dev-server step; that lock never ends the wait. The dev-server step serves on the same lock,
- * before Metro binds the port, and the busy-port retry can move the dev server after that. So a
- * serving lock counts once its holder says Metro reported the port (`portReported`), or once
- * {@link PORT_WATCH_TIMEOUT_MS} has passed since the lock's `startedAt`, the bound the port watch
- * itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not confirmed
- * when the child exits or the budget runs out is still the answer, `building` included.
- */
-async function waitForLockAsync(
-  projectRoot: string,
-  {
-    timeoutMs,
-    hasExited,
-    acceptBuilding = false,
-  }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean }
-): Promise<DevServerLockInfo | null> {
-  const deadline = Date.now() + timeoutMs;
-  // A run that ends in its build lets go of its lock; its last `building` answer says it built.
-  let building: DevServerLockInfo | null = null;
-  for (;;) {
-    const lock = await readDevServerLockAsync(projectRoot);
-    if (lock?.phase === 'building') building = lock;
-    // A `building` lock has no dev server yet. It ends the wait only for a caller that reports it.
-    if (lock?.phase === 'building' && acceptBuilding) return lock;
-    if (lock && lock.phase !== 'building') {
-      const spawnedAt = Date.parse(lock.startedAt);
-      if (lock.portReported || Date.now() - spawnedAt >= PORT_WATCH_TIMEOUT_MS) {
-        return lock;
-      }
-    }
-    // Checked after the read, not before: a child that started the dev server and exited in the
-    // same instant still published a lock, and that lock is the answer.
-    if (hasExited()) {
-      return lock ?? building;
-    }
-    if (Date.now() + LOCK_POLL_INTERVAL_MS >= deadline) {
-      return lock;
-    }
-    await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS));
-  }
-}
-
-/**
- * The log tail a failure quotes, or an empty string when there is none.
- *
- * Fenced rather than pasted in: the lines are Metro's, the Expo CLI's, and the app's own
- * `console.error` calls, none of which are this CLI speaking, and a failing bundle can carry
- * whatever text a file in the project holds (llp/0008-guardrails.rfc.md §Untrusted-content marking).
- */
-function logTail(projectRoot: string): string {
-  const read = readDetachedLogSync(projectRoot, FAILURE_LOG_LINES);
-  return read?.lines.length
-    ? `\n\nWhat the dev server printed:\n${wrapUntrustedAppOutput(read.lines.join('\n'))}`
-    : '';
-}
-
-/** What a wait for this project's lock came to, for a run that may still build. */
-type BuildingWait =
-  | { kind: 'building'; lock: DevServerLockInfo }
-  | { kind: 'up'; lock: DevServerLockInfo }
-  /** The run is gone; `building` is its last `building` lock, null when it published none. */
-  | { kind: 'ended'; building: DevServerLockInfo | null };
-
-/**
- * Wait for this project's lock, past a run that builds.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — without --wait-ready a run
- * that builds is reported at once (`building`). With it the wait goes on, and a run still building
- * at the deadline is exit 22. A run that ended in its build, or no lock, is `ended`.
- */
-async function waitPastBuildingAsync(
-  projectRoot: string,
-  options: DevOptions,
-  startedAt: number,
-  hasExited: () => boolean
-): Promise<BuildingWait> {
-  const lock = await waitForLockAsync(projectRoot, {
-    timeoutMs: options.detachTimeoutMs,
-    hasExited,
-    acceptBuilding: !options.waitReady,
-  });
-  if (!lock) return { kind: 'ended', building: null };
-  if (lock.phase !== 'building') return { kind: 'up', lock };
-  if (hasExited() || !isProcessAlive(lock.pid)) return { kind: 'ended', building: lock };
-  if (options.waitReady) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
-  return { kind: 'building', lock };
-}
-
-/** The detach's stop for a child whose dev server exited while its EAS open still runs. */
-function lostDevServerError(lock: DevServerLockInfo, logFile: string): CommandError {
-  const row = RUN_PHASE.finishing;
-  const error = new CommandError(
-    'DEV_DETACH_FAILED',
-    [
-      `The detached dev server exited, and its run (pid ${lock.pid}) is finishing its EAS session start.`,
-      `Why: ${row.why(lock)}`,
-      `How: run "${row.command}". ${row.does} What the run printed is in ${logFile}.`,
-    ].join('\n')
-  );
-  error.suggestedCommand = row.command;
-  return error;
-}
-
-/**
- * The error for a detached run whose lock still says `building` when the wait ends.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
- * and the same command follows it.
- */
-function stillBuildingOnLockError(
-  lock: DevServerLockInfo,
-  options: DevOptions,
-  waitedMs: number
-): CommandError {
-  const logFile = detachedLogPath(lock.projectRoot);
-  const rerun = rerunDevCommand(options.platform, options.callerArgv);
-  const error = new CommandError(
-    'DEV_DETACH_STILL_BUILDING',
-    [
-      `This project's dev run (pid ${lock.pid}) is still building after ${Math.round(waitedMs / 1000)} s, so its dev server is not up yet.`,
-      `Why: its plan builds before it serves, and its lock says that it builds. The run keeps going and starts the dev server on ${lock.url} when the build ends.`,
-      `How: run "${rerun}" again. It follows this run and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the build of a detached run. "${PROGRAM_PREFIX} dev:stop" stops the run.`,
-    ].join('\n')
-  );
-  error.exitCode = EXIT_OUTCOME_TIMEOUT;
-  error.data = { pid: lock.pid, url: lock.url, logFile, waitedMs };
-  error.suggestedCommand = rerun;
-  return error;
-}
-
-/**
- * The error for a detached run that held a `building` lock and ended before it served.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the run is gone, so the
- * build failed or was stopped: the log says which.
- */
-function buildEndedError(lock: DevServerLockInfo, exitCode: number | null): CommandError {
-  const logFile = detachedLogPath(lock.projectRoot);
-  const error = new CommandError(
-    'DEV_DETACH_FAILED',
-    [
-      `The detached dev run (pid ${lock.pid}) ended during its build${exitCode == null ? '' : ` with exit code ${exitCode}`}, so no dev server started.`,
-      `Why: its lock said that it was building, and the run is gone. A step before its dev server failed or was stopped.`,
-      `How: read what it printed in ${logFile} with "${PROGRAM_PREFIX} dev:logs", fix what stopped it, then run the same command again.${logTail(lock.projectRoot)}`,
-    ].join('\n')
-  );
-  error.data = { pid: lock.pid, exitCode, logFile };
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
-  return error;
-}
-
-/** The error for a detached child that never published a lock. */
-function notStartedError(
-  projectRoot: string,
-  logFile: string,
-  childExit: { code: number | null; signal: NodeJS.Signals | null } | null,
-  pid: number | null,
-  waitedMs: number,
-  platform: PlanPlatform
-): CommandError {
-  const how = childExit
-    ? `it exited ${childExit.signal ? `on ${childExit.signal}` : `with code ${childExit.code}`} before it did`
-    : `it was still running ${waitedMs}ms later without having published one`;
-
-  const error = new CommandError(
-    'DEV_DETACH_FAILED',
-    [
-      `The detached dev server did not start${pid == null ? '' : ` (pid ${pid})`}.`,
-      `Why: a dev server this CLI starts publishes its port on the project's lock as soon as it is listening, and ${how}. Without that lock nothing can find the dev server, so reporting one here would name a server no other command could reach.`,
-      `How: read what it printed in ${logFile}, or run "${PROGRAM_PREFIX} dev --${platform}" in this terminal to watch the same start happen in the foreground.${logTail(projectRoot)}`,
-    ].join('\n')
-  );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
-  return error;
-}
-
-/**
- * The error for a detached dev server that came up but whose bundler never answered.
- *
- * Two failures wear this name, and the difference is whether anything answered at all. A wait that
- * ran out on a bundler that is still working is about time; a wait that got an answer from a dev
- * server serving *another project* is not about time at all, and telling that caller to wait longer
- * is a next action that cannot work.
- *
- * Exported for the test table: the whole value of this error is in its wording, and the only way to
- * check wording is to read it.
- */
-export function notReadyError(
-  lock: DevServerLockInfo,
-  logFile: string,
-  result: BundlerReadyResult,
-  platform: PlanPlatform | null = null,
-  eas: DetachEas | null = null
-): CommandError {
-  const strangerAnswered = result.projectRootMatched === false;
-  const error = new CommandError(
-    'DEV_DETACH_NOT_READY',
-    [
-      `The dev server started on ${lock.url} (pid ${lock.pid}), but --wait-ready gave up before its bundler answered.`,
-      `Why: ${result.reason ?? 'GET /status did not answer'}. ${
-        strangerAnswered
-          ? `That answer came from a dev server serving ${result.reportedProjectRoot}, which is not this project — so the wait was watching somebody else's bundler and this project's may well be ready.`
-          : 'The dev server is still running — this is about the wait, not about the server.'
-      }`,
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — friction run
-      // 5, F48-10. Named on both paths, because the reader cannot tell the cases apart and this is
-      // the one they will not think of: a port number is not a listener, and this CLI only ever
-      // looks at one of the two a machine can have.
-      `Note: this CLI reaches the dev server at ${lock.url}, over IPv4. A port number is not one listener — 127.0.0.1:${lock.port} and [::1]:${lock.port} are different sockets, so another process can be answering this port on the other stack while this project's dev server is fine, and neither will have reported a collision. "lsof -nP -iTCP:${lock.port} -sTCP:LISTEN" lists both.`,
-      // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
-      // `smoke` needs `--ios` or `--android` now and nothing here knows which — this failure is
-      // about a dev server, and a dev server has no platform. So the *machine-readable* next action
-      // is `dev:logs`, which answers the same question ("what is the bundler doing") and is
-      // runnable as written. `smoke` stays in the prose with its flags shown, because it is the
-      // better answer for a reader who knows which device they have.
-      `How: read ${logFile} with "${PROGRAM_PREFIX} dev:logs", which says what the bundler is doing. "${PROGRAM_PREFIX} smoke --ios" or "--android" then reports whether this project compiles and runs on that device. ${eas ? easStopSentence(eas) : `Stop it with "${PROGRAM_PREFIX} dev:stop".`}`,
-    ].join('\n')
-  );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
-  return error;
 }
 
 /**
