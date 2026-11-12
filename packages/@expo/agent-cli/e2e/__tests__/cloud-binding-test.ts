@@ -516,7 +516,10 @@ it.each(['ios', 'android'] as const)(
           { env, reject: false }
         );
         expect(refused.exitCode, refused.all).toBe(20);
-        expect(JSON.parse(refused.stdout).error.code).toBe('DEV_SERVER_RUNNING');
+        expect(JSON.parse(refused.stdout).error).toMatchObject({
+          code: 'DEV_START_BUSY',
+          data: { pid: JSON.parse(first.stdout).pid, logFile: JSON.parse(first.stdout).logFile },
+        });
         expect(fs.existsSync(bindingFile(root, platform))).toBe(false);
         expect([readStubExpoInvocations(root).length, stubEasArgs(root).length]).toEqual(before);
       }
