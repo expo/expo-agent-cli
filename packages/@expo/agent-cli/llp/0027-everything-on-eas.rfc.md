@@ -2,136 +2,169 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** `smoke`'s bootstrap (`src/smoke/walk/device.ts` §start-session, `src/smoke/deps/device.ts` §ensureEasSession); `dev:stop --eas` (`src/dev/stopAsync.ts` §stopProjectEasSessionAsync); `dev`'s option resolver (`src/dev/resolveOptions.ts` §assertEasRunFits, §namesTunnel); the plan engine (`src/plan/decide.ts` §easRouteSteps, §easBuildPlan; `src/plan/types.ts` §DeviceBackend; `src/plan/resolveAsync.ts`; `src/plan/easBuildLookup.ts`); the EAS open (`src/dev/openAppEas.ts`); `eas.json` (`src/utils/easJson.ts`); the build lookup (`src/impact/buildCache.ts` §buildCacheArgs); the run follow-ups (`src/followups/start.ts` §onEas); the stub `eas` of the e2e tier (`e2e/stubs/eas.js`)
+**Systems:** `smoke`'s bootstrap (`src/smoke/walk/device.ts`, `src/smoke/deps/device.ts`); `dev:stop --eas` (`src/dev/stopAsync.ts`); `dev`'s option resolver (`src/dev/resolveOptions.ts`); the plan engine (`src/plan/decide.ts`, `src/plan/types.ts`, `src/plan/resolveAsync.ts`, `src/plan/easBuildLookup.ts`); the EAS open (`src/dev/openAppEas.ts`); `eas.json` (`src/utils/easJson.ts`); the build lookup (`src/impact/buildCache.ts`); EAS failure text (`src/utils/easFailure.ts`); the run follow-ups (`src/followups/start.ts`); the stub `eas` of the e2e tier (`e2e/stubs/eas.js`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-09-08
-**Related:** [[0015-backend-selection-and-config]] §One flag for EAS, [[0005-runtime-loop-tools]] §Cloud simulator, [[0026-dev-owns-the-open]], [[0004-smart-start-and-project-state]]
+**Revised:** 2026-11-13
+**Related:** [[0015-backend-selection-and-config]] §One flag for EAS, [[0005-runtime-loop-tools]] §Cloud simulator, [[0026-dev-owns-the-open]], [[0004-smart-start-and-project-state]], [[0035-one-device-per-worktree]]
 
 ## Summary
 
-`--eas` on `dev` used to mean one thing: the native build runs on EAS Build. The plan ended with an artifact on EAS and a sentence about `eas build:run` — and on an Expo Go project the flag changed nothing at all [observed — 1.0.9, 2026-09-08]. Kudo's rule [2026-09-08]: **when `--eas` is passed, everything runs on EAS — the build, the simulator, the lot.** For iOS and Android, `deviceBackend: "eas"` in the developer config takes the same route on `dev` without the flag. `dev --web` ignores that key ([[0015-backend-selection-and-config]] §The device backend).
+Kudo's rule [2026-09-08]: **when `--eas` is passed, everything runs on EAS — the build, the simulator, the lot.** For iOS and Android, `deviceBackend: "eas"` in the developer config takes the same route on `dev` without the flag ([[0015-backend-selection-and-config]] §The device backend).
 
-So `dev --ios --eas` now ends with the app running on an EAS Simulator session:
+`dev --ios --eas` ends with the app on an EAS Simulator session:
 
-- the dev server is tunnelled, because a session is a machine in a datacenter;
-- the build, when one is needed, is a **simulator** build (`development-simulator`), which is the one thing a simulator can install — and it is skipped when EAS already has a finished one of this fingerprint;
-- the open is a session: the one this project already has, or one started with the app named on its command line (`--expo-go` or `--build-id`) and the tunnelled launch URL in `--open-url`.
+| Part       | Local device ([[0026-dev-owns-the-open]]) | EAS device (this RFC)                                                         |
+| ---------- | ----------------------------------------- | ----------------------------------------------------------------------------- |
+| Dev server | LAN or loopback                           | Tunnel, because the session is in a datacenter                                |
+| Build      | `development` profile (a device build)    | `development-simulator` profile; skipped when EAS has one of this fingerprint |
+| Open       | `dev` opens the app on the local device   | `dev` reuses this project's session, or starts one with the app and the URL   |
+| Stop       | `dev:stop`                                | `dev:stop --eas` also ends the session, by id                                 |
 
-[[0026-dev-owns-the-open]] made `dev` open the app on a local device itself. This is the same act for the other device.
+`--eas` on `navigate`, `runtime:reload` and `runtime:stop` still names only the device.
 
 ## Check the EAS project before starting the environment
 
-`dev --eas` (including `--detach`) and `smoke --eas` read `expo config --json` before starting the environment. A config-selected EAS build gets the same check after the plan resolves. A missing or empty `extra.eas.projectId` stops with `EAS_PROJECT_NOT_LINKED`, exit 7, and the existing `eas init --id` / `--account` handoff. `--plan` remains available without setup. [confirmed — Kudo, 2026-09-09]
+[confirmed — Kudo, 2026-09-09] `dev --eas` (also with `--detach`), `smoke --eas`, and a config-selected EAS build read `expo config --json` before they start anything. `--plan` needs no setup.
 
-The project ID comes from the evaluated config, including dynamic configuration and environment variables. A failed evaluation, timeout, or unreadable response stops with `EAS_PROJECT_CONFIG_UNREADABLE`, not a claim that the project is unlinked. The check has a 30-second budget. It establishes local linkage configuration, not server-side access or account permissions; the EAS commands retain their own checks. `eas project:info` is not used as a read-only gate because its project context may create/link a project. [observed — eas-cli 23.2.0 `getProjectIdAsync`]
-
-An `eas.json` without a project ID is insufficient. A linked project without `eas.json` can still run: the simulator profile is generated when a build needs it. Other `--eas` device commands already query the project's EAS session before acting; cleanup is not gated on config evaluation, so a broken config does not prevent stopping Metro.
+- A missing or empty `extra.eas.projectId` stops with `EAS_PROJECT_NOT_LINKED`, exit 7, and the `eas init --id` / `--account` handoff.
+- A failed evaluation, a timeout (30 s) or an unreadable answer stops with `EAS_PROJECT_CONFIG_UNREADABLE`. It never claims the project is unlinked.
+- The project ID comes from the evaluated config, so dynamic config and environment variables count. An `eas.json` alone is not enough. A linked project without `eas.json` runs; the profile is written when a build needs it.
+- The check proves local linkage only, not server access. `eas project:info` is not the gate, because it can create or link a project [observed — eas-cli 23.2.0].
+- Cleanup is not gated on the config, so a broken config never blocks a stop.
 
 ## The dev server is tunnelled
 
-`exp://127.0.0.1:8081` names the loopback of whatever resolves it (llp/0005 §Cloud simulator). `resolveDevOptions` appends `--tunnel` to the forwarded `expo start` options when `--eas` is passed and no tunnel was asked for already (`--tunnel` or `--host tunnel`). `--lan`, `--localhost` and `--host lan|localhost` are refused with `--eas`: they name an address the session cannot reach, and a run that accepted them would end with an app on an error screen and a report of success. `--web` is refused too — EAS Simulator has no browser to offer, and `deploy` is the EAS command for the web app.
+`exp://127.0.0.1:8081` names the loopback of the device that reads it ([[0005-runtime-loop-tools]] §Cloud simulator). So with `--eas`:
 
-The detached child re-resolves its own argv, so `dev --detach --eas` implies the tunnel in the child and the parent's tunnel wait (`waitForTunnelUrlAsync`) already knows to expect one.
+- `dev` adds `--tunnel` to the `expo start` options, unless a tunnel is already asked for (`--tunnel`, `--host tunnel`). A detached child re-resolves its argv, so it gets the tunnel too.
+- `--lan`, `--localhost` and `--host lan|localhost` are refused: the session cannot reach those addresses, and the run would report success with an app on an error screen.
+- `--web` is refused: EAS Simulator has no browser, and `deploy` is the EAS command for the web.
 
-The launcher defaults `EXPO_UNSTABLE_TUNNEL_V2` to `1` for every child, including detached servers, so `--tunnel` dogfoods tunnel v2. An explicit value is preserved; `EXPO_UNSTABLE_TUNNEL_V2=0` opts out. This does not turn a tunnel on for runs that did not request one. [confirmed — Kudo, 2026-09-09]
+[confirmed — Kudo, 2026-09-09] The launcher sets `EXPO_UNSTABLE_TUNNEL_V2=1` for every child, detached ones too, unless the variable is already set. `=0` opts out. It never turns on a tunnel that nobody asked for.
 
 ## The build is a simulator build
 
-`eas build:configure` writes `development` as `developmentClient: true, distribution: 'internal'` [observed — eas-cli 23.2 `build/configure.ts`]. That is a **device** build: signed, for a phone. No simulator installs it — not the EAS Simulator, not the one on this desk — so the old `dev --eas` plan built something its own `build:run` sentence could not install on a Mac's simulator either. A finding of this work, not only of the cloud device.
+The `development` profile that `eas build:configure` writes is a signed device build; no simulator can install it [observed — eas-cli 23.2]. The EAS device route builds the `development-simulator` profile instead, with the three keys that `eas build:dev` uses: `developmentClient: true`, `distribution: "internal"`, `ios.simulator: true`.
 
-`eas build:dev` (hidden) solves it upstream with a profile named `development-simulator`: `developmentClient`, `internal`, `ios.simulator: true` [observed — eas-cli 23.2 `commands/build/dev.ts`]. `EAS_SIMULATOR_PROFILE` is that name, and the plan for the EAS device builds it. When `eas.json` has no such profile, `dev` adds one — exactly those three keys, nothing else in the file touched (`ensureSimulatorProfileSync`) — **right before the build step**, and the plan's reasons say so first. It is a project write done outside a plan step; the honest form was to name it in the plan (`easSimulatorProfile: false` → a reason) rather than hide it in the step. There is **no `eas build:configure`** on this route [Kudo, 2026-09-09]: when `eas.json` is missing, `dev` writes it with the one profile the build needs — the configure step's other output (device profiles, a submit section, `cli.version`) is nothing this plan reads, and the step can prompt. The configure step survives only for a build routed to EAS by config with the device kept local, where the `development` profile it writes is the one that build names.
+- When `eas.json` lacks the profile, `dev` adds exactly those keys right before the build step and changes nothing else. When `eas.json` is missing, `dev` writes it with that one profile. The plan's reasons name the write first, because it is a project write outside a step.
+- There is no `eas build:configure` on this route [Kudo, 2026-09-09]: its other output is unused, and it can prompt. It stays only on the route that builds on EAS for a local device.
+- Only `ENOENT` means "no `eas.json`". A file that cannot be read or parsed, or whose root or `build` is not an object, stops the run before the build and stays as it was.
+- Open question: should a local-device plan on a Mac also build for the simulator? It is out of scope here.
 
-A plan for a local device keeps the `development` profile it always built. Whether it should also move to a simulator build on a Mac — `expo run:ios` builds for the simulator, and so does a session — is left open here; it is a change to a plan nobody asked about.
-
-The profile writer only treats `ENOENT` as a missing file. If an existing `eas.json` cannot be read or parsed, or its root or `build` section is not an object, it stops with an actionable error before submitting the build and preserves the file. The tolerant read used by planning is not evidence that an existing file is safe to replace. [observed — regression tests in `easJson-test.ts` and `dev-eas-test.ts`, 2026-09-09]
-
-### Every `eas` argv is non-interactive
-
-The plan's `eas build` step carries `--non-interactive`. Without it, `eas build` in a directory with no git repository asked "Would you like us to run 'git init'" on a stdin the step cannot read, and stopped [observed — live, 2026-10-05]. Every other `eas` argv this CLI spawns carries the flag when the command accepts it: `simulator:list` and `simulator:availability` gained it. Two commands do not accept it, so they do not get it: `build:configure` and `simulator:exec` declare no such flag [observed — eas-cli 24.10.0, `oclif.manifest.json`, 2026-10-05]. `build:view` rejects it too; that lookup is fixed in its own PR. A device-profile build (`development`, local device) that needs credentials is expected to stop on the flag instead of prompting; that path was not run live.
+**Every `eas` argv is non-interactive** when the command accepts `--non-interactive`. Without it, `eas build` in a directory with no git repository asked to run `git init` on a stdin nobody reads, and stopped [observed — live, 2026-10-05]. `build:configure`, `simulator:exec` and `build:view` do not accept the flag [observed — eas-cli 24.10.0 manifest]. A device-profile build that needs credentials is expected to stop on the flag; that path has not run live.
 
 ## Reuse
 
-A session installs a build by id. A finished simulator build of this exact fingerprint on EAS is therefore a build the run does not have to make, and a native build is the fifteen minutes everything else in this command is measured against. `lookUpEasSimulatorBuildAsync` asks the same question `eas build:dev` asks: the per-platform fingerprint (an EAS build carries one per platform, so the probe's project hash cannot be handed to the lookup), `--build-profile development-simulator`, `--status finished`. `buildCacheArgs` gained the optional profile filter for it; `status` keeps asking about any finished build.
+A session installs a build by id, so a finished simulator build of this fingerprint on EAS is a build the run does not make. The lookup asks what `eas build:dev` asks: the **per-platform** fingerprint, profile `development-simulator`, status `finished`.
 
-Found, the plan is `dev-client-fresh` (or `bare-fresh`) resting on `plan.easBuild`, with one step — the tunnelled dev server — and a reason naming the build. Not found, or not askable (no fingerprint tool, no runner, a refusal), the plan builds, which is the plan it always was. The lookup is skipped for a project that has yet to install `expo-dev-client`: that install moves the fingerprint, so a build found now is a build of a project about to change.
+- Found: the plan is `dev-client-fresh` (or `bare-fresh`) on that build, with one step (the tunnelled dev server) and a reason that names the build.
+- Not found, or not askable (no fingerprint tool, no runner, a refusal): the plan builds.
+- Skipped when the project has not installed `expo-dev-client` yet, because that install changes the fingerprint.
+- The last-build record and the app-presence probe of [[0004-smart-start-and-project-state]] §A current build is not an installed app are not used. Both are about a local device; a session started with `--build-id` has the app by construction.
 
-The last-build record is not consulted on the EAS device, and neither is the app-presence probe of [[0004-smart-start-and-project-state]] §A current build is not an installed app: the first answers "does the app on a _local_ device match", and the second asks a local device. A session started with `--build-id` has the app by construction.
+`status` keeps its lookup for any finished build.
 
 ## The open is a session
 
-`openAppOnEasAsync` (`src/dev/openAppEas.ts`) is armed on the `expo start` step the way the local open is (`onDevServer`, [[0026-dev-owns-the-open]]), and runs in the same fire-and-forget shape: the dev server owns the foreground, and a failed open is a warning with `navigate / --eas` in it.
+The EAS open is armed on the `expo start` step like the local open ([[0026-dev-owns-the-open]]). The dev server owns the foreground; a failed open is a warning that names `navigate / --eas`. In order:
 
-1. **A session this project has**, on this platform and in progress (`probeCloudSessionAsync`), is the device: the app is opened on it through `openRouteAsync` with `cloud: 'required'`, the same guarded verb `navigate --eas` runs. Asked first, so a session that is up is found without a wait on a tunnel. The deep link is sent once the dev server advertises its tunnel host, because the tunnel comes up after Metro answers and a link sent before it names the loopback, which the session cannot load. A reused development client receives the launch URL from step 3, checked against the observed tunnel, so a session preserved across a Metro restart connects to the new tunnel. Expo Go's route URL already names the dev server. A session of this worktree on the other platform refuses the start, because one EAS session belongs to each worktree: the open fails, starts and stops nothing, and names `dev:stop --eas` (llp/0035 §One session per worktree).
-2. **The tunnel**, for a session about to be started. The dev server is asked for its advertised origin (`fetchAdvertisedUrlAsync`, the manifest's `launchAsset.url`) until it names a tunnel host or `EAS_TUNNEL_WAIT_MS` runs out. A foreground run captures no log, and the manifest is the dev server's own account (llp/0021).
-3. **The launch URL**, from `resolveRouteUrlAsync`'s `connect` list — `exp://<tunnel host>` for Expo Go, `<scheme>://?__expo_url=<origin>` for a development build — so `dev` and `navigate` never disagree about the link.
-4. **Then the session is started**: `eas simulator --platform <p> --type agent-device (--expo-go | --build-id <id>) --open-url <url> --non-interactive --name "<dir> — agent-cli dev"`. `--open-url` is what keeps the first deep link from raising "Open in Expo Go?" on a device nobody is at (llp/0005; `live-cloud-test.ts` fact 4). Without `--json`, so the EAS CLI writes `.env.eas-simulator` itself and every later `--eas` command finds the session (`simulator:exec` loads that file). The id is read from `Simulator session created (id: …)`, which the CLI prints before it waits for readiness — so a start that then fails still names the session it billed, and the warning says how to stop it.
+1. **A session this project already has** on this platform, in progress, is the device. It is asked first, so a running session needs no tunnel wait. `dev` opens the app on it the way `navigate --eas` does. The deep link waits until the dev server advertises its tunnel host; a link sent earlier names the loopback. A reused development client gets the launch URL of step 3, so a session kept across a Metro restart connects to the new tunnel. A session of this worktree on the other platform refuses the start, because a worktree owns one EAS session: the open starts and stops nothing and names `dev:stop --eas` ([[0035-one-device-per-worktree]] §One session per worktree).
+2. **The tunnel.** `dev` asks the dev server's manifest for its advertised origin until it names a tunnel host, or the wait runs out. The manifest is the dev server's own account ([[0021-honest-reports]]).
+3. **The launch URL**, from the same resolver `navigate` uses: `exp://<tunnel host>` for Expo Go, `<scheme>://?__expo_url=<origin>` for a development build.
+4. **The session starts**: `eas simulator --platform <p> --type agent-device (--expo-go | --build-id <id>) --open-url <url> --non-interactive --name "<dir> — agent-cli dev"`.
+   - `--open-url` prevents the "Open in Expo Go?" dialog on a device nobody is at.
+   - No `--json`, so the EAS CLI writes `.env.eas-simulator`, and later `--eas` commands find the session.
+   - The id is read from `Simulator session created (id: …)`, which prints before the readiness wait. A start that fails later still names the session it billed, and the warning says how to stop it.
 
-A development build with no id to install — the plan found none and the build step's `build:list` named none — is refused with the `eas build` that makes one. Guessing at "the latest build" would install a device build, or somebody else's.
+A development build with no id is refused with the `eas build` that makes one. "The latest build" could be a device build or another person's build.
 
-### Naming the build the run made
-
-The `eas build` step runs in `inherit` mode so its progress reaches the terminal, and a captured `--json` run would take that away from the one step that takes fifteen minutes. So the build id is asked for afterwards: `build:list --build-profile development-simulator --status finished --limit 1` — the newest finished build of the profile, which right after the run's own build finished is that build (`findLatestSimulatorBuildIdAsync`). A list that names nothing is a warning with the re-run in it: the next plan's lookup finds the build and skips straight to the session.
+The `eas build` step runs with inherited output so its progress shows. After it, `dev` reads the build id from `build:list --build-profile development-simulator --status finished --limit 1`. When that names nothing, `dev` warns with the re-run; the next plan's lookup finds the build.
 
 ## Follow-ups
 
-A `--eas` run's follow-ups are aimed at the session: `navigate / --eas`, `runtime:errors`, and `npx eas simulator:stop`. The phone rung is left out — the device is in a datacenter — and so is the cloud-build rung, because this run already built there when it had to.
+A `--eas` run's follow-ups aim at the session: `navigate / --eas`, `runtime:errors`, and `dev:stop --eas`. There is no phone rung and no cloud-build rung.
 
 ## smoke
 
-`smoke --eas` was the device flag alone: the session was somebody else's to have started, and a run with none reported "no device". The gate now brings its own environment on EAS the way it boots a simulator locally ([[0005-runtime-loop-tools]] §The run brings its own environment):
+`smoke --eas` brings its own environment on EAS, as it boots a simulator locally ([[0005-runtime-loop-tools]] §The run brings its own environment):
 
-- Its dev server starts through `dev --<platform> --detach --wait-ready --no-open --eas`, so it is tunnelled and a build the plan needs is the simulator profile on EAS Build. `--no-open` keeps the session this run's own act.
-- Its plan is resolved with `deviceBackend: 'eas'`, so the build it names — and the `installWith` it prints — are `dev --eas`'s.
-- A new conditional bootstrap phase, **`start-session`**, where the boot would be: `ensureEasSessionAsync` with the app the plan names. Expo Go starts with `--expo-go`; a development build needs a finished `development-simulator` build of this fingerprint on EAS (`lookUpEasSimulatorBuildAsync`, looked up only when no session is up, before the tunnel wait) — and **the gate never compiles one**. No build is a failed phase whose reason names `dev --<platform> --eas`, and the run stops where a run with no device stops. A session this run started is a registered cleanup (`resource: 'session'`) and is ended by id when the run ends through `releaseStartedSessionAsync`; one that was already up is left running.
-- `probeDevice` then finds the session by [[0035-one-device-per-worktree]] §Session binding, and the `app`, `reload`, `route` and `screenshot` phases drive it.
+- The dev server starts through `dev --<platform> --detach --wait-ready --no-open --eas`. `--no-open` keeps the session start smoke's own act.
+- The plan resolves with `deviceBackend: 'eas'`, so the build it names and its `installWith` match `dev --eas`.
+- The **`start-session`** phase runs where the boot would. Expo Go starts with `--expo-go`. A development build needs a finished `development-simulator` build of this fingerprint on EAS; **smoke never compiles one**. It looks the build up only when no session is up, before the tunnel wait. No build fails the phase with a reason that names `dev --<platform> --eas`, and the run stops where a run with no device stops.
+- The device probe finds the session by [[0035-one-device-per-worktree]] §Session binding, and the `app`, `reload`, `route` and `screenshot` phases drive it.
 
-## dev:stop
+Session ownership [observed — regression tests, 2026-09-09]:
 
-`dev:stop --eas` also ends this project's session: the sessions of this worktree, chosen by [[0035-one-device-per-worktree]] §Session cleanup, stopped **by id** — the bare `eas simulator:stop` ends whatever the dotenv names, which may be a session another run is driving. Reported under `session: { id, stopped, reason, platform }`; `id: null` is a project with none, and exit 20 is a session that would not stop, because it is still billing. Without the flag the session is untouched: a session costs money, and ending one is asked for by name.
-
-## What EAS said
-
-Three surfaces quoted the EAS CLI's refusal by its first line, and for an unlinked project that line is `EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:` — with the following, the two `eas init` forms, cut off [observed — `status --explain`, `runtime:stop --eas`, 2026-09-08]. `deploy` had already solved this for itself (`classifyEasDeployFailure`, F143): read the whole output, recognise the sentence, answer with the fix and the account the CLI listed.
-
-That classifier is `src/utils/easFailure.ts` now, `classifyEasFailure`, with a one-line `summary` beside the `why`/`how`/`command` it had, and it is read wherever this CLI quotes an `eas` refusal: the build lookup of `status` (`describeLookupFailure`), the session listing behind every `--eas` device command (`probeCloudSessionAsync`, and `cloudSessionUnknownError`'s `How:` and `Try:`), and a failed `eas` step of `dev` (`planStepFailedError`, which then names `eas init` rather than the command that just failed). Anything the classifier does not recognise keeps the first line, as before.
-
-It is also a needs-human scenario of its own, `eas-project-unlinked` (`EAS_PROJECT_NOT_LINKED`), placed before the generic `eas-prompt` row: the EAS CLI's explanation contains "cannot configure it in non-interactive mode", and the generic row read that as a question waiting in a terminal — `dev --eas` exited 7 telling the caller to answer a prompt that does not exist [observed — 2026-09-08]. The handoff stays exit 7, because which account a project belongs to is a person's decision ([[0007-deploy-and-headless]] §deploy, F143); the classifier fills the account in when the CLI listed exactly one, and every surface — `deploy`, `dev`, the `--eas` device commands — hands over the same `eas init` line.
-
-`eas init` and `eas *:configure` are not wrapped, on purpose [Kudo, 2026-09-08]: they are one-time, they prompt, and the account is the person's to choose. This CLI names them, with the account filled in when the EAS CLI listed exactly one.
-
-## What did not change
-
-- `--eas` on `navigate`, `runtime:reload`, `runtime:stop` names the device only, as the renamed `--cloud` did ([[0015-backend-selection-and-config]] §One flag for EAS).
-- The local device keeps everything of [[0026-dev-owns-the-open]]: same open, same `development` profile on the EAS build backend.
-
-## Testing
-
-- Unit: the plan rows (`decide-test.ts` §the EAS device), the resolver's lookup and profile injection (`resolveAsync-test.ts` §the EAS device), the option refusals and the implied tunnel (`resolveOptions-test.ts`), `eas.json` (`easJson-test.ts`), the open's argv and every stop (`openAppEas-test.ts`), the profile filter on the lookup argv (`compare-test.ts`).
-- Unit, `smoke`: the `start-session` phase started / reused / failed / absent (`phases-test.ts`); `dev:stop --eas` ended / none / would not stop / not asked (`stopAsync-test.ts`).
-- E2E, against the shared stub `eas` (`e2e/stubs/eas.js`, [[0002-testing-and-evals]]): `smoke --eas` with no session starts one with `--expo-go` and the tunnelled URL, finds it, and ends it by id; `dev:stop --eas` ends the listed session by id and answers `session` for a project with none. For `dev --eas`: the plan, both refusals, a detached run that builds the simulator profile, adds it to `eas.json`, names the build, tunnels the dev server and starts a session with `--build-id` and the dev-launcher URL; the Expo Go form with `--expo-go` and `exp://<tunnel>`; the reuse of a session that is up; the reuse of a finished build of this fingerprint and the miss on another fingerprint. The stub dev server advertises its tunnel host in the manifest once the tunnel "comes up", as the real one does.
-- Live, `apps/eas-example` on `expo-ci`, 2026-09-08 (eas-cli 23.2.0, run by hand from this package's `bin/cli.js`):
-  - `dev --ios --eas`, first pass: the plan was `dev-client-stale` with `eas build --platform ios --profile development-simulator` then `expo start --dev-client --tunnel`; the profile was added to `eas.json`; the build finished on EAS (`c42fd45f`); the dev server came up on a `*.on.expo.app` tunnel. The open **reused** an iOS session a concurrent CI live-cloud job had just started (`agent-cli-live`), and that session refused the deep link — the reuse rung picks any in-progress session of this project on the platform, and a shared CI account has other runs' sessions on it. On a developer's own account that is the session they started; on a shared account it is a caveat this document records rather than a defect it fixes.
-  - `dev --ios --eas`, second pass with no session up: the plan was `dev-client-fresh` resting on `easBuild c42fd45f` ("EAS already has a finished build for this fingerprint") — the reuse of §Reuse, live; `expo start --dev-client --tunnel`; `eas simulator --build-id c42fd45f … --open-url easexample://expo-development-client/?url=https://…on.expo.app`; the dev server bundled 536 modules for the app on the session right after; `dev` reported the session with its expo.dev URL. One finding fixed: the id parser missed the `(id: …, saved to .env.eas-simulator)` form and said "id unknown".
-  - `smoke --ios --eas` against that session: `start-session` reported the session as already up; `app` was inconclusive — `easexample://` opened, no debugger target attached within 3 min, and the screenshot was the dev launcher's screen — the same `/json/list`-stays-empty behaviour of a cloud session [[0005-runtime-loop-tools]] §Cloud simulator records. Exit 22, never a pass.
-  - `dev:stop --eas`: the dev server stopped and the session ended by id; `simulator:list --status in-progress` then listed nothing.
-  - Not yet run live: `dev --android --eas`, and the Expo Go form of the session start (`--expo-go`), which the `live-cloud` suite exercises on its own.
-
-Live check, 2026-09-09: a fresh SDK 57 app created with this CLI (`new <dir> --no-git --json`, dependencies installed) followed by `dev --ios --eas --json` stopped at the project-linkage preflight with exit 7. No Metro or EAS session was started. Separately, `start --tunnel` with `EXPO_UNSTABLE_TUNNEL_V2` unset advertised a `*.on.expo.app` URL; the server was stopped after checking it. [observed]
-
-### Smoke session ownership and cleanup
-
-The creation message identifies a new session. An overwrite warning naming a previous session is not a creation receipt and must never select the cleanup target. A session created before a failed readiness wait still belongs to the smoke run and is registered for cleanup. The start phase reports creation only; the environment summary reports the actual session cleanup result. Reused sessions remain running. [observed — regression tests, 2026-09-09]
+- Only the creation message identifies a new session. An overwrite warning that names an older session never selects the cleanup target.
+- A session that smoke created belongs to the run, also when its readiness wait failed. The run ends it by id at the end. A session that was already up stays running.
+- The `start-session` phase reports only creation. The environment summary reports the cleanup result.
 
 ### Attach the controller after a smoke session starts
 
-EAS's `--open-url` launches the app, but does not create an `agent-device` controller session. A fresh smoke run must still perform its normal app open even if Metro already lists a debugger target. That open binds the controller before observation and screenshots; it also uses the existing rule that an app opened by this run needs no additional reload. A reused session with an attached app keeps the existing reload check. [observed — SDK 57 on EAS iOS, 2026-09-09: without the controller open, screenshot exited `SESSION_NOT_FOUND: No active session. Run open first.`]
+[observed — SDK 57 on EAS iOS, 2026-09-09] `--open-url` launches the app but creates no `agent-device` controller session. Without one, a screenshot fails with `SESSION_NOT_FOUND`.
 
-The cloud screenshot needs that same controller session. When it fails with `SESSION_NOT_FOUND`, smoke runs `agent-device open <app-id> --platform <p>` through the guarded `simulator:exec` path and retries the screenshot once. The open has no `--relaunch`, so it never terminates the app. [not observed: whether `open <app-id>` leaves the screen of a foreground app as it was.] A skipped screenshot quotes the controller's `Error (CODE)` line and its `Hint`, and never the EAS CLI update banner.
+- A smoke run that started the session still does its normal app open, even when Metro already lists a debugger target. That open binds the controller. An app this run opened needs no extra reload.
+- A reused session with an attached app keeps the usual reload check.
+- When the cloud screenshot fails with `SESSION_NOT_FOUND`, smoke runs `agent-device open <app-id> --platform <p>` through `simulator:exec` and retries once. There is no `--relaunch`, so the app is not terminated. [not observed: whether that open keeps the current screen.]
+- A skipped screenshot quotes the controller's `Error (CODE)` line and its `Hint`, never the EAS CLI update banner.
+
+## dev:stop
+
+`dev:stop --eas` also ends this worktree's sessions, chosen by [[0035-one-device-per-worktree]] §Session cleanup, **by id**. A bare `eas simulator:stop` ends the session the dotenv names, which can belong to another run.
+
+- The result has `session: { id, stopped, reason, platform }`. `id: null` means the project has no session.
+- Exit 20 means a session did not stop and still bills.
+- Without `--eas`, the session is not touched. Ending a billed session is asked for by name.
 
 ### Stop hints
 
-Normal dev progress and follow-ups name `agent-cli dev:stop --eas`, which stops both the project's dev server and its EAS session. Smoke instead explains that it stops sessions it creates after the run. Exact-ID EAS stop commands remain appropriate when reporting a particular session whose startup or cleanup failed. [confirmed — Kudo, 2026-09-09]
+[confirmed — Kudo, 2026-09-09] `dev` progress and follow-ups name `agent-cli dev:stop --eas`, which stops the dev server and the session. Smoke says that it stops the sessions it creates after the run. An exact-id `eas simulator:stop --id` fits only a report about one session whose start or cleanup failed.
 
 ### The dev run owns sessions it creates
 
-When Metro exits, including after SIGINT/Ctrl-C or SIGTERM, `dev --eas` waits for its outstanding app-open operation and stops the session it created by exact ID. A reused session is left running. A failed readiness wait can still return a created session and receives the same cleanup. Signal handling remains installed until cleanup completes. If interruption arrives during creation, the run waits for that bounded operation to return a receipt rather than abandoning a potentially billed session. `--detach` transfers this lifetime to the child; the parent's normal return does not stop the session. [confirmed — Kudo, 2026-09-09; observed — subprocess regression tests]
+[confirmed — Kudo, 2026-09-09] When Metro exits, also on SIGINT or SIGTERM, `dev --eas` waits for its app open and stops the session it created, by id. A reused session stays running.
+
+- A failed readiness wait that returns a created session gets the same cleanup.
+- Signal handling stays installed until cleanup is done.
+- An interrupt during creation waits for the bounded start to return a receipt, so no billed session is lost.
+- `--detach` gives this lifetime to the child; the parent's return does not stop the session.
+
+## What EAS said
+
+For an unlinked project, the first line of the EAS CLI's refusal ends with "Run one of the following" and cuts off the two `eas init` forms. So every surface that quotes an `eas` refusal reads the whole output through one classifier, which returns a one-line `summary` and a `why`, `how` and `command`:
+
+- the `status` build lookup;
+- the session listing behind every `--eas` device command;
+- a failed `eas` step of `dev`, which then names `eas init`, not the step that failed;
+- `deploy`.
+
+Output the classifier does not recognise keeps its first line.
+
+The needs-human scenario `eas-project-unlinked` (`EAS_PROJECT_NOT_LINKED`) comes before the generic `eas-prompt` row. The refusal contains "cannot configure it in non-interactive mode", and the generic row read that as a waiting prompt. The handoff is exit 7, because the account a project belongs to is a person's decision ([[0007-deploy-and-headless]] §deploy). When the EAS CLI lists exactly one account, the classifier fills it in, and every surface hands over the same `eas init` line.
+
+`eas init` and `eas *:configure` are not wrapped [Kudo, 2026-09-08]: they run once, they prompt, and the account is the person's choice. This CLI names them.
+
+## Testing
+
+| Contract                                               | Test                                                                                               |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Plan rows, profile write, lookup for the EAS device    | `src/plan/__tests__/decide-test.ts`, `resolveAsync-test.ts`, `src/utils/__tests__/easJson-test.ts` |
+| Tunnel and the refusals                                | `src/dev/__tests__/resolveOptions-test.ts`                                                         |
+| §The open is a session                                 | `src/dev/__tests__/openAppEas-test.ts`                                                             |
+| §Check the EAS project before starting the environment | `e2e/__tests__/eas-preflight-test.ts`                                                              |
+| `dev --eas` end to end: build, reuse, open, Expo Go    | `e2e/__tests__/dev-eas-test.ts`                                                                    |
+| §The dev run owns sessions it creates                  | `e2e/__tests__/dev-eas-foreground-test.ts`                                                         |
+| §smoke and session ownership                           | `src/smoke/__tests__/phases-test.ts`, `e2e/__tests__/smoke-test.ts`                                |
+| §Attach the controller after a smoke session starts    | `src/device/__tests__/screenshot-test.ts`                                                          |
+| §dev:stop                                              | `src/dev/__tests__/stopAsync-test.ts`, `e2e/__tests__/cloud-simulator-test.ts`                     |
+| §What EAS said                                         | `src/utils/__tests__/easFailure-test.ts`, `src/needsHuman/__tests__/easProject-test.ts`            |
+| On a real session                                      | `e2e-live/__tests__/live-cloud-test.ts`                                                            |
+
+The e2e tier runs against the stub `eas` ([[0002-testing-and-evals]]). Its dev server advertises the tunnel host in the manifest only after the tunnel "comes up", as the real one does.
+
+Live on `apps/eas-example`, `expo-ci` account, 2026-09-08 (eas-cli 23.2.0): `dev --ios --eas` built the simulator profile, then on a second pass reused that build, started a session with `--build-id` and the dev-launcher URL, and the dev server bundled the app. `smoke --ios --eas` against that session was inconclusive (no debugger target, exit 22), as [[0005-runtime-loop-tools]] §Cloud simulator records. `dev:stop --eas` ended the session by id.
+
+One caveat from that run: the reuse rung took an in-progress session that a concurrent CI job had started, and that session refused the deep link. On a shared account, "a session of this project" can be another run's session. [[0035-one-device-per-worktree]] lists this among the problems it solves.
+
+Not run live: `dev --android --eas`, and the `--expo-go` session start from `dev` (the `live-cloud` suite covers `--expo-go` alone).
