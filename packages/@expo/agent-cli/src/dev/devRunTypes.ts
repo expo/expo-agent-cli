@@ -1,4 +1,4 @@
-import type { BoundDevice, ReleasedDevice } from '../deviceBinding';
+import type { Binding, ReleasedDevice } from '../deviceBinding';
 import type { NativePlatform } from '../plan/types';
 import type { StartupRequest } from './startupRequest';
 
@@ -67,7 +67,7 @@ export interface DevRun {
   readonly progress: RunProgress;
   readonly easOpenEvidence: EasOpenEvidence;
   cancel(intent: CancelIntent): void;
-  captureDevice(device: BoundDevice): void;
+  captureBinding(binding: Binding): void;
   serveAsync<T>(
     serve: (onReady: (metro: MetroReady) => void) => Promise<T>,
     open: OpenWork | null
