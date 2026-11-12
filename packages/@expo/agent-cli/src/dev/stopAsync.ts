@@ -366,7 +366,12 @@ async function stopLockedDevServerAsync(
   // user's process can, and `ESRCH` there means the thing is already not running.
   const sent = await signalProcessAsync(lock.pid, options.signal);
   base.signal = sent.delivered ? options.signal : null;
-  debugEvent('stop_signalled', { pid: lock.pid, signal: options.signal, ok: sent.delivered });
+  debugEvent('stop_signalled', {
+    pid: lock.pid,
+    signal: options.signal,
+    ok: sent.delivered,
+    error: sent.error ?? null,
+  });
 
   const outcome = await waitForStopAsync(lock, options.timeoutMs);
   base.waitedMs = Date.now() - startedAt;
