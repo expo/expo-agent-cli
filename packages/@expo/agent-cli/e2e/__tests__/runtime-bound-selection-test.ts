@@ -25,6 +25,8 @@ const apps = {
   a: runtimeTarget('a', { deviceName: A.name, appId: 'host.exp.Exponent' }),
   b: runtimeTarget('b', { deviceName: B.name, appId: 'host.exp.Exponent' }),
   cloud: runtimeTarget('cloud', { deviceName: 'iPhone 17' }),
+  // The app of an EAS session that ended while the dev server kept running: same model, same app id.
+  ended: runtimeTarget('ended', { deviceName: 'iPhone 17' }),
   android: runtimeTarget('android', {
     deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
     appId: 'host.exp.exponent',
@@ -188,6 +190,79 @@ for (const row of selectionCases) {
     }
   );
 }
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — an ended session's app
+it.each([
+  {
+    name: 'no flag, the ended app listed first',
+    targets: ['ended', 'cloud'],
+    silent: ['ended'],
+    read: 'cloud',
+  },
+  {
+    name: '--ios, the ended app listed last',
+    flag: 'ios',
+    targets: ['cloud', 'ended'],
+    silent: ['ended'],
+    read: 'cloud',
+  },
+  { name: 'both apps answer', targets: ['cloud', 'ended'], silent: [], read: null },
+  {
+    name: 'neither app answers',
+    targets: ['cloud', 'ended'],
+    silent: ['cloud', 'ended'],
+    read: null,
+  },
+] satisfies {
+  name: string;
+  flag?: 'ios';
+  targets: AppId[];
+  silent: AppId[];
+  read: AppId | null;
+}[])(
+  'eval with ios-cloud beside an app that no local device claims: $name',
+  async ({ flag, targets, silent, read }) => {
+    const { root, env } = await setupBoundAsync('ios-cloud');
+    const evaluated: string[] = [];
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: targets.map((id) => apps[id]),
+      inspectorSilent: silent,
+      inspectorEvaluate: (expression, device) => {
+        if (!expression.includes('selected-app-sentinel')) return undefined;
+        evaluated.push(device);
+        return device;
+      },
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:eval',
+          '"selected-app-sentinel"',
+          ...(flag ? [`--${flag}`] : []),
+          '--dev-server-url',
+          server.url,
+          '--json',
+        ],
+        { reject: false, env }
+      );
+      const scopeLines = result.stderr.split('\n').filter((line) => line.startsWith('Scoped to'));
+      if (read) {
+        expect(result.exitCode, result.all).toBe(0);
+        expect(JSON.parse(result.stdout).value).toBe(read);
+        expect(scopeLines).toEqual([sessionLine]);
+      } else {
+        expect(result.exitCode, result.all).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
+        expect(scopeLines).toEqual([]);
+      }
+      expect(evaluated).toEqual(read ? [read] : []);
+    } finally {
+      await server.close();
+    }
+  }
+);
 
 const refusalCases: {
   name: string;
