@@ -25,17 +25,10 @@ import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
 import { devServerRunningStopAsync } from './runningDevServer';
 
-import {
-  acquireDeviceAsync,
-  acquireLine,
-  devicesDisabled,
-  hostBindsPlatform,
-  localBackendOf,
-} from '../deviceBinding';
+import { devicesDisabled, hostBindsPlatform, localBackendOf } from '../deviceBinding';
 import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
-import * as Log from '../log';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, statedSmokePlatform } from '../smoke/suggest';
@@ -49,7 +42,7 @@ import {
   knownSessionIdSync,
   waitForEasSessionAsync,
 } from './detachEasProgress';
-import { CALLER_ARGV_ENV, explicitRequestOf } from './deviceOption';
+import { CALLER_ARGV_ENV } from './deviceOption';
 import { event } from './events';
 import {
   detachedLogPath,
@@ -58,6 +51,7 @@ import {
   type DetachedLogRead,
 } from './logFile';
 import { isProcessAlive } from './processLiveness';
+import { recordLastDevRequest } from './lastRequest';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
 
@@ -101,14 +95,14 @@ export interface DevDetachOptions {
    */
   print?: boolean;
   /**
-   * On a dev server that is already running, boot this worktree's own device and refuse when it
-   * has none to reuse.
+   * On a dev server that is already running, open this caller's EAS session on it and record the
+   * request.
    *
-   * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
-   * `dev` passes true: its caller asked for the app on a device, and the device created now would
-   * carry no app, so only a reuse serves. `smoke` leaves it unset and binds in its own boot phase.
+   * @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+   * `dev --eas` passes true. A local `dev` never reaches a running server here: it stops on the
+   * lock first. `smoke` leaves it unset and opens its device in its own boot phase.
    */
-  reuseBoundDevice?: boolean;
+  reopenEasSession?: boolean;
 }
 
 interface DetachContext {
@@ -116,7 +110,7 @@ interface DetachContext {
   options: DevOptions;
   startedAt: number;
   print: boolean;
-  reuseBoundDevice: boolean;
+  reopenEasSession: boolean;
   smokePlatform: NativePlatform;
 }
 
@@ -136,12 +130,12 @@ type Readiness =
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, reuseBoundDevice = false }: DevDetachOptions = {}
+  { print = true, reopenEasSession = false }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
   const smokePlatform =
     statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
-  const context = { projectRoot, options, startedAt, smokePlatform, print, reuseBoundDevice };
+  const context = { projectRoot, options, startedAt, smokePlatform, print, reopenEasSession };
   const source = await resolveDetachSourceAsync(context);
   switch (source.kind) {
     case 'building':
@@ -237,6 +231,7 @@ async function reuseRunningAsync(
     checked?.result.ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // Read the verdict and PID after all probes: any can outlast the running server.
   await checkReuseFailureAsync(context, hasExited, lock, statusAnswering);
+  if (context.reopenEasSession) recordLastDevRequest(projectRoot, options);
   return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning: true,
@@ -278,8 +273,8 @@ async function sessionForExistingRunAsync(
   tunnelUrl: string | null,
   hasExited: () => boolean
 ): Promise<string | null> {
-  const { projectRoot, options, reuseBoundDevice } = context;
-  const sessionPlatform = reuseBoundDevice ? easOpenPlatform(options) : null;
+  const { projectRoot, options, reopenEasSession } = context;
+  const sessionPlatform = reopenEasSession ? easOpenPlatform(options) : null;
   const followsSession =
     sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
   return followsSession
@@ -294,8 +289,8 @@ async function sessionForExistingRunAsync(
           callerArgv: options.callerArgv,
         })
       : null
-    : reuseBoundDevice
-      ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
+    : reopenEasSession
+      ? await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl)
       : null;
 }
 
@@ -614,38 +609,6 @@ async function waitForTunnelUrlAsync(
     }
     await new Promise((resolve) => setTimeout(resolve, TUNNEL_URL_POLL_MS));
   }
-}
-
-/**
- * Put this worktree's device on a running server: the EAS session, through the reopen, or the
- * local device, reuse only. Returns the EAS session id, or null.
- */
-// @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
-async function reuseDeviceOnRunningServerAsync(
-  projectRoot: string,
-  options: DevOptions,
-  devServerUrl: string,
-  tunnelUrl: string | null
-): Promise<string | null> {
-  if (options.deviceBackend === 'eas') {
-    return await reopenEasAsync(projectRoot, options, devServerUrl, tunnelUrl);
-  }
-  const platform = options.platform;
-  if (
-    (platform === 'ios' || platform === 'android') &&
-    !devicesDisabled() &&
-    hostBindsPlatform(platform)
-  ) {
-    Log.progress(
-      acquireLine(
-        await acquireDeviceAsync(projectRoot, platform, {
-          reuseOnly: true,
-          explicit: explicitRequestOf(options.device, options.callerArgv),
-        })
-      )
-    );
-  }
-  return null;
 }
 
 /** Read from the binding file, under the same conditions `dev` binds under. */

@@ -652,13 +652,10 @@ the parent keeps waiting for its own server. The missing-header compatibility ru
 §A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
 reject a foreign root. Without the flag `ready` is `null`.
 
-One dev server per project. The lock is read before anything is spawned. A project that
-already has one gets the running server reported back with `alreadyRunning: true`;
-`--wait-ready` performs the same readiness check before exit 0, without spawning another
-child. A second detached one is a process nobody could find. A foreground `dev` stops on
-the same lock instead (§A busy port): `--detach` promises a running server and reports
-the one there, while a foreground run promises the plan it printed, and a plan whose
-server already runs has no step to run.
+Public detached local repeats refuse with `DEV_SERVER_RUNNING`, exit 20, when Metro answers
+for this project. The refusal names the pid and port and preserves the request in `dev:stop && dev`.
+A no-wait repeat before Metro answers returns 22 with `dev:logs`. EAS and smoke bootstrap retain reuse.
+`dev-detach-test` covers both platforms, request preservation, and port changes.
 
 Reuse checks the process and its verdict after tunnel lookup and any final readiness
 probe, and before reporting a readiness timeout. Logs older than the lock's start time
@@ -715,8 +712,8 @@ ends it. On Windows `dev:stop` ends the process tree at once, with the same resu
 Tests: dev-eas-test (the report, the 22, the follow by a re-run, a followed build that
 fails, the stop of a building run), dev-detach-test (a building `expo run:*` plan).
 
-Exit codes. `dev --detach` exits 0 when a dev server is up, whether it started one or
-found one, and for a run that builds, without `--wait-ready`. Exit 1 when the child never
+Exit codes. `dev --detach` exits 0 for a successful first start, an EAS or internal
+reuse, and for a run that builds without `--wait-ready`. Local ready repeats exit 20. Exit 1 when the child never
 published a lock, and 1 when `--wait-ready` gave up on a serving dev server, which is
 still running, as the message says. Exit 22 (`DEV_DETACH_STILL_BUILDING`) when
 `--wait-ready` ends while the run builds. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
@@ -765,7 +762,7 @@ cache, resolves no plan, asks EAS for no build, probes no toolchain, and reads, 
 matches no device. It records no last request either: the recovery preference `status`
 reads ([[0035-one-device-per-worktree]] §Lifecycle output) is written after the stop, so
 a request the lock refused never replaces the one that started the running server.
-`--detach` records before it reports, because a reused server is a server that runs.
+`--detach` records in the child, or after a successful EAS reuse.
 `--device` on a run that binds nothing is still `BAD_ARGS` first: the refusals about the
 command come before the outcome about the project. The lock alone decides.
 Every plan `dev` can reach that has a step has a step that serves (`isDevServerStep`:
@@ -777,10 +774,8 @@ reasons: the device callback of [[0035-one-device-per-worktree]] §How `dev` use
 answers null on a live lock instead of inspecting the own binding, and the port block
 after the resolver builds the stopped plan, on the lock alone, whatever the forwarded
 arguments made of the last step. Every foreground `dev` that binds a device has
-therefore passed a lock that was not live, so the callback acquires with nothing to
-reuse: `reuseOnly` belongs to `dev --detach` alone, where a running server is the
-expected case (§Daemonization), and the `--device` preview of a plan has no reuse-only
-reading either.
+therefore passed a lock that was not live. Device acquisition can reuse a retained
+binding after an explicit stop and restart.
 
 The word. One `/status` probe of the lock's URL
 (`probeBundlerAsync(lock.url, { projectRoot })`) picks it: `serving` when it answers for
@@ -806,10 +801,8 @@ platform is the typed one when it is a device platform, else the project's defau
 the one rule the run uses (`defaultSmokePlatform`): a single checked-in native folder,
 then the host.
 
-Two things do not change. `dev --detach` reports the running server with
-`alreadyRunning: true` and exit 0 (§Daemonization), and `smoke` builds on that. The
-plain `start` wrapper keeps allowing a second server, which the serving step's lock claim
-reports on the event stream (`cli:dev_lock_skipped`, §Dev-server lock).
+Smoke's internal bootstrap can reuse a running server. The plain `start` wrapper keeps
+allowing a second server, reported through `cli:dev_lock_skipped` (§Dev-server lock).
 
 The port is resolved before the plan runs: the named `--port`, or the first port from
 8081 (`RCT_METRO_PORT` when set) that binds on `::` and `127.0.0.1`. It goes as `--port`

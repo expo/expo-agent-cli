@@ -5,12 +5,7 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../../devLock';
-import {
-  acquireDeviceAsync,
-  acquireLine,
-  devicesDisabled,
-  hostBindsPlatform,
-} from '../../deviceBinding';
+import { devicesDisabled, hostBindsPlatform } from '../../deviceBinding';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import * as bindingSummary from '../../deviceBinding/summary';
@@ -29,7 +24,6 @@ import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
-import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../log');
@@ -41,7 +35,6 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   devicesDisabled: vi.fn(() => true),
   hostBindsPlatform: vi.fn(() => false),
-  acquireDeviceAsync: vi.fn(),
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../reopenEas', () => ({ reopenEasAsync: vi.fn() }));
@@ -631,146 +624,23 @@ describe('the bound device', () => {
     projectRoot,
     startedAt: new Date(0).toISOString(),
   };
-  const reused = {
-    device: {
-      backend: 'local-ios' as const,
-      platform: 'ios' as const,
-      udid: 'SIM-1',
-      name: 'agent-cli 0000',
-      origin: 'created' as const,
-    },
-    justBooted: true,
-    action: 'reused' as const,
-  };
-
   beforeEach(() => {
-    mockPlatform('darwin');
     vi.mocked(devicesDisabled).mockReturnValue(false);
-    // These cases model a host that can run the requested iOS simulator. Other tests below
-    // exercise the unsupported-host branch explicitly.
-    vi.mocked(hostBindsPlatform).mockImplementation(
-      (platform) => platform === 'ios' && process.platform === 'darwin'
-    );
-    vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
+    vi.mocked(hostBindsPlatform).mockReturnValue(true);
   });
 
   it("reads its binding with the device check's timeout, not status's probe deadline", async () => {
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
     const summary = vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([]);
 
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--local']),
+      { print: false }
+    );
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toBe(0);
 
     expect(summary).toHaveBeenCalledWith(projectRoot, SIMCTL_CALL_TIMEOUT_MS);
-  });
-
-  // already-running-reuses-only
-  it('boots the parked simulator on a running server, reuse only, before the report', async () => {
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    const { event: cliEvent } = await import('../../events');
-    const summary = {
-      platform: 'ios' as const,
-      backend: 'local-ios' as const,
-      id: 'SIM-1',
-      name: 'agent-cli 0000',
-      origin: 'created',
-      state: 'up' as const,
-      expiresAt: new Date(3_600_000).toISOString(),
-    };
-    vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([summary as any]);
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local', '--json']), {
-        print: true,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-
-    expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { reuseOnly: true });
-    expect(spawn).not.toHaveBeenCalled();
-    expect(cliEvent).toHaveBeenCalledWith(
-      'dev_detach',
-      expect.objectContaining({ alreadyRunning: true })
-    );
-    expect(Log.progress).toHaveBeenCalledWith(acquireLine(reused));
-    expect(vi.mocked(Log.progress).mock.invocationCallOrder[0]!).toBeLessThan(
-      vi.mocked(cliEvent).mock.invocationCallOrder.at(-1)!
-    );
-    const printed = vi
-      .mocked(Log.log)
-      .mock.calls.map(([text]) => String(text))
-      .find((text) => text.includes('"device"'))!;
-    expect(JSON.parse(printed)).toMatchObject({
-      alreadyRunning: true,
-      device: { id: 'SIM-1', backend: 'local-ios' },
-    });
-  });
-
-  it('relays the refusal of a running server with nothing to reuse', async () => {
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    vi.mocked(acquireDeviceAsync).mockRejectedValue(
-      Object.assign(new Error('nothing to reuse'), { code: 'DEVICE_UNAVAILABLE', exitCode: 20 })
-    );
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).rejects.toMatchObject({ code: 'DEVICE_UNAVAILABLE', exitCode: 20 });
-  });
-
-  it.each(['linux', 'win32'] as const)(
-    'reuses the server without acquiring iOS on %s',
-    async (platform) => {
-      mockPlatform(platform);
-      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-      const { event: cliEvent } = await import('../../events');
-
-      await expect(
-        devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-          print: false,
-          reuseBoundDevice: true,
-        })
-      ).resolves.toBe(0);
-
-      expect(acquireDeviceAsync).not.toHaveBeenCalled();
-      expect(spawn).not.toHaveBeenCalled();
-      expect(cliEvent).toHaveBeenCalledWith(
-        'dev_detach',
-        expect.objectContaining({ alreadyRunning: true })
-      );
-    }
-  );
-
-  // smoke-never-reaches-already-running-reuse
-  it.each([
-    ['without reuseBoundDevice', ['--ios', '--detach', '--local'], {}, () => {}],
-    [
-      'for --android on a host without Android tools',
-      ['--android', '--detach', '--local'],
-      { reuseBoundDevice: true },
-      () => {},
-    ],
-    [
-      'while devices are disabled',
-      ['--ios', '--detach', '--local'],
-      { reuseBoundDevice: true },
-      () => vi.mocked(devicesDisabled).mockReturnValue(true),
-    ],
-  ])('binds nothing on a running server %s', async (_case, argv, extra, setup) => {
-    setup();
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(argv), { print: false, ...extra })
-    ).resolves.toBe(0);
-
-    expect(acquireDeviceAsync).not.toHaveBeenCalled();
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
@@ -786,7 +656,7 @@ describe('the bound device', () => {
       const result = devDetachAsync(
         projectRoot,
         { ...resolveDevOptions(['--ios', '--detach', '--eas']), waitReady },
-        { print: false, reuseBoundDevice: true }
+        { print: false, reopenEasSession: true }
       ).catch((error) => error);
       await vi.runAllTimersAsync();
 
@@ -809,32 +679,6 @@ describe('the bound device', () => {
     expect((await result).message).toContain('dev:stop --eas');
   });
 
-  it('reuses the worktree emulator on a running server when Android tools are available', async () => {
-    const reusedAndroid = {
-      device: {
-        backend: 'local-android' as const,
-        platform: 'android' as const,
-        serial: 'emulator-5554',
-        origin: { kind: 'spawned' as const, avd: 'Pixel_9', port: 5554, emulatorPid: 4242 },
-      },
-      justBooted: false,
-      action: 'reused' as const,
-    };
-    vi.mocked(hostBindsPlatform).mockReturnValue(true);
-    vi.mocked(acquireDeviceAsync).mockResolvedValue(reusedAndroid);
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--android', '--detach', '--local']), {
-        print: false,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-
-    expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'android', { reuseOnly: true });
-    expect(Log.progress).toHaveBeenCalledWith(acquireLine(reusedAndroid));
-  });
-
   // detached-device-error-relayed
   // detached-device-error-relayed: the child's log is what `logCmdError` writes under
   // `__EXPO_AGENT_CLI_DETACHED=1`, captured off the log module, so the round trip is the real one.
@@ -853,7 +697,7 @@ describe('the bound device', () => {
     const result = devDetachAsync(
       projectRoot,
       resolveDevOptions(['--ios', '--detach', '--local']),
-      { print: false, reuseBoundDevice: true }
+      { print: false, reopenEasSession: true }
     ).catch((error) => error);
     await vi.runAllTimersAsync();
 
@@ -964,7 +808,7 @@ describe('the EAS session under --wait-ready', () => {
   function start(argv = ['--ios', '--eas', '--detach', '--wait-ready', '--json']) {
     return devDetachAsync(projectRoot, resolveDevOptions(argv), {
       print: true,
-      reuseBoundDevice: true,
+      reopenEasSession: true,
     }).catch((error) => error);
   }
 

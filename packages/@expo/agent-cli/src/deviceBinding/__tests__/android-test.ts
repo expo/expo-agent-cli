@@ -310,17 +310,6 @@ describe(acquireDeviceAsync, () => {
     expect(tools.killed).toEqual([4001]);
   });
 
-  it('refuses not-reusable with reuseOnly and no instance to reuse', async () => {
-    const tools = fakeTools();
-
-    const error = await acquireDeviceAsync(ROOT, 'android', { tools, reuseOnly: true }).catch(
-      (e) => e
-    );
-
-    expect(error.data).toEqual({ reason: 'not-reusable' });
-    expect(tools.spawned).toEqual([]);
-  });
-
   it('throws the tool error when adb cannot run', async () => {
     const tools = fakeTools({ adbSpawnError: true });
 

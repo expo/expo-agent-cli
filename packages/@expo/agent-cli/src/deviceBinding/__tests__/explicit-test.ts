@@ -58,7 +58,7 @@ it('transfers an expired foreign explicit device and reuses it on the next dev',
   });
 });
 
-it('refuses ambiguous names, leaked creates, and reuseOnly replacement without changing the own binding', async () => {
+it('refuses ambiguous names and leaked creates', async () => {
   const tools = fakeTools({
     simulators: [
       human,
@@ -77,16 +77,6 @@ it('refuses ambiguous names, leaked creates, and reuseOnly replacement without c
   ).rejects.toMatchObject({
     data: { reason: 'explicit-not-found' },
   });
-  writeBinding(file(), bindingFor(ROOT, 'SECOND'));
-  await expect(
-    acquireDeviceAsync(ROOT, 'ios', { explicit: named('HUMAN'), reuseOnly: true, tools })
-  ).rejects.toMatchObject({
-    data: { reason: 'not-reusable' },
-    exitCode: 20,
-    message:
-      'The running dev server uses agent-cli 0000; --device names My iPhone.\nHow: run "npx @expo/agent-cli dev:stop", then this command again.',
-  });
-  expect(readBindingFile(file())).toMatchObject({ binding: { device: { udid: 'SECOND' } } });
 });
 
 it("refusals' How lines repeat the caller's flags, and an ambiguous name names a match", async () => {
@@ -282,12 +272,10 @@ it('explicit-android-needs-only-adb', async () => {
     binding: { device: { serial: 'R58N123', origin: { kind: 'explicit' } } },
   });
   await releaseWorktreeDevicesAsync(ROOT, { tools });
-  for (const reuseOnly of [false, true]) {
-    expect(await acquireDeviceAsync(ROOT, 'android', { tools, reuseOnly })).toMatchObject({
-      action: 'reused',
-      device: { serial: 'R58N123', origin: { kind: 'explicit' } },
-    });
-  }
+  expect(await acquireDeviceAsync(ROOT, 'android', { tools })).toMatchObject({
+    action: 'reused',
+    device: { serial: 'R58N123', origin: { kind: 'explicit' } },
+  });
   expect(tools.emulatorList).not.toHaveBeenCalled();
   expect(tools.calls.some(([command]) => command === 'emulator')).toBe(false);
   tools.emulators.length = 0;
