@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 20
     env:
-      AGENT_NATIVE_TIMEOUT_TRACE_DIR: ${{ runner.temp }}/native-timeout-probe
+      AGENT_NATIVE_TIMEOUT_TRACE_DIR: ${{ github.workspace }}/.audit-native-timeout-traces
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,5 +64,5 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-native-timeout-probe
-          path: ${{ runner.temp }}/native-timeout-probe
+          path: ${{ github.workspace }}/.audit-native-timeout-traces
           if-no-files-found: error
