@@ -426,9 +426,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     });
   }
 
-  /** The cloud binding a run in `projectRoot` writes for its iOS session. */
-  function sessionBindingFile(projectRoot: string): string {
-    return cloudBindingFile(expoHomeOf(projectRoot), fs.realpathSync(projectRoot));
+  function sessionBindingFile(projectRoot: string, platform = 'ios'): string {
+    return cloudBindingFile(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), platform);
   }
 
   /** Give the fixture a scheme, which a development build's launch URL is built from. */
@@ -739,9 +738,14 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   );
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it.skipIf(process.platform === 'win32')(
-    'answers a dev:stop that comes after Metro exited while the session start runs',
-    async () => {
+  it.skipIf(process.platform === 'win32').each([
+    { platform: 'ios', metroExit: 'before-stop', port: 8587 },
+    { platform: 'android', metroExit: 'before-stop', port: 8687 },
+    { platform: 'ios', metroExit: 'during-stop', port: 8586 },
+    { platform: 'android', metroExit: 'during-stop', port: 8686 },
+  ] as const)(
+    'answers a dev:stop while the $platform session start runs and Metro exits $metroExit',
+    async ({ platform, metroExit, port }) => {
       const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
       const projectRoot = await setupAsync('go-app', {
         easScript: script.replace(
@@ -753,19 +757,36 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         // A detached run keeps its session, so the session is the stop's to end.
         const started = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--ios', '--eas', '--detach', '--json'],
-          { env: { ...easRunEnv(projectRoot, 8587), STUB_EXPO_DELAY_MS: '2500' } }
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
+          {
+            env: {
+              ...easRunEnv(projectRoot, port),
+              STUB_EXPO_DELAY_MS: metroExit === 'before-stop' ? '2500' : '20000',
+            },
+          }
         );
         const pid: number = JSON.parse(started.stdout).pid;
-        const logFile: string = JSON.parse(started.stdout).logFile;
         expect(
           await waitForAsync(
-            () =>
-              fs.existsSync(logFile) &&
-              fs.readFileSync(logFile, 'utf8').includes('Finishing EAS session work'),
-            15_000
+            () => easInvocationArgs(projectRoot).some((args) => args[0] === 'simulator'),
+            10_000
           )
         ).toBe(true);
+        if (metroExit === 'before-stop') {
+          const logFile: string = JSON.parse(started.stdout).logFile;
+          expect(
+            await waitForAsync(
+              () =>
+                fs.existsSync(logFile) &&
+                fs.readFileSync(logFile, 'utf8').includes('Finishing EAS session work'),
+              15_000
+            )
+          ).toBe(true);
+        } else {
+          expect(await (await fetch(`http://127.0.0.1:${port}/status`)).text()).toContain(
+            'packager-status:running'
+          );
+        }
 
         const result = await executeAgentCliAsync(
           projectRoot,
@@ -776,16 +797,19 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         expect(result.exitCode).toBe(22);
         const report = JSON.parse(result.stdout);
         expect(report).toMatchObject({
-          stopped: true,
-          reason: null,
           admission: 'retained',
           pid,
           lockHeld: true,
           signal: 'SIGTERM',
           processStillRunning: true,
-          easPlatform: 'ios',
+          easPlatform: platform,
         });
-        expect(report.followups[0].command).toMatch(/dev:stop --eas$/);
+        if (metroExit === 'before-stop')
+          expect(report).toMatchObject({ stopped: true, reason: null });
+        await expect(fetch(`http://127.0.0.1:${port}/status`)).rejects.toThrow();
+        expect(report.followups[0]).toMatchObject({
+          command: expect.stringMatching(/dev:stop --eas$/),
+        });
 
         // `--eas` waits for the start, so it finds and stops the session the run binds.
         const easStop = await executeAgentCliAsync(
@@ -798,7 +822,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           id: 'sess-e2e-started',
           stopped: true,
         });
-        expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
+        expect(fs.existsSync(sessionBindingFile(projectRoot, platform))).toBe(false);
       } finally {
         await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
           env: stubExpoEnv(projectRoot),
