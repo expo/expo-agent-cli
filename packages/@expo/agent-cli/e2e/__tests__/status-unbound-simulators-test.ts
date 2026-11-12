@@ -53,7 +53,7 @@ describe.skipIf(process.platform !== 'darwin')(
     }
 
     it('names the booted simulators and the command that binds one', async () => {
-      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
 
       const row = await iosRowAsync();
 
@@ -105,7 +105,7 @@ describe.skipIf(process.platform !== 'darwin')(
       }
 
       it("splits the count into this worktree's EAS session and a local simulator not bound here", async () => {
-        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
         await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
           id: 'sess-1',
         });
@@ -126,6 +126,7 @@ describe.skipIf(process.platform !== 'darwin')(
             BOOTED_SIMULATOR,
             { udid: 'E2E-SIM-0002', name: SIMULATOR_NAME, state: 'Booted' },
           ],
+          bind: false,
         });
         await bindingFixture(projectRoot, SIMULATOR_UDID);
 
@@ -135,7 +136,7 @@ describe.skipIf(process.platform !== 'darwin')(
       });
 
       it('does not call an Android app an app on the EAS session', async () => {
-        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
         await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
           id: 'sess-1',
         });
@@ -150,7 +151,7 @@ describe.skipIf(process.platform !== 'darwin')(
       });
 
       it('adds no split for the simulator this worktree bound', async () => {
-        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
         await bindingFixture(projectRoot, SIMULATOR_UDID);
 
         const line = await statusLineAsync([liveTarget('own', SIMULATOR_NAME)]);

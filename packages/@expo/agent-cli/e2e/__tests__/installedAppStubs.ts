@@ -335,6 +335,7 @@ export async function installStubXcrunAsync(
     runningAppIds,
     expoGoMissing = false,
     phone,
+    bind = true,
   }: {
     booted?: { fingerprint: string };
     simulators?: { udid: string; name: string; state?: 'Booted' | 'Shutdown' }[];
@@ -343,6 +344,8 @@ export async function installStubXcrunAsync(
     expoGoMissing?: boolean;
     /** `postDelayMs` holds the POST back, the way a slow cold launch does. */
     phone?: { fingerprint: string | null; postDelayMs?: number };
+    /** Bind the first booted simulator to this fixture, as `dev` would. False leaves none bound. */
+    bind?: boolean;
   } = {}
 ): Promise<{ binDir: string; calls: StubCalls }> {
   const recordPath = path.join(root, '.xcrun-calls.jsonl');
@@ -373,7 +376,7 @@ export async function installStubXcrunAsync(
   const bound = booted
     ? { udid: SIMULATOR_UDID, name: SIMULATOR_NAME }
     : simulators?.find((simulator) => simulator.state === 'Booted');
-  if (bound) {
+  if (bound && bind) {
     await bindingFixture(root, bound.udid, bound.name);
   }
   const binDir = path.join(root, '.stub-bin');
