@@ -4,21 +4,14 @@
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { live, readCloudBindings } from '../deviceBinding/cloud';
-import { isExpired } from '../deviceBinding/lease';
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import * as Log from '../log';
 import type { NativePlatform } from '../plan/types';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
-import { parseDetachedChildPid } from './childVerdict';
-import { detachedLogPath, readDetachedLogFileSync } from './logFile';
-import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
-import { isProcessAlive } from './processLiveness';
 
 import { readRecoveryFactsAsync } from './readRecovery';
 import { decideRecovery, renderRecovery } from './recovery';
-
-const WHOLE_LOG = Number.MAX_SAFE_INTEGER;
 
 /** How often the binding registry is read while the session starts. */
 const EAS_SESSION_POLL_MS = 1_000;
@@ -49,30 +42,6 @@ export function knownSessionIdSync(projectRoot: string, platform: NativePlatform
     ({ device }) => device.platform === platform
   );
   return binding?.device.id ?? null;
-}
-
-/** Whether status should observe this child's pending EAS open rather than suggest restart. */
-export function childStartsSessionSync(
-  projectRoot: string,
-  lock: DevServerLockInfo,
-  platform: NativePlatform,
-  logFile = detachedLogPath(projectRoot)
-): boolean {
-  if (lock.easPlatform !== platform || lock.easOpenFinished) return false;
-  // The child's own bounds: the tunnel wait, then the session start.
-  const startWindowMs = EAS_TUNNEL_WAIT_MS + EAS_SESSION_START_TIMEOUT_MS;
-  if (Date.now() - Date.parse(lock.startedAt) >= startWindowMs) return false;
-  const log = readDetachedLogFileSync(logFile, WHOLE_LOG);
-  if (log == null || parseDetachedChildPid(log.lines) !== lock.pid || !isProcessAlive(lock.pid)) {
-    return false;
-  }
-  const now = new Date();
-  const since = Date.parse(lock.startedAt);
-  return !readCloudBindings(projectRoot).bindings.some(
-    (binding) =>
-      binding.device.platform === platform &&
-      (!isExpired(binding, now) || Date.parse(binding.boundAt) >= since)
-  );
 }
 
 /**
