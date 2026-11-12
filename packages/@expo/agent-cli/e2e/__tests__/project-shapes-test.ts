@@ -272,7 +272,9 @@ describe('a project inside a workspace', () => {
     it('answers the auth section from the expo the workspace installed', async () => {
       const { projectRoot } = await hoistedWorkspaceAsync();
 
-      const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
+        env: pathEnvVars(path.join(projectRoot, '.stub-bin')),
+      });
 
       expect(result.exitCode).toBe(0);
       expect(JSON.parse(result.stdout).auth).toMatchObject({
