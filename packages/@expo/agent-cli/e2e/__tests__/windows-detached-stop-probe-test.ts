@@ -23,7 +23,7 @@ type ProcessRecord = {
 type Trace =
   | ProcessRecord
   | { type: 'stub-exit' | 'shim-exit'; pid: number; code: number | null }
-  | { type: 'taskkill-spawn' | 'taskkill-error' | 'taskkill-close'; argv: string[] };
+  | { type: 'taskkill-spawn' | 'taskkill-error' | 'taskkill-close'; argv: string[]; stdout?: string; stderr?: string };
 
 const artifactRoot = process.env.AGENT_CLI_STOP_PROBE_ARTIFACT_DIR;
 const preload = fileURLToPath(new URL('../windows-stop-trace.cjs', import.meta.url)).replaceAll(
@@ -88,7 +88,7 @@ function parseReport(stdout: string) {
   }
 }
 
-it.skipIf(process.platform !== 'win32').each(Array.from({ length: 20 }, (_, i) => i + 1))(
+it.skipIf(process.platform !== 'win32').each(Array.from({ length: 50 }, (_, i) => i + 1))(
   'is stopped by dev:stop, which takes the whole tree with it (attempt %i)',
   async (iteration) => {
     if (!artifactRoot) throw new Error('AGENT_CLI_STOP_PROBE_ARTIFACT_DIR is required');
@@ -111,6 +111,7 @@ it.skipIf(process.platform !== 'win32').each(Array.from({ length: 20 }, (_, i) =
     let immediatelyAfter;
     let after;
     let stopDurationMs;
+    let nativeTargets: { pid: number; liveness: string }[] = [];
     let trace: Trace[] = [];
 
     try {
@@ -145,6 +146,13 @@ it.skipIf(process.platform !== 'win32').each(Array.from({ length: 20 }, (_, i) =
         portState(),
       ]);
       trace = readTrace(traceDirectory);
+      const nativePids = [...new Set(trace.flatMap((event) =>
+        event.type === 'taskkill-close'
+          ? [...`${event.stdout ?? ''}\n${event.stderr ?? ''}`.matchAll(/PID (\d+)/g)].map((match) => Number(match[1]))
+          : []
+      ))];
+      await waitForAsync(() => nativePids.every((pid) => liveness(pid) === 'gone'), 5000);
+      nativeTargets = nativePids.map((pid) => ({ pid, liveness: liveness(pid) }));
       after = { lock: afterLock, port: afterPort, pids: samplePids(trace) };
       const caseDurationMs = Date.now() - caseStartedAt;
       const cleanup = [];
@@ -167,6 +175,7 @@ it.skipIf(process.platform !== 'win32').each(Array.from({ length: 20 }, (_, i) =
         stopped,
         startedReport,
         stoppedReport,
+        nativeTargets,
         originalSignalAssertionPassed: stoppedReport?.signal === 'SIGTERM',
         before,
         immediatelyAfter,
@@ -204,6 +213,8 @@ it.skipIf(process.platform !== 'win32').each(Array.from({ length: 20 }, (_, i) =
       ])
     );
     expect.soft(after.pids.every((process) => process.liveness === 'gone')).toBe(true);
+    expect.soft(nativeTargets.length).toBeGreaterThan(0);
+    expect.soft(nativeTargets.every(({ liveness }) => liveness === 'gone')).toBe(true);
     expect.soft(after.lock).toBeNull();
     expect.soft(before?.port).toBe('ECONNREFUSED');
     expect.soft(after.port).toBe('ECONNREFUSED');
