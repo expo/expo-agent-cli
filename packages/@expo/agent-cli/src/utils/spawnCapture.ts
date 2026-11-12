@@ -4,6 +4,7 @@ import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
 import { assertSubprocessDeadline, trackSubprocessDeadline } from './subprocessDeadline';
 import { resolveSpawnTarget } from './windowsShim';
+import { startupSignal } from './startupTasks';
 
 /** Outcome of one captured subprocess run. */
 export interface SpawnCaptureResult {
@@ -40,8 +41,8 @@ export interface SpawnCaptureOptions {
 /**
  * Run a command and capture its output.
  *
- * Never rejects: a non-zero exit code and a missing binary are both results the caller reports
- * to the user, so the failure message can name the tool instead of the exception.
+ * A non-zero exit or missing binary is a result the caller reports with the tool's name.
+ * Rejects when the enclosing startup or subprocess deadline denies admission.
  *
  * **A package runner waits its turn** (`./runnerLock.ts`, F93), the same way `spawnSubprocessAsync`
  * makes it: the cloud simulator's verbs come through here, and they are `npx eas-cli` too.
@@ -61,6 +62,8 @@ export function spawnCaptureBufferAsync(
   args: string[],
   options: SpawnCaptureOptions = {}
 ): Promise<SpawnCaptureBufferResult> {
+  const signal = startupSignal();
+  if (signal?.aborted) return Promise.reject(signal.reason);
   const key = runnerSpawnKey(command, args);
   if (key == null) {
     return spawnCaptureNowAsync(command, args, options);
@@ -80,7 +83,9 @@ async function queuedCaptureAsync(
   args: string[],
   options: SpawnCaptureOptions
 ): Promise<SpawnCaptureBufferResult> {
-  const lock = await acquireRunnerLockAsync(key, { timeoutMs: options.timeoutMs });
+  const signal = startupSignal();
+  const lock = await acquireRunnerLockAsync(key, { timeoutMs: options.timeoutMs, signal });
+  if (lock == null && signal?.aborted) throw signal.reason;
   if (lock == null) {
     // The same shape a killed deadline resolves to here: no code, nothing captured. The caller's
     // reason names the timeout it asked for, which is what the wait spent.

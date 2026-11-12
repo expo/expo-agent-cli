@@ -76,8 +76,9 @@ const record = (type, pid = process.pid) =>
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = async (url, options) => {
   if (
-    /^http:\/\/127\.0\.0\.1:\d+\/?$/.test(url) &&
-    options?.method === 'HEAD' &&
+    ((options?.method === 'HEAD' && /^http:\/\/127\.0\.0\.1:\d+\/?$/.test(url)) ||
+      (options?.method === 'POST' && /^http:\/\/127\.0\.0\.1:\d+\/(cancel|release)$/.test(url) &&
+        new Headers(options.headers).has('x-detached-attempt'))) &&
     new Headers(options.headers).has('Authorization')
   ) {
     return nativeFetch(url, options);

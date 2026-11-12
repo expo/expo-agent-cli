@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import type { ChildProcess } from 'child_process';
 
 import { killProcessTree } from './processGroup';
+import { assertStartupActive, trackStartupChild, trackStartupTask } from './startupTasks';
 
 type Deadline = {
   expired: boolean;
@@ -44,7 +45,7 @@ export async function withSubprocessDeadlineAsync<T>(
     scope.timer.unref?.();
   });
   try {
-    return await Promise.race([deadlines.run(scope, work), timeout]);
+    return await Promise.race([trackStartupTask(deadlines.run(scope, work)), timeout]);
   } finally {
     clearTimeout(scope.timer);
   }
@@ -67,6 +68,7 @@ export function extendSubprocessDeadline(ms: number): void {
 
 /** Called before a spawn: an expired read must not start its fallback. Throws when it has. */
 export function assertSubprocessDeadline(): void {
+  assertStartupActive();
   const scope = deadlines.getStore();
   if (scope?.expired) {
     throw scope.error;
@@ -75,6 +77,7 @@ export function assertSubprocessDeadline(): void {
 
 /** Called after a spawn, so the enclosing deadline can stop the child when it expires. */
 export function trackSubprocessDeadline(child: ChildProcess): void {
+  trackStartupChild(child);
   const scope = deadlines.getStore();
   if (!scope) {
     return;

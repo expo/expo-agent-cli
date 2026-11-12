@@ -11,7 +11,12 @@ import { PROGRAM_PREFIX } from '../programName';
 import { settingsBuildBackend } from '../settings';
 import { EMPTY_SETTINGS } from '../settings/types';
 import { CommandError } from '../utils/errors';
-import { withStartupTasksAsync } from '../utils/startupTasks';
+import {
+  createStartupScope,
+  withStartupTasksAsync,
+  type StartupSession,
+} from '../utils/startupTasks';
+import { env } from '../utils/env';
 import {
   detachedLogPath,
   publishDetachedLogSync,
@@ -22,6 +27,7 @@ import { readDevServerLockAsync } from '../devLock/client';
 import type { DetachedChildVerdict } from './childVerdict';
 import type { DevOptions } from './resolveOptions';
 import type { DevStopOptions } from './resolveStopOptions';
+import { isProcessAlive } from './processLiveness';
 
 export const DETACHED_ATTEMPT_ENV = '__EXPO_AGENT_CLI_DETACHED_ATTEMPT';
 export const DETACHED_SETTINGS_ENV = '__EXPO_AGENT_CLI_DETACHED_SETTINGS';
@@ -87,23 +93,126 @@ export async function inspectDetachedStopAsync(
 ) {
   const attempt = await readDetachedAttemptAsync(root);
   const lock = await readDevServerLockAsync(root);
-  const authorized =
-    !expected ||
-    (!options.eas &&
-      (options.port == null || options.port === lock?.port) &&
-      attempt?.ref?.id === expected.id &&
-      lock?.detachedAttemptId === expected.id);
+  if (lock?.detachedAttemptId && lock.detachedAttemptId !== attempt?.ref?.id) {
+    throw stopUncertainError();
+  }
+  const matching =
+    attempt?.ref && lock?.detachedAttemptId === attempt.ref.id && lock.pid === attempt.ref.pid;
+  const knownPort = matching ? lock.port : attempt?.ref?.port;
+  const authorized = !expected || (!options.eas && attempt?.ref?.id === expected.id);
   if (
     authorized &&
     attempt &&
-    (!attempt.ref || !lock || lock.detachedAttemptId !== attempt.ref.id)
+    (!attempt.ref ||
+      (options.port != null && options.port !== knownPort) ||
+      (!matching && !supportsStartupCancellation(options)))
   ) {
     const error = detachedAttemptError(attempt);
     error.exitCode = 20;
-    error.message += '\nNothing was stopped. No matching stoppable dev-server lock was verified.';
+    error.message +=
+      '\nNothing was stopped. Startup cancellation requires its known port, no --force or --release, and the default SIGTERM signal.';
     throw error;
   }
   return { attempt, lock, authorized };
+}
+
+export const supportsStartupCancellation = (options: DevStopOptions) =>
+  !options.force && !options.release && options.signal === 'SIGTERM';
+
+export async function cancelDetachedAttemptAsync(ref: DetachedAttemptRef, options: DevStopOptions) {
+  const controller = new AbortController();
+  let released = false;
+  const deadline = Date.now() + options.timeoutMs;
+  let timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  const dispose = () => {
+    clearTimeout(timer);
+    controller.abort();
+  };
+  try {
+    const response = await fetch(`http://127.0.0.1:${ref.control.port}/cancel`, {
+      method: 'POST',
+      redirect: 'error',
+      headers: {
+        Authorization: ref.control.token,
+        'x-detached-attempt': ref.id,
+        'x-detached-cancel': String(supportsStartupCancellation(options)),
+        'x-detached-eas': String(options.eas),
+      },
+      signal: controller.signal,
+    });
+    if (
+      response.headers.get('x-detached-attempt') !== ref.id ||
+      !UUID.test(response.headers.get('x-detached-grant') ?? '') ||
+      (response.status !== 202 && response.status !== 200)
+    )
+      throw new Error();
+    clearTimeout(timer);
+    timer = setTimeout(
+      () => controller.abort(),
+      response.status === 200 && options.eas
+        ? options.timeoutMs + env.AGENT_CLI_EAS_SESSION_WAIT_MS
+        : Math.max(0, deadline - Date.now())
+    );
+    const completion = response
+      .json()
+      .then(
+        (value): StartupSession[] | null => {
+          const body = value as { id?: unknown; drained?: unknown; sessions?: unknown };
+          if (
+            body?.id !== ref.id ||
+            body.drained !== true ||
+            !Array.isArray(body.sessions) ||
+            !body.sessions.every(
+              (session: StartupSession) =>
+                typeof session?.id === 'string' &&
+                session.id.length > 0 &&
+                ['ios', 'android'].includes(session.platform)
+            )
+          )
+            return null;
+          return body.sessions;
+        },
+        () => null
+      )
+      .finally(() => clearTimeout(timer));
+    return {
+      state: response.status === 202 ? ('accepted' as const) : ('locked' as const),
+      completion,
+      dispose,
+      async releaseAsync() {
+        dispose();
+        if (options.eas || released) return;
+        try {
+          const acknowledgment = await fetch(`http://127.0.0.1:${ref.control.port}/release`, {
+            method: 'POST',
+            redirect: 'error',
+            signal: AbortSignal.timeout(options.timeoutMs),
+            headers: {
+              Authorization: ref.control.token,
+              'x-detached-attempt': ref.id,
+              'x-detached-grant': response.headers.get('x-detached-grant')!,
+            },
+          });
+          if (acknowledgment.status !== 204) throw stopUncertainError();
+        } catch {
+          if (isProcessAlive(ref.pid)) throw stopUncertainError();
+        }
+        released = true;
+      },
+    };
+  } catch {
+    dispose();
+    throw stopUncertainError();
+  }
+}
+
+export function stopUncertainError() {
+  const error = new CommandError(
+    'DEV_DETACHED_STOP_UNCERTAIN',
+    'The captured detached startup could not confirm exclusive stop authority. Nothing else was stopped. Inspect dev:logs.'
+  );
+  error.exitCode = 20;
+  return error;
 }
 
 export function prepareDetachedCandidate(
@@ -243,14 +352,9 @@ export async function withDetachedOwnerAsync<T>(
     );
   }
   const token = randomUUID();
-  const server = http.createServer((request, response) => {
-    const authorized = request.method === 'HEAD' && request.headers.authorization === token;
-    response.writeHead(authorized ? 200 : 401, {
-      Connection: 'close',
-      ...(authorized ? { 'x-detached-attempt': id } : {}),
-    });
-    response.end();
-  });
+  const startup = createStartupScope();
+  const control = createControlServer(id, token, startup);
+  const { server } = control;
   let ref: DetachedAttemptRef | null = null;
   try {
     await new Promise<void>((resolve, reject) => {
@@ -274,12 +378,89 @@ export async function withDetachedOwnerAsync<T>(
     });
     ref = candidate;
     publishDetachedLogSync(root, candidate.logFile);
-    return await owners.run(candidate, () => withStartupTasksAsync(run));
+    return await owners.run(candidate, () => withStartupTasksAsync(run, startup));
   } finally {
-    server.close();
-    server.closeAllConnections();
-    if (ref) retireDetachedAttempt(ref);
+    const mayRetire = await control.closeAsync();
+    if (ref && mayRetire) retireDetachedAttempt(ref);
   }
+}
+
+function createControlServer(
+  id: string,
+  token: string,
+  startup: ReturnType<typeof createStartupScope>
+) {
+  const responses = new Set<Promise<void>>();
+  let grant: { nonce: string; retainClaim: boolean } | undefined;
+  let closing = false;
+  const server = http.createServer((request, response) => {
+    const post = request.method === 'POST' && request.headers['x-detached-attempt'] === id;
+    const cancel = post && request.url === '/cancel';
+    const release = post && request.url === '/release';
+    if (
+      request.headers.authorization !== token ||
+      (!cancel && !release && !(request.method === 'HEAD' && request.url === '/'))
+    ) {
+      response.writeHead(401, { Connection: 'close' }).end();
+      return;
+    }
+    if (closing) {
+      response.writeHead(409).end();
+      return;
+    }
+    if (release) {
+      const matches =
+        grant && !grant.retainClaim && grant.nonce === request.headers['x-detached-grant'];
+      if (matches) grant = undefined;
+      response.writeHead(matches ? 204 : 409).end();
+      return;
+    }
+    const outcome = cancel
+      ? grant
+        ? 'unsupported'
+        : startup.cancel(request.headers['x-detached-cancel'] === 'true')
+      : 'locked';
+    if (cancel && outcome !== 'unsupported')
+      grant = { nonce: randomUUID(), retainClaim: request.headers['x-detached-eas'] === 'true' };
+    response.writeHead(outcome === 'accepted' ? 202 : outcome === 'locked' ? 200 : 409, {
+      Connection: 'close',
+      'x-detached-attempt': id,
+      ...(cancel && grant ? { 'x-detached-grant': grant.nonce } : {}),
+    });
+    if (!cancel || outcome === 'unsupported') {
+      response.end();
+      return;
+    }
+    response.flushHeaders();
+    const reply = async () => {
+      const drained = await startup.drained;
+      if (response.destroyed) return;
+      await new Promise<void>((resolve) => {
+        response.once('finish', resolve);
+        response.once('close', resolve);
+        response.end(
+          drained === 'drained'
+            ? JSON.stringify({ id, drained: true, sessions: [...startup.sessions.values()] })
+            : ''
+        );
+      });
+    };
+    const replied = reply();
+    responses.add(replied);
+    void replied.then(() => responses.delete(replied));
+  });
+  return {
+    server,
+    async closeAsync() {
+      closing = true;
+      startup.finishIfNeverStarted();
+      const drained = await startup.drained;
+      while (responses.size) await Promise.allSettled(responses);
+      server.close();
+      server.closeAllConnections();
+      return drained === 'drained' && !grant?.retainClaim;
+    },
+  };
 }
 
 export function retireDetachedAttempt(ref: DetachedAttemptRef): boolean {

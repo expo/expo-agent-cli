@@ -2,6 +2,7 @@
 // Where a run's lock points: resolve a step's port, publish it on the run's lock, follow Metro's report.
 
 import { lockAddressOrEmpty } from './address';
+import { startupSignal, trackStartupTask } from '../utils/startupTasks';
 import { debugEvent } from './events';
 import {
   readPortArg,
@@ -48,7 +49,9 @@ export async function publishDevServerPortAsync(
   const publishAsync = async (resolved: ResolvedDevServerPort | null) => {
     if (resolved == null) return options.lock.apply({ type: 'foreign-port' });
     await publishResolvedAsync(resolved);
-    if (resolved.source === 'reported') void noteServerPidAsync(resolved.port, options);
+    if (startupSignal()?.aborted) return;
+    if (resolved.source === 'reported')
+      void trackStartupTask(noteServerPidAsync(resolved.port, options)).catch(() => {});
     options.onResolved?.(resolved);
   };
   const publishResolvedAsync = async (resolved: ResolvedDevServerPort) => {
@@ -89,9 +92,9 @@ export async function publishDevServerPortAsync(
     onResolved: undefined,
     timeoutMs: Infinity,
   });
-  if (watched?.source === 'reported') {
+  if (watched?.source === 'reported' && !startupSignal()?.aborted) {
     options.lock.apply({ type: 'port-reported', port: watched.port });
-    void noteServerPidAsync(watched.port, options);
+    void trackStartupTask(noteServerPidAsync(watched.port, options)).catch(() => {});
     options.onResolved?.(watched);
   }
 }

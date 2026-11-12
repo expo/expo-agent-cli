@@ -1,13 +1,33 @@
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import {
+  withDetachedOwnerAsync,
+  readDetachedAttemptAsync,
+  cancelDetachedAttemptAsync,
+  DETACHED_ATTEMPT_ENV,
+} from '../../src/dev/detachedOwner';
+import { resolveDevOptions } from '../../src/dev/resolveOptions';
+import { resolveDevStopOptions } from '../../src/dev/resolveStopOptions';
+import { spawnSubprocessAsync } from '../../src/utils/subprocess';
+import { spawnCaptureAsync } from '../../src/utils/spawnCapture';
+import { withSubprocessDeadlineAsync } from '../../src/utils/subprocessDeadline';
+import { buildSessionStopArgs } from '../../src/device/eas';
+import { signalProcessAsync } from '../../src/dev/processStop';
 
-import { isProcessAlive } from '../../src/dev/processLiveness';
+import { isProcessAlive, isProcessRunning } from '../../src/dev/processLiveness';
 import { readLastDevRequest } from '../../src/dev/lastRequest';
 import { DETACHED_LOG_PATH } from '../detachUtils';
 import { setupDetachedFixtureAsync } from '../detachedFixture';
-import { stubEasArgs } from '../stubEas';
+import { stubEasArgs, writeCloudBindingAsync, cloudBindingFile } from '../stubEas';
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 import {
   collectOutput,
+  installStubBinAsync,
+  readJsonLines,
+  setupFixtureAsync,
+  expoHomeOf,
   executeAgentCliAsync,
   freePortAsync,
   killAsync,
@@ -143,6 +163,87 @@ it.concurrent.for(
   }
 });
 
+it.concurrent.for(platforms.flatMap((platform) => [false, true].map((eas) => ({ platform, eas }))))(
+  'stops startup while fingerprinting (%j)',
+  async ({ platform, eas }, { expect }) => {
+    const fixture = await setupDetachedFixtureAsync();
+    const { root, port, env, heldPids, processes } = fixture;
+    const run = (args: string[]) =>
+      executeAgentCliAsync(root, [...args, '--json'], {
+        env: { ...env, STUB_SIM_STOP_DELAY_MS: '1000' },
+        reject: false,
+      });
+    const bindingRoot = canonicalizeExistingPath(root);
+    await writeCloudBindingAsync(expoHomeOf(root), bindingRoot, { id: 'captured', platform });
+    const parent = spawnAgentCli(
+      root,
+      ['dev', `--${platform}`, '--eas', '--detach', '--port', String(port), '--json'],
+      { env: { ...env, HOLD_FINGERPRINT: '1' } }
+    );
+    const output = collectOutput(parent);
+    try {
+      expect(await waitForAsync(() => heldPids().length === 1, 15_000), output.all).toBe(true);
+      expect(await readDevLockAsync(root)).toBeNull();
+      const pids = [...processes().map(({ pid }) => pid), ...heldPids()];
+      expect(pids).toHaveLength(2);
+      const otherPort = String(await freePortAsync());
+      for (const args of [
+        ['--port', otherPort],
+        ['--force'],
+        ['--release'],
+        ['--signal', 'SIGKILL'],
+      ]) {
+        const refused = await run(['dev:stop', ...args]);
+        expect.soft(refused.exitCode, refused.all).toBe(20);
+        expect(pids.every(isProcessRunning), refused.all).toBe(true);
+      }
+
+      const stopping = run(['dev:stop', '--port', String(port), ...(eas ? ['--eas'] : [])]);
+      if (eas) {
+        expect(
+          await waitForAsync(
+            () => stubEasArgs(root).some(([verb]) => verb === 'simulator:stop'),
+            10000
+          )
+        ).toBe(true);
+        const blocked = await run([
+          'dev',
+          `--${platform}`,
+          '--eas',
+          '--detach',
+          '--port',
+          String(port),
+        ]);
+        expect(blocked.exitCode, blocked.all).toBe(20);
+        expect((await run(['dev:stop', '--eas'])).exitCode).toBe(20);
+        await writeCloudBindingAsync(expoHomeOf(root), bindingRoot, { id: 'successor', platform });
+      }
+      const stopped = await stopping;
+      const stops = stubEasArgs(root).filter(([verb]) => verb === 'simulator:stop');
+      expect(stops).toEqual(eas ? [buildSessionStopArgs('captured')] : []);
+      expect(
+        JSON.parse(
+          fs.readFileSync(cloudBindingFile(expoHomeOf(root), bindingRoot, platform), 'utf8')
+        ).device.id
+      ).toBe(eas ? 'successor' : 'captured');
+      expect.soft(stopped.exitCode, stopped.all).toBe(0);
+      expect.soft(JSON.parse(stopped.stdout), stopped.all).toMatchObject({ stopped: true });
+      expect(pids.filter(isProcessRunning), 'owner and fingerprint process exited').toEqual([]);
+
+      expect(fs.existsSync(path.join(root, '.expo/dev/detached-claim'))).toBe(false);
+      const easCalls = stubEasArgs(root);
+      fixture.releaseFingerprint();
+      expect(await readDevLockAsync(root)).toBeNull();
+      expect(processes()).toHaveLength(1);
+      expect(stubEasArgs(root)).toEqual(easCalls);
+      expect(readStubExpoInvocations(root).filter(({ args }) => args[0] === 'start')).toEqual([]);
+    } finally {
+      await killAsync(parent, 'SIGKILL');
+      await fixture.cleanup();
+    }
+  }
+);
+
 it.concurrent.for(platforms)(
   'recovers %s only after uncertain claims are manually quiesced',
   async (platform, { expect }) => {
@@ -183,6 +284,37 @@ it.concurrent.for(platforms)(
       const logs = await run(['dev:logs']);
       expect(JSON.parse(logs.stdout)).toMatchObject({ detached: { phase: 'uncertain' } });
       fs.renameSync(claim, `${claim}.quiesced`);
+      fs.appendFileSync(
+        path.join(root, 'capture-process.cjs'),
+        `
+        if (owner && process.env.CRASH_AFTER_CANCEL) {
+          const response = require('node:http').ServerResponse.prototype;
+          const flush = response.flushHeaders;
+          response.flushHeaders = function () {
+            flush.call(this);
+            if (this.statusCode === 202) process.kill(process.pid, 'SIGKILL');
+          };
+        }
+      `
+      );
+      const crashing = spawnAgentCli(root, [...start, '--json'], {
+        env: { ...env, HOLD_FINGERPRINT: '1', CRASH_AFTER_CANCEL: '1' },
+      });
+      const crashed = waitForExitAsync(crashing, collectOutput(crashing));
+      expect(await waitForAsync(() => fixture.heldPids().length === 1, 15000)).toBe(true);
+      const interrupted = (await readDetachedAttemptAsync(canonicalizeExistingPath(root)))!.ref!;
+      const incomplete = await run(['dev:stop', '--eas']);
+      expect(incomplete.exitCode, incomplete.all).toBe(22);
+      await crashed;
+      expect(isProcessAlive(interrupted.pid)).toBe(false);
+      expect(await readDevLockAsync(root)).toBeNull();
+      expect(stubEasArgs(root).filter(([verb]) => verb === 'simulator:stop')).toEqual([]);
+      expect(fs.existsSync(interrupted.directory)).toBe(true);
+      expect((await run(start)).exitCode).toBe(20);
+      expect(
+        await waitForAsync(() => fixture.heldPids().every((pid) => !isProcessRunning(pid)), 5000)
+      ).toBe(true);
+      fs.renameSync(claim, `${claim}.crashed`);
       for (let repeat = 0; repeat < 2; repeat++) {
         const started = await run(start);
         expect(started.exitCode, started.all).toBe(0);
@@ -319,6 +451,251 @@ it.concurrent.for(platforms)(
     } finally {
       await killAsync(parent, 'SIGKILL');
       await killAsync(smoke, 'SIGKILL');
+      await fixture.cleanup();
+    }
+  }
+);
+
+it.each([spawnSubprocessAsync, spawnCaptureAsync])(
+  'authenticates stop grants and drains active, queued and fallback runners (%#)',
+  async (activeRunner) => {
+    const root = await setupFixtureAsync('go-app');
+    fs.mkdirSync(path.join(root, '.expo/dev/logs'), { recursive: true });
+    const script = path.join(root, 'runner.cjs');
+    const log = path.join(root, 'children.jsonl');
+    fs.writeFileSync(
+      script,
+      `
+      const fs = require('node:fs');
+      fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ pid: process.pid }) + '\\n');
+      setInterval(() => {}, 1000);
+    `
+    );
+    await installStubBinAsync(root, 'npx', script);
+    const runner = path.join(root, process.platform === 'win32' ? 'npx.cmd' : 'npx');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const calls = () => readJsonLines<{ pid: number }>(log);
+    let queuedStarted = false,
+      deadlineEnded = false;
+    process.env[DETACHED_ATTEMPT_ENV] = randomUUID();
+    const finished = withDetachedOwnerAsync(
+      root,
+      resolveDevOptions(['--ios', '--detach']),
+      async () => {
+        const active = activeRunner(runner, ['spec', 'active']);
+        await waitForAsync(() => calls().length === 1, 5000);
+        const queuedRunner =
+          activeRunner === spawnSubprocessAsync ? spawnCaptureAsync : spawnSubprocessAsync;
+        const queued = withSubprocessDeadlineAsync(5000, 'outer', () =>
+          withSubprocessDeadlineAsync(500, 'inner', async () => {
+            try {
+              await queuedRunner(runner, ['spec', 'queued']);
+            } catch {
+              await queuedRunner(process.execPath, [script, 'fallback']);
+            } finally {
+              await held;
+            }
+          })
+        ).catch((error) => {
+          deadlineEnded = true;
+          return error;
+        });
+        queuedStarted = true;
+        await active;
+        await queued;
+      }
+    ).catch((error) => error);
+    delete process.env[DETACHED_ATTEMPT_ENV];
+    try {
+      expect(await waitForAsync(() => queuedStarted, 5000)).toBe(true);
+      const owner = (await readDetachedAttemptAsync(root))!.ref!;
+      const post = (action: string, headers = {}, signal?: AbortSignal) =>
+        fetch(`http://127.0.0.1:${owner.control.port}/${action}`, {
+          method: 'POST',
+          signal,
+          headers: {
+            Authorization: owner.control.token,
+            'x-detached-attempt': owner.id,
+            'x-detached-cancel': 'true',
+            ...headers,
+          },
+        });
+      for (const headers of [{ Authorization: 'wrong' }, { 'x-detached-attempt': 'wrong' }])
+        expect((await post('cancel', headers)).status).toBe(401);
+      const abort = new AbortController();
+      const first = await post('cancel', {}, abort.signal);
+      expect(first.status).toBe(202);
+      const grant = { 'x-detached-grant': first.headers.get('x-detached-grant')! };
+      abort.abort();
+      await first.text().catch(() => {});
+      expect((await post('cancel')).status).toBe(409);
+      expect((await post('release', grant)).status).toBe(204);
+      const second = await cancelDetachedAttemptAsync(owner, resolveDevStopOptions([]));
+      expect((await post('release', grant)).status).toBe(409);
+      expect((await post('cancel')).status).toBe(409);
+      let completed = false;
+      void second.completion.then(() => {
+        completed = true;
+      });
+      expect(
+        await waitForAsync(() => calls().every(({ pid }) => !isProcessRunning(pid)), 5000)
+      ).toBe(true);
+      expect(await waitForAsync(() => deadlineEnded, 5000)).toBe(true);
+      expect(completed).toBe(false);
+      expect(fs.existsSync(owner.directory)).toBe(true);
+      release();
+      expect(await second.completion).toEqual([]);
+      expect(await finished).toMatchObject({ code: 'DEV_INTERRUPTED' });
+      expect(calls()).toHaveLength(1);
+    } finally {
+      release();
+      for (const { pid } of calls())
+        if (isProcessRunning(pid)) await signalProcessAsync(pid, 'SIGKILL');
+      await finished;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each([
+  ['cancel-failure', false, 'subprocess'],
+  ['cancel-failure', true, 'capture'],
+  ['deadline-failure', false, 'capture'],
+  ['deadline-failure', true, 'capture'],
+  ['cancel', false, 'subprocess'],
+  ['cancel', false, 'capture'],
+  ['timeout', false, 'subprocess'],
+] as const)(
+  'reports managed startup drain from tree termination evidence (%s, eas=%s, %s)',
+  async (mode, eas, runner) => {
+    const fixture = await setupDetachedFixtureAsync();
+    const root = canonicalizeExistingPath(fixture.root);
+    const records = () =>
+      readJsonLines<{ event: string; pid: number; body?: string }>(path.join(root, 'tree.jsonl'));
+    const child = spawn(
+      process.execPath,
+      [path.resolve(__dirname, '../fixtures/startup-tree.cjs'), 'owner', root, mode, runner],
+      {
+        env: { ...process.env, ...fixture.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+      }
+    );
+    const output = collectOutput(child);
+    const exited = waitForExitAsync(child, output);
+    const failure = mode.includes('failure');
+    let stop: ReturnType<typeof executeAgentCliAsync> | undefined;
+    let completion: Promise<unknown> | undefined;
+    try {
+      expect(
+        await waitForAsync(() => records().some(({ event }) => event === 'leaf'), 15000),
+        output.all
+      ).toBe(true);
+      const owner = (await readDetachedAttemptAsync(root))!.ref!;
+      const tool = records().find(({ event }) => event === 'tool')!.pid;
+      const leaf = records().find(({ event }) => event === 'leaf')!.pid;
+      if (mode === 'deadline-failure' || mode === 'timeout')
+        expect(
+          await waitForAsync(() => records().some(({ event }) => event === 'direct-close'), 5000)
+        ).toBe(true);
+      if (eas) {
+        await writeCloudBindingAsync(expoHomeOf(root), root, { id: 'captured', platform: 'ios' });
+        stop = executeAgentCliAsync(root, ['dev:stop', '--eas', '--json', '--timeout', '10s'], {
+          env: fixture.env,
+          reject: false,
+        });
+        completion = stop;
+        expect(
+          await waitForAsync(() => records().some(({ event }) => event === 'accepted'), 5000)
+        ).toBe(true);
+      } else {
+        const headers = {
+          Authorization: owner.control.token,
+          'x-detached-attempt': owner.id,
+          'x-detached-cancel': 'true',
+        };
+        const response = await fetch(`http://127.0.0.1:${owner.control.port}/cancel`, {
+          method: 'POST',
+          headers,
+        });
+        expect(response.status).toBe(202);
+        completion = response.text();
+        void completion.catch(() => {});
+        expect(
+          (
+            await fetch(`http://127.0.0.1:${owner.control.port}/release`, {
+              method: 'POST',
+              headers: {
+                ...headers,
+                'x-detached-grant': response.headers.get('x-detached-grant')!,
+              },
+            })
+          ).status
+        ).toBe(204);
+      }
+      let completed = false;
+      void completion.then(
+        () => {
+          completed = true;
+        },
+        () => {
+          completed = true;
+        }
+      );
+      expect(
+        await waitForAsync(() => records().some(({ event }) => event === 'direct-close'), 5000)
+      ).toBe(true);
+      expect(isProcessRunning(tool)).toBe(false);
+      expect(await waitForAsync(() => isProcessRunning(leaf) === failure, 5000)).toBe(true);
+      expect(completed).toBe(false);
+      expect(fs.existsSync(owner.directory)).toBe(true);
+      fs.writeFileSync(path.join(root, 'release-tree-task'), '');
+      const result = await completion;
+      expect(await waitForAsync(() => !isProcessAlive(owner.pid), 5000), output.all).toBe(true);
+      await exited;
+      expect(isProcessAlive(owner.pid)).toBe(false);
+      if (failure) {
+        if (stop) {
+          expect(result).toMatchObject({ exitCode: 22 });
+          expect(JSON.parse((await stop).stdout)).toMatchObject({
+            stopped: false,
+          });
+          expect(fs.existsSync(cloudBindingFile(expoHomeOf(root), root, 'ios'))).toBe(true);
+        } else expect(result).toBe('');
+        expect(records().filter(({ event }) => event === 'receipt')).toEqual([
+          expect.objectContaining({ body: '' }),
+        ]);
+        expect(fs.readdirSync(path.dirname(owner.directory))).toEqual([owner.id]);
+        expect((await readDetachedAttemptAsync(root))?.observation.phase).toBe('uncertain');
+        const beforeRetry = stubEasArgs(root);
+        const retry = await executeAgentCliAsync(
+          root,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          { env: fixture.env, reject: false }
+        );
+        expect(retry.exitCode, retry.all).toBe(20);
+        expect(stubEasArgs(root)).toEqual(beforeRetry);
+        expect(readStubExpoInvocations(root)).toEqual([]);
+        expect(
+          stubEasArgs(root).filter(([verb]) => verb === 'simulator:stop' || verb === 'build')
+        ).toEqual([]);
+        expect(fixture.processes().filter(({ owner }) => !owner)).toEqual([]);
+        expect(isProcessRunning(leaf)).toBe(true);
+      } else {
+        expect(JSON.parse(result as string)).toMatchObject({ id: owner.id, drained: true });
+        expect(fs.existsSync(owner.directory)).toBe(false);
+      }
+    } finally {
+      fs.writeFileSync(path.join(root, 'release-tree-task'), '');
+      await killAsync(child, 'SIGKILL');
+      const pids = [...new Set(records().map(({ pid }) => pid))];
+      for (const pid of pids) if (isProcessRunning(pid)) await signalProcessAsync(pid, 'SIGKILL');
+      expect(await waitForAsync(() => pids.every((pid) => !isProcessRunning(pid)), 5000)).toBe(
+        true
+      );
+      await stop;
+      await completion?.catch(() => {});
       await fixture.cleanup();
     }
   }

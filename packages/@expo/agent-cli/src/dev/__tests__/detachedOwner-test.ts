@@ -103,3 +103,15 @@ it('keeps a failed startup owned until its background work settles, then retires
     await finished;
   }
 });
+
+it('retires a published claim when setup fails before scoped work starts', async () => {
+  fs.mkdirSync(path.join(root, '.expo/dev/logs/current'));
+  let started = false;
+  await expect(
+    start(async () => {
+      started = true;
+    })
+  ).rejects.toMatchObject({ code: 'EISDIR' });
+  expect(started).toBe(false);
+  expect(await readDetachedAttemptAsync(root)).toBeNull();
+});

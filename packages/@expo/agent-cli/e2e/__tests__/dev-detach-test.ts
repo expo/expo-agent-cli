@@ -692,30 +692,47 @@ describe('@expo/agent-cli dev --detach', () => {
   // The counterpart of the finding: `dev:stop` has to reach a process this shell never owned.
   it('is stopped by dev:stop, which takes the whole tree with it', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const started = await executeAgentCliAsync(
-      projectRoot,
-      ['dev', '--ios', '--detach', '--json'],
-      {
-        env: detachEnv(projectRoot, 8395),
-      }
+    const childPidFile = path.join(projectRoot, 'expo-child.pid');
+    fs.appendFileSync(
+      path.join(projectRoot, 'node_modules/expo/bin/cli'),
+      `\nif (process.argv[2] === 'start') require('node:fs').writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));\n`
     );
-    const { pid } = JSON.parse(started.stdout);
+    try {
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8395),
+        }
+      );
+      const { pid } = JSON.parse(started.stdout);
+      expect(await waitForAsync(() => fs.existsSync(childPidFile), 5000)).toBe(true);
+      const childPid = Number(fs.readFileSync(childPidFile, 'utf8'));
+      expect(isAlive(childPid)).toBe(true);
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
-      env: stubExpoEnv(projectRoot),
-    });
+      const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+        env: stubExpoEnv(projectRoot),
+      });
 
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      stopped: true,
-      pid,
-      port: 8395,
-      lockHeld: true,
-      signal: 'SIGTERM',
-    });
-    // The wrapper is gone, and so is the lock it held — the two halves of "no orphan".
-    expect(await waitForAsync(() => !isAlive(pid), 5000)).toBe(true);
-    expect(await readDevLockAsync(projectRoot)).toBeNull();
+      expect(result.exitCode).toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report).toMatchObject({
+        stopped: true,
+        pid,
+        port: 8395,
+        lockHeld: true,
+        processStillRunning: false,
+      });
+      expect(process.platform === 'win32' ? [null, 'SIGTERM'] : ['SIGTERM']).toContain(
+        report.signal
+      );
+      expect(await waitForAsync(() => !isAlive(childPid), 5000)).toBe(true);
+      // The wrapper is gone, and so is the lock it held — the two halves of "no orphan".
+      expect(await waitForAsync(() => !isAlive(pid), 5000)).toBe(true);
+      expect(await readDevLockAsync(projectRoot)).toBeNull();
+    } finally {
+      await cleanUpDetachedAsync(projectRoot);
+    }
   });
 
   // @ref llp/0021-honest-reports.rfc.md §The rules

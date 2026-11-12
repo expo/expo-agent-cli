@@ -7,6 +7,7 @@ import { findPortListenersAsync } from '../dev/portListener';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { autoSyncSkillsAsync } from '../skills/skillsAsync';
 import { CommandError } from '../utils/errors';
+import { canOpenStartup, startupSignal, trackStartupTask } from '../utils/startupTasks';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import type { SubprocessOutput } from '../utils/subprocess';
 import { resolveStartFollowUpsAsync } from './followUps';
@@ -119,7 +120,10 @@ export async function runDevServerAsync(
   let timer: NodeJS.Timeout | undefined;
   if (agentSkills) {
     timer = setTimeout(() => {
-      autoSyncSkillsAsync(projectRoot, { silent: output === 'capture' }).catch(() => {});
+      if (!startupSignal()?.aborted)
+        void trackStartupTask(
+          autoSyncSkillsAsync(projectRoot, { silent: output === 'capture' })
+        ).catch(() => {});
     }, SKILLS_SYNC_IDLE_DELAY_MS);
     // Don't let a pending sync hold the CLI open.
     timer.unref?.();
@@ -138,7 +142,7 @@ export async function runDevServerAsync(
   // The lock answers `arg` at the spawn and `reported` when Metro reports, so the open is guarded here.
   let opened = false;
   const open = (server: { url: string; port: number }) => {
-    if (!opened) {
+    if (!opened && canOpenStartup()) {
       opened = true;
       onDevServer?.(server);
     }
@@ -153,14 +157,16 @@ export async function runDevServerAsync(
     waiting = true;
     // A step that does not build has nothing left to wait for once its open went on Metro's report.
     const wanted = () => running && (phase === 'building' || !opened);
-    void waitForOwnMetroAsync(() => serverAt(port ?? first).url, projectRoot, wanted).then(
-      (answered) => {
-        // Metro that exited meanwhile has nothing to answer for or to open the app on.
-        if (!answered || !running) return;
-        runLock.apply({ type: 'status-answered' });
-        open(serverAt(port ?? first));
-      }
-    );
+    void trackStartupTask(
+      waitForOwnMetroAsync(() => serverAt(port ?? first).url, projectRoot, wanted).then(
+        (answered) => {
+          // Metro that exited meanwhile has nothing to answer for or to open the app on.
+          if (!answered || !running) return;
+          runLock.apply({ type: 'status-answered' });
+          open(serverAt(port ?? first));
+        }
+      )
+    ).catch(() => {});
   };
   const run = withLeaseExtendedAsync(projectRoot, () =>
     spawnDevServerAsync(projectRoot, args, output, signal)

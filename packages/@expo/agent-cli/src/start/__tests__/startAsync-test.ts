@@ -15,6 +15,7 @@ import {
   STATUS_POLL_INTERVAL_MS,
 } from '../startAsync';
 import { printed } from '../../utils/__tests__/printed';
+import { createStartupScope, withStartupTasksAsync } from '../../utils/startupTasks';
 
 vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
@@ -423,28 +424,48 @@ describe(runDevServerAsync, () => {
       await promise;
     });
 
-    it(`should not open on the port it was given when the dev server exits before /status answers`, async () => {
-      const onDevServer = vi.fn();
-      const end = mockLongRunningStart();
-      vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
-      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
-        ...step(),
-        agentSkills: false,
-        onDevServer,
-      });
-      const { onResolved } = vi.mocked(publishDevServerPortAsync).mock.calls[0]![2];
-
-      onResolved?.({ port: 8082, source: 'arg' });
-      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
-      end(0);
-      await promise;
-      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
-
-      expect(onDevServer).not.toHaveBeenCalled();
-      onResolved?.({ port: 8082, source: 'default' });
-      onResolved?.({ port: 8082, source: 'reported' });
-      expect(onDevServer).toHaveBeenCalledTimes(1);
-    });
+    it.each(['foreground', 'cancelled', 'failed'] as const)(
+      'settles late port and Metro callbacks after the %s run ends',
+      async (mode) => {
+        const onDevServer = vi.fn();
+        const end = mockLongRunningStart();
+        let answer!: (value: typeof ours) => void;
+        vi.mocked(probeBundlerAsync).mockReturnValue(new Promise((resolve) => (answer = resolve)));
+        let publish!: () => void;
+        const publication = new Promise<void>((resolve) => (publish = resolve));
+        vi.mocked(publishDevServerPortAsync).mockImplementation(async (_root, _args, options) => {
+          options.onResolved?.({ port: 8082, source: 'arg' });
+          await publication;
+          options.onResolved?.({ port: 8082, source: 'reported' });
+        });
+        const scope = createStartupScope();
+        const run = () =>
+          runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+            ...step(),
+            agentSkills: false,
+            onDevServer,
+          });
+        const promise = (mode === 'foreground' ? run() : withStartupTasksAsync(run, scope)).catch(
+          (error) => error
+        );
+        let settled = false;
+        void promise.then(() => {
+          settled = true;
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        if (mode === 'cancelled') scope.cancel();
+        if (mode === 'failed') scope.abort('publication failed');
+        end(0);
+        publish();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(settled).toBe(mode === 'foreground');
+        expect(onDevServer).toHaveBeenCalledTimes(mode === 'foreground' ? 1 : 0);
+        answer(ours);
+        const result = await promise;
+        if (mode !== 'foreground') expect(result).toMatchObject({ code: 'DEV_INTERRUPTED' });
+        expect(onDevServer).toHaveBeenCalledTimes(mode === 'foreground' ? 1 : 0);
+      }
+    );
 
     // The lock tells `arg` at the spawn and `log` when Metro reports: one open, not two.
     it(`should open once when the port arrives from the arguments and then from the log`, async () => {

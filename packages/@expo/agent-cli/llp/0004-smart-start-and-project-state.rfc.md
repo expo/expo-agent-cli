@@ -588,8 +588,25 @@ work, even when the parent exits or its wait expires.
 Before lock publication, an equivalent request returns 22 and a changed request returns 20.
 `status` and `dev:logs` expose the same detached PID and private log without exposing the token.
 One parsed settings snapshot determines both request identity and child execution; later edits
-apply to a later start. Pre-lock `dev:stop` explicitly refuses an incomplete stop. A normal locked
-stop retires only the captured generation after its process and matching lock disappear.
+apply to a later start. Every detached stop authenticates to the captured attempt before signaling.
+A single nonce grants stop authority. Closing or aborting its response never transfers that authority.
+A plain stopper explicitly releases its nonce after its last signal, captured-device cleanup and
+retirement decision. A released nonce cannot release a later grant. Admission closes before teardown.
+
+| Captured stop         | Completion and retirement contract                                                                                                                                                                                                                                                      | Proof                                                                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before lock handoff   | Abort queued and fallback work, force managed tree termination, and await direct-child close and startup work. Failed tree termination retains uncertainty even after direct fallback succeeds. Only a matching drained body plus owner exit and lock disappearance permits completion. | `dev-detached-owner-test` covers both runners, independent-stdio descendants, failed group termination, and nested deadline work.                                                  |
+| After lock handoff    | Follow ordinary locked stop. Plain stop can retire after a hard exit bypasses the body. Failed publication cancels startup and late callbacks cannot open.                                                                                                                              | `runLock-test`, `startAsync-test`, and the existing stop/start process cases.                                                                                                      |
+| Finishing EAS session | Plain stop returns promptly and keeps sessions. Explicit `--eas` waits on its separate session budget, then requires the drained body and actual exit before releasing only captured or owner-reported IDs and retiring. Missing receipts retain uncertain ownership.                   | `dev-eas-test` holds both platforms' receipts through plain stop and a short local timeout. `dev-detached-owner-test` holds cleanup against a successor and crashes after a grant. |
+
+Pre-lock termination failure blocks further subprocess admission and first lock handoff. After handoff,
+ordinary locked signal behavior remains unchanged. The managed group or Windows taskkill contract
+does not contain descendants that deliberately escape it, nor prove arbitrary OS descendant exit.
+
+The response body reports settled managed work, separately from accepted headers. Socket closure and PID
+exit cannot prove that work drained. No owned grant falls through to unscoped stop or a later session
+scan. `stopAsync-test` covers lock changes and grant release on exceptions. Ending a local EAS build
+waiter does not cancel an already submitted remote build.
 
 Malformed, incomplete or unanswered claims are uncertain and block replacement. Recovery requires
 quiescing callers and cleanup, resolving every surviving process, and moving the exact claim root

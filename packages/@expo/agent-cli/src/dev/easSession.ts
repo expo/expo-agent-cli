@@ -31,6 +31,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { easCliArgs, easCliLabel, resolveEasCli } from '../utils/easCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { recordStartupSession } from '../utils/startupTasks';
 import { ensureGitExcludedAsync } from '../utils/gitExclude';
 import { easFailureReason } from '../utils/easFailure';
 import type { CommandError } from '../utils/errors';
@@ -383,6 +384,7 @@ async function ensureSessionAsync(
   if (claim.renewed && !(isLive(probe) && probe.session.id === claim.renewed.id))
     await restoreRenewedLeaseAsync(claim.renewed);
   if (probe.state === 'active' && probe.session.platform === platform) {
+    recordStartupSession(probe.session.id, platform);
     event('open_app_eas_session_reused', { platform, sessionId: probe.session.id });
     return {
       ok: true,
@@ -489,6 +491,7 @@ async function ensureSessionAsync(
   });
   const output = `${result.stdout}\n${result.stderr}`;
   const sessionId = readSessionId(output);
+  recordStartupSession(sessionId, platform);
   const sessionUrl = readSessionUrl(output);
   if (result.spawnError) {
     return failed(`"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`, {
