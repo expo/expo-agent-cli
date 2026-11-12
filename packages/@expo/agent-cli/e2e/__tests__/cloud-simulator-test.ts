@@ -970,9 +970,9 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
 
       // Nothing was attempted, so this is the missing device rather than a failed reload: exit 1
       // with the whole of what to do about it, and never a report claiming a reload.
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode, result.all).toBe(1);
       const envelope = JSON.parse(result.stdout);
-      expect(envelope.error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
+      expect(envelope.error.code, result.all).toBe('NO_CLOUD_SIMULATOR_SESSION');
       expect(envelope.error.message).toContain('npx @expo/agent-cli dev --ios --eas');
       expect(envelope.reloaded).toBeUndefined();
       // And no verb was sent to a session that does not exist.

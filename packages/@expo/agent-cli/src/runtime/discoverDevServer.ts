@@ -1,7 +1,8 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md
 // Find the dev server a runtime command talks to: the discovery ladder over `./devServer.ts`'s probe.
 
-import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../devLock';
+import { readLastLoggedDevServerPort } from '../devLock';
+import { discoverByLockAsync } from './discoverByLock';
 import { matchProjectRoot, readReportedProjectRootAsync } from './projectRootHeader';
 import {
   DEFAULT_DEV_SERVER_URL,
@@ -112,29 +113,15 @@ export async function discoverDevServerAsync(
     }
   };
 
-  // Step 0 — the project's dev-server lock (`src/devLock/`): a socket an `@expo/agent-cli`-started dev
-  // server holds open for as long as it runs, which answers with the URL it listens on. Nothing
-  // answers unless a process is alive, so this step has no stale case to guard against. The URL
-  // is still probed, never trusted: the lock proves that the wrapper is alive, and the probe
-  // proves that the dev server behind it is. The lock names its port at the spawn, before Metro
-  // binds it, so the server there is this project's only when `/status` names no other project's
-  // root (`matchProjectRoot`, the rule every `/status` reader applies). Another root falls through.
+  // Step 0 — the project's dev-server lock, in `./discoverByLock`.
+  let lockMiss: string | null = null;
   if (projectRoot != null) {
-    const lock = await readDevServerLockAsync(projectRoot);
-    if (lock != null) {
-      const lockUrl = normalizeDevServerUrl(lock.url);
-      const lockProbe = await withTimeout(lockUrl);
-      if (lockProbe.reachable) {
-        // Lazy: `./bundlerStatus` reaches this module through `./waitReady`.
-        const { probeBundlerAsync } =
-          require('./bundlerStatus') as typeof import('./bundlerStatus');
-        const status = await probeBundlerAsync(lockUrl, { timeoutMs, projectRoot });
-        if (status.projectRootMatched !== false) {
-          return { ...lockProbe, devServerUrl: lockUrl, ...foundBy('lock') };
-        }
-      }
-    }
+    const lock = await discoverByLockAsync(projectRoot, withTimeout, timeoutMs);
+    if (lock.found) return lock.found;
+    lockMiss = lock.miss;
   }
+  const withLockMiss = (reason: string | undefined): string | undefined =>
+    lockMiss == null ? reason : [reason, lockMiss].filter(Boolean).join('; ');
 
   /** Judge a server that answered: this project's, foreign, or unproved. */
   const judgeAsync = async (url: string): Promise<Judgement> => {
@@ -254,7 +241,7 @@ export async function discoverDevServerAsync(
     return {
       reachable: false,
       targets: [],
-      reason: reasons.join('; '),
+      reason: withLockMiss(reasons.join('; ')),
       ...(foreignServers.length > 0 ? { foreignServers } : {}),
       devServerUrl: DEFAULT_DEV_SERVER_URL,
       ...foundBy('default'),
@@ -263,7 +250,8 @@ export async function discoverDevServerAsync(
 
   // Nothing answered anywhere. The default URL is reported so the caller has a dev server to name
   // in its error, and `default` is the step that produced it.
-  return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
+  const reason = withLockMiss(defaultProbe.reason);
+  return { ...defaultProbe, reason, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
 }
 
 /** Prefer listed targets, then scan-port order, for both progress and the final answer. */

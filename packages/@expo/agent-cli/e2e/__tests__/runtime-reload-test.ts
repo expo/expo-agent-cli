@@ -10,6 +10,8 @@ import path from 'node:path';
 
 import {
   executeAgentCliAsync,
+  freePortAsync,
+  holdDevLockAsync,
   holdLockForAsync,
   installStubBinAsync,
   setupFixtureAsync,
@@ -567,6 +569,34 @@ describe('@expo/agent-cli runtime:reload', () => {
     // A tool error, not an outcome: there was nothing to reload onto.
     expect(result.exitCode).toBe(1);
     expect(JSON.parse(result.stdout).error.code).toBe('NO_DEV_SERVER');
+  });
+
+  // A held lock whose URL did not answer is named in the reason, not only the 8081 the ladder ends on.
+  it("names the lock's URL when the dev server it names does not answer", async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const port = await freePortAsync();
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: `http://127.0.0.1:${port}`,
+      port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+
+    try {
+      const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
+        env: stubExpoEnv(projectRoot),
+        reject: false,
+      });
+
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code, result.all).toBe('NO_DEV_SERVER');
+      expect(error.message).toContain(
+        `the project's dev-server lock named http://127.0.0.1:${port}, which did not answer`
+      );
+    } finally {
+      releaseLock();
+    }
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules.
