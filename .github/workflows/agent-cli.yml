@@ -149,7 +149,7 @@ jobs:
         run: bun run test:e2e -- dev-detach-recovery-test status-detached-recovery-test dev-detach-long-build-test
         working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E recovery commands and pending sessions
-        run: bun run test:e2e -- recovery-intent-test recovery-pending-eas-test
+        run: bun run test:e2e -- recovery-intent-test recovery-pending-eas-test recovery-tunnel-test
         working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.
