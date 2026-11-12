@@ -219,9 +219,7 @@ export function chooseNextAction({
       (deviceBackend !== 'eas' && !host.devicesDisabled && host.bindsPlatform(platform)))
   ) {
     // @ref llp/0021-honest-reports.rfc.md §How they show up
-    // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-    // A server that runs an EAS session is never stopped, for any platform.
-    const restart = ownServer != null && ownServer.easPlatform == null && bound.length === 0;
+    const restart = ownServer != null && easServer == null;
     const unreadable = host.unreadableBindingFile(platform);
     // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
     const command = easServer

@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { guardedCloudArgs } from '../../src/device/cloudCommand';
+import { readLastDevRequest } from '../../src/dev/lastRequest';
 import type { Binding } from '../../src/deviceBinding/types';
 import { easCliArgs, easCliInvocation } from '../../src/utils/easCli';
 import { spawnSubprocessAsync } from '../../src/utils/subprocess';
@@ -471,8 +472,9 @@ it('a re-run beside a child whose open finished reopens when the binding is gone
   expect(opens()).toEqual([]);
   fs.rmSync(bindingFile(root));
 
-  const second = await run();
+  const second = await run('--go');
   expect(second.exitCode, second.stderr).toBe(0);
+  expect(readLastDevRequest(root)?.runTarget).toBe('expo-go');
   expect(second.stderr).not.toMatch(/Waiting up to .* for the EAS Simulator session/);
   expect(second.stdout).toContain(
     `This project already had a dev server; this run bound EAS Simulator session ${id}.`

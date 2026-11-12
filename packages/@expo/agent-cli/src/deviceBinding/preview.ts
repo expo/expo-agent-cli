@@ -45,7 +45,6 @@ export async function previewExplicitDeviceAsync(
     platform,
     candidates,
     explicit,
-    false,
     tools,
     android?.unready ?? []
   );

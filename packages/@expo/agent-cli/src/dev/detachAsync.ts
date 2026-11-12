@@ -13,9 +13,9 @@
 // `dev:stop` signals the pid the lock names. This is the reason the child is this CLI and not
 // `expo start` directly: the lock is taken by the wrapper, so a detached run has to *be* a wrapper.
 //
-// **One detached dev server per project.** The lock is asked before anything is spawned, and a
-// project that already has one is reported rather than given a second. Two dev servers for one
-// project is a thing people do on purpose in two terminals; two *detached* ones is a process
+// **One detached dev server per project.** The lock is asked before anything is spawned.
+// Two dev servers for one project is a thing people do on purpose in two terminals; two
+// *detached* ones is a process
 // nobody can find, because only one of them can hold the lock that names it.
 
 import type { PlanPlatform } from '../plan/types';
@@ -28,13 +28,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
-import {
-  acquireDeviceAsync,
-  acquireLine,
-  devicesDisabled,
-  hostBindsPlatform,
-  localBackendOf,
-} from '../deviceBinding';
+import { devicesDisabled, hostBindsPlatform, localBackendOf } from '../deviceBinding';
 import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
 import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
@@ -69,7 +63,7 @@ import {
   knownSessionIdSync,
   waitForEasSessionAsync,
 } from './detachEasProgress';
-import { CALLER_ARGV_ENV, explicitRequestOf } from './deviceOption';
+import { CALLER_ARGV_ENV } from './deviceOption';
 import { event } from './events';
 import {
   detachedLogPath,
@@ -78,6 +72,7 @@ import {
   type DetachedLogRead,
 } from './logFile';
 import { isProcessAlive } from './processLiveness';
+import { recordLastDevRequest } from './lastRequest';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
 
@@ -203,29 +198,20 @@ export interface DevDetachOptions {
    * way, so a suppressed report is never a silent start.
    */
   print?: boolean;
-  /**
-   * On a dev server that is already running, boot this worktree's own device and refuse when it
-   * has none to reuse.
-   *
-   * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
-   * `dev` passes true: its caller asked for the app on a device, and the device created now would
-   * carry no app, so only a reuse serves. `smoke` leaves it unset and binds in its own boot phase.
-   */
-  reuseBoundDevice?: boolean;
+  publicDev?: boolean;
 }
 
 /**
  * Start the dev server in a process of its own, and report where it landed.
  *
- * @returns the exit code: always `0`, because a detached server that came up — or was already
- * up — is the outcome asked for. Everything else throws.
+ * @returns `0` for a successful start or supported reuse. Refusals throw.
  * @throws {CommandError} when the child exited before publishing its lock, or the wait ran out.
  */
 // oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, reuseBoundDevice = false }: DevDetachOptions = {}
+  { print = true, publicDev = false }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
 
@@ -320,11 +306,27 @@ export async function devDetachAsync(
       );
     }
     const lock = checked?.lock ?? running;
+    if (publicDev && options.deviceBackend !== 'eas') {
+      const ready = await isOwnBundlerAnsweringAsync(projectRoot, lock.url);
+      await checkReuseFailureAsync(lock, checked?.result.ready ? ready : null);
+      const command = ready
+        ? `${PROGRAM_PREFIX} dev:stop && ${rerunDevCommand(options.platform, options.callerArgv)}`
+        : `${PROGRAM_PREFIX} dev:logs`;
+      const phase = ready ? 'serving' : 'starting';
+      const error = new CommandError(
+        'DEV_SERVER_RUNNING',
+        `This project's dev server (pid ${lock.pid}) is ${phase} on port ${lock.port}, so nothing was started.\nHow: run "${command}".`
+      );
+      error.exitCode = ready ? EXIT_OUTCOME_FAILED : EXIT_OUTCOME_TIMEOUT;
+      error.data = { port: lock.port, pid: lock.pid, phase };
+      error.suggestedCommand = command;
+      throw error;
+    }
     // Reuse only reads the current tunnel; it does not wait for a new one to appear.
     const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
     // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a child still starting
     // its session is followed: a reopen would start a second one, or exit 1 on a queued one.
-    const sessionPlatform = reuseBoundDevice ? easOpenPlatform(options) : null;
+    const sessionPlatform = publicDev ? easOpenPlatform(options) : null;
     const followsSession =
       sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
     const easSessionId = followsSession
@@ -339,8 +341,8 @@ export async function devDetachAsync(
             callerArgv: options.callerArgv,
           })
         : null
-      : reuseBoundDevice
-        ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
+      : publicDev
+        ? await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl)
         : null;
     const device = await boundDeviceAsync(projectRoot, options);
     const statusAnswering =
@@ -349,6 +351,7 @@ export async function devDetachAsync(
         : null;
     // Read the verdict and PID after all probes: any can outlast the running server.
     await checkReuseFailureAsync(lock, statusAnswering);
+    if (publicDev) recordLastDevRequest(projectRoot, options);
     return reportDetached(projectRoot, options, {
       lock,
       alreadyRunning: true,
@@ -1115,38 +1118,6 @@ function reportDetached(
     reportFollowUps('dev', report.followups, { json: options.json });
   }
   return 0;
-}
-
-/**
- * Put this worktree's device on a running server: the EAS session, through the reopen, or the
- * local device, reuse only. Returns the EAS session id, or null.
- */
-// @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
-async function reuseDeviceOnRunningServerAsync(
-  projectRoot: string,
-  options: DevOptions,
-  devServerUrl: string,
-  tunnelUrl: string | null
-): Promise<string | null> {
-  if (options.deviceBackend === 'eas') {
-    return await reopenEasAsync(projectRoot, options, devServerUrl, tunnelUrl);
-  }
-  const platform = options.platform;
-  if (
-    (platform === 'ios' || platform === 'android') &&
-    !devicesDisabled() &&
-    hostBindsPlatform(platform)
-  ) {
-    Log.progress(
-      acquireLine(
-        await acquireDeviceAsync(projectRoot, platform, {
-          reuseOnly: true,
-          explicit: explicitRequestOf(options.device, options.callerArgv),
-        })
-      )
-    );
-  }
-  return null;
 }
 
 /** Read from the binding file, under the same conditions `dev` binds under. */
