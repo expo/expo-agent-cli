@@ -1,75 +1,45 @@
-name: Windows detached stop native timeout probe
+name: Windows native job prototype
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  native-timeout:
+  native-job-probe:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 12
     env:
-      AGENT_NATIVE_TIMEOUT_TRACE_DIR: ${{ github.workspace }}/native-timeout-traces
+      PROBE_DIRECTORY: ${{ github.workspace }}\scripts\diagnostics\windows-job-prototype
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          persist-credentials: false
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: Build @expo/agent-cli
-        run: bun run build
-        working-directory: packages/@expo/agent-cli
-      - name: Trace the original process batch
-        id: probe
+          node-version: '24'
+      - name: Compile isolated Win32 helper with installed MSVC
+        shell: pwsh
+        run: '& "$env:PROBE_DIRECTORY\build.ps1"'
+      - name: Run actual Node controller and local fixtures
+        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path $env:AGENT_NATIVE_TIMEOUT_TRACE_DIR | Out-Null
-          $tracePath = (Join-Path $env:GITHUB_WORKSPACE 'scripts/diagnostics/trace-native-timeout.cjs').Replace('\', '/')
-          $env:NODE_OPTIONS = '--require "' + $tracePath + '"'
-          bun run test:e2e -- dev-detached-owner-test dev-owned-stop-test cloud-binding-test dev-stop-test
-        working-directory: packages/@expo/agent-cli
-      - name: Save fixture files that still exist
-        if: ${{ always() && steps.probe.outcome != 'skipped' }}
-        run: |
-          $directory = $env:AGENT_NATIVE_TIMEOUT_TRACE_DIR
-          if (!(Test-Path -LiteralPath $directory)) { exit 0 }
-          $roots = Get-ChildItem -LiteralPath $directory -Filter '*.jsonl' -File |
-            ForEach-Object { Get-Content -LiteralPath $_.FullName } |
-            Where-Object { $_.Contains('"event":"fixture-launch"') } |
-            ForEach-Object { ($_ | ConvertFrom-Json).root } |
-            Sort-Object -Unique
-          foreach ($root in $roots) {
-            $name = Split-Path (Split-Path $root -Parent) -Leaf
-            $destination = Join-Path $directory $name
-            New-Item -ItemType Directory -Force -Path $destination | Out-Null
-            foreach ($file in @('owned-stop.jsonl', 'control.jsonl', 'spawned.jsonl')) {
-              $source = Join-Path $root $file
-              if (Test-Path -LiteralPath $source) {
-                Copy-Item -LiteralPath $source -Destination $destination
-              }
-            }
-          }
-      - name: Verify owner traces exist
-        if: ${{ always() && steps.probe.outcome != 'skipped' }}
-        run: |
-          $files = @(Get-ChildItem -LiteralPath $env:AGENT_NATIVE_TIMEOUT_TRACE_DIR -Filter '*.jsonl' -File)
-          $owners = @($files | ForEach-Object { Get-Content -LiteralPath $_.FullName } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.event -eq 'process-start' -and $_.script -eq 'cli.js' -and $_.detached })
-          Write-Output "Trace files: $($files.Count); detached owner starts: $($owners.Count)"
-          if ($owners.Count -eq 0) { throw 'No detached owner preload trace was captured.' }
-      - name: Upload native timeout traces
-        if: ${{ always() && steps.probe.outcome != 'skipped' }}
+          $ErrorActionPreference = 'Stop'
+          node "$env:PROBE_DIRECTORY\controller.mjs" "$env:PROBE_DIRECTORY\job-helper.exe" "$env:PROBE_DIRECTORY\results" 2>&1 | Tee-Object -FilePath "$env:PROBE_DIRECTORY\results\controller.log"
+          exit $LASTEXITCODE
+      - name: Upload native observations and exact executable
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: windows-native-timeout-probe
-          path: ${{ github.workspace }}/native-timeout-traces
+          name: windows-job-prototype-${{ github.sha }}
           if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            scripts/diagnostics/windows-job-prototype/results/
+            scripts/diagnostics/windows-job-prototype/job-helper.exe
+            scripts/diagnostics/windows-job-prototype/job-helper.cpp
+            scripts/diagnostics/windows-job-prototype/controller.mjs
+            scripts/diagnostics/windows-job-prototype/fixture.mjs
+            scripts/diagnostics/windows-job-prototype/build.ps1
+            scripts/diagnostics/windows-job-prototype/README.md
+            scripts/diagnostics/windows-job-prototype/MANIFEST.sha256
+            .github/workflows/agent-cli.yml
