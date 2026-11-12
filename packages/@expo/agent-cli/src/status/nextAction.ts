@@ -216,7 +216,7 @@ export function chooseNextAction({
             ? `The lease on the bound ${platform} device expired.${ownServer ? ' Stop the running dev server before rebinding it.' : ''}`
             : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`
         : devNext.why;
-  const recovery = renderRecovery(decideRecovery({ ...facts, needsStart: true, why })!);
+  const recovery = renderRecovery(decideRecovery({ ...facts, needsStart: true, why }));
   return {
     ...devNext,
     ...recovery,

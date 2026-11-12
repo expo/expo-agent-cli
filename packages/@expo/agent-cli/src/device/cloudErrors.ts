@@ -14,7 +14,6 @@ import {
 import {
   CLOUD_SESSION_ENV_FILE,
   cloudSessionListCommand,
-  cloudSessionStartCommand,
   easNeedsHuman,
   readControllerError,
   type CloudPlatform,
@@ -31,10 +30,9 @@ import {
  * reader knows the file on disk is stale rather than wrong.
  */
 export function cloudSessionUnavailableError(
-  probe: Extract<CloudSessionProbe, { state: 'inactive' | 'none' | 'unavailable' }>
+  probe: Extract<CloudSessionProbe, { state: 'inactive' | 'none' | 'unavailable' }>,
+  recovery?: { command: string; why: string | null }
 ): CommandError {
-  const start = cloudSessionStartCommand();
-
   if (probe.state === 'unavailable') {
     const error = new CommandError(
       'CLOUD_SIMULATOR_UNAVAILABLE',
@@ -55,10 +53,11 @@ export function cloudSessionUnavailableError(
     [
       'No EAS Simulator session this CLI can drive is running for this project, so there is no cloud simulator to open the link on.',
       `Why: ${probe.reason}. A cloud simulator is a session that is started, driven and stopped — unlike a local simulator, there is nothing to find that somebody else left booted.`,
-      `How: if this project's dev server is running, stop it with "${PROGRAM_PREFIX} dev:stop" first (existing sessions are preserved). Start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${cloudSessionListCommand()}" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
+      ...(recovery?.why ? [`Why: ${recovery.why}`] : []),
+      `How: run "${recovery?.command ?? `${PROGRAM_PREFIX} status`}", then retry this command. To see this project's sessions, "${cloudSessionListCommand()}" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} status`;
+  error.suggestedCommand = recovery?.command ?? `${PROGRAM_PREFIX} status`;
   return error;
 }
 
@@ -185,17 +184,19 @@ export function cloudPlatformUnknownError(sessionId: string | null): CommandErro
 export function cloudNeedsTunnelError(
   url: string,
   hostType: string | null,
-  platform: 'ios' | 'android'
+  platform: 'ios' | 'android',
+  recovery?: { command: string; why: string | null }
 ): CommandError {
   const error = new CommandError(
     'CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER',
     [
       `The dev server is only reachable from ${hostType === 'localhost' ? 'this machine' : 'this network'}, so a cloud simulator cannot load ${url} and nothing was opened.`,
       `Why: the URL carries a ${hostType ?? 'local'} host, and the simulator runs on EAS infrastructure — ${hostType === 'localhost' ? 'that host is the loopback of whatever resolves it, which there is a machine in a datacenter' : 'that address is on this network and the session is not'}. Opening it would land the app on an error screen with the device tool reporting success, which is the class of false green this command exists to remove.`,
-      `How: stop the dev server with "${PROGRAM_PREFIX} dev:stop", then run "${PROGRAM_PREFIX} dev --${platform} --detach --tunnel" and retry this command. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
+      ...(recovery?.why ? [`Why: ${recovery.why}`] : []),
+      `How: run "${recovery?.command ?? `${PROGRAM_PREFIX} status --${platform}`}", then retry this command. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop`;
+  error.suggestedCommand = recovery?.command ?? `${PROGRAM_PREFIX} status --${platform}`;
   return error;
 }
 

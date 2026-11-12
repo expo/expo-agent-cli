@@ -11,7 +11,6 @@ const server = { url: 'http://127.0.0.1:8081', port: 8081 };
 it.each<RunProgress>([
   { kind: 'starting', metro },
   { kind: 'stopping', metro },
-  { kind: 'unaccounted', metro, detail: 'The submitted session has no confirmed receipt.' },
   { kind: 'unknown' },
 ])('observes live $kind evidence regardless of published lock readiness', (progress) => {
   const action = decideRecovery({
@@ -19,7 +18,7 @@ it.each<RunProgress>([
     lock: lockInfo({ easOpenFinished: true }),
     request,
     needsStart: true,
-  })!;
+  });
   expect(renderRecovery(action)).toMatchObject({
     command: 'npx @expo/agent-cli dev:logs',
     recovery: { kind: 'observe', attempt: { id: attempt.id, logFile: attempt.logFile } },
@@ -37,7 +36,7 @@ it.each([
     }),
   },
 ])('observes foreground EAS with $name evidence and no detached log', ({ lock }) => {
-  const action = decideRecovery({ lock, request, needsStart: true })!;
+  const action = decideRecovery({ lock, request, needsStart: true });
   expect(renderRecovery(action)).toMatchObject({
     command: 'npx @expo/agent-cli status',
     recovery: { kind: 'observe' },
@@ -46,6 +45,14 @@ it.each([
 
 it.each<{ ownership: DetachedObservation; kind: string }>([
   { ownership: { kind: 'interrupted', attempt }, kind: 'discard-record' },
+  {
+    ownership: {
+      kind: 'live',
+      attempt,
+      progress: { kind: 'unaccounted', metro, detail: 'Session submission has no receipt.' },
+    },
+    kind: 'uncertain',
+  },
   {
     ownership: { kind: 'uncertain', attempt, detail: 'The endpoint did not answer.' },
     kind: 'uncertain',
@@ -56,6 +63,6 @@ it.each<{ ownership: DetachedObservation; kind: string }>([
   },
   { ownership: { kind: 'none' }, kind: 'start' },
 ])('uses $kind only from its ownership evidence', ({ ownership, kind }) => {
-  const action = decideRecovery({ ownership, lock: null, request, needsStart: true })!;
+  const action = decideRecovery({ ownership, lock: null, request, needsStart: true });
   expect(action.kind).toBe(kind);
 });

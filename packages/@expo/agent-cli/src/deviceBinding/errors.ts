@@ -209,19 +209,27 @@ export function cloudBindingError(
 export class CloudBindingError extends CommandError {
   constructor(
     readonly platform: DevicePlatform,
-    fault: CloudBindingFault
+    readonly fault: CloudBindingFault
   ) {
-    const command = deviceCommand(platform, { eas: true });
     super(
       'NO_BOUND_DEVICE',
       [
         `The bound ${platform} EAS session is ${fault}.`,
-        `How: run "${command}" to bind a session again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop"; plain stop preserves its sessions.`,
+        `How: run "${PROGRAM_PREFIX} status" to check the run before starting another session.`,
       ].join('\n')
     );
     this.exitCode = EXIT_OUTCOME_FAILED;
     this.data = { reason: 'gone' };
     this.suggestedCommand = `${PROGRAM_PREFIX} status`;
+  }
+
+  withRecovery({ command, why }: { command: string; why: string | null }): void {
+    this.suggestedCommand = command;
+    this.message = [
+      `The bound ${this.platform} EAS session is ${this.fault}.`,
+      ...(why ? [`Why: ${why}`] : []),
+      `How: run "${command}", then retry this command.`,
+    ].join('\n');
   }
 }
 

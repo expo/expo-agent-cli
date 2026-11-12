@@ -25,7 +25,7 @@ import fs from 'fs';
 import { stripVTControlCharacters } from 'util';
 
 import { readDevServerLockAsync } from '../devLock';
-import { readDetachedLogSync } from './logFile';
+import { readDetachedLogFileSync, readDetachedLogSync } from './logFile';
 
 /** How a device reaches the dev server, in the vocabulary of `expo start --host`. */
 export type DevServerHostType =
@@ -112,9 +112,11 @@ export function readDevServerLog(lines: string[]): DevServerLogReading {
  */
 export function readDevServerLogSync(
   projectRoot: string,
-  { tail = ADVERTISED_LOG_LINES }: { tail?: number } = {}
+  { tail = ADVERTISED_LOG_LINES, logFile }: { tail?: number; logFile?: string } = {}
 ): CapturedDevServerLog | null {
-  const read = readDetachedLogSync(projectRoot, tail);
+  const read = logFile
+    ? readDetachedLogFileSync(logFile, tail)
+    : readDetachedLogSync(projectRoot, tail);
   if (read == null) {
     return null;
   }

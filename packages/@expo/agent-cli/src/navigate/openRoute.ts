@@ -22,6 +22,7 @@ import {
   readControllerError,
 } from '../device/cloudSimulator';
 import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErrors';
+import { readCloudRecoveryAsync } from './cloudRecovery';
 import { event as cliEvent } from '../events';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
@@ -222,7 +223,8 @@ export async function openRouteAsync(
     device.backend === 'cloud' &&
     (resolved.hostType === 'localhost' || resolved.hostType === 'lan')
   ) {
-    throw cloudNeedsTunnelError(resolved.url, resolved.hostType, device.platform);
+    const recovery = await readCloudRecoveryAsync(projectRoot, device.platform, { tunnel: true });
+    throw cloudNeedsTunnelError(resolved.url, resolved.hostType, device.platform, recovery);
   }
 
   // Decided before the reverse, because the two links need different ports forwarded: the launcher

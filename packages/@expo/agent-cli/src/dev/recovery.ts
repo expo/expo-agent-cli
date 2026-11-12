@@ -16,24 +16,30 @@ export interface RecoveryMetadata {
   attempt?: AttemptReference;
 }
 
+interface RecoveryFacts {
+  ownership?: DetachedObservation;
+  lock: DevServerLockInfo | null;
+  request: StartupRequest;
+  needsStart: boolean;
+  why?: string | null;
+}
+
+export function decideRecovery(facts: RecoveryFacts & { needsStart: true }): RecoveryAction;
+export function decideRecovery(facts: RecoveryFacts): RecoveryAction | null;
 export function decideRecovery({
   ownership = { kind: 'none' },
   lock,
   request,
   needsStart,
   why = null,
-}: {
-  ownership?: DetachedObservation;
-  lock: DevServerLockInfo | null;
-  request: StartupRequest;
-  needsStart: boolean;
-  why?: string | null;
-}): RecoveryAction | null {
+}: RecoveryFacts): RecoveryAction | null {
   if (ownership.kind === 'interrupted')
     return { kind: 'discard-record', attempt: ownership.attempt };
   if (ownership.kind === 'uncertain')
     return { kind: 'uncertain', attempt: ownership.attempt, detail: ownership.detail };
   if (ownership.kind === 'live') {
+    if (ownership.progress.kind === 'unaccounted')
+      return { kind: 'uncertain', attempt: ownership.attempt, detail: ownership.progress.detail };
     if (ownership.progress.kind !== 'running')
       return { kind: 'observe', phase: ownership.progress.kind, attempt: ownership.attempt };
   } else if (lock) {

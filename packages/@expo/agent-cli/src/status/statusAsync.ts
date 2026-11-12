@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
-import { readDetachedRunWarning } from '../dev/detachedOwnership';
+import { observeDetachedRunAsync } from '../dev/detachedOwnership';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { judgeEndedRunAsync } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
@@ -268,7 +268,10 @@ export async function collectStatusReportAsync(
     }
   });
 
-  const saved = readLastDevRequest(projectRoot);
+  const ownership = await observeDetachedRunAsync(projectRoot);
+  const saved =
+    (ownership.kind === 'live' ? ownership.attempt.request : null) ??
+    readLastDevRequest(projectRoot);
   const request =
     saved && (!options.platform || options.platform === saved.platform) ? saved : null;
   const [project, devServer, device, skills, auth, binding, ownLock] = await Promise.all([
@@ -430,6 +433,7 @@ export async function collectStatusReportAsync(
       ownLock,
       request,
       deviceBackend,
+      ownership,
       plan,
       host: {
         now: Date.now(),
@@ -442,15 +446,6 @@ export async function collectStatusReportAsync(
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
-  }
-
-  if (!ownLock && report.next) {
-    const warning = await readDetachedRunWarning(projectRoot);
-    if (warning) {
-      report.next.command = warning.suggestedCommand ?? `${PROGRAM_PREFIX} dev:logs`;
-      report.next.steps = [];
-      report.next.why = warning.message;
-    }
   }
 
   if ('value' in skills) {

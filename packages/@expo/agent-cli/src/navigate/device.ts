@@ -26,7 +26,7 @@ import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { debugEvent } from './events';
-import { withCloudRecoveryAsync } from './cloudRecovery';
+import { readCloudRecoveryAsync, withCloudRecoveryAsync } from './cloudRecovery';
 
 export type NavigatePlatform = 'ios' | 'android';
 
@@ -210,7 +210,10 @@ async function resolveCloudDeviceAsync(
   if (rung.probe.state === 'unknown') {
     throw cloudSessionUnknownError(rung.probe);
   }
-  throw cloudSessionUnavailableError(rung.probe);
+  throw cloudSessionUnavailableError(
+    rung.probe,
+    await readCloudRecoveryAsync(context.projectRoot, platform)
+  );
 }
 
 /**

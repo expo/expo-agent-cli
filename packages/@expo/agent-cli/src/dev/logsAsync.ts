@@ -16,13 +16,12 @@
 
 import chalk from 'chalk';
 
-import { readDevServerLockAsync } from '../devLock';
 import { event as cliEvent } from '../events';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatformAsync, devCommand, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { CommandError } from '../utils/errors';
 import {
@@ -30,7 +29,9 @@ import {
   resolveDevServerReach,
   type DevServerHostType,
 } from './advertisedUrl';
-import { detachedLogPath, readDetachedLogSync } from './logFile';
+import { detachedLogPath, readDetachedLogFileSync } from './logFile';
+import { readRecoveryFactsAsync } from './readRecovery';
+import { decideRecovery, renderRecovery, type RecoveryAction } from './recovery';
 import type { DevLogsOptions } from './resolveLogsOptions';
 
 /**
@@ -66,20 +67,24 @@ export interface DevLogsResultJson {
  * @throws {CommandError} `NO_DEV_LOG` when this project has no detached dev server log.
  */
 export async function devLogsAsync(projectRoot: string, options: DevLogsOptions): Promise<number> {
-  const read = readDetachedLogSync(projectRoot, options.tail);
-  const [lock, smokePlatform] = await Promise.all([
-    readDevServerLockAsync(projectRoot),
+  const [facts, smokePlatform] = await Promise.all([
+    readRecoveryFactsAsync(projectRoot),
     defaultSmokePlatformAsync(projectRoot),
   ]);
+  const { ownership, lock } = facts;
+  const attempt = ownership.kind === 'none' ? null : ownership.attempt;
+  const logFile = attempt?.logFile ?? detachedLogPath(projectRoot);
+  const read = readDetachedLogFileSync(logFile, options.tail);
+  const action = decideRecovery({ ...facts, needsStart: lock == null });
 
   if (!read) {
-    throw noLogError(projectRoot, lock != null, smokePlatform);
+    throw noLogError(logFile, lock != null, action, smokePlatform);
   }
 
   // Read over the **whole** log rather than the tail this command was asked for: the `Waiting on`
   // line is near the top of a file whose tail is what a caller usually wants, so a `--tail 20`
   // would hide the one address a device off this machine can use.
-  const reach = resolveDevServerReach(readDevServerLogSync(projectRoot), lock);
+  const reach = resolveDevServerReach(readDevServerLogSync(projectRoot, { logFile }), lock);
 
   const report: DevLogsResultJson = {
     logFile: read.logFile,
@@ -93,7 +98,7 @@ export async function devLogsAsync(projectRoot: string, options: DevLogsOptions)
     followups: [],
   };
   report.followups = followUpsEnabled(options.followups)
-    ? buildFollowUps(report, smokePlatform)
+    ? buildFollowUps(action, smokePlatform)
     : [];
 
   cliEvent('dev_logs', {
@@ -149,13 +154,16 @@ function reachLine(report: DevLogsResultJson): string | null {
 }
 
 /** @ref llp/0009-smart-followups.rfc.md §Examples per command */
-function buildFollowUps(report: DevLogsResultJson, smokePlatform: NativePlatform): FollowUp[] {
-  if (!report.devServer) {
+function buildFollowUps(action: RecoveryAction | null, smokePlatform: NativePlatform): FollowUp[] {
+  if (action) {
+    const recovery = renderRecovery(action);
     return [
       {
-        id: 'dev-detach',
-        command: devCommand(smokePlatform, '--detach --wait-ready'),
-        why: 'These lines are from a dev server that is no longer running, so nothing is serving this project now.',
+        id: action.kind === 'start' ? 'dev-detach' : 'observe-run',
+        command: recovery.command,
+        why:
+          recovery.why ??
+          'The last run ended. Start the saved request to serve this project again.',
       },
     ];
   }
@@ -177,27 +185,27 @@ function buildFollowUps(report: DevLogsResultJson, smokePlatform: NativePlatform
  * why would send the caller looking for a file that was never going to exist.
  */
 function noLogError(
-  projectRoot: string,
+  logFile: string,
   serverRunning: boolean,
+  action: RecoveryAction | null,
   smokePlatform: NativePlatform
 ): CommandError {
-  const logFile = detachedLogPath(projectRoot);
+  const recovery = action ? renderRecovery(action) : null;
+  const command = recovery?.command ?? smokeCommand(smokePlatform);
   const error = new CommandError(
     'NO_DEV_LOG',
     serverRunning
       ? [
           `This project has a dev server running, but no log to read: it was started attached.`,
           `Why: only "${PROGRAM_PREFIX} dev --detach" writes to ${logFile}. A dev server started in a terminal writes to that terminal, and nothing captured it — so its output is there and nowhere else.`,
-          `How: read it in the terminal it is running in. To get a log next time, stop it with "${PROGRAM_PREFIX} dev:stop" and start it again with "${PROGRAM_PREFIX} dev --detach". For what the bundler is doing right now, "${smokeCommand(smokePlatform)}" answers without a log.`,
+          `How: read it in the terminal it is running in, then run "${command}".`,
         ].join('\n')
       : [
           `This project has no detached dev server log, so there is nothing to read.`,
-          `Why: nothing has been written to ${logFile}, which means no "${PROGRAM_PREFIX} dev --detach" has run in this project.`,
-          `How: start one with "${devCommand(smokePlatform, '--detach --wait-ready')}", then run this command again.`,
+          `Why: ${recovery?.why ?? `Nothing readable has been written to ${logFile}.`}`,
+          `How: run "${command}", then run this command again.`,
         ].join('\n')
   );
-  error.suggestedCommand = serverRunning
-    ? smokeCommand(smokePlatform)
-    : devCommand(smokePlatform, '--detach --wait-ready');
+  error.suggestedCommand = command;
   return error;
 }
