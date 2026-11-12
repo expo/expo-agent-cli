@@ -38,6 +38,19 @@ const FLAG_IOS: TargetSelection = {
   device: null,
   bound: false,
 };
+const CLOUD_IOS: TargetSelection = {
+  platform: { value: 'ios', by: 'bound-device' },
+  device: { backend: 'cloud', deviceId: 'sess-1' },
+  bound: true,
+};
+const CLOUD_ANDROID: TargetSelection = {
+  platform: { value: 'android', by: 'bound-device' },
+  device: { backend: 'cloud', deviceId: 'sess-2' },
+  bound: true,
+};
+/** The session's app: its device name is the cloud simulator's model, which no local tool reports. */
+const onCloudIos = target('cloud-ios', 'iPhone 17 Pro');
+const onCloudAndroid = target('cloud-android', 'sdk_gphone64_arm64 - 16 - API 36');
 const FLAG_ANDROID: TargetSelection = {
   platform: { value: 'android', by: 'flag' },
   device: null,
@@ -102,6 +115,29 @@ describe('what rung 1 does, and which bundle proves it', () => {
       targetSelection: ANY,
       unread: 'the target list could not be read again',
       mechanism: 'page-reload',
+      bundlePlatforms: ['android'],
+    },
+    // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — an iOS EAS session.
+    {
+      name: 'sends Page.reload, not the broadcast, on an iOS EAS session',
+      targets: [onCloudIos],
+      targetSelection: CLOUD_IOS,
+      mechanism: 'page-reload',
+      bundlePlatforms: ['ios'],
+    },
+    {
+      name: 'keeps Page.reload on an iOS EAS session when the fresh read failed',
+      targets: [onCloudIos],
+      targetSelection: CLOUD_IOS,
+      unread: 'the target list could not be read again',
+      mechanism: 'page-reload',
+      bundlePlatforms: ['ios'],
+    },
+    {
+      name: 'broadcasts on an Android EAS session',
+      targets: [onCloudAndroid],
+      targetSelection: CLOUD_ANDROID,
+      mechanism: 'broadcast',
       bundlePlatforms: ['android'],
     },
   ])('$name', ({ targets, targetSelection, unread = null, mechanism, bundlePlatforms }) => {

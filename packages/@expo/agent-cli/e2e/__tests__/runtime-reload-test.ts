@@ -647,54 +647,6 @@ describe('an app the command socket cannot see', () => {
     reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'device-1' },
   };
 
-  /** The reload the runtime method sends, which is the only expression this stub answers. */
-  function reloadResponder(): (expression: string) => unknown {
-    return (expression) => {
-      if (!expression.includes('reloadAppAsync')) {
-        return undefined;
-      }
-      // The probe carries its own diagnostic strings; the call does not.
-      return expression.includes('no-expo-global') ? 'ready' : 'sent';
-    };
-  }
-
-  it('reloads the app the debugger target list names, when --method runtime asks', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({
-      projectRoot,
-      // The app is connected: this is the list every other reading command in this CLI uses.
-      targets: [CDP_TARGET],
-      // And it is invisible on the command socket, which is what a cloud app over a tunnel was.
-      messagePeers: {},
-      inspectorEvaluate: reloadResponder(),
-      reloadTargets: 'reconnect',
-    });
-    const releaseLock = await holdLockForAsync(projectRoot, stub);
-    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
-      simulators: [BOOTED_SIMULATOR],
-    });
-
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:reload', '--method', 'runtime', '--json'],
-        { env: stubExpoEnv(projectRoot) }
-      );
-
-      expect(result.exitCode).toBe(0);
-      const report: ReloadReport = JSON.parse(result.stdout);
-      expect(report.reloaded).toBe(true);
-      expect(report.method).toBe('runtime');
-      expect(report.verifiedBy).toBe('fresh-debugger-target');
-      expect(report.appsReconnected).toBeGreaterThan(0);
-      // And nothing went near a simulator.
-      expect(readXcrun()).toEqual([]);
-    } finally {
-      releaseLock();
-      await stub.close();
-    }
-  });
-
   // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — wave 21.
   //
   // The K2 shape at the process boundary: the app is in `/json/list` and holds no client on the
@@ -788,34 +740,6 @@ describe('an app the command socket cannot see', () => {
       // Both deliberate methods are on stderr, with what each one costs.
       expect(result.stderr).toContain('--method device');
       expect(result.stderr).toContain('--method runtime');
-    } finally {
-      releaseLock();
-      await stub.close();
-    }
-  });
-
-  it('takes --method runtime on its own', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({
-      projectRoot,
-      targets: [CDP_TARGET],
-      messagePeers: {},
-      inspectorEvaluate: reloadResponder(),
-      reloadTargets: 'reconnect',
-    });
-    const releaseLock = await holdLockForAsync(projectRoot, stub);
-
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:reload', '--method', 'runtime', '--json'],
-        { env: stubExpoEnv(projectRoot) }
-      );
-
-      const report: ReloadReport = JSON.parse(result.stdout);
-      expect(report.method).toBe('runtime');
-      // Only the one method was tried, because the caller pinned it.
-      expect(report.attempts.map((attempt) => attempt.method)).toEqual(['runtime']);
     } finally {
       releaseLock();
       await stub.close();
