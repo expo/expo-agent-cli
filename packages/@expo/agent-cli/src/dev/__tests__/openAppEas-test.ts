@@ -585,6 +585,7 @@ describe(easOpenWork, () => {
       expoGo: true,
       keepSession: true,
       buildId: null,
+      signal: new AbortController().signal,
     });
     const result = await eas.runAsync({
       metro: { url: DEV_SERVER, port: 8081 },

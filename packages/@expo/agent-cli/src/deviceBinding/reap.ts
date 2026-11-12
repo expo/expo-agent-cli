@@ -165,13 +165,14 @@ export async function acquireSectionAsync<T>(
   tools: DeviceTools,
   work: (actions: Cleanup[]) => Promise<T>,
   inventory?: IosInventory,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  drainOnAbort = false
 ): Promise<T> {
   const actions: Cleanup[] = [];
   try {
     return await withRegistryLockAsync(
       async () => {
-        signal?.throwIfAborted();
+        if (!drainOnAbort) signal?.throwIfAborted();
         try {
           return await work(actions);
         } finally {

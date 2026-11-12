@@ -80,11 +80,13 @@ export interface RenewedLease {
 export async function claimCloudBindingsAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  tools: DeviceTools = defaultTools()
+  tools: DeviceTools = defaultTools(),
+  signal?: AbortSignal
 ): Promise<{ boundIds: string[]; unreadable: string | null; renewed: RenewedLease | null }> {
   try {
     return await withRegistryLockAsync(
       async () => {
+        signal?.throwIfAborted();
         const file = bindingPathFor(projectRoot, platform, 'cloud');
         const read = readBindingFile(file);
         if (read.kind === 'unreadable') return { boundIds: [], unreadable: file, renewed: null };
@@ -154,6 +156,7 @@ export async function acquireCloudBindingAsync(
     origin,
     start,
     tools = defaultTools(),
+    signal,
   }: {
     platform: DevicePlatform;
     id: string;
@@ -161,38 +164,46 @@ export async function acquireCloudBindingAsync(
     /** Only a run that started the session: when it began, and the id the dotenv names now. */
     start?: { at: Date; dotenvId: () => string | null };
     tools?: DeviceTools;
+    signal?: AbortSignal;
   }
 ): Promise<CloudBinding> {
-  return acquireSectionAsync(projectRoot, tools, async (actions) => {
-    const file = bindingPathFor(projectRoot, platform, 'cloud');
-    const read = readBindingFile(file);
-    if (read.kind === 'unreadable')
-      throw deviceUnavailableError('unreadable', { platform, path: file });
-    const before = read.kind === 'binding' && isCloudBinding(read.binding) ? read.binding : null;
-    const lease = leaseFrom(tools.now());
-    const binding: CloudBinding =
-      before?.device.id === id
-        ? { ...before, expiresAt: lease.expiresAt }
-        : {
-            version: 1,
-            projectRoot: canonicalizeExistingPath(projectRoot),
-            device: { backend: 'cloud', platform, id, origin },
-            ...lease,
-          };
-    const raced =
-      start != null &&
-      before != null &&
-      before.device.id !== id &&
-      Date.parse(before.boundAt) >= start.at.getTime();
-    if (raced && start.dotenvId() !== id) {
-      // §Session guard: only the session the dotenv names can be driven, so the other run's stays.
-      actions.push(concurrentStop(binding));
-      return before;
-    }
-    if (raced && before.device.origin === 'started') actions.push(concurrentStop(before));
-    writeBindingFile(file, binding);
-    return binding;
-  });
+  return acquireSectionAsync(
+    projectRoot,
+    tools,
+    async (actions) => {
+      const file = bindingPathFor(projectRoot, platform, 'cloud');
+      const read = readBindingFile(file);
+      if (read.kind === 'unreadable')
+        throw deviceUnavailableError('unreadable', { platform, path: file });
+      const before = read.kind === 'binding' && isCloudBinding(read.binding) ? read.binding : null;
+      const lease = leaseFrom(tools.now());
+      const binding: CloudBinding =
+        before?.device.id === id
+          ? { ...before, expiresAt: lease.expiresAt }
+          : {
+              version: 1,
+              projectRoot: canonicalizeExistingPath(projectRoot),
+              device: { backend: 'cloud', platform, id, origin },
+              ...lease,
+            };
+      const raced =
+        start != null &&
+        before != null &&
+        before.device.id !== id &&
+        Date.parse(before.boundAt) >= start.at.getTime();
+      if (raced && start.dotenvId() !== id) {
+        // §Session guard: only the session the dotenv names can be driven, so the other run's stays.
+        actions.push(concurrentStop(binding));
+        return before;
+      }
+      if (raced && before.device.origin === 'started') actions.push(concurrentStop(before));
+      writeBindingFile(file, binding);
+      return binding;
+    },
+    undefined,
+    signal,
+    origin === 'started'
+  );
 }
 
 function concurrentStop(binding: CloudBinding): Cleanup {

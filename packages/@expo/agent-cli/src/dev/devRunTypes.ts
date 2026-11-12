@@ -18,9 +18,10 @@ export type SessionReference = Readonly<{
   platform: NativePlatform;
   origin: 'started' | 'reused';
 }>;
-export type OpenSettlement =
-  | { kind: 'settled'; session?: SessionReference }
-  | { kind: 'unaccounted'; detail: string; session?: SessionReference };
+export type OpenSettlement = ({ kind: 'settled' } | { kind: 'unaccounted'; detail: string }) & {
+  session?: SessionReference;
+  binding?: Binding;
+};
 export type OpenWork = Readonly<{
   kind: 'local' | 'eas';
   runAsync(input: { metro: MetroReady; stillWanted: () => boolean }): Promise<OpenSettlement>;

@@ -48,6 +48,7 @@ import {
   resolveEasOpenUrlAsync,
   waitForTunnelHostAsync,
   type EnsureEasSessionOptions,
+  type EnsureEasSessionReport,
 } from './easSession';
 
 /** How long the `build:list` that names the build this run just made may take. */
@@ -57,6 +58,8 @@ export type OpenAppOnEasOptions = EnsureEasSessionOptions;
 
 /** What one open on EAS amounted to. */
 export interface OpenAppOnEasReport {
+  binding?: EnsureEasSessionReport['binding'];
+  unaccounted?: string;
   opened: boolean;
   /** The session the app was opened on, or null when none was reached. */
   sessionId: string | null;
@@ -162,6 +165,8 @@ export async function openAppOnEasAsync(
     tunnelHost: session.tunnelHost,
     sessionUrl: session.sessionUrl,
     refusal: session.refusal,
+    binding: session.binding,
+    unaccounted: session.unaccounted,
   };
   if (!session.ok) {
     return { ...base, opened: false, reason: session.reason ?? 'no session was reached' };
@@ -205,6 +210,9 @@ export async function openAppOnEasAsync(
       routeCheck: false,
       command: 'navigate',
       cloud: 'required',
+      beforeOpen: () => {
+        if (!stillWanted()) throw new Error('The dev server stopped before the app was opened.');
+      },
     });
     if (result.exitCode !== 0) {
       return {
@@ -238,6 +246,7 @@ export function easOpenWork(
     fingerprintCache?: boolean;
     keepSession: boolean;
     buildId: string | null;
+    signal: AbortSignal;
   }
 ): OpenWork {
   let session: OpenAppOnEasReport | null = null;
@@ -252,7 +261,10 @@ export function easOpenWork(
       if (!session)
         return { kind: 'unaccounted', detail: 'The EAS open failed without a receipt.' };
       return {
-        kind: 'settled',
+        ...(session.unaccounted
+          ? { kind: 'unaccounted' as const, detail: session.unaccounted }
+          : { kind: 'settled' as const }),
+        binding: session.binding,
         ...(session.sessionId
           ? {
               session: {

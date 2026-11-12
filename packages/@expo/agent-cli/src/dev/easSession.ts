@@ -70,6 +70,7 @@ export interface EnsureEasSessionOptions {
   fingerprintCache?: boolean;
   /** Whether the work is still worth performing, checked between the slow stages. */
   stillWanted?: () => boolean;
+  signal?: AbortSignal;
   /** What the session is called on expo.dev, for a person scanning the list later. */
   sessionName?: string;
   /**
@@ -86,6 +87,8 @@ export interface EnsureEasSessionOptions {
 
 /** What making sure there is a session with the app on it amounted to. */
 export interface EnsureEasSessionReport {
+  binding?: CloudBinding;
+  unaccounted?: string;
   /** A session on this platform is up, with the app on it (started) or at least drivable (reused). */
   ok: boolean;
   /** The session, or null when none was reached. */
@@ -190,6 +193,7 @@ export async function ensureEasSessionAsync(
   const startedAt = new Date();
   const session = await ensureSessionAsync(projectRoot, options);
   if (
+    !options.signal &&
     session.sessionId &&
     session.started &&
     options.stillWanted?.() === false &&
@@ -207,12 +211,20 @@ export async function ensureEasSessionAsync(
         platform: options.platform,
         id: session.sessionId,
         origin: session.started ? 'started' : 'dotenv',
+        signal: options.signal,
         start: session.started
           ? { at: startedAt, dotenvId: () => readCloudSessionIdSync(projectRoot) }
           : undefined,
       });
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
+      if (options.signal)
+        return {
+          ...session,
+          ok: false,
+          unaccounted: `EAS session ${session.sessionId} could not be recorded: ${why}`,
+          reason: why,
+        };
       if (!session.started)
         return {
           ...session,
@@ -227,12 +239,18 @@ export async function ensureEasSessionAsync(
         ok: false,
         sessionId: null,
         started: false,
+        ...(options.signal
+          ? {
+              unaccounted: `The cleanup of concurrent EAS session ${session.sessionId} was not confirmed.`,
+            }
+          : {}),
         reason: `another run in this worktree started EAS session ${binding.device.id} at the same time, and ${CLOUD_SESSION_ENV_FILE} names it, so this run ended its own session ${session.sessionId} ("${cloudStopCommand(session.sessionId)}" ends it if that failed); run this again to use ${binding.device.id}`,
       };
     const gitExclude = await excludeCloudSessionEnvFromGitAsync(projectRoot);
     if (gitExclude) {
-      return { ...session, gitExclude };
+      return { ...session, binding, gitExclude };
     }
+    return { ...session, binding };
   }
   return session;
 }
@@ -361,7 +379,7 @@ async function ensureSessionAsync(
   }
   let claim: Awaited<ReturnType<typeof claimCloudBindingsAsync>>;
   try {
-    claim = await claimCloudBindingsAsync(projectRoot, platform);
+    claim = await claimCloudBindingsAsync(projectRoot, platform, undefined, options.signal);
   } catch (error) {
     return failed(
       `the device registry could not be read, so no session was started: ${error instanceof Error ? firstLine(error.message) : String(error)}`
@@ -483,10 +501,24 @@ async function ensureSessionAsync(
         : 'This run will stop the session afterwards.'
     }`
   );
-  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
-    cwd: projectRoot,
-    timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
-  });
+  let submitted = false;
+  let result: Awaited<ReturnType<typeof spawnCaptureAsync>>;
+  try {
+    result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
+      cwd: projectRoot,
+      timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
+      signal: options.signal,
+      drainOnAbort: true,
+      beforeSpawn() {
+        options.signal?.throwIfAborted();
+        if (!stillWanted()) throw new Error('The dev server stopped before session submission.');
+        submitted = true;
+      },
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return failed(reason, submitted ? { unaccounted: reason } : {});
+  }
   const output = `${result.stdout}\n${result.stderr}`;
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
@@ -509,6 +541,9 @@ async function ensureSessionAsync(
         sessionId,
         sessionUrl,
         started: sessionId != null,
+        ...(!sessionId
+          ? { unaccounted: 'The submitted EAS session command returned no session receipt.' }
+          : {}),
       }
     );
   }
@@ -520,6 +555,9 @@ async function ensureSessionAsync(
     openUrl,
     sessionUrl,
     reason: null,
+    ...(!sessionId
+      ? { unaccounted: 'The submitted EAS session command returned no session receipt.' }
+      : {}),
   };
 }
 

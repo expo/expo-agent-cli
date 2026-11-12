@@ -114,6 +114,7 @@ export class DevServerStepRunner {
           fingerprintCache: options.fingerprintCache,
           keepSession: options.detachedChild,
           buildId: easBuildId,
+          signal: steps.run.signal,
         })
       : openPlatform
         ? {

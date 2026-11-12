@@ -111,6 +111,7 @@ class WorkScope implements DevRun {
         .then(() => open.runAsync({ metro, stillWanted }))
         .then(
           (result) => {
+            if (result.binding) this.captureBinding(result.binding);
             current.opening = { kind: 'settled', result };
           },
           (error: unknown) => {
