@@ -111,7 +111,7 @@ async function devInRunAsync(
     await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
     owned?.signal.throwIfAborted();
   }
-  recordLastDevRequest(projectRoot, options);
+  recordLastDevRequest(projectRoot, options, owned?.request);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.
   const orphan = await findUntrackedDevServerAsync(projectRoot, lock, options);
 
