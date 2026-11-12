@@ -64,7 +64,7 @@ export const runtimeEvalHelp: CommandHelp = {
     `The expression runs in a Hermes runtime: no require, no import(), no process, no fs, so a`,
     `module the app did not already load is out of reach. What is in reach is the app's globals,`,
     `and the useful one is expo — Object.keys(expo) lists what this version offers, and`,
-    `expo.reloadAppAsync() reloads the app. Reach for "${PROGRAM_PREFIX} runtime:reload" instead: it`,
+    `expo.reloadAppAsync('<reason>') reloads the app. Reach for "${PROGRAM_PREFIX} runtime:reload" instead: it`,
     `makes that call for you, checks the entry bundle first, and reports whether the app is back.`,
     `A promise is awaited and reported under promise; --no-await-promise reports it pending.`,
     `Exit 1 when the expression throws in the app or its promise rejects. Values come from the`,

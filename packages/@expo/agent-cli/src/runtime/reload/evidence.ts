@@ -30,7 +30,7 @@ export function describeEvidence(report: ReloadResultJson): string {
     case 'debugger-context-replaced':
       return `${contextReplacedTargets(report.attempts)
         .map((each) => each.deviceName)
-        .join(', ')} answered from a new JavaScript context after Page.reload`;
+        .join(', ')} answered from a new JavaScript context after the reload`;
     default:
       return 'nothing';
   }

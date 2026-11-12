@@ -5,13 +5,12 @@
 // The dev server relays a broadcast to every app that loads from its port. While the run's scope
 // skips an app (another worktree's, or one beside the bound device), a broadcast would reload that
 // app too. Then rung 1 sends CDP `Page.reload` to this worktree's own targets instead, and proves it
-// on those targets. Everything that follows from that choice is decided here, once.
+// on those targets. An iOS EAS session takes `Page.reload` too: its development build ignores the
+// broadcast. Everything that follows from that choice is decided here, once.
 
 import type { NativePlatform } from '../../plan/types';
-import { firstLine } from '../../utils/text';
 import { probeDevServerAsync } from '../devServer';
 import type { CdpTarget } from '../cdpClient';
-import { jsContextReplacedAsync, type ContextReplaced } from '../contextReplaced';
 import {
   connectMessageSocketAsync,
   peersChanged,
@@ -30,8 +29,9 @@ import {
   type SkippedApp,
 } from '../targetSelection';
 import { platformOfTarget } from '../targetPlatform';
-import type { ReloadAttempt, TargetReloadOutcome } from './attempt';
+import type { ReloadAttempt } from './attempt';
 import { debugEvent } from './events';
+import { reloadInPlaceAsync } from './inPlace';
 
 /**
  * How long the app's message socket has to come back before the broadcast is judged to have done
@@ -266,7 +266,7 @@ export type RungOnePolicy = {
   /** The platforms whose served bundle proves the reload: never one an app outside `read` can fetch. */
   bundlePlatforms: NativePlatform[] | 'any';
 } &
-  /** `page-reload` exactly when the scope skips an app. */
+  /** `page-reload` exactly when the scope skips an app or is an iOS EAS session. */
   (
     | { mechanism: 'broadcast' | 'page-reload' }
     /**
@@ -292,7 +292,11 @@ export function rungOnePolicy(
 ): RungOnePolicy {
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
-  const broadcast = classifiedTargets.skipped.length === 0;
+  // The SDK 58 iOS development build on an EAS session ignores the broadcast (llp/0005 §How it
+  // reloads), so its own targets take `Page.reload`.
+  const iosEasSession =
+    targetSelection.device?.backend === 'cloud' && targetSelection.platform?.value === 'ios';
+  const broadcast = classifiedTargets.skipped.length === 0 && !iosEasSession;
   const outside = broadcast
     ? [
         ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
@@ -405,7 +409,7 @@ export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn
 
 /**
  * What rung 1 leaves for the rest of the run. `ran`: a mechanism reached an app, so the shared
- * observations decide what its own proof did not; `relaunchWhy`: rung 2 may relaunch.
+ * observations decide what its own proof did not; `relaunchWhy`: rung 2, then the relaunch, may follow.
  */
 export function settleRungOne(outcome: RungOneOutcome): {
   ran: boolean;
@@ -426,7 +430,8 @@ export function settleRungOne(outcome: RungOneOutcome): {
 }
 
 /**
- * Run rung 1: the broadcast, or `Page.reload` to the own targets while the scope skips an app.
+ * Run rung 1: the broadcast, or `Page.reload` to the own targets while the scope skips an app or
+ * is an iOS EAS session.
  *
  * @param budgetMs the caller's budget. The rung's own proof is watched for no longer (F95), and
  * each mechanism has its own window inside it: a targeted reload shares one absolute deadline of
@@ -452,7 +457,7 @@ export async function runRungOneAsync(
         relaunchWhy: `${policy.unread}, so no broadcast was sent and the app was relaunched instead`,
       };
     case 'page-reload':
-      return await reloadOwnTargetsAsync(devServerUrl, {
+      return await pageReloadAsync(devServerUrl, {
         policy,
         own: classifiedTargets.read,
         deadline: Date.now() + Math.min(Math.max(0, budgetMs), PAGE_RELOAD_PROOF_MS),
@@ -524,67 +529,31 @@ async function broadcastAsync(
       };
 }
 
-/** How long one own target has to answer `Page.reload`. */
-const PAGE_RELOAD_ANSWER_MS = 4000;
-
 /**
- * Send `Page.reload` to each own target that takes it, and prove it on that target.
- *
- * The answer `{}` is delivery, not proof, and the target keeps its page id [observed — SDK 58
- * development build, React Native 0.88, iOS 27 simulator, 2026-10-21]. So a marker global is set
- * before the reload, and the reload is proved when the same target answers without it
- * (`../contextReplaced.ts`). One own target proved is enough: it stops the other checks.
+ * Rung 1 as `Page.reload` to the own targets. The scope skips an app, or it is an iOS EAS session
+ * whose development build ignores the broadcast ({@link rungOnePolicy}); the reason names which.
  */
-async function reloadOwnTargetsAsync(
+async function pageReloadAsync(
   devServerUrl: string,
   { policy, own, deadline }: { policy: RungOnePolicy; own: CdpTarget[]; deadline: number }
 ): Promise<RungOneOutcome> {
-  const provedOne = new AbortController();
-  const outcomes = await Promise.all(
-    own.map((target) => reloadOwnTargetAsync(devServerUrl, target, deadline, provedOne))
-  );
-  const proved = outcomes.filter((each) => each.outcome === 'context-replaced');
-  const answered = outcomes.filter(
-    (each) => each.outcome === 'context-replaced' || each.outcome === 'delivered-unproved'
-  );
-  const notes = outcomes
-    .filter((each) => each.reason)
-    .map((each) => `"${each.deviceName}": ${each.reason}`);
-  const reloadable = outcomes.filter((each) => each.outcome !== 'unsupported');
-  debugEvent('page_reload_sent', { targets: reloadable.length, answered: answered.length });
-  const kind =
-    proved.length > 0
-      ? 'proved'
-      : answered.length > 0
-        ? 'delivered'
-        : reloadable.length > 0 && reloadable.every((each) => each.outcome === 'unmarkable')
-          ? 'unprovable'
-          : 'not-delivered';
-  const names = (kind === 'proved' ? proved : answered)
-    .map((each) => `"${each.deviceName}"`)
-    .join(', ');
-  const clause = {
-    proved: `${names} answered from a new JavaScript context after Page.reload`,
-    delivered: `${names} answered Page.reload over the debugger, and no new JavaScript context was seen`,
-    unprovable:
-      'no app of this worktree could carry the marker that proves a Page.reload, so none was sent',
-    'not-delivered':
-      reloadable.length === 0
-        ? 'no app of this worktree takes Page.reload'
-        : 'no app of this worktree answered Page.reload',
-  }[kind];
-  const attempt: ReloadAttempt = {
-    method: 'page-reload',
-    ok: kind === 'proved',
-    delivered: kind === 'proved' || kind === 'delivered',
-    outcomes,
-    reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app, and this run skips ${policy.skippedApps.length} of them (\`skippedApps\`).`,
-    leftAppStopped: null,
-  };
+  const skips = policy.skippedApps.length;
+  const why =
+    skips > 0
+      ? `No broadcast was sent, because the dev server relays it to every app, and this run skips ${skips} of them (\`skippedApps\`).`
+      : 'No broadcast was sent: the app on an iOS EAS Simulator session ignores it.';
+  const { kind, attempt, clause } = await reloadInPlaceAsync(devServerUrl, {
+    mechanism: 'page-reload',
+    own,
+    deadline,
+    why,
+  });
   const churn = {
     ...CHURN_NOT_ASKED,
     reason:
-      "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app",
+      skips > 0
+        ? "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app"
+        : "the dev server's command socket was not asked: the app on an iOS EAS Simulator session ignores the broadcast",
   };
   return kind === 'proved'
     ? { kind, proof: 'debugger-context-replaced', attempt, churn }
@@ -595,65 +564,3 @@ async function reloadOwnTargetsAsync(
         relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,
       };
 }
-
-/** `Page.reload` to one own target, proved on it. The first target proved stops the other checks. */
-async function reloadOwnTargetAsync(
-  devServerUrl: string,
-  target: CdpTarget,
-  deadline: number,
-  provedOne: AbortController
-): Promise<TargetReloadOutcome> {
-  const identity = { targetId: target.id, deviceName: target.deviceName };
-  if (target.reactNative?.capabilities?.nativePageReloads !== true) {
-    return {
-      ...identity,
-      outcome: 'unsupported',
-      reason: 'the target does not support Page.reload',
-    };
-  }
-  try {
-    const seen = await jsContextReplacedAsync(devServerUrl, target, {
-      act: async (session) =>
-        await session.sendAsync(
-          'Page.reload',
-          {},
-          Math.max(1, Math.min(PAGE_RELOAD_ANSWER_MS, deadline - Date.now()))
-        ),
-      timeoutMs: Math.max(0, deadline - Date.now()),
-      deadline,
-      signal: provedOne.signal,
-    });
-    if (seen.kind === 'replaced') {
-      provedOne.abort();
-      return { ...identity, outcome: 'context-replaced', reason: null };
-    }
-    if (provedOne.signal.aborted) {
-      return { ...identity, outcome: 'stopped', reason: STOPPED };
-    }
-    return {
-      ...identity,
-      outcome: UNPROVED[seen.kind],
-      reason: seen.reason,
-    };
-  } catch (error: unknown) {
-    return provedOne.signal.aborted
-      ? { ...identity, outcome: 'stopped', reason: STOPPED }
-      : {
-          ...identity,
-          outcome: 'not-delivered',
-          reason: firstLine(error instanceof Error ? error.message : String(error)),
-        };
-  }
-}
-
-/** Nothing shows that an action whose answer was lost reached the app, so it is not counted as answered. */
-const UNPROVED = {
-  'not-replaced': 'delivered-unproved',
-  'answer-lost': 'not-delivered',
-  unmarkable: 'unmarkable',
-} as const satisfies Record<
-  Exclude<ContextReplaced['kind'], 'replaced'>,
-  TargetReloadOutcome['outcome']
->;
-
-const STOPPED = 'another app of this worktree proved the reload first, so this check stopped';
