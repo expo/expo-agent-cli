@@ -12,7 +12,10 @@ import {
   waitForExitAsync,
 } from './utils';
 
-export async function detachedControlFixture(platform: 'ios' | 'android') {
+export async function detachedControlFixture(
+  platform: 'ios' | 'android',
+  { open = false }: { open?: boolean } = {}
+) {
   const root = await setupFixtureAsync('go-app');
   const barrier = path.join(root, 'config-barrier');
   fs.mkdirSync(barrier);
@@ -43,7 +46,8 @@ export async function detachedControlFixture(platform: 'ios' | 'android') {
     })();`
   );
   const children: ReturnType<typeof spawnAgentCli>[] = [];
-  const args = ['dev', `--${platform}`, '--eas', '--go', '--no-open', '--json'];
+  const args = ['dev', `--${platform}`, '--eas', '--go', '--json'];
+  if (!open) args.push('--no-open');
   function start(extraArgs: string[] = []) {
     const id = randomUUID();
     const child = spawnAgentCli(root, [...args, ...extraArgs], {

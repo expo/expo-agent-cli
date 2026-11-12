@@ -1,13 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isProcessAlive } from '../../src/dev/processLiveness';
 import { detachedControlFixture } from '../detachedControlFixture';
-import { expoHomeOf, waitForAsync } from '../utils';
+import { expoHomeOf, readStubExpoInvocations, waitForAsync } from '../utils';
 import {
+  STUB_EAS_LOG_NAME,
   cloudBindingFile,
   installStubEasAsync,
   stubEasArgs,
+  stubEasCommands,
   writeCloudBindingAsync,
+  writeCloudSessionFileAsync,
 } from '../stubEas';
 
 it.each(['ios', 'android'] as const)(
@@ -41,6 +45,91 @@ it.each(['ios', 'android'] as const)(
       expect((await started.result).exitCode).not.toBe(0);
     } finally {
       await f.cleanup();
+    }
+  }
+);
+
+it.each(['ios', 'android'] as const)(
+  'cooperative stop cancels %s EAS session discovery before Metro starts',
+  async (platform) => {
+    const f = await detachedControlFixture(platform, { open: true });
+    const barrier = path.join(f.root, 'session-list-barrier');
+    fs.mkdirSync(barrier);
+    const release = path.join(barrier, 'release');
+    const entered = path.join(barrier, 'entered');
+    const cancelled = path.join(barrier, 'cancelled');
+    const packageFile = path.join(f.root, 'package.json');
+    const manifest = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
+    manifest.devDependencies = { ...manifest.devDependencies, 'eas-cli': '*' };
+    fs.writeFileSync(packageFile, JSON.stringify(manifest));
+    await installStubEasAsync(f.root, {
+      script: `
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(path.join(f.root, STUB_EAS_LOG_NAME))}, JSON.stringify({ args }) + '\\n');
+if (args[0] === 'simulator:list') {
+  process.on('SIGTERM', () => {
+    fs.writeFileSync(${JSON.stringify(cancelled)}, '');
+    process.exit(0);
+  });
+  fs.writeFileSync(${JSON.stringify(entered)}, String(process.pid));
+  const poll = setInterval(() => {
+    if (fs.existsSync(${JSON.stringify(release)})) {
+      clearInterval(poll);
+      console.log(JSON.stringify({ sessions: [], pageInfo: { hasNextPage: false, endCursor: null } }));
+    }
+  }, 20);
+} else if (args[0] === 'simulator:availability') {
+  console.log(JSON.stringify({ available: true }));
+} else {
+  process.exitCode = 1;
+}
+`,
+    });
+    await writeCloudSessionFileAsync(f.root, 'prior-session');
+    fs.writeFileSync(path.join(f.barrier, 'release'), '');
+    let probePid: number | undefined;
+    try {
+      const owner = f.start();
+      expect(
+        await waitForAsync(
+          () => fs.existsSync(entered) && Number(fs.readFileSync(entered, 'utf8')) > 0,
+          15_000
+        )
+      ).toBe(true);
+      expect(fs.existsSync(f.record(owner.id))).toBe(true);
+      const pid = Number(fs.readFileSync(entered, 'utf8'));
+      probePid = pid;
+      const stopped = await f.run(['dev:stop', '--json']);
+      expect(stopped.exitCode, stopped.all).toBe(0);
+      expect(JSON.parse(stopped.stdout)).toMatchObject({
+        stopped: false,
+        reason: 'not-running',
+        admission: 'released',
+      });
+      const ended = await owner.result;
+      expect(ended.exitCode).toBe(143);
+      expect(JSON.parse(ended.stdout).error.code).toBe('DEV_INTERRUPTED');
+      expect(fs.existsSync(f.record(owner.id))).toBe(false);
+      expect(fs.existsSync(path.join(f.root, '.expo', 'agent-cli-last-dev.json'))).toBe(false);
+      if (process.platform !== 'win32') {
+        expect(await waitForAsync(() => fs.existsSync(cancelled), 5_000)).toBe(true);
+      }
+      expect(await waitForAsync(() => !isProcessAlive(pid), 5_000)).toBe(true);
+      expect(stubEasCommands(f.root)).toEqual(['simulator:list']);
+      expect(readStubExpoInvocations(f.root).map(({ args }) => args)).toEqual([
+        ['config', '--json'],
+      ]);
+    } finally {
+      fs.writeFileSync(release, '');
+      try {
+        const pid = probePid;
+        if (pid && !(await waitForAsync(() => !isProcessAlive(pid), 5_000))) {
+          process.kill(pid, 'SIGKILL');
+        }
+      } finally {
+        await f.cleanup();
+      }
     }
   }
 );
