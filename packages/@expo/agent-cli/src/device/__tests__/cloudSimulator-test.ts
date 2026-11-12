@@ -1039,13 +1039,11 @@ describe(cloudSessionUnavailableError, () => {
     reason: 'the service lists no running EAS Simulator session for this project',
   } as const;
 
-  it(`names the command that starts a session, and says it bills until stopped`, () => {
+  it(`asks status for recovery when no run context was supplied`, () => {
     const error = cloudSessionUnavailableError(probe);
 
     expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
-    expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
-    expect(error.message).toContain('selects Expo Go or a development build');
-    expect(error.message).toContain('npx @expo/agent-cli dev:stop --eas');
+    expect(error.message).toContain('npx @expo/agent-cli status');
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
@@ -1085,7 +1083,7 @@ describe(cloudNeedsTunnelError, () => {
 
     expect(error.code).toBe('CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER');
     expect(error.message).toContain('exp://127.0.0.1:8081/--/?');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev:stop');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status --ios');
   });
 
   it(`refuses a LAN URL too, because the session is not on this network`, () => {
