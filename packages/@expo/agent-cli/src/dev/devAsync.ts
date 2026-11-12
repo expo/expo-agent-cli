@@ -110,17 +110,8 @@ async function devInRunAsync(
   }
   owned?.signal.throwIfAborted();
   if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
-    await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
+    await assertEasStartupAllowedAsync(projectRoot, options, owned?.signal);
     owned?.signal.throwIfAborted();
-    const platform = easOpenPlatform(options);
-    const other = platform ? await otherPlatformSessionAsync(projectRoot, platform) : null;
-    owned?.signal.throwIfAborted();
-    if (platform && other)
-      throw otherPlatformSessionError(other.platform, {
-        wanted: platform,
-        sessionId: other.sessionId,
-        devServerRunning: false,
-      });
   }
   recordLastDevRequest(projectRoot, options, owned?.request);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.
@@ -244,6 +235,27 @@ async function devInRunAsync(
   }
 
   return 0;
+}
+
+// @ref llp/0027-everything-on-eas.rfc.md §Check the EAS project before starting the environment
+// @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
+async function assertEasStartupAllowedAsync(
+  projectRoot: string,
+  options: DevOptions,
+  signal?: AbortSignal
+): Promise<void> {
+  await assertEasProjectConfiguredAsync(projectRoot, { signal });
+  signal?.throwIfAborted();
+  const platform = easOpenPlatform(options);
+  if (!platform) return;
+  const other = await otherPlatformSessionAsync(projectRoot, platform, { signal });
+  signal?.throwIfAborted();
+  if (other)
+    throw otherPlatformSessionError(other.platform, {
+      wanted: platform,
+      sessionId: other.sessionId,
+      devServerRunning: false,
+    });
 }
 
 async function resolveDevPlanAsync(

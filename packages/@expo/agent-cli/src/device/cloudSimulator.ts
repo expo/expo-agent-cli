@@ -484,7 +484,7 @@ export interface CloudRunResult {
 }
 
 /**
- * Ask the service what this project has running. Never throws: no session is an answer.
+ * Ask the service what this project has running. Discovery failures return a probe result.
  *
  * One listing (followed page by page), and a second read-only request only when the listing held
  * nothing usable. The dotenv is read too, but not as a gate — it is the preference
@@ -501,10 +501,12 @@ export async function probeCloudSessionAsync({
   platform = null,
   boundIds,
   timeoutMs = CLOUD_SESSION_TIMEOUT_MS,
+  signal,
 }: CloudRunOptions & {
   platform?: CloudPlatform | null;
   /** The cloud session ids this worktree's bindings name. */
   boundIds: readonly string[];
+  signal?: AbortSignal;
 }): Promise<CloudSessionProbe> {
   const cli = easCli ?? resolveEasCli(projectRoot);
   if (!cli) {
@@ -531,6 +533,7 @@ export async function probeCloudSessionAsync({
     const result = await runEasAsync(cli, buildSessionListArgs({ after }), {
       projectRoot,
       timeoutMs,
+      signal,
     });
     const failure = listingFailure(result, preferredId);
     if (failure) return failure;
@@ -569,6 +572,7 @@ export async function probeCloudSessionAsync({
     cli,
     projectRoot,
     timeoutMs,
+    signal,
     preferredId,
     boundId: boundIds[0] ?? null,
     wrongType,
@@ -614,6 +618,7 @@ async function noUsableSessionAsync({
   cli,
   projectRoot,
   timeoutMs,
+  signal,
   preferredId,
   boundId,
   wrongType,
@@ -621,12 +626,17 @@ async function noUsableSessionAsync({
   cli: EasCli;
   projectRoot: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   preferredId: string | null;
   /** A bound id the listing does not show: ended, once the account is known to have the feature. */
   boundId: string | null;
   wrongType: CloudSessionInfo[];
 }): Promise<CloudSessionProbe> {
-  const availability = await runEasAsync(cli, buildAvailabilityArgs(), { projectRoot, timeoutMs });
+  const availability = await runEasAsync(cli, buildAvailabilityArgs(), {
+    projectRoot,
+    timeoutMs,
+    signal,
+  });
   // A check that stopped because nobody is signed in has established nothing about the account's
   // access — and the next step for it is a person, not a session. Answered as `unknown` with the
   // run attached, so the caller raises the handoff rather than "this project has no session".
@@ -771,7 +781,8 @@ async function runEasAsync(
     projectRoot,
     timeoutMs,
     display = args,
-  }: { projectRoot: string; timeoutMs: number; display?: string[] }
+    signal,
+  }: { projectRoot: string; timeoutMs: number; display?: string[]; signal?: AbortSignal }
 ): Promise<CloudRunResult> {
   const { stdout, stderr, exitCode, spawnError } = await spawnCaptureAsync(
     cli.command,
@@ -779,6 +790,7 @@ async function runEasAsync(
     {
       cwd: projectRoot,
       timeoutMs,
+      signal,
     }
   );
   return {

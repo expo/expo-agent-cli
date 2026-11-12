@@ -119,14 +119,15 @@ export async function findLatestSimulatorBuildIdAsync(
 }
 
 /**
- * The session on another platform that would refuse a `dev --<platform> --eas`, asked before a
- * detached run starts its dev server. Read-only. Null when no binding and no dotenv point at
- * another platform, or when discovery is unsure: the child then decides. A session that reports no
- * platform counts, as it does for the refusal in `ensureSessionAsync`.
+ * The session on another platform that would refuse a `dev --<platform> --eas`, asked before
+ * starting the dev server. Read-only. Null when no binding and no dotenv point at another
+ * platform, or when discovery is unsure and the session open must decide. A session that reports
+ * no platform counts, as it does for the refusal in `ensureSessionAsync`.
  */
 export async function otherPlatformSessionAsync(
   projectRoot: string,
-  platform: NativePlatform
+  platform: NativePlatform,
+  { signal }: { signal?: AbortSignal } = {}
 ): Promise<{ sessionId: string; platform: CloudPlatform | null } | null> {
   const bindings = claimable(readCloudBindings(projectRoot).bindings, platform, new Date());
   const ids = bindings.map(({ device }) => device.id);
@@ -147,6 +148,7 @@ export async function otherPlatformSessionAsync(
     platform,
     boundIds: ids,
     timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
+    signal,
   });
   return otherPlatformSession(probe, platform);
 }
