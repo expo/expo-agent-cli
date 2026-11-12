@@ -79,7 +79,7 @@ describe.concurrent('@expo/agent-cli dev --eas — a foreground open that ends',
       dotenv: 'sess-e2e',
       said: [
         'session sess-e2e is an iOS session',
-        'navigate / --eas --ios',
+        'dev --ios --eas --detach',
         'dev --android --eas --detach',
         'dev:stop --eas',
       ],

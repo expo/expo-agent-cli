@@ -197,11 +197,11 @@ describe('@expo/agent-cli dev', () => {
               30_000
             )
           ).toBe(true);
-          await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
           expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
             pid: child.pid,
             phase: 'building',
           });
+          await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
           await new Promise((resolve) => setTimeout(resolve, 1500));
           await new Promise((resolve) => foreign.close(resolve));
 

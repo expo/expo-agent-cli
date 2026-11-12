@@ -132,7 +132,7 @@ it('two worktrees start and drive their own sessions; plain stop keeps a binding
     expect.objectContaining({
       id: 'own-0',
       released: null,
-      reason: expect.stringContaining('recorded, not checked'),
+      reason: null,
     })
   );
   expect(fs.existsSync(bindingFile(first))).toBe(true);

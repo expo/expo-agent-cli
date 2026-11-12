@@ -86,7 +86,7 @@ describe('a project whose path holds a space', () => {
     const report = JSON.parse(result.stdout);
     expect(report.project.root).toBe(projectRoot);
     expect(report.next.command).toBe(
-      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
     );
   });
 
@@ -101,9 +101,13 @@ describe('a project whose path holds a space', () => {
 
     const detached = await executeAgentCliAsync(
       projectRoot,
-      ['dev', '--ios', '--detach', '--json'],
+      ['dev', '--ios', '--detach', '--wait-ready', '--json'],
       {
-        env: { STUB_EXPO_DEV_SERVER_PORT: '8099', STUB_EXPO_DELAY_MS: STUB_ALIVE_MS },
+        env: {
+          STUB_EXPO_DEV_SERVER_PORT: '8099',
+          STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+          STUB_EXPO_LISTEN: '1',
+        },
       }
     );
     expect(detached.exitCode).toBe(0);

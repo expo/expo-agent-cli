@@ -140,35 +140,40 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(JSON.parse(result.stdout).reversedPort).toBeNull();
   });
 
-  it(`says how to start a session when this project has none`, async () => {
-    const projectRoot = await setupAsync('go-app');
+  it.each(['ios', 'android'] as const)(
+    `says how to start a %s session when this project has none`,
+    async (platform) => {
+      const projectRoot = await setupAsync('go-app');
 
-    const result = await navigateCloud(projectRoot, [], { STUB_SIM_SESSIONS: '0' });
+      const result = await navigateCloud(projectRoot, [`--${platform}`], {
+        STUB_SIM_SESSIONS: '0',
+      });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('No EAS Simulator session this CLI can drive is running');
-    expect(result.stderr).toContain('@expo/agent-cli dev --ios --eas');
-    // The listing, then the read-only availability question, and nothing that could start or bill
-    // anything.
-    expect(easInvocations(projectRoot)).toEqual([
-      [
-        'simulator:list',
-        '--status',
-        'in-progress',
-        '--status',
-        'new',
-        '--status',
-        'queued',
-        '--status',
-        'starting',
-        '--limit',
-        '25',
-        '--json',
-        '--non-interactive',
-      ],
-      ['simulator:availability', '--json', '--non-interactive'],
-    ]);
-  });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('No EAS Simulator session this CLI can drive is running');
+      expect(result.stderr).toContain(`@expo/agent-cli dev --${platform} --eas`);
+      // The listing, then the read-only availability question, and nothing that could start or bill
+      // anything.
+      expect(easInvocations(projectRoot)).toEqual([
+        [
+          'simulator:list',
+          '--status',
+          'in-progress',
+          '--status',
+          'new',
+          '--status',
+          'queued',
+          '--status',
+          'starting',
+          '--limit',
+          '25',
+          '--json',
+          '--non-interactive',
+        ],
+        ['simulator:availability', '--json', '--non-interactive'],
+      ]);
+    }
+  );
 
   // A listing alone does not authorize driving another worktree's session.
   it(`refuses an unbound session even when it is the only session listed`, async () => {
@@ -242,7 +247,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     const projectRoot = await setupAsync('go-app');
     await writeSessionFileAsync(projectRoot, 'sess-e2e');
 
-    const result = await navigateCloud(projectRoot, [], { STUB_SIM_STATUS: 'STOPPED' });
+    const result = await navigateCloud(projectRoot, ['--ios'], { STUB_SIM_STATUS: 'STOPPED' });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('sess-e2e');
@@ -652,7 +657,7 @@ describe('@expo/agent-cli runtime:stop --eas', () => {
   it(`says how to start a session when --eas finds none`, async () => {
     const projectRoot = await setupAsync('go-app');
 
-    const result = await executeAgentCliAsync(projectRoot, ['runtime:stop', '--eas'], {
+    const result = await executeAgentCliAsync(projectRoot, ['runtime:stop', '--eas', '--ios'], {
       reject: false,
       env: { STUB_SIM_SESSIONS: '0' },
     });
@@ -937,8 +942,8 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
 
       expect(result.exitCode).toBe(1);
       expect(JSON.parse(result.stdout).error.code).toBe('CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER');
-      expect(result.stderr).toContain(
-        `dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --tunnel`
+      expect(JSON.parse(result.stdout).error.suggestedCommand).toBe(
+        `npx @expo/agent-cli status --${process.platform === 'darwin' ? 'ios' : 'android'}`
       );
       expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
     } finally {
@@ -964,7 +969,7 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['runtime:reload', '--eas', '--timeout', '2s', '--json', '--no-followups'],
+        ['runtime:reload', '--eas', '--ios', '--timeout', '2s', '--json', '--no-followups'],
         { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
       );
 
