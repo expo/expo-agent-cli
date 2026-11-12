@@ -1,5 +1,6 @@
 import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { PROGRAM_PREFIX } from '../programName';
+import { renderStartRefusal } from './recovery';
 import { CommandError } from '../utils/errors';
 import type { AttemptReference, DetachedObservation } from './devRunTypes';
 import { equivalentStartupRequest, type StartupRequest } from './startupRequest';
@@ -51,43 +52,29 @@ export function ownershipError(message: string, code = 'DEV_START_UNCERTAIN'): C
 
 export function detachedStartError(refusal: StartRefusal): CommandError {
   const { attempt } = refusal;
+  const recovery = renderStartRefusal(refusal);
   const details = attempt
     ? `Detached run ${attempt.id}${attempt.pid ? ` (pid ${attempt.pid})` : ''}.${attempt.logFile ? ` Log: ${attempt.logFile}.` : ''}`
     : '';
-  const data = attempt
-    ? { pid: attempt.pid, logFile: attempt.logFile, attemptId: attempt.id }
-    : undefined;
-  if (refusal.kind === 'observe')
-    return Object.assign(
-      ownershipError(
-        `${details} The matching run is still starting. No new work was started. Observe its log or check status again.`,
-        'DEV_START_IN_PROGRESS'
-      ),
-      { exitCode: EXIT_OUTCOME_TIMEOUT, data, suggestedCommand: `${PROGRAM_PREFIX} dev:logs` }
-    );
-  if (refusal.kind === 'uncertain')
-    return Object.assign(
-      ownershipError(
-        `${details} ${refusal.detail} Read its log and check status again; the record was retained.`
-      ),
-      { data }
-    );
-  if (refusal.kind === 'discard')
-    return Object.assign(
-      ownershipError(
-        `${details} The owner ended without releasing ownership; subprocesses may survive. Discard only this record with "${discardRunCommand(refusal.attempt.id)}". This does not stop processes or EAS sessions.`
-      ),
-      {
-        data,
-        attemptId: refusal.attempt.id,
-        suggestedCommand: discardRunCommand(refusal.attempt.id),
-      }
-    );
+  const code =
+    refusal.kind === 'observe'
+      ? 'DEV_START_IN_PROGRESS'
+      : refusal.kind === 'discard' || refusal.kind === 'uncertain'
+        ? 'DEV_START_UNCERTAIN'
+        : 'DEV_START_BUSY';
   return Object.assign(
     ownershipError(
-      `${details} Another detached run holds startup ownership. No new work was started. Read its log, then check status or stop it before starting again.`,
-      'DEV_START_BUSY'
+      `${details} No new work was started. ${recovery.why ?? ''} How: run "${recovery.command}".`,
+      code
     ),
-    { data }
+    {
+      exitCode: refusal.kind === 'observe' ? EXIT_OUTCOME_TIMEOUT : EXIT_OUTCOME_FAILED,
+      suggestedCommand: recovery.command,
+      data: {
+        ...(attempt ? { pid: attempt.pid, logFile: attempt.logFile, attemptId: attempt.id } : {}),
+        recovery: recovery.recovery,
+      },
+      ...(refusal.kind === 'discard' ? { attemptId: refusal.attempt.id } : {}),
+    }
   );
 }
