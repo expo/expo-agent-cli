@@ -217,8 +217,19 @@ it
       (platform) => platform === 'android' || process.platform === 'darwin'
     )
   )('retains ownership while a local %s app download outlives Metro', async (platform) => {
-  const f = await fixture();
+  const f = await fixture(platform);
   const binDir = path.join(f.root, '.stub-bin');
+  const metroPid = path.join(f.root, 'metro-pid');
+  const expoScript = path.join(f.root, 'node_modules', 'expo', 'bin', 'cli');
+  fs.writeFileSync(
+    expoScript,
+    fs
+      .readFileSync(expoScript, 'utf8')
+      .replace(
+        "'use strict';",
+        `'use strict'; if (process.argv[2] === 'start') require('node:fs').writeFileSync(${JSON.stringify(metroPid)}, String(process.pid));`
+      )
+  );
   const device =
     platform === 'ios'
       ? await installStubXcrunAsync(f.root, {
@@ -252,22 +263,38 @@ it
     expect(await waitForAsync(() => fs.existsSync(downloading), 15_000)).toBe(true);
     const owner = await readDevLockAsync(f.root);
     expect(owner).not.toBeNull();
-    const stop = await executeAgentCliAsync(f.root, ['dev:stop', '--timeout', '1s', '--json'], {
-      reject: false,
-    });
-    expect(stop.exitCode, stop.all).toBe(20);
-    expect(await readDevLockAsync(f.root)).toBeNull();
+    process.kill(Number(fs.readFileSync(metroPid, 'utf8')), 'SIGTERM');
+    expect(
+      await waitForAsync(
+        () =>
+          new Promise<boolean>((resolve) => {
+            const socket = net.connect(f.port, '127.0.0.1');
+            socket.setTimeout(500, () => {
+              socket.destroy();
+              resolve(false);
+            });
+            socket.once('error', () => resolve(true));
+            socket.once('connect', () => {
+              socket.destroy();
+              resolve(false);
+            });
+          }),
+        5000
+      )
+    ).toBe(true);
+    expect(await readDevLockAsync(f.root)).toMatchObject({ pid: owner!.pid });
     const retry = await f.start().result;
     expect(retry.exitCode, retry.all).toBe(20);
-    expect(JSON.parse(retry.stdout).error).toMatchObject({
-      code: 'DEV_START_BUSY',
-      data: { pid: owner!.pid },
-    });
+    expect(JSON.parse(retry.stdout).error.data).toMatchObject({ pid: owner!.pid });
+    expect(readStubExpoInvocations(f.root).filter(({ args }) => args[0] === 'start')).toHaveLength(
+      1
+    );
     fs.writeFileSync(release, '');
     expect(
       await waitForAsync(() => f.marks('exited').includes(`exited-${owner!.pid}`), 15_000)
     ).toBe(true);
-    expect(device.calls().filter((args) => args.includes('install'))).toHaveLength(1);
+    expect(device.calls().filter((args) => args.includes('install'))).toHaveLength(0);
+    expect(await readDevLockAsync(f.root)).toBeNull();
     const restarted = await f.start().result;
     expect(restarted.exitCode, restarted.all).toBe(0);
   } finally {
