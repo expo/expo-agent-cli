@@ -72,8 +72,18 @@ const isWorker = (file) => typeof file === 'string' &&
 const record = (type, pid = process.pid) =>
   fs.appendFileSync(eventsFile, JSON.stringify({ type, pid }) + '\n');
 
-// Block network access even if worker discovery breaks after a packaging change.
-globalThis.fetch = async () => { throw new Error('Unexpected external request in telemetry test'); };
+// Block external requests even if worker discovery breaks after a packaging change.
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (
+    /^http:\/\/127\.0\.0\.1:\d+\/?$/.test(url) &&
+    options?.method === 'HEAD' &&
+    new Headers(options.headers).has('Authorization')
+  ) {
+    return nativeFetch(url, options);
+  }
+  throw new Error('Unexpected external request in telemetry test');
+};
 
 if (isWorker(process.argv[1])) {
   process.on('exit', () => record('exit'));
@@ -364,10 +374,11 @@ describe('@expo/agent-cli telemetry', () => {
       // The internal marker is consumed by our child; Expo keeps its own telemetry settings.
       expect(telemetry.readUpstreamEnvironment()).toEqual([{ noTelemetry: '0', offline: '0' }]);
     } finally {
-      await executeAgentCliAsync(telemetry.projectRoot, ['dev:stop', '--json'], {
+      const stopped = await executeAgentCliAsync(telemetry.projectRoot, ['dev:stop', '--json'], {
         env: { ...telemetry.env, EXPO_NO_TELEMETRY: '1' },
         reject: false,
       });
+      expect(stopped.exitCode, stopped.all).toBe(0);
     }
   });
 

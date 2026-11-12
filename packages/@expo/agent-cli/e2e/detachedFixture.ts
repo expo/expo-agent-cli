@@ -52,6 +52,7 @@ export async function setupDetachedFixtureAsync() {
     ...detachEnv(root, port),
     NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
     STUB_EXPO_LISTEN: '1',
+    STUB_EXPO_TUNNEL_HOST: 'owned.tunnel.example',
     STUB_SIM_SESSIONS: '0',
     STUB_FINGERPRINT_HASH: 'feedfacefeedfacefeedfacefeedfacefeedface',
   };

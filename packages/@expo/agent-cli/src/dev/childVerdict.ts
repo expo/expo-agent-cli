@@ -140,11 +140,13 @@ function parseData(json: string | undefined): Record<string, unknown> | null {
 }
 
 /** The codes the parent of a detached run rethrows unchanged (llp/0035 §Output and errors). */
-export function isRelayedDeviceCode(code: string | null): code is string {
+export function isRelayedStartCode(code: string | null): code is string {
   return (
     code != null &&
     (code === 'NO_BOUND_DEVICE' ||
       code === 'CLOUD_SIMULATOR_PLATFORM_MISMATCH' ||
+      code === 'EAS_PROJECT_NOT_LINKED' ||
+      code === 'EAS_PROJECT_CONFIG_UNREADABLE' ||
       code.startsWith('DEVICE_'))
   );
 }

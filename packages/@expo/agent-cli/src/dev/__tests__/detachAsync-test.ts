@@ -317,16 +317,19 @@ describe('reusing a running server', () => {
     });
     setTimeout(() => {
       vi.mocked(isProcessAlive).mockReturnValue(false);
-      fs.appendFileSync(logFile, 'NeedsHumanError: macOS refused Automation permission\n');
+      fs.appendFileSync(logFile, 'NeedsHumanError: The project is not linked to EAS\n');
     }, 50);
-    setTimeout(() => fs.appendFileSync(logFile, 'Needs a human   macos-automation\n'), delay);
+    setTimeout(() => fs.appendFileSync(logFile, 'Needs a human   eas-project-unlinked\n'), delay);
+    setTimeout(() => {
+      fs.appendFileSync(logFile, 'Error code      EAS_PROJECT_NOT_LINKED exit 7\n');
+    }, delay + 100);
 
     expect(await failure()).toMatchObject({
-      code: 'DEV_DETACH_NEEDS_HUMAN',
+      code: 'EAS_PROJECT_NOT_LINKED',
       exitCode: 7,
-      needsHuman: { scenario: 'macos-automation', detectedBy: 'detached-child-log' },
+      needsHuman: { scenario: 'eas-project-unlinked', detectedBy: 'detached-child-log' },
     });
-    expect(Date.now()).toBe(Math.max(200, delay));
+    expect(Date.now()).toBe(Math.max(200, delay + 100));
   });
 
   it('reads the handoff after the final status probe', async () => {
@@ -451,7 +454,10 @@ describe('readiness belongs to this worktree', () => {
   it("relays the child's failure instead of waiting on a foreign server until timeout", async () => {
     vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(foreign);
     setTimeout(() => {
-      fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
+      fs.appendFileSync(
+        logFile,
+        'Needs a human   macos-automation\nError code      DEV_DETACH_NEEDS_HUMAN exit 7\n'
+      );
       vi.mocked(isProcessAlive).mockReturnValue(false);
     }, 1000);
 

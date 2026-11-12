@@ -1,10 +1,11 @@
-import { detachedLogPath } from '../../src/dev/logFile';
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
 //
 // `@expo/agent-cli dev:logs` through the published bin: what a detached dev server printed, read
 // back from its log file.
 import fs from 'node:fs';
 import path from 'node:path';
+
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 
 import { executeAgentCliAsync, setupFixtureAsync, stubExpoEnv, waitForAsync } from '../utils';
 import { DETACHED_LOG_PATH, cleanUpDetachedAsync, detachEnv } from '../detachUtils';
@@ -14,15 +15,17 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8394),
-      });
-      // The stub prints its start line as soon as it runs; the file is written by the child.
-      await waitForAsync(
-        () =>
-          (fs.readFileSync(detachedLogPath(projectRoot), 'utf8') || '').includes('stub_expo_start'),
-        5000
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8394),
+        }
       );
+      const { logFile } = JSON.parse(started.stdout);
+      expect(
+        await waitForAsync(() => fs.readFileSync(logFile, 'utf8').includes('stub_expo_start'), 5000)
+      ).toBe(true);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:logs', '--json'], {
         env: stubExpoEnv(projectRoot),
@@ -30,7 +33,7 @@ describe('@expo/agent-cli dev:logs', () => {
 
       expect(result.exitCode).toBe(0);
       const report = JSON.parse(result.stdout);
-      expect(report.logFile).toBe(detachedLogPath(projectRoot));
+      expect(report.logFile).toBe(canonicalizeExistingPath(logFile));
       expect(report.lines.join('\n')).toContain('stub_expo_start');
       expect(report.devServer).toMatchObject({ port: 8394 });
     } finally {
@@ -42,10 +45,15 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8393),
-      });
-      await waitForAsync(() => fs.existsSync(detachedLogPath(projectRoot)), 5000);
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8393),
+        }
+      );
+      const { logFile } = JSON.parse(started.stdout);
+      expect(fs.existsSync(logFile)).toBe(true);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:logs'], {
         env: stubExpoEnv(projectRoot),

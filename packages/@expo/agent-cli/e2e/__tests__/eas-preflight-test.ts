@@ -14,14 +14,16 @@ it.each([
   // An eas.json alone is not sufficient either.
   await fs.promises.writeFile(path.join(projectRoot, 'eas.json'), '{"build":{}}');
   const result = await executeAgentCliAsync(projectRoot, [...argv, '--json'], { reject: false });
-  expect(result.exitCode).toBe(7);
-  expect(JSON.parse(result.stdout).error.code).toBe('EAS_PROJECT_NOT_LINKED');
+  expect(result.exitCode, result.all).toBe(7);
+  expect(JSON.parse(result.stdout).error).toMatchObject({
+    code: 'EAS_PROJECT_NOT_LINKED',
+    needsHuman: { scenario: 'eas-project-unlinked' },
+  });
   expect(result.stderr).toContain('init --id <project-id> --non-interactive');
   expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
     ['config', '--json'],
   ]);
   expect(readStubEasInvocations(projectRoot)).toEqual([]);
-  expect(fs.existsSync(path.join(projectRoot, '.expo', 'agent-cli-dev.log'))).toBe(false);
 });
 
 it('does not require EAS setup to print a plan', async () => {
@@ -48,5 +50,18 @@ it('uses evaluated config even when the static app.json says the project is link
     env: { STUB_EXPO_CONFIG_JSON: config },
   });
   expect(result.exitCode).toBe(7);
+  expect(readStubEasInvocations(projectRoot)).toEqual([]);
+});
+
+it('relays a detached config evaluation failure', async () => {
+  const projectRoot = await setupFixtureAsync('go-app');
+  await installStubEasAsync(projectRoot);
+  const argv = ['dev', '--ios', '--eas', '--detach', '--json'];
+  const result = await executeAgentCliAsync(projectRoot, argv, {
+    reject: false,
+    env: { STUB_EXPO_CONFIG_JSON: path.join(projectRoot, 'missing-config.json') },
+  });
+  expect(result.exitCode, result.all).toBe(1);
+  expect(JSON.parse(result.stdout).error.code).toBe('EAS_PROJECT_CONFIG_UNREADABLE');
   expect(readStubEasInvocations(projectRoot)).toEqual([]);
 });

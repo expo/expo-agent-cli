@@ -30,7 +30,7 @@ import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
-import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
+import { needsHumanError, needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
 import { findNeedsHumanScenario } from '../needsHuman/registry';
 import { rerunDevCommand } from '../plan/rerun';
 import { PROGRAM_PREFIX } from '../programName';
@@ -42,7 +42,7 @@ import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
-  isRelayedDeviceCode,
+  isRelayedStartCode,
   childOpensPlatform,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
@@ -245,7 +245,7 @@ async function devDetachAttributedAsync(
     // A followed run that ended in its build spawns nothing: its log says why.
     if (wait.kind === 'ended') {
       const verdict = await waitForChildVerdictAsync(projectRoot);
-      const relayed = relayedDeviceError(verdict);
+      const relayed = relayedStartError(verdict);
       if (relayed) throw relayed;
       throw buildEndedError(followed, verdict?.exitCode ?? null);
     }
@@ -421,11 +421,11 @@ async function devDetachAttributedAsync(
   // A run that ended in its build holds no lock any more, and its log says why.
   let lock = wait.kind === 'up' ? wait.lock : null;
   if (!lock) {
-    // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
+    // A startup refusal in the child can reach the caller before any lock.
     const verdict = childExit
       ? await waitForChildVerdictAsync(projectRoot)
       : readChildVerdictSync(projectRoot);
-    const relayed = relayedDeviceError(verdict);
+    const relayed = relayedStartError(verdict);
     if (relayed) {
       throw relayed;
     }
@@ -738,11 +738,6 @@ const VERDICT_WAIT_MS = 2_000;
  * and reported "the process exited" for a stop that had a named scenario and an "Ask the user"
  * line a beat behind it — the exact misreport this wait exists to prevent, one line further in.
  *
- * So the wait ends on a **scenario**, and the deadline is what ends it otherwise. The cost is
- * bounded and is paid only by a run that has already failed: a child that died with no handoff to
- * write spends {@link VERDICT_WAIT_MS} before it is reported as gone, which is the wrong answer's
- * price for making the right one reachable.
- *
  * @returns the last verdict read, which is null when the child wrote none at all.
  */
 async function waitForChildVerdictAsync(
@@ -752,7 +747,7 @@ async function waitForChildVerdictAsync(
   let verdict = readChildVerdictSync(projectRoot, since);
   const deadline = Date.now() + VERDICT_WAIT_MS;
   // The code row is the last line `logCmdError` writes, so a verdict with one is complete.
-  while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
+  while (verdict?.code == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
     verdict = readChildVerdictSync(projectRoot, since) ?? verdict;
   }
@@ -760,16 +755,18 @@ async function waitForChildVerdictAsync(
 }
 
 /**
- * A device refusal the child raised, rebuilt as the child raised it: code, exit and How line.
+ * Rebuild a startup refusal the child raised, including its recovery when it needs a person.
  *
  * @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the agent's recovery is the
  * child's own `dev` or `dev:stop` command, not `dev:logs`.
  */
-function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError | null {
-  if (verdict == null || !isRelayedDeviceCode(verdict.code)) {
-    return null;
-  }
-  const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
+function relayedStartError(verdict: DetachedChildVerdict | null): CommandError | null {
+  if (verdict == null || !isRelayedStartCode(verdict.code)) return null;
+  const message = verdict.message.replace(/^[A-Za-z]*Error: /, '');
+  const error =
+    verdict.code === 'EAS_PROJECT_NOT_LINKED'
+      ? needsHumanError('eas-project-unlinked', { detectedBy: 'detached-child-log', message })
+      : new CommandError(verdict.code, message);
   error.exitCode = verdict.exitCode ?? EXIT_OUTCOME_FAILED;
   if (verdict.data) {
     error.data = verdict.data;
@@ -910,7 +907,7 @@ function detachFailureError(
     eas: DetachEas | null;
   }
 ): CommandError {
-  const relayed = relayedDeviceError(verdict);
+  const relayed = relayedStartError(verdict);
   if (relayed) {
     return relayed;
   }
