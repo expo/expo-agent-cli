@@ -45,6 +45,7 @@ export const devStopHelp: CommandHelp = {
     stderr: 'progress and errors',
     keys: [
       'stopped',
+      'admission',
       'pid',
       'port',
       'url',

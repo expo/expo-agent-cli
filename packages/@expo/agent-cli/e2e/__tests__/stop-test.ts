@@ -122,6 +122,7 @@ describe('@expo/agent-cli dev:stop', () => {
     const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json']);
 
     expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
+      'admission',
       'detail',
       'deviceError',
       'devices',

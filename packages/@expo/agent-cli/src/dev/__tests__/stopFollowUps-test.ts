@@ -1,11 +1,13 @@
 import { localBackendOf } from '../../deviceBinding/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
-import { buildFollowUps, type DevStopResultJson } from '../stopAsync';
+import { buildFollowUps } from '../stopPresentation';
+import type { DevStopResultJson } from '../stopTypes';
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
 describe(buildFollowUps, () => {
   const result = (overrides: Partial<DevStopResultJson>): DevStopResultJson => ({
+    admission: null,
     stopped: true,
     pid: 1234,
     port: 8081,

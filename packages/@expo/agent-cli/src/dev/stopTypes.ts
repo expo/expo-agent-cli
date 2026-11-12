@@ -47,6 +47,8 @@ export type DevStopForceRefusal =
  * every key always present, and a fact the run does not have is null.
  */
 export interface DevStopResultJson extends Partial<StoppedDevices> {
+  /** Admission evidence, independent of whether the process or Metro stopped. */
+  admission: 'retained' | 'discarded' | 'released' | null;
   /** Explicit record discard, independent of process termination. */
   discardedRun?: string | null;
   /** Necessary recovery even when optional follow-ups are disabled. */
