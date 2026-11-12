@@ -18,6 +18,12 @@ import type { WebSocket } from 'ws';
 
 import { createInspectorWebSocket, type CdpTarget } from './cdpClient';
 import { debugEvent } from './events';
+import {
+  classifyTargets,
+  sessionSlotOpen,
+  type DeviceInventory,
+  type TargetSelection,
+} from './targetSelection';
 
 /** How long one handshake gets before the target is called unreachable. */
 const LIVENESS_TIMEOUT_MS = 1500;
@@ -94,5 +100,100 @@ function opensAsync(
     socket.on('open', () => finish(true));
     socket.on('error', () => finish(false));
     socket.on('close', () => finish(false));
+  });
+}
+
+/** How long an unplaced target of an EAS Simulator session gets to answer `Runtime.evaluate`. */
+const SESSION_PROBE_TIMEOUT_MS = 1500;
+
+type ProbeAnswer = 'answered' | 'silent' | 'unknown';
+
+/**
+ * Record the targets of an ended EAS Simulator session as dead, so no classification counts them.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+ * An ended session's page stays listed and its socket opens, so the handshake above calls it live.
+ * Only a request tells: the page answers nothing. The probe runs only where the one-unplaced-target
+ * rule applies and two or more targets are unplaced, and it drops nothing unless one answered.
+ */
+export async function withSessionTargetLivenessAsync(
+  targets: readonly CdpTarget[],
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory,
+  {
+    timeoutMs = SESSION_PROBE_TIMEOUT_MS,
+    createWebSocket = createInspectorWebSocket,
+  }: { timeoutMs?: number; createWebSocket?: (url: string) => WebSocket } = {}
+): Promise<DeviceInventory> {
+  const classified = classifyTargets([...targets], targetSelection, deviceInventory);
+  const unplaced = classified.undetermined;
+  if (!sessionSlotOpen(targetSelection, classified) || unplaced.length < 2) {
+    return deviceInventory;
+  }
+  const answers = await Promise.all(
+    unplaced.map((target) => askAsync(target.webSocketDebuggerUrl, timeoutMs, createWebSocket))
+  );
+  const dead = unplaced.filter((_, at) => answers[at] === 'silent').map((target) => target.id);
+  debugEvent('target_liveness', { listed: unplaced.length, stale: dead.length });
+  if (!answers.includes('answered') || dead.length === 0) {
+    return deviceInventory;
+  }
+  return { ...deviceInventory, deadTargetIds: [...(deviceInventory.deadTargetIds ?? []), ...dead] };
+}
+
+/**
+ * One `Runtime.evaluate` of `1`. `silent` is the only verdict of death: the socket opened and the
+ * deadline passed with no answer. A socket that closes, fails or never opens is `unknown`.
+ */
+function askAsync(
+  url: string,
+  timeoutMs: number,
+  createWebSocket: (url: string) => WebSocket
+): Promise<ProbeAnswer> {
+  if (!url) {
+    return Promise.resolve('unknown');
+  }
+  return new Promise<ProbeAnswer>((resolve) => {
+    let opened = false;
+    let settled = false;
+    let socket: WebSocket | undefined;
+    const finish = (answer: ProbeAnswer) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket?.close();
+      } catch {
+        // A socket that will not close changes nothing about the answer.
+      }
+      resolve(answer);
+    };
+    const timer = setTimeout(() => finish(opened ? 'silent' : 'unknown'), timeoutMs);
+    timer.unref?.();
+    try {
+      socket = createWebSocket(url);
+    } catch {
+      finish('unknown');
+      return;
+    }
+    socket.on('open', () => {
+      opened = true;
+      socket!.send(
+        JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: '1' } })
+      );
+    });
+    socket.on('message', (data) => {
+      try {
+        if (JSON.parse(String(data)).id === 1) {
+          finish('answered');
+        }
+      } catch {
+        // Not an answer to this request.
+      }
+    });
+    socket.on('error', () => finish('unknown'));
+    socket.on('close', () => finish('unknown'));
   });
 }

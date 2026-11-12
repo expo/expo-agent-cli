@@ -14,6 +14,11 @@ import type { CdpTarget } from './cdpClient';
 import { onAndroidModel, platformOfTarget } from './targetPlatform';
 
 /** What this machine's device tools report. Facts only: no decision of this run is in here. */
+/**
+ * What this machine's device tools report, and which listed targets the liveness probe found dead.
+ * Every classification of a run reads the same inventory, so a fact recorded here holds for all of
+ * them.
+ */
 export interface DeviceInventory {
   /** Booted simulators of every runtime, as `xcrun simctl` reports them. */
   booted: { name: string; udid: string }[];
@@ -34,6 +39,11 @@ export interface DeviceInventory {
    * project root (`dev:wait`, a `navigate` wait) has no "this worktree", so it reads none.
    */
   iosBindings: LiveIosBinding[];
+  /**
+   * Ids of listed targets whose debugger socket opened and that answered nothing within the
+   * liveness probe's deadline (`./targetLiveness.ts`). No classification counts them.
+   */
+  deadTargetIds?: readonly string[];
 }
 
 /** Facts that know nothing, for a run that did not need to ask the device tools. */
@@ -335,7 +345,9 @@ export function androidModelTwins(
  * worktree bound it, so the one target nothing on this machine claims is its app, provided the
  * scope's device tools answered or this host cannot run them. A failed inspection cannot establish
  * absence, so an Android-shaped target stays undetermined while `adb` gave no answer. Two such
- * targets stay undetermined: nothing says which one is the session's. An Android
+ * targets stay undetermined: nothing says which one is the session's. A target the liveness probe
+ * found dead (`deadTargetIds`) is in no group, so an ended session's app does not hold the slot
+ * (llp/0005 §Target owner). An Android
  * session needs no rule, because its device name shape places it. A target on another worktree's
  * simulator is skipped in every scope, so it never takes that slot.
  */
@@ -350,7 +362,9 @@ export function classifyTargets(
     undetermined: [],
     skipped: [],
   };
-  for (const target of targets) {
+  const dead = new Set(deviceInventory.deadTargetIds);
+  const listed = targets.filter((target) => !dead.has(target.id));
+  for (const target of listed) {
     const classification = classifyTarget(target, targetSelection, deviceInventory);
     switch (classification.group) {
       case 'read':
@@ -372,20 +386,34 @@ export function classifyTargets(
   // An Android session's own target has React Native Android's name shape, so an unplaced one is
   // never it.
   if (
-    targetSelection.device?.backend === 'cloud' &&
-    targetSelection.platform?.value !== 'android' &&
+    sessionSlotOpen(targetSelection, classifiedTargets) &&
     only &&
     !more.length &&
-    !unprovenOffMachine(only, targetSelection, deviceInventory) &&
-    (targetSelection.platform != null || classifiedTargets.read.length === 0)
+    !unprovenOffMachine(only, targetSelection, deviceInventory)
   ) {
     return {
       ...classifiedTargets,
-      read: targets.filter((target) => target === only || classifiedTargets.read.includes(target)),
+      read: listed.filter((target) => target === only || classifiedTargets.read.includes(target)),
       undetermined: [],
     };
   }
   return classifiedTargets;
+}
+
+/**
+ * Whether the one unplaced target of this classification would be read as the EAS Simulator
+ * session's app: a cloud scope that is not Android, and, with no platform named, no target already
+ * read.
+ */
+export function sessionSlotOpen(
+  targetSelection: TargetSelection,
+  classifiedTargets: Pick<ClassifiedTargets, 'read'>
+): boolean {
+  return (
+    targetSelection.device?.backend === 'cloud' &&
+    targetSelection.platform?.value !== 'android' &&
+    (targetSelection.platform != null || classifiedTargets.read.length === 0)
+  );
 }
 
 /** Whether the device tools can change where these targets fall for this scope. */

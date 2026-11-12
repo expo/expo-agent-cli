@@ -7,6 +7,7 @@ import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import type { Binding, BoundDevice, DevicePlatform } from '../deviceBinding/types';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
+import { withSessionTargetLivenessAsync } from './targetLiveness';
 import {
   deviceInventoryForSelectionAsync,
   selectedDeviceOf,
@@ -76,14 +77,17 @@ export async function resolveTargetSelectionAsync(
   options: ResolveTargetSelectionOptions
 ): Promise<ResolvedTargetSelection> {
   const targetSelection = await resolveScopeAsync(options);
-  const deviceInventory =
+  const deviceInventory = await withSessionTargetLivenessAsync(
+    options.targets,
+    targetSelection,
     options.deviceInventory ??
-    (await deviceInventoryForSelectionAsync(
-      options.targets,
-      targetSelection,
-      options.projectRoot,
-      options.devServerUrl
-    ));
+      (await deviceInventoryForSelectionAsync(
+        options.targets,
+        targetSelection,
+        options.projectRoot,
+        options.devServerUrl
+      ))
+  );
   return {
     targetSelection,
     deviceInventory,
