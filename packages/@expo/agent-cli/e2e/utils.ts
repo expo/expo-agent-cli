@@ -792,6 +792,11 @@ export type StubDevServerOptions = {
    */
   inspectorSilent?: readonly string[];
   /**
+   * Devices whose `live` inspector socket opens and closes when a request arrives, as a reloading
+   * app or an evicted debugger connection does. Not observed on an ended session's page.
+   */
+  inspectorClosing?: readonly string[];
+  /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
    * An empty object is a dev server nothing has connected to, which is the case where there is
@@ -930,6 +935,7 @@ export async function startStubDevServerAsync({
   targetsAppearWithFile = null,
   inspectorEvaluate,
   inspectorSilent = [],
+  inspectorClosing = [],
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1141,6 +1147,10 @@ export async function startStubDevServerAsync({
     inspectorServer?.on('connection', (socket: WebSocket, request: IncomingMessage) => {
       const device = new URL(request.url ?? '/', 'http://stub').searchParams.get('device') ?? '';
       if (inspectorSilent.includes(device)) {
+        return;
+      }
+      if (inspectorClosing.includes(device)) {
+        socket.on('message', () => socket.close());
         return;
       }
       socket.on('message', (data) => {

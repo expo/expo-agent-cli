@@ -213,21 +213,30 @@ it.each([
     silent: ['cloud', 'ended'],
     read: null,
   },
+  {
+    name: 'the other app closes its socket',
+    targets: ['ended', 'cloud'],
+    silent: [],
+    closing: ['ended'],
+    read: null,
+  },
 ] satisfies {
   name: string;
   flag?: 'ios';
   targets: AppId[];
   silent: AppId[];
+  closing?: AppId[];
   read: AppId | null;
 }[])(
   'eval with ios-cloud beside an app that no local device claims: $name',
-  async ({ flag, targets, silent, read }) => {
+  async ({ flag, targets, silent, closing = [], read }) => {
     const { root, env } = await setupBoundAsync('ios-cloud');
     const evaluated: string[] = [];
     const server = await startStubDevServerAsync({
       projectRoot: root,
       targets: targets.map((id) => apps[id]),
       inspectorSilent: silent,
+      inspectorClosing: closing,
       inspectorEvaluate: (expression, device) => {
         if (!expression.includes('selected-app-sentinel')) return undefined;
         evaluated.push(device);
