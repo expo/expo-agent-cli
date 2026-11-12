@@ -102,8 +102,8 @@ export interface ReloadResultJson {
    * band): this may name only a signal whose **own** evidence is in this payload and non-empty —
    * `commandSocketChurn.reconnected` for `message-socket-peers`, {@link appsReconnected} for
    * `fresh-debugger-target`, `bundlesAfterReload.count` for `dev-server-bundle`, and an `attempts`
-   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` attempt that
-   * worked for `debugger-context-replaced`. A label with nothing to show for
+   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` or `runtime`
+   * attempt that worked for `debugger-context-replaced`. A label with nothing to show for
    * itself is `null`, which makes `reloaded` false — the band, rather than a claim.
    */
   verifiedBy:

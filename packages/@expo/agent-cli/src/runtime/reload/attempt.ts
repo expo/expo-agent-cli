@@ -72,7 +72,7 @@ const KEEPS_PAGE_ID: Record<ReloadAttempt['method'], string | null> = {
   'page-reload': 'the app answered Page.reload, which keeps its page id',
   device: 'a relaunched app registers again under the page id it had',
   'dev-server': null,
-  runtime: null,
+  runtime: 'the app reloaded itself, which keeps its page id',
 };
 
 /** {@link KEEPS_PAGE_ID} for the attempt the run settled on. */

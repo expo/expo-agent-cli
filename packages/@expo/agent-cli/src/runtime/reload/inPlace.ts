@@ -18,8 +18,11 @@ export type InPlaceMechanism = 'page-reload' | 'runtime';
 /** How long rung 2 has to prove itself, so the relaunch keeps the rest of `--timeout`. */
 const RUNTIME_RELOAD_PROOF_MS = 5000;
 
-/** How long one target has to answer the action. */
-const ANSWER_MS = 4000;
+/**
+ * How long one target has to answer the action. `expo.reloadAppAsync` answers at once or never (its
+ * context goes), so its bound is short and the marker reads keep most of rung 2's window.
+ */
+const ANSWER_MS: Record<InPlaceMechanism, number> = { 'page-reload': 4000, runtime: 1500 };
 
 const RUNTIME_RELOAD_EXPRESSION = `(function () {
   var e = globalThis.expo;
@@ -134,7 +137,7 @@ export async function reloadInPlaceAsync(
   const clause = {
     proved: `${names} answered from a new JavaScript context after ${label}`,
     delivered: `${names} answered ${label} over the debugger, and no new JavaScript context was seen`,
-    unprovable: `no app of this worktree could carry the marker that proves a ${label}, so none was sent`,
+    unprovable: `no app of this worktree could carry the marker that proves the reload, so no ${label} was sent`,
     'not-delivered':
       reloadable.length === 0
         ? `no app of this worktree takes ${label}`
@@ -169,7 +172,7 @@ async function reloadTargetAsync(
       reason: 'the target does not support Page.reload',
     };
   }
-  const answerMs = () => Math.max(1, Math.min(ANSWER_MS, deadline - Date.now()));
+  const answerMs = () => Math.max(1, Math.min(ANSWER_MS[mechanism], deadline - Date.now()));
   try {
     const seen = await jsContextReplacedAsync(devServerUrl, target, {
       act: async (session) => {
@@ -205,7 +208,7 @@ async function reloadTargetAsync(
     if (provedOne.signal.aborted) {
       return { ...identity, outcome: 'stopped', reason: STOPPED };
     }
-    return { ...identity, outcome: UNPROVED[seen.kind], reason: seen.reason };
+    return { ...identity, outcome: UNPROVED[mechanism][seen.kind], reason: seen.reason };
   } catch (error: unknown) {
     return provedOne.signal.aborted
       ? { ...identity, outcome: 'stopped', reason: STOPPED }
@@ -217,14 +220,25 @@ async function reloadTargetAsync(
   }
 }
 
-/** Nothing shows that an action whose answer was lost reached the app, so it is not counted as answered. */
+/**
+ * Nothing shows that a `Page.reload` whose answer was lost reached the app, so it is not counted as
+ * answered. `expo.reloadAppAsync` tears down the context that would answer it, so a lost answer is
+ * the usual shape of a call that ran: the run watches for a fresh target or a bundle.
+ */
 const UNPROVED = {
-  'not-replaced': 'delivered-unproved',
-  'answer-lost': 'not-delivered',
-  unmarkable: 'unmarkable',
+  'page-reload': {
+    'not-replaced': 'delivered-unproved',
+    'answer-lost': 'not-delivered',
+    unmarkable: 'unmarkable',
+  },
+  runtime: {
+    'not-replaced': 'delivered-unproved',
+    'answer-lost': 'delivered-unproved',
+    unmarkable: 'unmarkable',
+  },
 } as const satisfies Record<
-  Exclude<ContextReplaced['kind'], 'replaced'>,
-  TargetReloadOutcome['outcome']
+  InPlaceMechanism,
+  Record<Exclude<ContextReplaced['kind'], 'replaced'>, TargetReloadOutcome['outcome']>
 >;
 
 const STOPPED = 'another app of this worktree proved the reload first, so this check stopped';
