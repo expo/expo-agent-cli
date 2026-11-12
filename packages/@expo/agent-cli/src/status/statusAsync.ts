@@ -10,7 +10,6 @@ import fs from 'fs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
-import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readDetachedRunWarning } from '../dev/detachedOwnership';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { judgeEndedRunAsync } from '../dev/untrackedDevServer';
@@ -436,8 +435,6 @@ export async function collectStatusReportAsync(
         now: Date.now(),
         devicesDisabled: devicesDisabled(),
         bindsPlatform: hostBindsPlatform,
-        childStartsSession: (lock, lockPlatform) =>
-          childStartsSessionSync(projectRoot, lock, lockPlatform),
         unreadableBindingFile: (bindingPlatform) =>
           unreadableBindingFiles(projectRoot, bindingPlatform)[0]?.file ?? null,
       },

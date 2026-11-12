@@ -560,7 +560,7 @@ export function buildNextActionStatus(
 }
 
 /** The command and the reason for a dev server this project can already use, or null. */
-function verifyAction(
+export function verifyAction(
   devServer: DevServerStatus | null,
   device: LocalDeviceStatus | null,
   state: ProjectState,

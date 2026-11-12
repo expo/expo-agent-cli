@@ -77,7 +77,8 @@ function binding(overrides: Partial<BindingSummary>): BindingSummary {
 
 const expired = '2026-01-01T00:00:00.000Z';
 const own = lockInfo();
-const easLock = (platform: 'ios' | 'android') => lockInfo({ easPlatform: platform });
+const easLock = (platform: 'ios' | 'android') =>
+  lockInfo({ easPlatform: platform, easOpenFinished: true });
 const androidRequest = startupRequestFrom(
   resolveDevOptions([
     '--android',
@@ -122,7 +123,6 @@ const host: NextActionHost = {
   now: Date.parse('2026-10-30T00:00:00.000Z'),
   devicesDisabled: false,
   bindsPlatform: () => true,
-  childStartsSession: () => false,
   unreadableBindingFile: () => null,
 };
 
@@ -248,11 +248,13 @@ describe(chooseNextAction, () => {
       },
     ]),
     {
-      name: 'says the session is starting while the detached child starts it',
-      facts: { devServer: noApp, ownLock: easLock('ios') },
-      host: { childStartsSession: () => true },
-      command: `${dev}:logs`,
-      why: "The dev server's EAS Simulator session for ios is starting. Read its logs and check status again when startup finishes.",
+      name: 'observes an unfinished foreground EAS session',
+      facts: {
+        devServer: noApp,
+        ownLock: lockInfo({ easPlatform: 'ios', easOpenFinished: false }),
+      },
+      command: `${PROGRAM_PREFIX} status`,
+      why: 'The run is still starting. Read the foreground terminal and check status again.',
     },
     {
       name: 'binds the session again, not smoke, for an app on an own EAS server',
@@ -388,18 +390,14 @@ describe(chooseNextAction, () => {
     {
       name: 'shows the build of a run that builds before it serves',
       facts: { ownLock: lockInfo({ phase: 'building', pid: 4242, port: 8090 }) },
-      command: `${PROGRAM_PREFIX} dev:logs`,
-      why: expect.stringMatching(
-        /^This project's dev run \(pid 4242\) is building before it serves on port 8090\./
-      ),
+      command: `${PROGRAM_PREFIX} status`,
+      why: 'The run is still starting. Read the foreground terminal and check status again.',
     },
     {
-      name: 'stops the session a finishing run binds',
+      name: 'observes a finishing run until its work settles',
       facts: { ownLock: lockInfo({ phase: 'finishing', pid: 4242, easPlatform: 'ios' }) },
-      command: `${PROGRAM_PREFIX} dev:stop --eas`,
-      why: expect.stringMatching(
-        /^This project's last dev run \(pid 4242\) is finishing its EAS session start\./
-      ),
+      command: `${PROGRAM_PREFIX} status`,
+      why: "The run's cleanup is still in progress. Observe it before starting another run.",
     },
     {
       name: "keeps the plan's next under AGENT_CLI_NO_DEVICE",
@@ -430,7 +428,7 @@ describe(chooseNextAction, () => {
     {
       name: 'asks for no local device when the config puts the device on EAS',
       facts: { deviceBackend: 'eas', devServer: foreign },
-      command: `${dev} --ios`,
+      command: `${dev} --ios --eas --detach --wait-ready`,
       why: null,
     },
     {
@@ -508,7 +506,7 @@ describe(chooseNextAction, () => {
     {
       name: 'removes an unreadable binding file before the dev command that would refuse on it',
       host: { unreadableBindingFile: () => '/bindings/local-ios.json' },
-      command: `rm -f '/bindings/local-ios.json' && ${dev} --ios --port 8081 --detach --wait-ready`,
+      command: `rm -f /bindings/local-ios.json && ${dev} --ios --port 8081 --detach --wait-ready`,
       why: 'The binding file /bindings/local-ios.json does not parse; a newer CLI may have written it.',
     },
   ])('$name', ({ facts, host: hostOverrides, plan: editPlan, command, why, stepsPort }) => {

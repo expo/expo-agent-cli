@@ -6,15 +6,17 @@ import { loopbackPortOfUrl } from '../navigate/adbReverse';
 import type { DevServerLockInfo } from '../devLock';
 import { withDevServerPort } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
-import { RUN_PHASE } from '../dev/runPhase';
+import type { DetachedObservation } from '../dev/devRunTypes';
+import { decideRecovery, renderRecovery } from '../dev/recovery';
 import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevicePlatform } from '../deviceBinding/types';
 import type { LastBuildRecord } from '../plan/lastBuild';
-import { recoveryRequestFor, recoveryStartCommand } from '../dev/recoveryRequest';
-import type { DeviceBackend, NativePlatform, PlanPlatform } from '../plan/types';
+import { recoveryRequestFor } from '../dev/recoveryRequest';
+import type { DeviceBackend, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { ProjectState, StartPlan } from '../project/types';
-import { buildNextActionStatus, resolveDefaultPlatform } from './sections';
+import { buildNextActionStatus, resolveDefaultPlatform, verifyAction } from './sections';
+import { quoteArgument } from '../utils/consent';
 import type { DevServerStatus, LocalDeviceStatus, NextActionStatus } from './types';
 
 /**
@@ -113,11 +115,11 @@ export interface NextActionHost {
   now: number;
   devicesDisabled: boolean;
   bindsPlatform(platform: DevicePlatform): boolean;
-  childStartsSession(lock: DevServerLockInfo, platform: NativePlatform): boolean;
   unreadableBindingFile(platform: DevicePlatform): string | null;
 }
 
 export interface NextActionFacts {
+  ownership?: DetachedObservation;
   state: ProjectState;
   record: LastBuildRecord;
   platform: PlanPlatform;
@@ -152,6 +154,7 @@ export function chooseNextAction({
   deviceBackend,
   plan,
   host,
+  ownership,
 }: NextActionFacts): NextActionStatus {
   const { cloud, cloudPlatform, bound, liveBound, expiredSession } = bindingsFor(
     bindings ?? [],
@@ -159,27 +162,6 @@ export function chooseNextAction({
     host.now
   );
   const recoveryPlan = plan && recoveryPort != null ? withDevServerPort(plan, recoveryPort) : plan;
-  let next = buildNextActionStatus(
-    state,
-    record,
-    platform,
-    devServer,
-    device,
-    // The scheme a development build of this project registers, read the same way the deep link
-    // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
-    // the app's own scheme (`src/navigate/connectUrl.ts`).
-    devBuildScheme,
-    cloudPlatform,
-    // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
-    // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
-    // toolchain probe folded in — rather than the one the project's state alone implies. The two
-    // differ on exactly the machines where it matters, and a `status` that reported
-    // "expo run:ios" on a Linux box would be the report disagreeing with the command.
-    recoveryPlan
-  );
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app, §Dependencies not installed
-  // — no app to act on outranks every device next below: each of them runs `dev`, which stops first.
-  if (state.app !== 'ready') return next;
   const devNext = buildNextActionStatus(
     state,
     record,
@@ -190,82 +172,59 @@ export function chooseNextAction({
     null,
     recoveryPlan
   );
-  const noRun =
-    unservedRunNext(ownLock, devNext) ?? endedRunNext(devServer, cloud, platform, devNext);
-  if (noRun) return noRun;
   const ownServer = servingLock(ownLock);
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
+  const implicitEas =
+    plan?.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit;
   const port = ownServer?.port === requestedPort ? recoveryPort : (ownServer?.port ?? recoveryPort);
-  const eas = !!(easServer || expiredSession);
-  const devCommand = devRerun(platform, request, port, devNext, eas);
-  if ((request || recoveryPort != null) && next.command.startsWith(`${PROGRAM_PREFIX} dev `))
-    next.command = devCommand;
-  // An unfinished session start is observed; rebinding after it finishes needs a deliberate restart.
-  const pendingSession =
-    easServer?.easPlatform && host.childStartsSession(easServer, easServer.easPlatform);
-  const stopFirst = ownServer ? `${PROGRAM_PREFIX} dev:stop && ` : '';
-  if (expiredSession && !pendingSession) {
-    // @ref llp/0021-honest-reports.rfc.md §How they show up
-    next = {
-      ...devNext,
-      command: `${stopFirst}${devCommand}`,
-      why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
-    };
-  } else if (
+  const currentRequest =
+    ownership?.kind === 'live' ? (ownership.attempt.request ?? request) : request;
+  const restart = recoveryRequestFor(platform, currentRequest, {
+    port,
+    deviceBackend: easServer || expiredSession || implicitEas ? 'eas' : deviceBackend,
+  });
+  const facts = { ownership, lock: ownLock, request: restart };
+  const pending = decideRecovery({ ...facts, needsStart: false });
+  if (pending) return { ...devNext, ...renderRecovery(pending), steps: [] };
+  if (state.app !== 'ready') return devNext;
+  const ended = endedRunNext(devServer, cloud, platform, devNext);
+  if (ended) return ended;
+  const verify = verifyAction(devServer, device, state, devBuildScheme, cloudPlatform);
+  const needsBinding =
     platform !== 'web' &&
     bindings &&
     !liveBound &&
-    // An app on an own EAS server can load from Metro while the session is not bound.
+    cloud.length === 0 &&
     !(
       devServer?.running &&
       devServer.appsConnected > 0 &&
       devServer.projectRootMatched !== false &&
       ownServer?.easPlatform !== platform
     ) &&
-    cloud.length === 0 &&
-    // `dev --eas` binds a cloud session and needs no local device tools. A project whose
-    // config puts this platform on EAS gets no local-device step.
     (easServer != null ||
-      (deviceBackend !== 'eas' && !host.devicesDisabled && host.bindsPlatform(platform)))
-  ) {
-    // @ref llp/0021-honest-reports.rfc.md §How they show up
-    const unreadable = host.unreadableBindingFile(platform);
-    const command = pendingSession ? `${PROGRAM_PREFIX} dev:logs` : `${stopFirst}${devCommand}`;
-    const easWhy = easServer
-      ? pendingSession
-        ? `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`
-        : `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`
-      : null;
-    next = {
-      ...devNext,
-      command: unreadable ? `rm -f '${unreadable}' && ${command}` : command,
-      steps: pendingSession ? [] : devNext.steps,
-      why: unreadable
-        ? `The binding file ${unreadable} does not parse; a newer CLI may have written it.`
-        : (easWhy ??
-          (bound.length
+      (deviceBackend !== 'eas' && !host.devicesDisabled && host.bindsPlatform(platform)));
+  if (verify && !expiredSession && !needsBinding) return { ...devNext, ...verify, steps: [] };
+  const unreadable = needsBinding ? host.unreadableBindingFile(platform) : null;
+  const why = expiredSession
+    ? `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`
+    : unreadable
+      ? `The binding file ${unreadable} does not parse; a newer CLI may have written it.`
+      : needsBinding
+        ? easServer
+          ? `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`
+          : bound.length
             ? `The lease on the bound ${platform} device expired.${ownServer ? ' Stop the running dev server before rebinding it.' : ''}`
-            : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`)),
-    };
-  }
-  return ownServer ? ownedServerNext(next, !!pendingSession) : next;
-}
-
-/** Bare starts are refused while an own lock exists, even with a live device binding. */
-function ownedServerNext(next: NextActionStatus, pendingSession: boolean): NextActionStatus {
-  if (!next.command.startsWith(`${PROGRAM_PREFIX} dev `)) return next;
-  return pendingSession
-    ? {
-        ...next,
-        command: `${PROGRAM_PREFIX} dev:logs`,
-        steps: [],
-        why: 'The EAS session is still starting. Read its logs and check status again.',
-      }
-    : {
-        ...next,
-        command: `${PROGRAM_PREFIX} dev:stop && ${next.command}`,
-        why: `${next.why ? `${next.why} ` : ''}Stop the owned dev-server process before starting another run.`,
-      };
+            : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`
+        : devNext.why;
+  const recovery = renderRecovery(decideRecovery({ ...facts, needsStart: true, why })!);
+  return {
+    ...devNext,
+    ...recovery,
+    command: unreadable
+      ? `rm -f ${quoteArgument(unreadable)} && ${recovery.command}`
+      : recovery.command,
+    why: why ?? recovery.why,
+  };
 }
 
 /** The live cloud binding this CLI started for `platform`, else any it started; null for none. */
@@ -298,39 +257,4 @@ function endedRunNext(
 /** The lock of a dev server that serves, or null for none or a run that builds or finishes. */
 function servingLock(lock: DevServerLockInfo | null): DevServerLockInfo | null {
   return lock?.phase === 'serving' ? lock : null;
-}
-
-/**
- * The next step beside a run that builds or finishes, from its row of the phase table; null for no
- * run or one that serves.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run with no dev server
- * outranks every device step: each of them runs `dev`, which this run's lock refuses.
- */
-function unservedRunNext(
-  lock: DevServerLockInfo | null,
-  devNext: NextActionStatus
-): NextActionStatus | null {
-  const phase = lock?.phase;
-  if (!lock || (phase !== 'building' && phase !== 'finishing')) return null;
-  const row = RUN_PHASE[phase];
-  return { ...devNext, command: row.command, why: `${row.state(lock)}. ${row.does}` };
-}
-
-/** The `dev` re-run that keeps the saved request's flags and the recovery port. */
-function devRerun(
-  platform: PlanPlatform,
-  request: LastDevRequest | null,
-  recoveryPort: number | null,
-  devNext: NextActionStatus,
-  eas: boolean
-): string {
-  const implicitEas =
-    devNext.buildLocation?.runsOn === 'eas' && devNext.buildLocation.selection?.implicit;
-  return recoveryStartCommand(
-    recoveryRequestFor(platform, request, {
-      port: recoveryPort,
-      deviceBackend: eas || implicitEas ? 'eas' : 'local',
-    })
-  );
 }

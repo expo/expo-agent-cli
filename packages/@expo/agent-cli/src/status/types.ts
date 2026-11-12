@@ -1,3 +1,4 @@
+import type { RecoveryMetadata } from '../dev/recovery';
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // The shape of the status report: one object with a section per question the command answers.
 // Pure data, so the human formatter and the `--json` output describe exactly the same facts.
@@ -436,6 +437,7 @@ export interface AuthStatus {
 }
 
 export interface NextActionStatus {
+  recovery?: RecoveryMetadata;
   /** The command to run next. */
   command: string;
   /**
