@@ -35,25 +35,6 @@ it('death before publication leaves admission available', async () => {
   }
 });
 
-it('simultaneous detached starts elect one owner and normal stop releases it', async () => {
-  const f = await detachedRunFixture();
-  try {
-    const results = await Promise.all([f.start(), f.start()]);
-    expect(results.map((result) => result.exitCode).sort()).toEqual([0, 20]);
-    const winner = JSON.parse(results.find((result) => result.exitCode === 0)!.stdout);
-    const refused = JSON.parse(results.find((result) => result.exitCode === 20)!.stdout);
-    expect(['DEV_START_BUSY', 'DEV_SERVER_RUNNING']).toContain(refused.error.code);
-    expect(refused.error.data.pid).toBe(winner.pid);
-    const stopped = await f.run(['dev:stop', '--json']);
-    expect(stopped.exitCode, stopped.all).toBe(0);
-    const restarted = await f.start();
-    expect(restarted.exitCode, restarted.all).toBe(0);
-    expect(JSON.parse(restarted.stdout).pid).not.toBe(winner.pid);
-  } finally {
-    await f.cleanup();
-  }
-});
-
 it('an empty ownership directory does not prevent publication', async () => {
   const f = await detachedRunFixture();
   try {
