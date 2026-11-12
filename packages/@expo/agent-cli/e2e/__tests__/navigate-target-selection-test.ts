@@ -191,6 +191,7 @@ async function deviceFixture(root: string, scenario: Scenario) {
     return {
       env: adb.env,
       calls: adb.calls,
+      failures: adb.failures,
       forceStops: () => adb.calls().filter((args) => args.includes('force-stop')),
       opens: () =>
         adb
@@ -330,7 +331,9 @@ it.each(scenarios)('$name', async (scenario) => {
     const ownAttached = scenario.initial === 'own' && scenario.twin !== 'both';
     const stuck = scenario.neverAttaches || scenario.attachesAfterStop;
     const recovers = stuck && scenario.backend === 'local-android';
-    expect(device.opens()).toEqual(
+    // A launcher missing here with the recovery run is a stub run that failed: its exit code is in
+    // the report's `launch`, and a stub that threw left its stack in `failures()`.
+    expect(device.opens(), `${result.all}\n${device.failures?.() ?? ''}`).toEqual(
       ownAttached ? [ROUTE] : recovers ? [launcher, ROUTE, ROUTE] : [launcher, ROUTE]
     );
     if (!recovers) expect(device.forceStops?.() ?? []).toEqual([]);
