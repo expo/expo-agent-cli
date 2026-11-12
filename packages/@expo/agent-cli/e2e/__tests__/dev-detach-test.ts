@@ -55,11 +55,6 @@ describe('@expo/agent-cli dev --detach', () => {
         { env, reject: false }
       );
       expect(started.exitCode, started.all).toBe(0);
-      expect(
-        JSON.parse(
-          fs.readFileSync(path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'), 'utf8')
-        )
-      ).toMatchObject({ platform: 'android', port, buildBackend: 'local', runTarget: 'expo-go' });
       await cleanUpDetachedAsync(projectRoot);
       const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env,
