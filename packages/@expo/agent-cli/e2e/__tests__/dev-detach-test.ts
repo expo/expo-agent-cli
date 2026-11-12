@@ -584,8 +584,12 @@ describe('@expo/agent-cli dev --detach', () => {
         );
         expect(again.exitCode, again.all).toBe(20);
         const { error } = JSON.parse(again.stdout);
-        expect(error).toMatchObject({ code: 'DEV_SERVER_RUNNING', data: { port: lock!.port } });
-        expect(error.data.port).not.toBe(8473);
+        expect(error).toMatchObject({
+          code: 'DEV_START_BUSY',
+          data: { pid: lock!.pid, recovery: { kind: 'stop-and-start' } },
+        });
+        expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: lock!.port });
+        expect(lock!.port).not.toBe(8473);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
       }
@@ -612,27 +616,35 @@ describe('@expo/agent-cli dev --detach', () => {
   // nothing would be able to find it or stop it — which is worse than a second foreground one.
   it.each([8397, 8396])('refuses a second --detach requesting port %s', async (port) => {
     const projectRoot = await setupFixtureAsync('go-app');
+    const env = { ...detachEnv(projectRoot, 8397), STUB_EXPO_LISTEN: '1' };
 
     try {
       const first = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--json', '--port', '8397'],
-        {
-          env: detachEnv(projectRoot, 8397),
-        }
+        ['dev', '--ios', '--detach', '--wait-ready', '--json', '--port', '8397'],
+        { env }
       );
       const firstPid = JSON.parse(first.stdout).pid;
 
-      const second = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--ios', '--detach', '--json', '--port', String(port)],
-        { env: detachEnv(projectRoot, port), reject: false }
-      );
+      const retry = () =>
+        executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--detach', '--json', '--port', String(port)],
+          { env, reject: false }
+        );
+      let second = await retry();
+      expect(
+        await waitForAsync(async () => {
+          if (second.exitCode !== 22) return true;
+          second = await retry();
+          return second.exitCode !== 22;
+        }, 5000)
+      ).toBe(true);
 
       expect(second.exitCode, second.stderr).toBe(20);
       expect(JSON.parse(second.stdout).error).toMatchObject({
-        code: 'DEV_SERVER_RUNNING',
-        data: { pid: firstPid, port: 8397 },
+        code: 'DEV_START_BUSY',
+        data: { pid: firstPid, recovery: { kind: 'stop-and-start' } },
       });
       expect(
         readStubExpoInvocations(projectRoot).filter((call) => call.args[0] === 'start')
@@ -708,9 +720,9 @@ describe('@expo/agent-cli dev --detach', () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const started = await executeAgentCliAsync(
       projectRoot,
-      ['dev', '--ios', '--detach', '--json'],
+      ['dev', '--ios', '--detach', '--wait-ready', '--json'],
       {
-        env: detachEnv(projectRoot, 8395),
+        env: { ...detachEnv(projectRoot, 8395), STUB_EXPO_LISTEN: '1' },
       }
     );
     const { pid } = JSON.parse(started.stdout);

@@ -196,12 +196,13 @@ describe('device lifecycle across two worktrees', () => {
       expect.objectContaining({ platform: 'ios', id: udid, name, origin: 'created' })
     );
 
-    const reused = await executeAgentCliAsync(
+    const observing = await executeAgentCliAsync(
       projectRoot,
       ['dev', '--ios', '--detach', '--no-open'],
       { env, reject: false }
     );
-    expect(reused.exitCode).toBe(20);
+    expect(observing.exitCode, observing.all).toBe(22);
+    expect(observing.stderr).toContain('dev:logs');
     expect(bindings()[0]?.device).toEqual(binding!.device);
   });
 
