@@ -21,7 +21,10 @@ vi.mock('../../project/probe', () => ({
 }));
 vi.mock('../../dev/detachAsync', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../dev/detachAsync')>()),
-  devDetachAsync: vi.fn(async () => 0),
+  devDetachAsync: vi.fn(async (_root, _options, report) => {
+    report?.onElected?.({ id: 'owned' });
+    return 0;
+  }),
 }));
 vi.mock('../../runtime/discoverDevServer', () => ({
   discoverDevServerAsync: vi.fn(async () => ({
@@ -31,6 +34,11 @@ vi.mock('../../runtime/discoverDevServer', () => ({
   })),
 }));
 const root = '/work/app';
+async function stopStartedDevServer(options: ReturnType<typeof resolveSmokeOptions>) {
+  const deps = buildSmokeDeps(root, options);
+  await deps.startDevServer();
+  return deps.stopDevServer();
+}
 beforeEach(() => {
   vol.reset();
   fs.mkdirSync(root, { recursive: true });
@@ -91,6 +99,7 @@ it.each([
   async (_, argv, setByWalk) => {
     const deps = buildSmokeDeps(root, resolveSmokeOptions([...argv]));
     if (setByWalk) deps.cloudRoute.current = 'required';
+    await deps.startDevServer();
     await deps.stopDevServer();
     expect(devStopAsync).toHaveBeenCalledWith(
       root,
@@ -120,10 +129,7 @@ it('cloud smoke reports no device rows for the local devices dev:stop kept', asy
     } as any);
     return 0;
   });
-  const result = await buildSmokeDeps(
-    root,
-    resolveSmokeOptions(['--ios', '--eas'])
-  ).stopDevServer();
+  const result = await stopStartedDevServer(resolveSmokeOptions(['--ios', '--eas']));
   expect(result.devices).toBeUndefined();
 });
 
@@ -148,7 +154,7 @@ it('a release dev:stop refused gives its reason to each device it kept', async (
     } as any);
     return 0;
   });
-  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  const result = await stopStartedDevServer(resolveSmokeOptions(['--ios']));
   expect(result.devices).toEqual([
     {
       ...kept,
@@ -172,7 +178,7 @@ it('the dev server cleanup carries the devices dev:stop released', async () => {
     onReport?.({ stopped: true, devices: [device], deviceError: null } as any);
     return 0;
   });
-  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  const result = await stopStartedDevServer(resolveSmokeOptions(['--ios']));
   expect(result.devices).toEqual([device]);
 });
 
@@ -196,7 +202,7 @@ it('a device that dev:stop could not release does not mark the dev server as sti
     } as any);
     return 20;
   });
-  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  const result = await stopStartedDevServer(resolveSmokeOptions(['--ios']));
   expect(result.ok).toBe(true);
   expect(result.devices).toEqual([device]);
 });

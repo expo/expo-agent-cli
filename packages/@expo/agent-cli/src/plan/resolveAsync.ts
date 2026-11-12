@@ -32,6 +32,7 @@ export interface ResolvedStartPlan {
 }
 
 export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
+  settings?: AgentCliSettings;
   /** Where a flag on this command line asked the build to run, or null when none did. */
   requestedBackend?: BuildBackend | null;
   /** Which app a flag on this command line asked for, or null when none did. */
@@ -92,6 +93,7 @@ export async function resolveStartPlanAsync(
   options: ResolveStartPlanOptions = {}
 ): Promise<ResolvedStartPlan> {
   const {
+    settings = readAgentCliSettings(projectRoot).settings,
     requestedBackend = null,
     requestedTarget = null,
     hostPlatform,
@@ -104,7 +106,6 @@ export async function resolveStartPlanAsync(
     ...planOptions
   } = options;
 
-  const { settings } = readAgentCliSettings(projectRoot);
   const runTarget = selectRunTarget({
     requested: requestedTarget,
     configured: settings.target,

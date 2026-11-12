@@ -578,13 +578,26 @@ then `unref()`. The child gets no `2g` IPC variables from the parent: a detached
 outlives the parent, and events sent to the parent's IPC socket would be lost when it
 exits. The child writes to the parent's `LOG_EVENTS` file when there is one, and opens its
 own `2g` session otherwise; `expo start` logs to the child (`dev-detach-test` "returns once
-the dev server reports its port through 2g"). The wrapper is what takes the lock. A
-detached server that published no
-lock would be a process nothing could find, wait on, or stop. The lock names its port
-and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
-`expo` child exactly as the foreground one does.
+the dev server reports its port through 2g"). The detached child exclusively creates
+`.expo/dev/detached-claim` before external preflight, fingerprint, build, device work or
+last-request writes. Its unique UUID directory contains an immutable owner record and a token-authenticated
+loopback endpoint. The matching dev-server lock carries its attempt ID when available; the lock
+still supplies readiness and port evidence. The child retains ownership through background startup
+work, even when the parent exits or its wait expires.
 
-A run killed with `SIGKILL` leaves its Metro running with no lock: an untracked dev server.
+Before lock publication, an equivalent request returns 22 and a changed request returns 20.
+`status` and `dev:logs` expose the same detached PID and private log without exposing the token.
+One parsed settings snapshot determines both request identity and child execution; later edits
+apply to a later start. Pre-lock `dev:stop` explicitly refuses an incomplete stop. A normal locked
+stop retires only the captured generation after its process and matching lock disappear.
+
+Malformed, incomplete or unanswered claims are uncertain and block replacement. Recovery requires
+quiescing callers and cleanup, resolving every surviving process, and moving the exact claim root
+aside while retaining logs. Moving a claim does not stop a listener. Retirement unlinks only the
+captured record, removes its UUID directory nonrecursively, then attempts root removal once.
+Failed root removal leaves uncertainty; an old cleanup cannot remove a replacement generation.
+
+With no detached claim remaining, a run killed with `SIGKILL` can leave its Metro running with no lock: an untracked dev server. An unanswered detached claim requires the manual recovery above.
 The lock is a socket so that nothing claims a process is alive after it is gone. Beside it,
 the holder keeps a run record (`.expo/agent-cli-dev-run.json`: its pid, the port, and the
 pid listening there), written once the dev server reported its port and removed when the lock
@@ -661,9 +674,9 @@ Reuse checks the process and its verdict after tunnel lookup and any final readi
 probe, and before reporting a readiness timeout. Logs older than the lock's start time
 cannot supply a current verdict. Reuse adds no platform-opening grace period.
 
-The log is one file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. A
-name carrying the port could not be resolved by `dev:logs` before the port was known. A
-file that accumulated across runs would answer with last week's output.
+Each candidate writes `.expo/dev/logs/dev-detached-<UUID>.log`. Only the elected child publishes
+the `logs/current` pointer; its parent keeps reading that candidate's captured log. Observation
+falls back to legacy `dev-detached.log` when no current pointer exists.
 
 `dev:logs` has no `--follow`. A tail that never returns is the thing `--detach` exists
 to avoid. It polls instead. Each read is the last 100 lines by default, ANSI stripped,

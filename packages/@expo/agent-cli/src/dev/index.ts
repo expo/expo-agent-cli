@@ -114,12 +114,27 @@ export const agentCliDev: Command = async (argv) => {
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
     const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
-    const options = resolveDevOptions(argv ?? [], readAgentCliSettings(projectRoot).settings);
+    const { DETACHED_SETTINGS_ENV, withDetachedOwnerAsync } =
+      require('./detachedOwner') as typeof import('./detachedOwner');
+    const snapshot =
+      process.env.__EXPO_AGENT_CLI_DETACHED === '1'
+        ? process.env[DETACHED_SETTINGS_ENV]
+        : undefined;
+    delete process.env[DETACHED_SETTINGS_ENV];
+    const { parseAgentCliSettings } =
+      require('../settings/parse') as typeof import('../settings/parse');
+    const settings =
+      snapshot == null
+        ? readAgentCliSettings(projectRoot).settings
+        : parseAgentCliSettings(JSON.parse(snapshot), 'detached settings');
+    const options = resolveDevOptions(argv ?? [], settings);
     assertDependenciesInstalledSync(projectRoot);
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — Renamed: the
     // plan-first engine is `@expo/agent-cli dev`, and `@expo/agent-cli start` is the plain `expo start` wrapper.
     const { devAsync } = require('./devAsync') as typeof import('./devAsync');
-    process.exitCode = await devAsync(projectRoot, options);
+    process.exitCode = options.detachedChild
+      ? await withDetachedOwnerAsync(projectRoot, options, () => devAsync(projectRoot, options))
+      : await devAsync(projectRoot, options);
   })().catch(logCmdError);
 };

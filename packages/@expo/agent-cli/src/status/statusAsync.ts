@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { readDetachedAttemptAsync } from '../dev/detachedOwner';
 
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
@@ -250,6 +251,7 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
+  const detached = await readDetachedAttemptAsync(projectRoot);
   const easProject = readEasProject(projectRoot);
   const projectRead = attemptAsync(() => readProjectAsync(projectRoot, options));
   const authRead = attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot));
@@ -288,6 +290,9 @@ export async function collectStatusReportAsync(
   const bindings = 'value' in binding ? binding.value : [];
   const errors: Partial<Record<StatusSectionName, string>> = {};
   const report: StatusReport = {
+    ...(detached && (!detached.ref || ownLock?.detachedAttemptId !== detached.ref.id)
+      ? { detached: detached.observation }
+      : {}),
     project: null,
     expoGo: null,
     freshness: null,
@@ -439,6 +444,14 @@ export async function collectStatusReportAsync(
           unreadableBindingFiles(projectRoot, bindingPlatform)[0]?.file ?? null,
       },
     });
+    if (report.detached) {
+      report.next = {
+        ...report.next,
+        command: `${PROGRAM_PREFIX} dev:logs`,
+        steps: [],
+        why: report.detached.detail,
+      };
+    }
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;

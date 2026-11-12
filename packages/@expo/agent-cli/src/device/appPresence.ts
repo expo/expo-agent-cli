@@ -24,6 +24,7 @@ import {
 import type { NativePlatform } from '../plan/types';
 import { readConfiguredAppId } from '../runtime/appId';
 import { hasAppOnDeviceAsync } from './hasApp';
+import { trackStartupTask } from '../utils/startupTasks';
 
 /** Whether the development build is on the device, as far as this machine can be asked. */
 export type AppPresence =
@@ -111,7 +112,7 @@ export async function probeAppPresenceAsync(
   });
   try {
     return await Promise.race([
-      askDeviceAsync(projectRoot, platform, bound.device, options),
+      trackStartupTask(askDeviceAsync(projectRoot, platform, bound.device, options)),
       expired,
     ]);
   } catch {

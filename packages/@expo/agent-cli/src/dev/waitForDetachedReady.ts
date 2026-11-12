@@ -68,7 +68,7 @@ export async function waitForDetachedReadyAsync(
       const current = await readDevServerLockAsync(projectRoot, {
         timeoutMs: Math.min(2000, Math.max(1, deadline - Date.now())),
       });
-      if (current && current.pid !== initialLock.pid) {
+      if (current && !sameOwner(current, initialLock)) {
         return failed('The dev-server lock changed owners while waiting for readiness.');
       }
       if (current?.phase === 'finishing') {
@@ -115,4 +115,8 @@ export async function waitForDetachedReadyAsync(
     probe?.controller.abort();
     await probe?.promise;
   }
+}
+
+function sameOwner(a: DevServerLockInfo, b: DevServerLockInfo): boolean {
+  return a.pid === b.pid && a.detachedAttemptId === b.detachedAttemptId;
 }

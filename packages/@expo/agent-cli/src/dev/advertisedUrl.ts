@@ -112,9 +112,9 @@ export function readDevServerLog(lines: string[]): DevServerLogReading {
  */
 export function readDevServerLogSync(
   projectRoot: string,
-  { tail = ADVERTISED_LOG_LINES }: { tail?: number } = {}
+  { tail = ADVERTISED_LOG_LINES, logFile }: { tail?: number; logFile?: string } = {}
 ): CapturedDevServerLog | null {
-  const read = readDetachedLogSync(projectRoot, tail);
+  const read = readDetachedLogSync(projectRoot, tail, logFile);
   if (read == null) {
     return null;
   }

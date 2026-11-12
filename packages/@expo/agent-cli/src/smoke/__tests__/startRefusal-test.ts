@@ -19,9 +19,5 @@ it('a start refused before acquisition keeps the bound device on cleanup', async
   const start = await deps.startDevServer();
   expect(start.reason).toContain('EAS credits');
   await deps.stopDevServer();
-  expect(devStopAsync).toHaveBeenCalledWith(
-    '/work/app',
-    expect.objectContaining({ release: false }),
-    expect.anything()
-  );
+  expect(devStopAsync).not.toHaveBeenCalled();
 });

@@ -7,25 +7,17 @@
 // command timeout waiting for a command that never returns, and every step after it — `dev:wait`,
 // `navigate`, `runtime:errors` — needs a shell the dev server is not holding [F46, friction run 4].
 //
-// What is new here is only the *spawn*: the child is `@expo/agent-cli dev` again, unchanged, with its
-// output pointed at a file. Everything that makes the dev server discoverable afterwards already
-// exists — the lock publishes its port (`src/devLock/`), `dev:wait` reports its readiness, and
-// `dev:stop` signals the pid the lock names. This is the reason the child is this CLI and not
-// `expo start` directly: the lock is taken by the wrapper, so a detached run has to *be* a wrapper.
-//
-// **One detached dev server per project.** The lock is asked before anything is spawned.
-// Two dev servers for one project is a thing people do on purpose in two terminals; two
-// *detached* ones is a process
-// nobody can find, because only one of them can hold the lock that names it.
-
-import type { PlanPlatform } from '../plan/types';
-import { otherPlatformSessionError } from '../device/cloudErrors';
-import { otherPlatformSessionAsync } from './openAppEas';
+import type { PlanPlatform, NativePlatform } from '../plan/types';
 import { reopenEasAsync } from './reopenEas';
 import { devServerRunningStopAsync } from './runningDevServer';
 import { RUN_PHASE } from './runPhase';
 import { spawn } from 'child_process';
 import fs from 'fs';
+import {
+  prepareDetachedCandidate,
+  readDetachedRunningLockAsync,
+  type DetachedAttemptRef,
+} from './detachedOwner';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { devicesDisabled, hostBindsPlatform, localBackendOf } from '../deviceBinding';
@@ -40,7 +32,6 @@ import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
 import { findNeedsHumanScenario } from '../needsHuman/registry';
-import type { NativePlatform } from '../plan/types';
 import { rerunDevCommand } from '../plan/rerun';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
@@ -67,7 +58,7 @@ import { CALLER_ARGV_ENV } from './deviceOption';
 import { event } from './events';
 import {
   detachedLogPath,
-  openDetachedLogSync,
+  withDetachedLogAttribution,
   readDetachedLogSync,
   type DetachedLogRead,
 } from './logFile';
@@ -199,6 +190,7 @@ export interface DevDetachOptions {
    */
   print?: boolean;
   publicDev?: boolean;
+  onElected?: (ref: DetachedAttemptRef) => void;
 }
 
 /**
@@ -207,11 +199,14 @@ export interface DevDetachOptions {
  * @returns `0` for a successful start or supported reuse. Refusals throw.
  * @throws {CommandError} when the child exited before publishing its lock, or the wait ran out.
  */
+export const devDetachAsync: typeof devDetachAttributedAsync = (root, options, report) =>
+  withDetachedLogAttribution(root, () => devDetachAttributedAsync(root, options, report));
+
 // oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
-export async function devDetachAsync(
+async function devDetachAttributedAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, publicDev = false }: DevDetachOptions = {}
+  { print = true, publicDev = false, onElected }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
 
@@ -235,9 +230,7 @@ export async function devDetachAsync(
       smokePlatform,
     });
 
-  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
-  // lock, so nothing would be able to find it or stop it afterwards.
-  let running = await readDevServerLockAsync(projectRoot);
+  let running = await readDetachedRunningLockAsync(projectRoot, options);
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
   // followed, not given a second child.
   if (running?.phase === 'building') {
@@ -366,20 +359,11 @@ export async function devDetachAsync(
     });
   }
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
-  // exit code. Spawn path only: on a running server the reopen above throws the same refusal.
   const easPlatform = easOpenPlatform(options);
-  const other = easPlatform ? await otherPlatformSessionAsync(projectRoot, easPlatform) : null;
-  if (easPlatform && other)
-    throw otherPlatformSessionError(other.platform, {
-      wanted: easPlatform,
-      sessionId: other.sessionId,
-      devServerRunning: false,
-    });
   // The session bound before the spawn, expired or not, is the one the child reuses and renews.
   const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
-  const { logFile, fd } = openDetachedLogSync(projectRoot);
+  const { logFile, fd, ...candidate } = prepareDetachedCandidate(projectRoot, options, onElected);
   const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);
 
   event('detach_spawn', { logFile, argv: args });
@@ -397,6 +381,7 @@ export async function devDetachAsync(
       ...detachedEventLogEnv(process.env),
       __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
       __EXPO_AGENT_CLI_DETACHED: '1',
+      ...candidate.env,
       [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
     },
   });
@@ -425,7 +410,13 @@ export async function devDetachAsync(
   });
   const hasExited = () => childExit != null;
 
-  const wait = await waitPastBuildingAsync(projectRoot, options, startedAt, hasExited);
+  const wait = await waitPastBuildingAsync(
+    projectRoot,
+    options,
+    startedAt,
+    hasExited,
+    candidate.readLockAsync
+  );
   if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, false);
   // A run that ended in its build holds no lock any more, and its log says why.
   let lock = wait.kind === 'up' ? wait.lock : null;
@@ -443,6 +434,7 @@ export async function devDetachAsync(
       const exit = childExit as { code: number | null } | null;
       throw buildEndedError(wait.building, exit?.code ?? verdict?.exitCode ?? null);
     }
+    await candidate.observeFailedStartAsync(childExit != null, verdict);
     throw notStartedError(
       projectRoot,
       logFile,
@@ -1215,9 +1207,7 @@ function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): 
     const lead = report.eas?.sessionId
       ? `This project already had a dev server; this run bound EAS Simulator session ${report.eas.sessionId}.`
       : 'This project already had a dev server, so nothing was started.';
-    lines.push(
-      ` ${lead} One detached dev server per project: a second one could not hold the lock, and nothing would be able to find or stop it.`
-    );
+    lines.push(` ${lead}`);
   }
   Log.log(lines.join('\n'));
 }
@@ -1316,13 +1306,19 @@ async function waitForLockAsync(
     timeoutMs,
     hasExited,
     acceptBuilding = false,
-  }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean }
+    readLock = () => readDevServerLockAsync(projectRoot),
+  }: {
+    timeoutMs: number;
+    hasExited: () => boolean;
+    acceptBuilding?: boolean;
+    readLock?: () => Promise<DevServerLockInfo | null>;
+  }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
   // A run that ends in its build lets go of its lock; its last `building` answer says it built.
   let building: DevServerLockInfo | null = null;
   for (;;) {
-    const lock = await readDevServerLockAsync(projectRoot);
+    const lock = await readLock();
     if (lock?.phase === 'building') building = lock;
     // A `building` lock has no dev server yet. It ends the wait only for a caller that reports it.
     if (lock?.phase === 'building' && acceptBuilding) return lock;
@@ -1376,12 +1372,14 @@ async function waitPastBuildingAsync(
   projectRoot: string,
   options: DevOptions,
   startedAt: number,
-  hasExited: () => boolean
+  hasExited: () => boolean,
+  readLock?: () => Promise<DevServerLockInfo | null>
 ): Promise<BuildingWait> {
   const lock = await waitForLockAsync(projectRoot, {
     timeoutMs: options.detachTimeoutMs,
     hasExited,
     acceptBuilding: !options.waitReady,
+    readLock,
   });
   if (!lock) return { kind: 'ended', building: null };
   if (lock.phase !== 'building') return { kind: 'up', lock };

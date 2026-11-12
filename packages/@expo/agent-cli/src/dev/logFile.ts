@@ -1,15 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// Where a detached dev server's output goes, and how it is read back.
-//
-// One file per project, not one per port, and truncated on each run. Both follow from the rule the
-// lock already enforces: **one detached dev server per project**. A name carrying the port could
-// not be resolved by `dev:logs` before the port was known, and a file that accumulated across runs
-// would answer "what is my dev server doing" with what a dev server did last week.
-//
-// It sits in `.expo/dev/logs/`, which `src/utils/dotExpo.ts` already documents as the directory of
-// per-run logs — so nothing new appears in a project, and `.expo` is already gitignored.
-
+import { AsyncLocalStorage } from 'async_hooks';
 import fs from 'fs';
 import path from 'path';
 import { stripVTControlCharacters } from 'util';
@@ -17,26 +7,48 @@ import { stripVTControlCharacters } from 'util';
 /** Directory of the per-run logs, as `.expo`'s own README describes it. */
 const DEV_LOGS_DIR = path.join('.expo', 'dev', 'logs');
 
-/** Name of the file a detached dev server's stdout and stderr are written to. */
+/** Legacy log used only when no candidate has published a current pointer. */
 const DETACHED_LOG_NAME = 'dev-detached.log';
+const attribution = new AsyncLocalStorage<{ root: string; logFile?: string }>();
+
+export function withDetachedLogAttribution<T>(root: string, run: () => T): T {
+  return attribution.run({ root }, run);
+}
+
+export function captureDetachedLog(logFile: string): void {
+  const scope = attribution.getStore();
+  if (scope) scope.logFile = logFile;
+}
+
+export function publishDetachedLogSync(root: string, logFile: string): void {
+  fs.writeFileSync(path.join(root, DEV_LOGS_DIR, 'current'), path.basename(logFile));
+}
 
 /** Where this project's detached dev server writes its output. */
 export function detachedLogPath(projectRoot: string): string {
+  const scope = attribution.getStore();
+  if (scope?.root === projectRoot && scope.logFile) return scope.logFile;
+  try {
+    const name = fs.readFileSync(path.join(projectRoot, DEV_LOGS_DIR, 'current'), 'utf8');
+    if (/^dev-detached-[\da-f-]+\.log$/.test(name))
+      return path.join(projectRoot, DEV_LOGS_DIR, name);
+  } catch {}
   return path.join(projectRoot, DEV_LOGS_DIR, DETACHED_LOG_NAME);
 }
 
 /**
- * Create the log file for a new detached run, truncating whatever was there.
+ * Exclusively create a private log for a new detached candidate.
  *
  * @returns the path and an open file descriptor for the child's stdout and stderr. The caller
  * closes the descriptor once the child owns it.
  */
-export function openDetachedLogSync(projectRoot: string): { logFile: string; fd: number } {
-  const logFile = detachedLogPath(projectRoot);
+export function openDetachedLogSync(
+  projectRoot: string,
+  id: string
+): { logFile: string; fd: number } {
+  const logFile = path.join(projectRoot, DEV_LOGS_DIR, `dev-detached-${id}.log`);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
-  // `w`, so a new run starts a new log: the previous run's Metro output under a question about
-  // this one is worse than no answer.
-  return { logFile, fd: fs.openSync(logFile, 'w') };
+  return { logFile, fd: fs.openSync(logFile, 'wx') };
 }
 
 /** What a read of the log amounts to. */
@@ -60,8 +72,11 @@ export interface DetachedLogRead {
  *
  * @param tail how many lines from the end to return.
  */
-export function readDetachedLogSync(projectRoot: string, tail: number): DetachedLogRead | null {
-  const logFile = detachedLogPath(projectRoot);
+export function readDetachedLogSync(
+  projectRoot: string,
+  tail: number,
+  logFile = detachedLogPath(projectRoot)
+): DetachedLogRead | null {
   let raw: string;
   try {
     raw = fs.readFileSync(logFile, 'utf8');

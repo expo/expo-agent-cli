@@ -213,20 +213,21 @@ describe(readDetachedLogSync, () => {
     expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual(['Bundled 1200ms']);
   });
 
-  it(`truncates the file for a new run`, () => {
+  it(`preserves the previous log when a candidate creates its private log`, () => {
     vol.fromJSON({ [detachedLogPath(projectRoot)]: 'from the last run\n' });
 
-    const { logFile } = openDetachedLogSync(projectRoot);
+    const { logFile } = openDetachedLogSync(projectRoot, 'candidate');
 
-    expect(logFile).toBe(detachedLogPath(projectRoot));
-    expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual([]);
+    expect(readDetachedLogSync(projectRoot, 10, logFile)!.lines).toEqual([]);
+    expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual(['from the last run']);
+    expect(() => openDetachedLogSync(projectRoot, 'candidate')).toThrow();
   });
 
   it(`creates the log directory when the project has none`, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
 
-    expect(() => openDetachedLogSync(projectRoot)).not.toThrow();
-    expect(readDetachedLogSync(projectRoot, 10)).not.toBeNull();
+    const { logFile } = openDetachedLogSync(projectRoot, 'candidate');
+    expect(readDetachedLogSync(projectRoot, 10, logFile)).not.toBeNull();
   });
 });
 

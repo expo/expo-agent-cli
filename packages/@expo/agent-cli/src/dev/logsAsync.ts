@@ -15,6 +15,7 @@
 // write (llp/0008-guardrails.rfc.md §Untrusted-content marking).
 
 import chalk from 'chalk';
+import { readDetachedAttemptAsync, type DetachedObservation } from './detachedOwner';
 
 import { readDevServerLockAsync } from '../devLock';
 import { event as cliEvent } from '../events';
@@ -39,6 +40,7 @@ import type { DevLogsOptions } from './resolveLogsOptions';
  * @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract
  */
 export interface DevLogsResultJson {
+  detached?: DetachedObservation;
   /** The file that was read. */
   logFile: string;
   /** The lines themselves, ANSI stripped, oldest first. */
@@ -60,13 +62,18 @@ export interface DevLogsResultJson {
 }
 
 /**
- * Print what this project's detached dev server has written.
+ * Print the captured log and any uncertain ownership observation.
  *
  * @returns `0`. A log that exists is the answer, whatever is in it.
  * @throws {CommandError} `NO_DEV_LOG` when this project has no detached dev server log.
  */
 export async function devLogsAsync(projectRoot: string, options: DevLogsOptions): Promise<number> {
-  const read = readDetachedLogSync(projectRoot, options.tail);
+  const attempt = await readDetachedAttemptAsync(projectRoot);
+  const read =
+    readDetachedLogSync(projectRoot, options.tail, attempt?.observation.logFile ?? undefined) ??
+    (attempt
+      ? { logFile: attempt.observation.logFile!, lines: [], totalLines: 0, truncated: false }
+      : null);
   const [lock, smokePlatform] = await Promise.all([
     readDevServerLockAsync(projectRoot),
     defaultSmokePlatformAsync(projectRoot),
@@ -79,9 +86,15 @@ export async function devLogsAsync(projectRoot: string, options: DevLogsOptions)
   // Read over the **whole** log rather than the tail this command was asked for: the `Waiting on`
   // line is near the top of a file whose tail is what a caller usually wants, so a `--tail 20`
   // would hide the one address a device off this machine can use.
-  const reach = resolveDevServerReach(readDevServerLogSync(projectRoot), lock);
+  const reach = resolveDevServerReach(
+    readDevServerLogSync(projectRoot, { logFile: read.logFile }),
+    lock
+  );
 
   const report: DevLogsResultJson = {
+    ...(attempt && (!attempt.ref || lock?.detachedAttemptId !== attempt.ref.id)
+      ? { detached: attempt.observation }
+      : {}),
     logFile: read.logFile,
     lines: read.lines,
     totalLines: read.totalLines,
@@ -123,6 +136,10 @@ function printHumanReport(report: DevLogsResultJson): void {
     header.push(
       `${label('Dev server')}${report.devServer.url}${chalk.dim(` · pid ${report.devServer.pid}`)}`
     );
+  } else if (report.detached) {
+    header.push(
+      `${label('Detached')}${report.detached.detail} pid ${report.detached.pid ?? 'unknown'}`
+    );
   } else {
     header.push(
       `${label('Dev server')}${chalk.dim('not running · this is what the last detached run printed')}`
@@ -150,6 +167,8 @@ function reachLine(report: DevLogsResultJson): string | null {
 
 /** @ref llp/0009-smart-followups.rfc.md §Examples per command */
 function buildFollowUps(report: DevLogsResultJson, smokePlatform: NativePlatform): FollowUp[] {
+  if (report.detached && !report.devServer)
+    return [{ id: 'dev-logs', command: `${PROGRAM_PREFIX} dev:logs`, why: report.detached.detail }];
   if (!report.devServer) {
     return [
       {

@@ -749,7 +749,6 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000); const exitCode = 0;'
         ),
       });
-      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
       try {
         // A detached run keeps its session, so the session is the stop's to end.
         const started = await executeAgentCliAsync(
@@ -757,7 +756,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           ['dev', '--ios', '--eas', '--detach', '--json'],
           { env: { ...easRunEnv(projectRoot, 8587), STUB_EXPO_DELAY_MS: '2500' } }
         );
-        const pid: number = JSON.parse(started.stdout).pid;
+        const { pid, logFile }: { pid: number; logFile: string } = JSON.parse(started.stdout);
         expect(
           await waitForAsync(
             () =>
@@ -945,7 +944,6 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         STUB_EAS_BUILD_STDERR: 'Build failed: e2e-followed',
         AGENT_CLI_DETACH_TIMEOUT_MS: '1500',
       };
-      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
       try {
         const first = await executeAgentCliAsync(
           projectRoot,
@@ -953,6 +951,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           { env, reject: false }
         );
         expect(JSON.parse(first.stdout).phase).toBe('building');
+        const logFile: string = JSON.parse(first.stdout).logFile;
 
         const again = await executeAgentCliAsync(
           projectRoot,

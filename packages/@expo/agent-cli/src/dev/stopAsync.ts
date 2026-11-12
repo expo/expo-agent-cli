@@ -28,16 +28,17 @@
 // `--signal SIGKILL` for a pid nothing could signal.
 
 import { stopCloudSessionsAsync } from './stopCloudSessions';
+import {
+  inspectDetachedStopAsync,
+  readDetachedAttemptAsync,
+  retireDetachedAttempt,
+  type DetachedAttemptRef,
+} from './detachedOwner';
 import chalk from 'chalk';
 
 import type { CloudPlatform } from '../device/cloudSimulator';
 import type { ReleasedDevice } from '../deviceBinding';
-import {
-  lockAddressFor,
-  probeDevServerLockAsync,
-  readDevServerLockAsync,
-  type DevServerLockInfo,
-} from '../devLock';
+import { lockAddressFor, probeDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { event as cliEvent } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
@@ -51,7 +52,7 @@ import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { debugEvent, event } from './events';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
-import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
+import { captureDetachedDevices, stopDevicesAsync, type StoppedDevices } from './stopDevices';
 import {
   isPortFreeAsync,
   POLL_INTERVAL_MS,
@@ -206,6 +207,7 @@ export interface DevStopReportOptions {
    * is never a silent stop.
    */
   print?: boolean;
+  expectedAttempt?: DetachedAttemptRef;
   /**
    * Handed the report, for a caller that has to say what happened in words of its own.
    *
@@ -224,10 +226,17 @@ export interface DevStopReportOptions {
 export async function devStopAsync(
   projectRoot: string,
   options: DevStopOptions,
-  { print = true, onReport }: DevStopReportOptions = {}
+  { print = true, onReport, expectedAttempt }: DevStopReportOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
-  const lock = await readDevServerLockAsync(projectRoot);
+  const { attempt, lock, authorized } = await inspectDetachedStopAsync(
+    projectRoot,
+    options,
+    expectedAttempt
+  );
+  if (!authorized) return EXIT_OUTCOME_FAILED;
+
+  const releaseCaptured = captureDetachedDevices(projectRoot, options, expectedAttempt);
 
   // `--port` names the target, and a lock is only evidence about the port it holds.
   //
@@ -246,7 +255,7 @@ export async function devStopAsync(
 
   const { report, finishing } =
     lock != null && lockOwnsTarget
-      ? await stopLockedDevServerAsync(lock, options, startedAt)
+      ? await stopLockedDevServerAsync(lock, options, startedAt, attempt?.ref ?? null)
       : {
           report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
           finishing: false,
@@ -270,10 +279,18 @@ export async function devStopAsync(
       };
     }
   }
-  const cloud = options.eas && !sessionPending ? await stopCloudSessionsAsync(projectRoot) : null;
+  const cloud =
+    options.eas && !sessionPending && !expectedAttempt
+      ? await stopCloudSessionsAsync(projectRoot)
+      : null;
   if (cloud) report.session = cloud.session;
   const devServerOk = report.stopped || report.reason === 'not-running';
-  Object.assign(report, await stopDevicesAsync(projectRoot, options, report, cloud));
+  Object.assign(
+    report,
+    releaseCaptured
+      ? await releaseCaptured(devServerOk)
+      : await stopDevicesAsync(projectRoot, options, report, cloud)
+  );
   report.followups = followUpsEnabled(options.followups)
     ? buildFollowUps(report, runFinishing)
     : [];
@@ -329,7 +346,8 @@ export async function devStopAsync(
 async function stopLockedDevServerAsync(
   lock: DevServerLockInfo,
   options: DevStopOptions,
-  startedAt: number
+  startedAt: number,
+  attempt: DetachedAttemptRef | null
 ): Promise<{ report: DevStopResultJson; finishing: boolean }> {
   const base: DevStopResultJson = {
     stopped: false,
@@ -380,6 +398,16 @@ async function stopLockedDevServerAsync(
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a stop that ends the
     // holder without its cleanup (Windows `taskkill /F`) leaves its record; this stop ends it.
     clearDevRunRecord(lock.projectRoot, lock.pid);
+    if (
+      attempt &&
+      !retireDetachedAttempt(attempt) &&
+      (await readDetachedAttemptAsync(lock.projectRoot))
+    ) {
+      base.stopped = false;
+      base.reason = 'still-running';
+      base.detail =
+        'The process stopped, but detached ownership could not be safely retired. Inspect dev:logs before manual recovery.';
+    }
     return { report: base, finishing: false };
   }
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the run's lock says

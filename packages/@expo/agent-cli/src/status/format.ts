@@ -66,6 +66,11 @@ export function formatStatusReport(report: StatusReport): string {
       ? [row('eas build', report.builds, buildsLine, report, 'builds')]
       : []),
     row('dev server', report.devServer, devServerLine, report, 'devServer'),
+    ...(report.detached
+      ? [
+          `${chalk.dim('detached'.padEnd(LABEL_WIDTH))}${report.detached.detail} pid ${report.detached.pid ?? 'unknown'} · ${report.detached.logFile}`,
+        ]
+      : []),
     // Under the dev server it points at, because that is the address it was built from.
     ...(report.devServer ? openUrlLines(report.devServer) : []),
     deviceRow(report),

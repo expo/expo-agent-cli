@@ -110,6 +110,7 @@ export class DevServerStepRunner {
     // Session cleanup stays inside the active step so interruption waits for it.
     const result = await steps.stepAsync(async (signal) => {
       let attemptActive = true;
+      let localOpen: Promise<void> | undefined;
       const stillWanted = () => attemptActive && !steps.interrupted;
       const easPlatform = openPlatform ? this.easPlatform : null;
       const eas = easPlatform
@@ -137,7 +138,7 @@ export class DevServerStepRunner {
                 eas.open({ devServerUrl: url, stillWanted, buildId: easBuildId });
                 void eas.finished.then(() => lock.apply({ type: 'eas-open-returned' }));
               } else {
-                void openAppForRunAsync(
+                localOpen = openAppForRunAsync(
                   projectRoot,
                   plan,
                   openPlatform,
@@ -151,6 +152,7 @@ export class DevServerStepRunner {
       }).finally(async () => {
         attemptActive = false;
         await eas?.finishAsync();
+        await localOpen;
       });
     });
     return { args, spawnedAt, result };

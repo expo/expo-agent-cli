@@ -15,8 +15,10 @@ import path from 'node:path';
 
 import { list as listSessions, tap } from '2g/api';
 
+import { detachedLogPath } from '../../src/dev/logFile';
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import { rerunDevCommand } from '../../src/plan/rerun';
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 import {
   executeAgentCliAsync,
   freePortAsync,
@@ -30,7 +32,7 @@ import {
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
-import { DETACHED_LOG_PATH, cleanUpDetachedAsync, detachEnv, STUB_ALIVE_MS } from '../detachUtils';
+import { cleanUpDetachedAsync, detachEnv, STUB_ALIVE_MS } from '../detachUtils';
 
 /** Whether a pid is still alive, without signalling it. */
 function isAlive(pid: number): boolean {
@@ -170,9 +172,9 @@ describe('@expo/agent-cli dev --detach', () => {
         ready: null,
       });
       expect(report.pid).toBeGreaterThan(0);
-      expect(report.logFile).toContain(DETACHED_LOG_PATH);
+      expect(report.logFile).toBe(canonicalizeExistingPath(detachedLogPath(projectRoot)));
       // Line 1 of the child's log names the child, before its plan, so a re-run can tell who wrote it.
-      const log = await fs.promises.readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8');
+      const log = await fs.promises.readFile(detachedLogPath(projectRoot), 'utf8');
       expect(log.split('\n')[0]).toBe(`Detached dev run, pid ${report.pid}.`);
 
       // The parent has exited — this test is running — and the child has not.
@@ -455,7 +457,7 @@ describe('@expo/agent-cli dev --detach', () => {
           ['run:ios', '--port', String(report.port)],
         ]);
         // Said once, by the plan, and not again by the step it moved.
-        const log = await fs.promises.readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8');
+        const log = await fs.promises.readFile(detachedLogPath(projectRoot), 'utf8');
         expect(log.split('Port 8081 is busy; the dev server uses').length).toBe(2);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
@@ -810,7 +812,7 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(
           result.exitCode,
           `${result.all}\nDetached child log:\n${await fs.promises
-            .readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8')
+            .readFile(detachedLogPath(projectRoot), 'utf8')
             .catch(() => '(unavailable)')}`
         ).toBe(7);
         const { error } = JSON.parse(result.stdout);

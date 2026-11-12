@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the one writer of a run's lock.
 
 import * as Log from '../log';
+import { currentDetachedAttemptId } from '../dev/detachedOwner';
 import { PROGRAM_NAME } from '../programName';
 import { lockAddressOrEmpty } from './address';
 import { debugEvent, event } from './events';
@@ -115,6 +116,7 @@ export async function withRunLockAsync<T>(
 /** What the lock answers in a held state. */
 function lockInfo(projectRoot: string, state: HeldRunState): DevServerLockInfo {
   return {
+    ...(currentDetachedAttemptId() ? { detachedAttemptId: currentDetachedAttemptId() } : {}),
     url: `http://127.0.0.1:${state.port}`,
     port: state.port,
     portReported: state.source === 'reported',

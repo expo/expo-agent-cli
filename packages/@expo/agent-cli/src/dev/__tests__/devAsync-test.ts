@@ -53,6 +53,7 @@ vi.mock('../portCollision', async (importOriginal) => {
 });
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openAppEas', () => ({
+  otherPlatformSessionAsync: vi.fn(async () => null),
   easRunLifecycle: vi.fn(),
 }));
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));

@@ -1,3 +1,4 @@
+import type { DetachedObservation } from '../dev/detachedOwner';
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // The shape of the status report: one object with a section per question the command answers.
 // Pure data, so the human formatter and the `--json` output describe exactly the same facts.
@@ -548,6 +549,7 @@ export type StatusSectionName =
  * can, so a broken probe costs one section instead of the whole command.
  */
 export interface StatusReport {
+  detached?: DetachedObservation;
   binding?: BindingSummary[];
   orphanSessions?: OrphanSessionStatus[];
   project: ProjectStatus | null;

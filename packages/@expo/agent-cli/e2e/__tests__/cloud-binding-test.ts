@@ -310,7 +310,7 @@ it('a session the dotenv does not name is refused with dev:stop --eas, which end
   expect(stops).toEqual(expect.arrayContaining(['ios-A', 'android-B']));
   expect(fs.readFileSync(path.join(root, '.env.eas-simulator'), 'utf8')).not.toContain('=');
 });
-it('a start for the other platform beside a bound session refuses and spawns nothing', async () => {
+it('a start for the other platform beside a bound session starts no dev server or session', async () => {
   const root = await project();
   await writeCloudBindingAsync(expoHome, root, { id: 's-ios' });
   list([{ id: 's-ios' }]);

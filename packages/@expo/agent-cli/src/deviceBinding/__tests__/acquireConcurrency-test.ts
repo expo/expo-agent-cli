@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { acquireDeviceAsync } from '..';
+import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '..';
 import {
   bindingPathFor,
   readBindingFile,
@@ -179,4 +179,83 @@ it('stops after three changed snapshots without replacing the last binding', asy
     false
   );
   expectDeviceCallsOutsideLock(tools);
+});
+
+it('serializes captured shutdown and rechecks authority after waiting for a successor', async () => {
+  const tools = fakeTools({
+    simulators: [{ udid: 'SIM', name: 'owned', state: 'Booted' }],
+    alivePids: [process.pid],
+  });
+  const expected = bindingFor(root, 'SIM');
+  await replaceBinding(tools, 'SIM');
+  const shutdown = signal(),
+    resume = signal();
+  let waiting = signal();
+  const simctl = tools.simctl,
+    alive = tools.isPidAlive;
+  tools.simctl = async (args, options) => {
+    if (args[0] === 'shutdown') {
+      shutdown.resolve();
+      await resume.promise;
+    }
+    return simctl(args, options);
+  };
+  tools.isPidAlive = (pid) => {
+    if (pid === process.pid) waiting.resolve();
+    return alive(pid);
+  };
+  const released = releaseWorktreeDevicesAsync(root, { platform: 'ios', tools, expected });
+  await shutdown.promise;
+  const acquired = acquireDeviceAsync(root, 'ios', { tools });
+  try {
+    expect(
+      await Promise.race([waiting.promise.then(() => 'waiting'), acquired.then(() => 'acquired')])
+    ).toBe('waiting');
+    expect(readBindingFile(file())).toMatchObject({ binding: { boundAt: expected.boundAt } });
+    expect(tools.calls.some(([command]) => command === 'bootstatus')).toBe(false);
+  } finally {
+    resume.resolve();
+    await Promise.all([released, acquired]);
+  }
+  const [rows, successor] = await Promise.all([released, acquired]);
+  const replacementBinding = successor.binding;
+  if (!replacementBinding) throw new Error('Successor acquired no binding');
+  expect(rows).toEqual([expect.objectContaining({ released: true, shutDown: true })]);
+  expect(replacementBinding.boundAt).not.toBe(expected.boundAt);
+  expect(tools.simulators[0]?.state).toBe('Booted');
+  expect(tools.calls.filter(([command]) => ['shutdown', 'bootstatus'].includes(command!))).toEqual([
+    ['shutdown', 'SIM'],
+    ['bootstatus', 'SIM', '-b'],
+  ]);
+
+  const held = signal(),
+    resumeLock = signal();
+  waiting = signal();
+  let allowed = true;
+  const blocker = withRegistryLockAsync(
+    async () => {
+      held.resolve();
+      await resumeLock.promise;
+      writeBindingFile(file(), { ...replacementBinding });
+      allowed = false;
+    },
+    { tools, waitMs: 1_000 }
+  );
+  await held.promise;
+  const skipped = releaseWorktreeDevicesAsync(root, {
+    platform: 'ios',
+    tools,
+    expected: replacementBinding,
+    canRelease: async () => allowed,
+  });
+  try {
+    await waiting.promise;
+  } finally {
+    resumeLock.resolve();
+  }
+  await blocker;
+  expect(await skipped).toEqual([]);
+  expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: replacementBinding });
+  expect(tools.simulators[0]?.state).toBe('Booted');
+  expect(tools.calls.filter(([command]) => command === 'shutdown')).toHaveLength(1);
 });

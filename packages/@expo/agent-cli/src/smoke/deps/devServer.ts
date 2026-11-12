@@ -1,6 +1,8 @@
 import chalk from 'chalk';
 
 import { devDetachAsync } from '../../dev/detachAsync';
+import type { DetachedAttemptRef } from '../../dev/detachedOwner';
+import { readAgentCliSettings } from '../../settings';
 import { resolveDevOptions } from '../../dev/resolveOptions';
 import { resolveDevStopOptions } from '../../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../../dev/stopAsync';
@@ -19,9 +21,9 @@ import { whatAndHow } from './reasons';
 import { deviceBoundByStart, START_DEV_SERVER_ARGV, startPortArgs } from './startArgs';
 import type { SmokeDepsContext } from './shared';
 
-/** What the start phase tells the stop phase: whether the device it found was already running. */
 interface DevServerState {
   keepBoundDevice: boolean;
+  attempt?: DetachedAttemptRef;
 }
 
 /** How long discovery may spend on each candidate port. Short: a dev server that is up answers. */
@@ -115,13 +117,18 @@ async function startDevServer(
     await devDetachAsync(
       projectRoot,
       {
-        ...resolveDevOptions(argv),
+        ...resolveDevOptions(argv, readAgentCliSettings(projectRoot).settings),
         // A plan that compiles needs a budget the shape of a compile
         // (@ref ../timeouts §BUILD_DEV_SERVER_TIMEOUT_MS).
         detachTimeoutMs:
           target.buildLocation != null ? BUILD_DEV_SERVER_TIMEOUT_MS : START_DEV_SERVER_TIMEOUT_MS,
       },
-      { print: false }
+      {
+        print: false,
+        onElected: (ref) => {
+          server.attempt = ref;
+        },
+      }
     );
   } catch (error: unknown) {
     return {
@@ -156,6 +163,7 @@ async function stopDevServer(
   ctx: SmokeDepsContext,
   server: DevServerState
 ): ReturnType<SmokeDeps['stopDevServer']> {
+  if (!server.attempt) return { ok: true, target: null, reason: null };
   const { projectRoot, options } = ctx;
   const captured: { report: DevStopResultJson | null } = { report: null };
   const release = ctx.cloudRoute.current !== 'required' && !server.keepBoundDevice;
@@ -168,6 +176,7 @@ async function stopDevServer(
     },
     {
       print: false,
+      expectedAttempt: server.attempt,
       onReport: (stopped) => {
         captured.report = stopped;
       },

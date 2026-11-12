@@ -22,8 +22,9 @@ import type { DevServerLockInfo } from '../../devLock/types';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { printed } from '../../utils/__tests__/printed';
 
-vi.mock('../../devLock', () => {
-  const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
+vi.mock('../../devLock/client', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
+vi.mock('../../devLock', async () => {
+  const { readDevServerLockAsync } = await import('../../devLock/client');
   return {
     readDevServerLockAsync,
     // The address is the project root, and a probe is held when the mocked read answers.

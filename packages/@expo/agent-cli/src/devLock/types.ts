@@ -9,6 +9,7 @@
  * there is no file to read, and so nothing to read out of date.
  */
 export interface DevServerLockInfo {
+  detachedAttemptId?: string;
   /** Origin the dev server listens on, e.g. `http://127.0.0.1:8082`. */
   url: string;
   /** Port of {@link url}, split out so a caller does not have to parse it back. */

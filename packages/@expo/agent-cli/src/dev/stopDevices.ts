@@ -5,7 +5,9 @@ import {
   type ReleasedDevice,
 } from '../deviceBinding';
 import { deviceUnavailableError } from '../deviceBinding/errors';
-import { keptDevices, unreadableBindingFiles } from '../deviceBinding/records';
+import { keptDevices, ownBindingFiles, unreadableBindingFiles } from '../deviceBinding/records';
+import { readBindingFile } from '../deviceBinding/registry';
+import { readDetachedAttemptAsync, type DetachedAttemptRef } from './detachedOwner';
 import { reapDevicesAsync } from '../deviceBinding/reap';
 import type { CleanupReport } from '../deviceBinding/cleanup';
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
@@ -17,6 +19,50 @@ export interface StoppedDevices {
   devices: ReleasedDevice[];
   reaped: CleanupReport[];
   deviceError: string | null;
+}
+
+export function captureDetachedDevices(
+  root: string,
+  options: DevStopOptions,
+  attempt?: DetachedAttemptRef
+) {
+  if (!attempt) return null;
+  const bindings = ownBindingFiles(root)
+    .filter(
+      ({ platform, backend }) =>
+        backend !== 'cloud' && (!options.platform || platform === options.platform)
+    )
+    .flatMap(({ file }) => {
+      const read = readBindingFile(file);
+      return read.kind === 'binding' ? [read.binding] : [];
+    });
+  return async (stopped: boolean): Promise<StoppedDevices> => {
+    const report: StoppedDevices = { devices: [], reaped: [], deviceError: null };
+    const canRelease = async () => {
+      const current = await readDetachedAttemptAsync(root);
+      if (!current || current.ref?.id === attempt.id) return true;
+      report.deviceError =
+        'Device cleanup was skipped because detached ownership changed or became uncertain.';
+      return false;
+    };
+    if (!options.release || !stopped || devicesDisabled() || !(await canRelease())) return report;
+    try {
+      for (const binding of bindings) {
+        report.devices.push(
+          ...(await releaseWorktreeDevicesAsync(root, {
+            platform: binding.device.platform,
+            expected: binding,
+            canRelease,
+          }))
+        );
+      }
+      if (report.devices.some((device) => !device.released))
+        report.deviceError ??= 'Some captured devices could not be released.';
+    } catch (error) {
+      report.deviceError = error instanceof Error ? error.message : String(error);
+    }
+    return report;
+  };
 }
 
 /**

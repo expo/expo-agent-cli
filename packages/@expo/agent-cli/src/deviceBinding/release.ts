@@ -1,6 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Records
 // Let go of this worktree's own local bindings, one rule per origin. The file action runs under
-// the lock, the device action after it.
+// the lock; captured cleanup also dispatches its device action before unlocking.
 
 import { killEmulatorIfOurs } from './android';
 import { clearInspectCache } from './inspect';
@@ -38,15 +38,21 @@ export async function releaseWorktreeDevicesAsync(
     platform,
     tools = defaultTools(),
     expected,
-  }: { platform?: DevicePlatform; tools?: DeviceTools; expected?: Binding } = {}
+    canRelease,
+  }: {
+    platform?: DevicePlatform;
+    tools?: DeviceTools;
+    expected?: Binding;
+    canRelease?: () => Promise<boolean>;
+  } = {}
 ): Promise<ReleasedDevice[]> {
   const platforms: DevicePlatform[] = platform ? [platform] : ['ios', 'android'];
   const released: ReleasedDevice[] = [];
   for (const each of platforms) {
     const letGo =
       each === 'ios'
-        ? await releaseIosAsync(projectRoot, tools, expected)
-        : await releaseAndroidAsync(projectRoot, tools, expected);
+        ? await releaseIosAsync(projectRoot, tools, expected, canRelease)
+        : await releaseAndroidAsync(projectRoot, tools, expected, canRelease);
     if (letGo) {
       released.push(letGo);
     }
@@ -57,7 +63,8 @@ export async function releaseWorktreeDevicesAsync(
 async function releaseIosAsync(
   projectRoot: string,
   tools: DeviceTools,
-  expected?: Binding
+  expected?: Binding,
+  canRelease?: () => Promise<boolean>
 ): Promise<ReleasedDevice | null> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const before = readBindingFile(file);
@@ -74,14 +81,17 @@ async function releaseIosAsync(
       if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return null;
       }
+      if (canRelease && !(await canRelease())) return null;
       if (listing.kind === 'missing') {
         removeBindingFile(file);
         return { shutdown: false };
       }
       expireLease(file, read.binding, tools);
+      const shutdown =
+        origin === 'created' && !(listing.kind === 'listed' && listing.state === 'Shutdown');
       return {
-        shutdown:
-          origin === 'created' && !(listing.kind === 'listed' && listing.state === 'Shutdown'),
+        shutdown,
+        ...(expected && shutdown ? { stopped: await shutdownSimulatorAsync(tools, udid) } : {}),
       };
     },
     { waitMs: WRITE_LOCK_WAIT_MS, tools }
@@ -90,7 +100,12 @@ async function releaseIosAsync(
   if (letGo == null) {
     return null;
   }
-  const stopped = letGo.shutdown ? await shutdownSimulatorAsync(tools, udid) : null;
+  const stopped =
+    'stopped' in letGo
+      ? letGo.stopped
+      : letGo.shutdown
+        ? await shutdownSimulatorAsync(tools, udid)
+        : null;
   return {
     backend: 'local-ios',
     platform: 'ios',
@@ -106,7 +121,8 @@ async function releaseIosAsync(
 async function releaseAndroidAsync(
   projectRoot: string,
   tools: DeviceTools,
-  expected?: Binding
+  expected?: Binding,
+  canRelease?: () => Promise<boolean>
 ): Promise<ReleasedDevice | null> {
   const file = bindingPathFor(projectRoot, 'android', 'local-android');
   const before = readBindingFile(file);
@@ -121,12 +137,15 @@ async function releaseAndroidAsync(
       if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return false;
       }
+      if (canRelease && !(await canRelease())) return false;
       if (origin.kind === 'spawned') {
         removeBindingFile(file);
       } else {
         expireLease(file, read.binding, tools);
       }
-      return true;
+      return {
+        killed: expected && origin.kind === 'spawned' ? killEmulatorIfOurs(tools, origin) : null,
+      };
     },
     { waitMs: WRITE_LOCK_WAIT_MS, tools }
   );
@@ -134,7 +153,8 @@ async function releaseAndroidAsync(
   if (!letGo) {
     return null;
   }
-  const killed = origin.kind === 'spawned' ? killEmulatorIfOurs(tools, origin) : null;
+  const killed =
+    letGo.killed ?? (origin.kind === 'spawned' ? killEmulatorIfOurs(tools, origin) : null);
   const stillRunning =
     origin.kind === 'spawned' && killed?.failed === true && tools.isPidAlive(origin.emulatorPid);
   if (stillRunning) {

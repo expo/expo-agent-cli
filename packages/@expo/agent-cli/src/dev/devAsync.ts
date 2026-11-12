@@ -35,6 +35,9 @@ import {
 } from '../toolchain/runsOn';
 import { CommandError } from '../utils/errors';
 import { detachedPidLine } from './childVerdict';
+import { otherPlatformSessionError } from '../device/cloudErrors';
+import { otherPlatformSessionAsync } from './openAppEas';
+import { easOpenPlatform } from './resolveOptions';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import {
   findUntrackedDevServerAsync,
@@ -65,15 +68,27 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   if (options.device !== undefined && boundPlatform(options) == null) {
     throw deviceNotBindableError(options);
   }
-  if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
-    await assertEasProjectConfiguredAsync(projectRoot);
-  }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
   // the child does the probe: this run's whole job is to start that child and report on it.
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
     return await devDetachAsync(projectRoot, options, { publicDev: true });
+  }
+
+  if (options.detachedChild) {
+    const platform = easOpenPlatform(options);
+    const other = platform ? await otherPlatformSessionAsync(projectRoot, platform) : null;
+    if (platform && other)
+      throw otherPlatformSessionError(other.platform, {
+        wanted: platform,
+        sessionId: other.sessionId,
+        devServerRunning: false,
+      });
+  }
+
+  if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
+    await assertEasProjectConfiguredAsync(projectRoot);
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
@@ -210,6 +225,7 @@ async function resolveDevPlanAsync(
     state,
     {
       acquireDevice,
+      settings: options.settings,
       platform: options.platform,
       requestedPlatform: options.platform,
       open: options.open,

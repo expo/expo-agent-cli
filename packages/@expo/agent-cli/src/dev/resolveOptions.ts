@@ -50,6 +50,7 @@ export type DevMode =
   | 'plan';
 
 export interface DevOptions {
+  settings?: AgentCliSettings;
   mode: DevMode;
   device?: string;
   /** Arguments to append after the plan's own, when spawning the `expo` CLI. */
@@ -230,6 +231,7 @@ export function resolveDevOptions(
   }
 
   return {
+    settings,
     mode: argv.includes('--plan') ? 'plan' : 'run',
     ...(device === undefined ? {} : { device }),
     // `--port` is stripped: `dev` owns the port and sets it on every step that serves

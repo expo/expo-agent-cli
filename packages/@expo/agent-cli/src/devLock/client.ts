@@ -147,6 +147,7 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
     projectRoot,
     easPlatform,
     easOpenFinished,
+    detachedAttemptId,
     phase,
   } = parsed as Record<string, unknown>;
   if (
@@ -162,6 +163,7 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
   // Optional on the wire: a lock held by an older CLI names no reported port, no EAS platform, no
   // finished open and no phase, and an older CLI took its lock only while it served.
   return {
+    ...(typeof detachedAttemptId === 'string' ? { detachedAttemptId } : {}),
     url,
     port,
     portReported: portReported === true,

@@ -1,4 +1,5 @@
 import { env } from '../../utils/env';
+import { EMPTY_SETTINGS } from '../../settings/types';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { parseAgentCliSettings } from '../../settings/parse';
 import { resolveDevOptions } from '../resolveOptions';
@@ -6,6 +7,7 @@ import { resolveDevOptions } from '../resolveOptions';
 describe(resolveDevOptions, () => {
   it(`should forward every argument the plan engine does not own`, () => {
     expect(resolveDevOptions(['--web', '--port', '8082'])).toEqual({
+      settings: EMPTY_SETTINGS,
       mode: 'run',
       expoArgs: ['--web'],
       agentSkills: true,
@@ -31,6 +33,7 @@ describe(resolveDevOptions, () => {
 
   it(`should strip --no-agent-skills and skip the sync`, () => {
     expect(resolveDevOptions(['--ios', '--no-agent-skills', '--clear'])).toEqual({
+      settings: EMPTY_SETTINGS,
       mode: 'run',
       expoArgs: ['--clear'],
       agentSkills: false,
@@ -59,6 +62,7 @@ describe(resolveDevOptions, () => {
 
   it(`should enter plan mode and strip the flag`, () => {
     expect(resolveDevOptions(['--ios', '--plan', '--port', '8082'])).toEqual({
+      settings: EMPTY_SETTINGS,
       mode: 'plan',
       expoArgs: [],
       agentSkills: true,
@@ -200,6 +204,7 @@ describe(resolveDevOptions, () => {
 
   it(`should ask for a JSON plan and strip the flag`, () => {
     expect(resolveDevOptions(['--android', '--plan', '--json'])).toEqual({
+      settings: EMPTY_SETTINGS,
       mode: 'plan',
       expoArgs: [],
       agentSkills: true,
@@ -228,6 +233,7 @@ describe(resolveDevOptions, () => {
 
   it(`should suppress the follow-ups and strip the flag`, () => {
     expect(resolveDevOptions(['--web', '--no-followups', '--clear'])).toEqual({
+      settings: EMPTY_SETTINGS,
       mode: 'run',
       expoArgs: ['--web', '--clear'],
       agentSkills: true,

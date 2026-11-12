@@ -18,13 +18,22 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
-import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
-import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { lockInfo as makeLockInfo } from '../../devLock/__tests__/fakeLock';
+const attemptId = '00000000-0000-4000-8000-000000000001';
+const lockInfo = (overrides: Parameters<typeof makeLockInfo>[0] = {}) =>
+  makeLockInfo({ detachedAttemptId: attemptId, ...overrides });
+vi.mock('crypto', async (original) => ({
+  ...(await original<typeof import('crypto')>()),
+  randomUUID: () => attemptId,
+}));
 
-vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
+vi.mock('../../devLock', async () => ({
+  readDevServerLockAsync: (await import('../../devLock/client')).readDevServerLockAsync,
+}));
+vi.mock('../../devLock/client', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../log');
 vi.mock('../../exitCodes', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../exitCodes')>()),
@@ -50,7 +59,7 @@ vi.mock('../advertisedUrl', async (importOriginal) => ({
 }));
 
 const projectRoot = '/project';
-const logFile = detachedLogPath(projectRoot);
+const logFile = path.join(projectRoot, '.expo/dev/logs', `dev-detached-${attemptId}.log`);
 const servingPlan = '  1. expo run:ios  ~minutes\n› Installing on iPhone\n';
 
 function readiness(ready = true): BundlerReadyResult {
@@ -66,6 +75,8 @@ function readiness(ready = true): BundlerReadyResult {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(0);
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.writeFileSync(path.join(path.dirname(logFile), 'current'), path.basename(logFile));
   vi.mocked(readDevServerLockAsync)
     .mockResolvedValueOnce(null)
     .mockResolvedValue({

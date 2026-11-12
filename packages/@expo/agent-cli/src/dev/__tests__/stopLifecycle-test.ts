@@ -20,8 +20,9 @@ vi.mock('../../deviceBinding/records', () => ({
 vi.mock('../../deviceBinding/reap', () => ({
   reapDevicesAsync: vi.fn(async () => ({ reports: [], error: null })),
 }));
-vi.mock('../../devLock', () => {
-  const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
+vi.mock('../../devLock/client', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
+vi.mock('../../devLock', async () => {
+  const { readDevServerLockAsync } = await import('../../devLock/client');
   return {
     readDevServerLockAsync,
     // The address is the project root, and a probe is held when the mocked read answers.
