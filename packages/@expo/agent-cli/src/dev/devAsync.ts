@@ -1,18 +1,4 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
-// What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then
-// (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
-// `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
-
-import { easRunLifecycle } from './openAppEas';
-import { withLeaseExtendedAsync } from '../deviceBinding/renew';
-import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
-import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
-import { outputTail } from '../deploy/parseOutput';
-import { readDevServerLockAsync } from '../devLock/client';
-import type { DevServerLockInfo } from '../devLock/types';
-import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
-import type { RunLock } from '../devLock';
-import { withRunAsync, type RunSteps } from './runSteps';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -24,83 +10,51 @@ import {
   type AcquireResult,
   type DevicePlatform,
 } from '../deviceBinding';
-import { EXIT_OUTCOME_FAILED } from '../exitCodes';
+import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
+import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
+import { readDevServerLockAsync } from '../devLock/client';
+import type { DevServerLockInfo } from '../devLock/types';
 import { buildStartPlanFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import { Log } from '../log';
-import { classifySubprocessFailure } from '../needsHuman/detect';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
-import { needsHumanErrorFrom } from '../needsHuman/error';
-import { lastNonEmptyLine } from '../needsHuman/promptShape';
 import { emitStartPlan } from '../plan/emit';
+import { readLastBuildRecord } from '../plan/lastBuild';
 import { rerunDevCommand } from '../plan/rerun';
-import { event as planEvent } from '../plan/events';
-import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
-import type { NativePlatform, PlanPlatform } from '../plan/types';
+import type { PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { clearFingerprintMemo } from '../project/fingerprint';
-import { clearFingerprintCache } from '../project/fingerprintCache';
-import { dropEasNoneEntry } from '../status/easBuilds';
 import { probeProjectStateAsync } from '../project/probe';
-import type { PlanStep, ProjectState, StartPlan } from '../project/types';
-import { runDevServerAsync, type DevServerRun } from '../start/startAsync';
+import type { ProjectState, StartPlan } from '../project/types';
+import { CONFIG_LOCATION } from '../settings/read';
 import {
-  localRequirement,
-  localTool,
   EAS_REQUIREMENT,
-  EAS_SIMULATOR_PROFILE,
   EAS_WHERE,
   LOCAL_WHERE,
+  localRequirement,
+  localTool,
 } from '../toolchain/runsOn';
-import { classifyEasFailure } from '../utils/easFailure';
-import { ensureSimulatorProfileSync } from '../utils/easJson';
 import { CommandError } from '../utils/errors';
-import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
-import { isInteractive } from '../utils/interactive';
-import type { SubprocessOutput } from '../utils/subprocess';
-import {
-  looksLikeWrapperCrash,
-  wrapperCrashDetail,
-  type WrapperCrashTool,
-} from '../utils/wrapperCrash';
-import { appReachedDevice } from './buildEvidence';
 import { detachedPidLine } from './childVerdict';
-import { recordLastDevRequest } from './lastRequest';
-import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
-import { event as devEvent } from './events';
-import {
-  buildsBeforeServing,
-  forwardedStepArgs,
-  isDevServerStep,
-  withDevice,
-  withForwardedExpoArgs,
-  withPortArg,
-} from './forwardedArgs';
-import {
-  defaultMetroPort,
-  detectPortCollision,
-  findFreePortAsync,
-  formatPortMove,
-  resolvePlannedPortAsync,
-  type PortCollision,
-} from './portCollision';
 import {
   findUntrackedDevServerAsync,
   planDevServerPortAsync,
   portDemandedError,
   replaceUntrackedDevServerAsync,
+  warnPortMove,
 } from './devServerPort';
-import { easOpenPlatform, type DevOptions } from './resolveOptions';
+import { executeDevPlanAsync, type ExecutedDevPlan } from './executeDevPlanAsync';
+import { isDevServerStep, withDevice, withForwardedExpoArgs } from './forwardedArgs';
+import { recordLastDevRequest } from './lastRequest';
+import { resolvePlannedPortAsync } from './portCollision';
+import { type DevOptions } from './resolveOptions';
+import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { devServerRunningStopAsync } from './runningDevServer';
-import { easCommandPrefix } from '../utils/easCli';
-import { CONFIG_LOCATION } from '../settings/read';
 
 /**
  * Probe the project, emit the plan, and run it.
  *
- * @returns 0 in `--plan` mode, otherwise the exit code of the first step that failed, or of the
- * last step when every step succeeded.
+ * @returns 0 after a successful foreground run or plan, or the detached parent's result.
  */
 export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
@@ -151,46 +105,18 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
   // printed, so the steps an agent approves are the steps that run — never swapped mid-run
   // (llp/0008 §Plan-with-cost dry run).
-  const { plan: resolvedPlan, acquired: boundEarly } = await resolveStartPlanAsync(
-    projectRoot,
-    state,
-    {
-      acquireDevice,
-      // The caller's own flag, which the resolver requires: the plan builds for this platform and
-      // `expo start` opens the app on it — booting a simulator or an emulator when none is up, the
-      // same way `expo run:ios` and `expo run:android` do.
-      platform: options.platform,
-      requestedPlatform: options.platform,
-      open: options.open,
-      lastBuild: readLastBuildRecord(projectRoot),
-      requestedBackend: options.buildBackend,
-      requestedTarget: options.runTarget,
-      // @ref llp/0027-everything-on-eas.rfc.md — `--eas` puts the device on EAS too, which changes
-      // the build profile, adds the tunnel, and lets the resolver ask EAS for a build it already has.
-      deviceBackend: options.deviceBackend,
-      fingerprintCache: options.fingerprintCache,
-    }
-  );
-  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — a committed config
-  // starts a billed session for everyone who runs this, so the plan says where the choice came from.
-  // A `--no-open` run starts no session, so it says nothing.
-  const resolved =
-    options.deviceBackendSource === 'config' && options.open
-      ? { ...resolvedPlan, reasons: [...resolvedPlan.reasons, configSessionReason()] }
-      : resolvedPlan;
-
-  // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
-  // Here, before anything is printed. The options a caller typed for `expo start` used to be folded
-  // in while the step ran, so `--plan --tunnel` printed a command without `--tunnel` and the run
-  // passed it [observed — friction run 7, F71; live run S5].
-  const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
+  const {
+    plan: forwardedPlan,
+    acquired: boundEarly,
+    dropped,
+  } = await resolveDevPlanAsync(projectRoot, state, options, acquireDevice);
 
   let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options, orphan.claim);
   warnDroppedExpoArgs(plan, dropped);
 
   // A draft that builds is bound here, not in the resolver: after the port check above and the
   // refusals below, so a run that refuses creates no simulator, and `--plan` only inspects.
-  const bindsHere = resolved.buildLocation != null;
+  const bindsHere = forwardedPlan.buildLocation != null;
   const stopped = plan.devServerPort?.state === 'running';
   let acquired = boundEarly;
   const implicitEas = isImplicitEas(plan);
@@ -266,23 +192,67 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // above, and then it runs. `dev` was asked to get this app onto a device, and a build is how that
   // is done; there is no second act of consent, in a terminal or out of one. `--plan` is the run
   // that stops.
-  const run = await executePlanAsync(projectRoot, plan, state, options, acquired);
-
-  // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
-  // A plan whose step failed has no result to report, so it reports a failure. It used to print
-  // the plan object with its success-shaped follow-ups and leave only the exit code disagreeing —
-  // and when the code was the Expo CLI's own `7`, an agent read a started dev server on stdout,
-  // nothing on stderr, and "a person must finish this" from the exit code
-  // [observed — friction run 2, 2026-08-23: `dev --yes --json --ios`, when `--yes` still existed].
-  if (run.exitCode !== 0 && run.failure) {
-    throw planStepFailedError(run.failure, stepOutputFor(options), run.exitCode, options.platform);
-  }
+  const run = await executeDevPlanAsync(projectRoot, plan, state, options, acquired);
 
   if (options.json) {
-    await reportRunResultAsync(projectRoot, plan, run, options);
+    await reportRunResultAsync(projectRoot, run, options);
   }
 
-  return run.exitCode;
+  return 0;
+}
+
+async function resolveDevPlanAsync(
+  projectRoot: string,
+  state: ProjectState,
+  options: DevOptions,
+  acquireDevice: (draft: StartPlan) => Promise<AcquireResult | null>
+) {
+  const { plan: resolvedPlan, acquired: boundEarly } = await resolveStartPlanAsync(
+    projectRoot,
+    state,
+    {
+      acquireDevice,
+      platform: options.platform,
+      requestedPlatform: options.platform,
+      open: options.open,
+      lastBuild: readLastBuildRecord(projectRoot),
+      requestedBackend: options.buildBackend,
+      requestedTarget: options.runTarget,
+      // @ref llp/0027-everything-on-eas.rfc.md
+      deviceBackend: options.deviceBackend,
+      fingerprintCache: options.fingerprintCache,
+    }
+  );
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+  const resolved =
+    options.deviceBackendSource === 'config' && options.open
+      ? { ...resolvedPlan, reasons: [...resolvedPlan.reasons, configSessionReason()] }
+      : resolvedPlan;
+
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
+  const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
+
+  return { plan: forwardedPlan, acquired: boundEarly, dropped };
+}
+
+/** In `--json` mode, print the one object for a finished run. */
+async function reportRunResultAsync(
+  projectRoot: string,
+  run: ExecutedDevPlan,
+  options: DevOptions
+): Promise<void> {
+  // One object, when the run is over and there is something true to say about it.
+  const ran = run.plan;
+  // A run whose last step started no dev server (a forwarded `--no-bundler`) has nothing that
+  // reported a port, so its follow-ups read the plan, as they do before a run.
+  const followups = await resolveRunFollowUpsAsync(
+    projectRoot,
+    ran,
+    options,
+    run.devServer ? { phase: 'ran', devServer: run.devServer } : PLANNED
+  );
+  reportFollowUps('dev', followups, { json: true });
+  Log.log(JSON.stringify({ ...ran, followups }, null, 2));
 }
 
 /** Print the `--plan` result with its follow-ups. */
@@ -296,27 +266,6 @@ function emitPlanOnly(plan: StartPlan, state: ProjectState, options: DevOptions)
     : [];
   emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
   reportFollowUps('dev', followups, { json: options.json });
-}
-
-/** In `--json` mode, print the one object for a finished run. */
-async function reportRunResultAsync(
-  projectRoot: string,
-  plan: StartPlan,
-  run: PlanRun,
-  options: DevOptions
-): Promise<void> {
-  // One object, when the run is over and there is something true to say about it.
-  const ran = planAsRun(plan, run);
-  // A run whose last step started no dev server (a forwarded `--no-bundler`) has nothing that
-  // reported a port, so its follow-ups read the plan, as they do before a run.
-  const followups = await resolveRunFollowUpsAsync(
-    projectRoot,
-    ran,
-    options,
-    run.devServer ? { phase: 'ran', devServer: run.devServer } : PLANNED
-  );
-  reportFollowUps('dev', followups, { json: true });
-  Log.log(JSON.stringify({ ...ran, followups }, null, 2));
 }
 
 /** Warn that the last step is not `expo start`, so the forwarded options were not passed on. */
@@ -527,956 +476,4 @@ function warnUnbuildable(plan: StartPlan): void {
   Log.warn(
     `This plan builds ${LOCAL_WHERE} and this machine does not have ${tool}: ${location.detail}${asked} The build step will fail once it reaches the compiler. To build for ${location.platform} without ${tool}, run "${location.alternativeCommand}", which builds ${EAS_WHERE} and needs ${EAS_REQUIREMENT}.`
   );
-}
-
-/**
- * Where the output of the plan's subprocesses goes.
- *
- * `--json` owns stdout, so nothing a subprocess prints may reach it. A run with no terminal keeps
- * the output *and* prints it, because a step that stopped on a question the Expo CLI asked says so
- * on a stream that would otherwise go nowhere. A person watching gets the tools' own stdio, which
- * is what makes the bundler's keypress menu and its signals work.
- */
-function stepOutputFor(options: DevOptions): SubprocessOutput {
-  if (options.json) {
-    return 'capture';
-  }
-  return isInteractive() ? 'inherit' : 'tee';
-}
-
-/** The step that ended a plan, and everything known about how it ended. */
-interface StepFailure {
-  step: PlanStep;
-  /** The CLI arguments it actually ran with, which is what a reader has to reproduce. */
-  args: string[];
-  /** Whether this step is the one that starts the dev server. */
-  devServerStep: boolean;
-  /** What the step exited with, which is the `expo` CLI's own code. */
-  exitCode: number;
-  /**
-   * Whether this failed step's build was recorded anyway, because its app reached a device.
-   *
-   * The one thing a reader of a failed `expo run:*` cannot see for themselves, and the one that
-   * decides what the next command costs: fifteen minutes, or seconds (F121, `./buildEvidence.ts`).
-   */
-  buildRecorded: boolean;
-  stdout: string;
-  stderr: string;
-  /**
-   * The file that actually ran, when the step resolved one.
-   *
-   * Kept because it is the only fact that resolves a wrapper crash: the reader has to look at the
-   * file under that name, not at the package they believe they installed (`wrapperCrash.ts`).
-   * Null for a dev-server step, whose output nothing captures anyway.
-   */
-  binPath: string | null;
-}
-
-/** What one execution of a plan amounts to. */
-interface PlanRun {
-  exitCode: number;
-  /** The dev server the run started, or null when it started none. */
-  devServer: DevServerRun | null;
-  /** The step that stopped the plan, or null when every step succeeded. */
-  failure: StepFailure | null;
-  /** The step that served, with the arguments it last ran with, or null when no step served. */
-  serving: { index: number; args: string[] } | null;
-}
-
-/**
- * Run the plan's steps under one dev-server lock, and release it when the run ends.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the lock belongs to the
- * run, so it answers through a port retry and through the run's EAS exit work.
- */
-async function executePlanAsync(
-  projectRoot: string,
-  plan: StartPlan,
-  state: ProjectState,
-  options: DevOptions,
-  acquired: AcquireResult | null
-): Promise<PlanRun> {
-  return await withRunAsync(
-    projectRoot,
-    plan,
-    shouldOpenApp(options) ? easOpenPlatform(options) : null,
-    (runLock, steps) =>
-      runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock, steps)
-  );
-}
-
-// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
-async function runPlanStepsAsync(
-  projectRoot: string,
-  plan: StartPlan,
-  state: ProjectState,
-  options: DevOptions,
-  acquired: AcquireResult | null,
-  runLock: RunLock,
-  steps: RunSteps
-): Promise<PlanRun> {
-  const output = stepOutputFor(options);
-  let devServer: DevServerRun | null = null;
-  let exitCode = 0;
-  // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
-  // retry does: the second bind is the same dev server, not a second app to open.
-  let openStarted = false;
-  // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
-  // installs: the one the plan found, or the one this run's `eas build` step makes below.
-  let easBuildId: string | null = plan.easBuild?.id ?? null;
-  let serving: PlanRun['serving'] = null;
-
-  for (const [index, step] of plan.steps.entries()) {
-    let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
-    planEvent('start_plan_step', {
-      id: step.id,
-      argv: [step.argv[0]!, ...args],
-      index: index + 1,
-      total: plan.steps.length,
-    });
-
-    const devServerStep = isDevServerStep(step);
-    // The open belongs to the `expo start` step alone: `expo run:*` installs and launches the app
-    // itself, and a build step serves nothing to open.
-    const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
-    let stepRunning = false;
-    const runOneStep = async (stepArgs: string[], signal: AbortSignal) => {
-      if (!devServerStep) {
-        return await withLeaseExtendedAsync(projectRoot, () =>
-          runStepAsync(projectRoot, step, stepArgs, output, signal)
-        );
-      }
-      stepRunning = true;
-      const easPlatform = opensApp ? easOpenPlatform(options) : null;
-      const eas = easPlatform
-        ? easRunLifecycle(projectRoot, {
-            platform: easPlatform,
-            expoGo: plan.target === 'expo-go',
-            fingerprintCache: options.fingerprintCache,
-            keepSession: options.detachedChild,
-          })
-        : null;
-      return await runDevServerAsync(projectRoot, stepArgs, {
-        agentSkills: options.agentSkills,
-        output,
-        signal,
-        lock: runLock,
-        phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
-        // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-        easPlatform: eas?.platform ?? null,
-        onDevServer: opensApp
-          ? (server) => {
-              if (openStarted) {
-                return;
-              }
-              openStarted = true;
-              // Open alongside Metro. A failed open must not stop it.
-              const stillWanted = () => stepRunning && !steps.interrupted;
-              if (eas) {
-                // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS
-                // open of the plan, said on the run's lock.
-                runLock.apply({ type: 'eas-open-started' });
-                eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
-                void eas.finished.then(() => runLock.apply({ type: 'eas-open-returned' }));
-              } else
-                void openAppForRunAsync(
-                  projectRoot,
-                  plan,
-                  options,
-                  server.url,
-                  stillWanted,
-                  acquired
-                );
-            }
-          : undefined,
-      }).finally(async () => {
-        stepRunning = false;
-        await eas?.finishAsync();
-      });
-    };
-    // The port retry runs it again; a signal during either run waits for that run to end.
-    const runStep = (stepArgs: string[]) =>
-      steps.stepAsync((signal) => runOneStep(stepArgs, signal));
-
-    if (step.id === 'eas-build') {
-      // A remembered "no build" for this platform is about to be wrong.
-      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
-    }
-    // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
-    // Said in the plan's reasons, and done here, right before the build that names the profile:
-    // `eas build --profile development-simulator` against an `eas.json` without it stops at "profile
-    // not found", after the upload. The write is three keys under `build`, and nothing else moves.
-    if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
-      if (ensureSimulatorProfileSync(projectRoot)) {
-        devEvent('eas_json_profile_added', { profile: EAS_SIMULATOR_PROFILE });
-        Log.progress(`Added the "${EAS_SIMULATOR_PROFILE}" build profile to eas.json.`);
-      }
-    }
-
-    let spawnedAt = Date.now();
-    let result = await runStep(args);
-    // A signal ends a step with exit 0, so a step before the dev server counts for nothing after
-    // one. The dev-server step goes on: a stop there is its normal end, and its exit work follows.
-    if (!devServerStep) steps.assertNotInterrupted();
-
-    // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — the port carve-out. Checked
-    // before the classifier below, because a busy port is the one stop in the Expo CLI's prompt
-    // family that a machine can get past on its own. Whatever the exit code: `expo run:*` that
-    // skipped its dev server exits 0.
-    if (devServerStep) {
-      const collision = portCollisionIn(projectRoot, args, result as DevServerRun, spawnedAt);
-      if (collision) {
-        // A port the caller named is a requirement, not a preference: silently moving the dev
-        // server somewhere else would leave every command the caller had already written — and
-        // every URL it had already printed — pointing at nothing.
-        if (options.port != null) {
-          throw await portDemandedError(options.port, options.platform);
-        }
-        const askedPort = readPortArg(args) ?? defaultMetroPort();
-        // A signal that ended the first spawn ends the run: the retry would be a later step.
-        steps.assertNotInterrupted();
-        // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
-        // None after the open started: a retry gets no open, and the run let go of its lock when
-        // that open returned (llp/0035 §Preserved sessions).
-        const retry = openStarted
-          ? null
-          : await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
-        if (retry) {
-          args = retry.args;
-          result = retry.result;
-          spawnedAt = retry.spawnedAt;
-        }
-        // A collision still in the output after the retry fails the run, whatever the exit code:
-        // `expo run:*` that skipped its dev server again exits 0 with nothing serving.
-        if (portCollisionIn(projectRoot, args, result as DevServerRun, spawnedAt) != null) {
-          planEvent('start_plan_step_exit', { id: step.id, code: result.exitCode });
-          throw await portTakenAfterRetryError({
-            step,
-            args,
-            askedPort,
-            movedTo: retry ? readPortArg(retry.args) : null,
-            exitCode: result.exitCode,
-            callerArgv: options.callerArgv,
-            platform: options.platform,
-          });
-        }
-      }
-      devServer = result as DevServerRun;
-      serving = { index, args };
-    }
-    exitCode = result.exitCode;
-    planEvent('start_plan_step_exit', { id: step.id, code: exitCode });
-
-    if (
-      exitCode !== 0 &&
-      step.id === 'install' &&
-      appReachedDevice(`${result.stdout}\n${result.stderr}`)
-    ) {
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
-      // The install step's job is the app on the device, and the output says it got there — so a
-      // non-zero exit is about what `expo run:*` does *after* the install, which on a Mac without
-      // the Automation grant is the AppleScript launch (observed 2026-09-04, and the reason
-      // `installDevBuildAsync` judges this command by its result rather than its exit code). The
-      // dev server still to come deep-links into the app itself, so the launch is not load-bearing
-      // here. Failing the plan over it would stop the one step the caller was waiting for.
-      Log.warn(
-        `The ${step.argv[1]} install put the app on the device, then exited with ${exitCode} — most likely the launch, which the dev server's own open replaces. Continuing.`
-      );
-      exitCode = 0;
-    } else if (exitCode !== 0) {
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-      // F121, and **before** the needs-human throw below rather than after it: `expo run:*` builds,
-      // installs and launches in one subprocess, and a launch that failed is not a build that did.
-      // A build whose app is on the device is a fact of its own, so it is recorded here, and the
-      // step failure below is reported exactly as it was. The `macos-automation` recovery — start
-      // the dev server and deep-link in — no longer walks back into the same fifteen-minute build,
-      // which is what made that handoff wrong rather than merely incomplete.
-      const buildRecorded = recordBuildReachedDevice(projectRoot, step, state, result);
-      const failure: StepFailure = {
-        step,
-        args,
-        devServerStep,
-        exitCode,
-        buildRecorded,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        // A dev-server step answers with a `DevServerRun`, which resolved no binary of its own.
-        binPath: 'binPath' in result ? (result.binPath ?? null) : null,
-      };
-      // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol, layer 3 — a step that
-      // stopped because the Expo CLI needed an answer, or because macOS refused it a permission,
-      // is not a failed command: it is a command waiting on a person. Nothing is captured in
-      // `inherit` mode, so there is nothing to classify there.
-      //
-      assertNotNeedsHuman(failure, options.platform);
-      // Every later step depends on this one having worked, so the plan stops here.
-      return { exitCode, devServer, failure, serving };
-    }
-
-    recordBuildOf(projectRoot, step, state);
-    if (step.id === 'eas-build') {
-      // A `status` that ran during the build saw no finished build and saved a new "none".
-      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
-    }
-    if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
-      // The build that just finished is the newest finished one of its profile, and its id is what
-      // the session installs. Asked of EAS rather than parsed out of the step, whose output went to
-      // the terminal (`./openAppEas.ts` §findLatestSimulatorBuildIdAsync).
-      const { findLatestSimulatorBuildIdAsync } =
-        require('./openAppEas') as typeof import('./openAppEas');
-      easBuildId = await findLatestSimulatorBuildIdAsync(
-        projectRoot,
-        resolveEasBuildPlatform(step)
-      );
-      if (easBuildId) {
-        devEvent('eas_build_named', { buildId: easBuildId });
-      } else {
-        Log.warn(
-          `The build finished, and "eas build:list" did not name it — so no EAS Simulator session will be started with it. Once "${easCommandPrefix()} build:list --build-profile ${EAS_SIMULATOR_PROFILE} --status finished" shows it, run this command again: the plan will find the build and skip straight to the session.`
-        );
-      }
-    }
-    // @ref llp/0023-fingerprint-caching.rfc.md §What invalidates an answer
-    // After the step, not before: an install, a prebuild or a build has just changed the project,
-    // and every fingerprint measured before it is a statement about the project as it was.
-    //
-    // **Both caches, not only the memo.** The pinned files are stamps of the project's own config
-    // and lockfiles and say nothing about `ios/` or `android/`, so `expo prebuild` — which creates
-    // them — moves nothing the record is keyed on. Its expiry would catch that eventually; dropping
-    // the record here catches it now, for the one prebuild this CLI runs itself.
-    clearFingerprintMemo(projectRoot);
-    clearFingerprintCache(projectRoot);
-  }
-
-  return { exitCode, devServer, failure: null, serving };
-}
-
-/**
- * The collision a dev-server step's output reports, or null.
- *
- * A dev server that reported or logged where it listens bound its port, so nothing in its output
- * is a bind collision. The port watch follows the step for as long as it runs, so a report after a
- * `run:*` build counts; `start.log` is what `@expo/cli` 57 and older write instead.
- *
- * A collision that names another port is not this step's: a `run:*` step's output carries Gradle
- * and Xcode output too, and an `EADDRINUSE` there is some other listener. A collision that names no
- * port (`Use port N instead?` alone) still counts.
- *
- * @param args the arguments the step ran with; its port is their `--port`, else Expo's default.
- * @param spawnedAt Epoch milliseconds the step was started at; an earlier log entry is not its own.
- */
-function portCollisionIn(
-  projectRoot: string,
-  args: string[],
-  result: DevServerRun,
-  spawnedAt: number
-): PortCollision | null {
-  if (
-    result.port?.source === 'reported' ||
-    readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) != null
-  ) {
-    return null;
-  }
-  const collision = detectPortCollision(`${result.stderr}\n${result.stdout}`);
-  const stepPort = readPortArg(args) ?? defaultMetroPort();
-  if (collision?.requestedPort != null && collision.requestedPort !== stepPort) {
-    return null;
-  }
-  return collision;
-}
-
-/**
- * The plan as it ran: the serving step's last arguments, and the port the dev server ended on.
- *
- * The planned port is the hint and the retry can move it, so the `--json` object, like the
- * follow-ups, names the port that serves.
- */
-function planAsRun(plan: StartPlan, run: PlanRun): StartPlan {
-  const { serving } = run;
-  if (!serving || !plan.devServerPort) {
-    return plan;
-  }
-  const reported = run.devServer?.port;
-  const port =
-    reported && (reported.source === 'reported' || reported.source === 'arg')
-      ? reported.port
-      : plan.devServerPort.port;
-  return {
-    ...plan,
-    steps: plan.steps.map((step, index) =>
-      index === serving.index ? { ...step, argv: [step.argv[0]!, ...serving.args] } : step
-    ),
-    devServerPort:
-      port === plan.devServerPort.port
-        ? plan.devServerPort
-        : {
-            port,
-            movedFrom: plan.devServerPort.movedFrom ?? plan.devServerPort.port,
-            state: 'picked',
-          },
-  };
-}
-
-/** What one step run amounts to, for the retry that may replace it. */
-type StepResult = {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  /** The file that ran, when this step resolved one. @see StepFailure.binPath */
-  binPath?: string | null;
-};
-
-/**
- * Start the dev server again on a port this CLI picked, after the Expo CLI stopped on a busy one.
- *
- * Only reached when the caller named no `--port`: they asked for "a dev server", and which port it
- * lands on is this command's to decide — which is exactly what the Expo CLI's own question is for,
- * and exactly what a run with no terminal cannot answer.
- *
- * The plan already gave the step a free port, so this covers the race between that bind test and
- * the dev server's own bind.
- *
- * @param planned the port the plan picked, which is the one the step asked for.
- * @returns the second run and the arguments it used, or null when no free port could be found.
- */
-async function retryOnFreePortAsync(
-  collision: PortCollision,
-  args: string[],
-  planned: StartPlan['devServerPort'],
-  runStep: (stepArgs: string[]) => Promise<StepResult>
-): Promise<{ args: string[]; result: StepResult; spawnedAt: number } | null> {
-  const asked = planned?.port ?? collision.requestedPort ?? defaultMetroPort();
-  // The CLI's own offer first: it walked to that port, so it is the one it would have taken.
-  const free = await findFreePortAsync(collision.offeredPort ?? asked + 1);
-  const busy = planned?.port ?? collision.requestedPort;
-
-  devEvent('start_plan_port_retry', {
-    busyPort: busy,
-    offeredPort: collision.offeredPort,
-    port: free,
-  });
-
-  if (free == null) {
-    return null;
-  }
-
-  warnPortMove(
-    { busy, to: free, when: 'retry' },
-    planned?.movedFrom ?? planned?.port ?? collision.requestedPort
-  );
-  const retryArgs = withPortArg(args, free);
-  const spawnedAt = Date.now();
-  return { args: retryArgs, result: await runStep(retryArgs), spawnedAt };
-}
-
-/**
- * Say that the dev server is not on the port the caller expected.
- *
- * On stderr even in `--json` mode, where stdout is the one object this run prints, because every
- * URL the caller built on the expected port is stale. A `--detach` parent does not read this: it
- * compares the plan in the child's log with the lock the child publishes (llp/0004 §A busy port is
- * not a step only a person can complete).
- *
- * @param expected the port the caller expected, which the hint names.
- */
-function warnPortMove(move: Parameters<typeof formatPortMove>[0], expected: number | null): void {
-  Log.warn(
-    `${formatPortMove(move)} ${
-      expected == null
-        ? 'Pass --port to name one yourself.'
-        : `Pass --port ${expected} to require that port instead of moving, which fails when it is taken.`
-    }`
-  );
-}
-
-/**
- * The failure for a dev-server step whose port was still taken after the one retry.
- *
- * An outcome (llp/0010 §Exit codes): the run's code is 20, and the Expo CLI's own code, which is 0
- * when `expo run:*` skipped its dev server, is named in the text. Never the command that just
- * failed: running it again repeats the same race. The port it names is the one the last attempt
- * lost, and the process on it is named the way `portDemandedError` names it.
- */
-async function portTakenAfterRetryError(stop: {
-  step: PlanStep;
-  args: string[];
-  askedPort: number;
-  /** The port the retry moved the dev server to, or null when no free port was found. */
-  movedTo: number | null;
-  exitCode: number;
-  /** The caller's own `dev` arguments, which the suggested command repeats with a free port. */
-  callerArgv: string[];
-  platform: PlanPlatform;
-}): Promise<CommandError> {
-  const { askedPort, movedTo } = stop;
-  const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
-  const { isExpoDevServerAsync, looksLikeDevServerProcess } =
-    require('./stopAsync') as typeof import('./stopAsync');
-  const taken = movedTo ?? askedPort;
-  const [listener, free, answersAsDevServer] = await Promise.all([
-    findPortListenerAsync(taken),
-    findFreePortAsync(taken + 1),
-    isExpoDevServerAsync(taken),
-  ]);
-  const holder = listener
-    ? `pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}`
-    : 'a process this machine would not name';
-  const invocation = `npx ${stop.step.argv[0]} ${stop.args.join(' ')}`;
-  const why =
-    movedTo != null
-      ? `Why: the step asked for port ${askedPort}, which was taken, and the one retry moved it to port ${movedTo}, which ${holder} bound before the dev server did.`
-      : `Why: ${holder} holds port ${askedPort}, and no free port was found to retry on.`;
-  const onFreePort =
-    free == null ? null : rerunDevCommand(stop.platform, withPortArg(stop.callerArgv, free));
-  const forceStop =
-    answersAsDevServer && listener != null && looksLikeDevServerProcess(listener)
-      ? `${PROGRAM_PREFIX} dev:stop --port ${taken} --force`
-      : null;
-  const how = onFreePort
-    ? `How: start on a free port with "${onFreePort}".`
-    : forceStop
-      ? `How: stop the dev server on port ${taken} with "${forceStop}", which stops it only when it answers as an Expo dev server, then run this command again.`
-      : `How: stop ${holder} on port ${taken} yourself, then run this command again.`;
-  const error = new CommandError(
-    'PORT_TAKEN_AFTER_RETRY',
-    [
-      `No dev server was started: "${invocation}" stopped on a busy port and exited ${stop.exitCode}.`,
-      why,
-      how,
-    ].join('\n')
-  );
-  const suggested = onFreePort ?? forceStop;
-  if (suggested) {
-    error.suggestedCommand = suggested;
-  }
-  error.exitCode = EXIT_OUTCOME_FAILED;
-  return error;
-}
-
-/** Run a plan step that is not a dev server, in the output mode this run is in. */
-async function runStepAsync(
-  projectRoot: string,
-  step: PlanStep,
-  args: string[],
-  output: SubprocessOutput,
-  signal: AbortSignal
-): Promise<StepResult> {
-  if (step.argv[0] === 'eas') {
-    return await runEasStepAsync(projectRoot, args, output, signal);
-  }
-  if (output === 'inherit') {
-    // Nothing is captured, so there is nothing for the wrapper-crash guard to read either.
-    const exitCode = await runExpoAsync(projectRoot, args, { signal });
-    return { exitCode, stdout: '', stderr: '', binPath: null };
-  }
-  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output, signal });
-  return {
-    exitCode: result.exitCode ?? 1,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    binPath: cli.command,
-  };
-}
-
-/**
- * Run one `eas` step of a plan.
- *
- * @ref llp/0015-backend-selection-and-config.rfc.md §Running an `eas` step
- * The EAS CLI is reached as a subprocess like every other member of the family (llp/0001
- * constraint 5), and it is resolved with the *throwing* resolver: a plan that chose the cloud
- * cannot do its job without it, so an unreachable CLI is an error rather than a step that quietly
- * does nothing. Since wave 18 that error is a last resort — the ladder's third rung runs the
- * published `eas-cli` through `npx`, so a machine that simply never installed it builds anyway, and
- * a cloud build is a step whose minutes make the first download's a rounding error. The output mode
- * is the plan's own — `inherit` is what makes the EAS CLI's own progress and its credential
- * questions reach the person watching.
- */
-async function runEasStepAsync(
-  projectRoot: string,
-  args: string[],
-  output: SubprocessOutput,
-  signal: AbortSignal
-): Promise<StepResult> {
-  const { resolveEasCliOrThrow, easCliArgs } =
-    require('../utils/easCli') as typeof import('../utils/easCli');
-  const { spawnSubprocessAsync } =
-    require('../utils/subprocess') as typeof import('../utils/subprocess');
-
-  const easCli = resolveEasCliOrThrow(projectRoot);
-  const result = await spawnSubprocessAsync(easCli.command, easCliArgs(easCli, args), {
-    cwd: projectRoot,
-    output,
-    signal,
-  });
-  return {
-    exitCode: result.exitCode ?? 1,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    // The file, as this field promises, which on the runner rung is the runner. Nothing downstream
-    // reads it except the wrapper-crash guard, and a wrapper crash is a claim about a binary
-    // somebody installed under the name `eas` — never about `npx`, which reports its own failures.
-    binPath: easCli.command,
-  };
-}
-
-/**
- * Turn a step the registry recognises into the handoff it is.
- *
- * Two scenarios reach this today, and they need different prose. A prompt — `Input is required,
- * but 'npx expo' is in non-interactive mode.` — is the definition of exit 7: no re-run of the same
- * command gets past it, because what it is waiting for is an answer. A macOS Automation refusal is
- * the same shape for a different reason: the permission is granted by a person clicking a switch,
- * and until then `expo start --ios` cannot finish. Anything else the classifier recognises keeps
- * the registry row's own code and a message that names the step and quotes what the tool printed.
- *
- * @throws {NeedsHumanError} when the registry recognises what stopped the step.
- */
-function assertNotNeedsHuman(failure: StepFailure, platform: PlanPlatform): void {
-  const invocation = invocationOf(failure);
-  const needsHuman = classifySubprocessFailure({
-    // The registry is keyed by tool, and an `eas build` that stops for a login is a different
-    // scenario from an `expo start` that stops for a prompt.
-    tool: failure.step.argv[0] === 'eas' ? 'eas' : 'expo',
-    invocation,
-    exitCode: failure.exitCode,
-    stdout: failure.stdout,
-    stderr: failure.stderr,
-  });
-  if (!needsHuman) {
-    return;
-  }
-
-  throw needsHumanErrorFrom(
-    needsHuman,
-    stopPromptFor(needsHuman.scenario, failure, invocation, platform)
-  );
-}
-
-/** The what / why / how of one recognised stop, per scenario. */
-function stopPromptFor(
-  scenario: string,
-  failure: StepFailure,
-  invocation: string,
-  platform: PlanPlatform
-): { message: string; code?: string } {
-  if (scenario === 'macos-automation') {
-    // The *first* line of the crash, not the last: an unhandled rejection ends with Node's own
-    // version footer, and quoting that under "What the tool printed" says nothing at all.
-    const said = firstLineMatching(failure, /osascript|Apple events|\(-1743\)/i);
-    return {
-      message: [
-        `The plan stopped at "${failure.step.id}": macOS refused "${invocation}" permission to control Simulator.app.`,
-        `Why: the Expo CLI's launch step drives Simulator.app through AppleScript, and macOS refuses an application that has not been granted Automation permission. The Expo CLI does not catch that rejection, so it ends the whole process${failure.devServerStep ? ' — the dev server this run started exited with it, and nothing is listening for this project now' : ''}.`,
-        `How: grant the permission in System Settings › Privacy & Security › Automation, then run this command again. To keep going without it, run "${PROGRAM_PREFIX} dev --${platform} --detach" — the build is recorded, so the next run starts the dev server and opens the app through "xcrun simctl openurl", which needs no grant.`,
-        // @ref llp/0004 §Implemented in v1 — F121. The `How:` above is the
-        // recovery that used to walk straight back into a fifteen-minute rebuild, because the build
-        // this run finished was not recorded. It is now, and the reader is told so on the line that
-        // sends them there.
-        failure.buildRecorded
-          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform}" starts a dev server rather than building again.`
-          : '',
-        said ? `\nWhat the tool printed:\n${said}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    };
-  }
-
-  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — the EAS CLI said what was missing,
-  // and the person-shaped half is the choice of account, not a question in a terminal.
-  if (scenario === 'eas-project-unlinked') {
-    const cause = classifyEasFailure(`${failure.stdout}\n${failure.stderr}`);
-    return {
-      message: [
-        `The plan stopped at "${failure.step.id}": "${invocation}" refused, because this project is not linked to an EAS project.`,
-        `Why: ${cause?.why ?? 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to act on.'}`,
-        `How: ${cause?.how ?? `link it once with "${easCommandPrefix()} init --account <account-name> --non-interactive", then run this command again.`}`,
-      ].join('\n'),
-    };
-  }
-
-  // A prompt is the one case where the *last* line is the answer: it is the question the CLI
-  // stopped on, and nothing was printed after it.
-  //
-  // The port question is deliberately not among these any more: it is recognised before the
-  // classifier runs and either retried on a free port or reported as an outcome
-  // (`detectPortCollision`, `portDemandedError`). What is left here genuinely needs the person.
-  //
-  // **The code is the registry row's own, never one spelled here.** A plan runs steps of two CLIs
-  // (llp/0015 §Running an `eas` step), and an `eas build` that stopped for a login is a different
-  // scenario, with a different recovery, from an `expo start` that stopped for a prompt — which is
-  // the whole reason the classifier is told which tool ran. Naming `EXPO_NEEDS_INPUT` here
-  // flattened all four rows onto the Expo CLI's, so an agent branching on the code was told to
-  // answer a question when what it had to do was sign in.
-  const asked = lastNonEmptyLine(failure.stderr) ?? lastNonEmptyLine(failure.stdout);
-  const cli = `${cliNameOf(failure.step)} CLI`;
-  return {
-    message: [
-      `The plan stopped at "${failure.step.id}": "${invocation}" needed an answer and this run has no terminal to give one.`,
-      `Why: the ${cli} asks before it does something it cannot decide, and a run with no terminal fails there instead of prompting. The question it asked is quoted below.`,
-      `How: run the command above in a terminal once and answer it. If the answer is a value this CLI takes as a flag, pass that flag instead — "${PROGRAM_PREFIX} dev --help" lists them.`,
-      asked ? `\nWhat it asked for:\n${asked}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  };
-}
-
-/** The command a reader has to type to reproduce one step, exactly as it ran. */
-function invocationOf(failure: StepFailure): string {
-  return `npx ${failure.step.argv[0]} ${failure.args.join(' ')}`;
-}
-
-/** The CLI a step drives, as a reader would name it in a sentence. */
-function cliNameOf(step: PlanStep): string {
-  return step.argv[0] === 'eas' ? 'EAS' : 'Expo';
-}
-
-/** The first line of a captured failure that says something about the cause, or null for none. */
-function firstLineMatching(failure: StepFailure, pattern: RegExp): string | null {
-  return (
-    `${failure.stderr}\n${failure.stdout}`
-      .split('\n')
-      .map((line) => line.trim())
-      .find((line) => pattern.test(line)) ?? null
-  );
-}
-
-/**
- * A step that failed and that nothing recognised.
- *
- * The plan object is not an answer here: it describes what the run *meant* to do, and printing it
- * with its follow-ups after a step failed told a driving agent that a dev server was up when none
- * was [observed — friction run 2, 2026-08-23]. The **forwarded exit code is kept**, per llp/0010
- * §Exit codes: inventing one would hide the code the tool actually reported. Only the payload
- * changes — from a success-shaped plan to the error envelope every other `--json` failure prints.
- */
-function planStepFailedError(
-  failure: StepFailure,
-  output: SubprocessOutput,
-  exitCode: number,
-  platform: PlanPlatform
-): CommandError {
-  const invocation = invocationOf(failure);
-  // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md §Constraints — the process on the other side of
-  // the spawn is whatever this machine has under that name, and sometimes it is a wrapper, a shim
-  // or a stale link. Quoting *its* bytes under "What the tool printed" tells the reader the Expo or
-  // EAS CLI said them, and an agent then acts on a sentence no Expo tool wrote (`wrapperCrash.ts`).
-  // The guard needs captured output, so it can only fire in `capture` mode — which is the mode a
-  // driving agent runs in, and the only one where anything is quoted at all.
-  const tool: WrapperCrashTool = failure.step.argv[0] === 'eas' ? 'eas' : 'expo';
-  const wrapperCrash =
-    output === 'capture' &&
-    failure.binPath != null &&
-    looksLikeWrapperCrash({
-      tool,
-      exitCode: failure.exitCode,
-      stdout: failure.stdout,
-      stderr: failure.stderr,
-    });
-  // In `tee` and `inherit` mode the tool's own output already reached the terminal, and repeating
-  // it would bury the three lines that say what to do.
-  const tail = output === 'capture' ? outputTail(`${failure.stdout}${failure.stderr}`, 12) : '';
-  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — an `eas` step that stopped on a
-  // sentence this CLI recognises (an unlinked project, a signed-out machine) gets the fix as its
-  // `How:`, not "run it yourself and read the output". Only what was captured can be read.
-  const cause =
-    tool === 'eas' && output !== 'inherit'
-      ? classifyEasFailure(`${failure.stdout}\n${failure.stderr}`)
-      : null;
-  const error = new CommandError(
-    'PLAN_STEP_FAILED',
-    [
-      `The plan stopped at "${failure.step.id}": "${invocation}" exited ${exitCode}.`,
-      failure.devServerStep
-        ? `Why: that step is the one that starts the dev server, and its process has exited, so no dev server is running for this project. The exit code above is the ${cliNameOf(failure.step)} CLI's own, not this command's.`
-        : `Why: every later step of the plan depends on this one, so nothing after it ran. The exit code above is the ${cliNameOf(failure.step)} CLI's own, not this command's.`,
-      // @ref llp/0004 §Implemented in v1 — said out loud because it is the
-      // fact that decides what the next command costs, and nothing in the tool's own output says
-      // it. Without this line the reader re-runs a step whose expensive half already worked.
-      failure.buildRecorded
-        ? `Note: the app it built is installed on the device, so that build is recorded — the next "${PROGRAM_PREFIX} dev --${platform}" starts a dev server for it instead of building again.`
-        : '',
-      cause ? `The EAS CLI said: ${cause.why}` : '',
-      cause
-        ? `How: ${cause.how}`
-        : `How: run the command above yourself to see it fail with its whole output, or run "${PROGRAM_PREFIX} dev --${platform} --plan" to see the steps this plan is made of.`,
-      wrapperCrash
-        ? wrapperCrashDetail({ tool, exitCode: failure.exitCode }, failure.binPath!)
-        : tail
-          ? `\nWhat the tool printed:\n${tail}`
-          : '',
-    ]
-      .filter(Boolean)
-      .join('\n')
-  );
-  // The fix, when there is one, and never the command that just failed in that case (F67).
-  error.suggestedCommand = cause?.command ?? invocation;
-  error.exitCode = exitCode;
-  return error;
-}
-
-/**
- * Turn one plan step into `expo` CLI arguments.
- *
- * The plan owns the arguments of every step. The user's own `expo start` options are appended
- * to the last step only when that step is `expo start`, because `expo prebuild` and
- * `expo run:*` accept a different set of options.
- */
-function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): string[] {
-  assertRunnableStep(step);
-  // Idempotent, and folded in a second time on purpose: the plan the run reads already carries the
-  // forwarded options (`withForwardedExpoArgs`, above), and a flag the argv holds is never added
-  // twice. What this call is still for is the assertion above and a step that was rebuilt since.
-  return forwardedStepArgs(step, options.expoArgs, { isLast }).args;
-}
-
-/**
- * Whether this run opens the app itself once the dev server is up.
- *
- * @ref llp/0026-dev-owns-the-open.rfc.md
- * Only for a native platform (`--web` is served, not opened), only when running rather than
- * planning, and not under `--no-open`. `AGENT_CLI_NO_DEVICE` turns it off for a harness whose
- * machines must not have their simulators touched — the stubbed e2e tier sets it.
- */
-function shouldOpenApp(options: DevOptions): boolean {
-  return (
-    options.mode === 'run' &&
-    options.open &&
-    (options.platform === 'ios' || options.platform === 'android') &&
-    // The harness switch is about *this machine's* devices. An EAS Simulator session is reached
-    // through the `eas` on PATH, which the stubbed tier doubles, so the open runs there.
-    (options.deviceBackend === 'eas' || process.env.AGENT_CLI_NO_DEVICE !== '1')
-  );
-}
-
-/**
- * Open the app for a running dev server, and say what happened on stderr.
- *
- * Never throws and never stops the server: the app not opening is a warning with the `navigate`
- * door in it, because the dev server is still doing its job.
- */
-async function openAppForRunAsync(
-  projectRoot: string,
-  plan: StartPlan,
-  options: DevOptions,
-  devServerUrl: string,
-  stillWanted: () => boolean,
-  acquired: AcquireResult | null
-): Promise<void> {
-  const platform = options.platform as NativePlatform;
-  const { openAppOnDeviceAsync, openAppFailureLine } =
-    require('./openApp') as typeof import('./openApp');
-  try {
-    const report = await openAppOnDeviceAsync(projectRoot, {
-      platform,
-      expoGo: plan.target === 'expo-go',
-      devServerUrl,
-      stillWanted,
-      interactive: isInteractive(),
-      device: acquired?.device ?? null,
-      justBooted: acquired?.justBooted ?? false,
-    });
-    if (report.opened) {
-      Log.progress(
-        `Opened the app on the ${platform === 'ios' ? 'iOS simulator' : 'Android device'}${
-          report.booted ? ' it booted' : ''
-        }.`
-      );
-    } else if (stillWanted()) {
-      Log.warn(openAppFailureLine(platform, report.reason ?? 'no reason was given'));
-    }
-  } catch (error: unknown) {
-    // `openAppOnDeviceAsync` promises not to throw; this guard is for the promise breaking.
-    Log.warn(
-      `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
-    );
-  }
-}
-
-/** The platform an `eas build` step builds for, read off its argv. */
-function resolveEasBuildPlatform(step: PlanStep): NativePlatform {
-  const index = step.argv.indexOf('--platform');
-  return step.argv[index + 1] === 'android' ? 'android' : 'ios';
-}
-
-/**
- * Record what a successful `expo run:*` built, so the next run can skip the build.
- *
- * The hash comes from the probe, meaning it describes the project as it was *before* prebuild
- * ran. That is the same hash the next probe computes for an unchanged project, which is what
- * makes the comparison in `decideStartPlan` work.
- *
- * The probe's `sources` go in with it, because a hash alone lets a later `@expo/agent-cli impact` say the
- * native surface changed and never what changed (llp/0011 §The record has to hold the sources).
- * They are already in hand: the probe computed them to get the hash.
- */
-function recordBuildOf(projectRoot: string, step: PlanStep, state: ProjectState): void {
-  const platform = resolveBuildPlatform(step);
-  if (platform && state.fingerprint.hash) {
-    recordLastBuildFingerprint(projectRoot, platform, {
-      hash: state.fingerprint.hash,
-      sources: state.fingerprint.sources ?? null,
-    });
-  }
-}
-
-/**
- * Record the build of a step that **failed**, when its own output shows the app reached a device.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
- * The other half of {@link recordBuildOf}, and the whole of F121. `expo run:*` is one subprocess
- * that builds, installs and launches, so its exit code is the *launch's* answer as often as the
- * compiler's — and a plan that rebuilds because the launch failed spends fifteen minutes to change
- * nothing. What is read is the install (`./buildEvidence.ts`), because the record is a claim about
- * the app on a device rather than about a binary in a build directory.
- *
- * @returns whether a build was recorded, which is what the failure report has to say out loud.
- */
-function recordBuildReachedDevice(
-  projectRoot: string,
-  step: PlanStep,
-  state: ProjectState,
-  result: StepResult
-): boolean {
-  if (resolveBuildPlatform(step) == null) {
-    return false;
-  }
-  if (!appReachedDevice(`${result.stdout}\n${result.stderr}`)) {
-    return false;
-  }
-  recordBuildOf(projectRoot, step, state);
-  // Only when something was written: a project with no fingerprint records nothing, and a report
-  // that promised the next plan would skip the build would be promising the opposite of the truth.
-  return state.fingerprint.hash != null;
-}
-
-function resolveBuildPlatform(step: PlanStep): NativePlatform | null {
-  if (step.argv[0] !== 'expo') {
-    // @ref llp/0015-backend-selection-and-config.rfc.md §What the EAS route is made of
-    // Deliberately not `eas build`. The record answers "does the app **installed on a device**
-    // match this project", and a cloud build ends in an artifact that nothing here has installed.
-    // Recording it would mark the next plan fresh against a build no device is running.
-    return null;
-  }
-  if (step.argv[1] === 'run:ios') {
-    return 'ios';
-  }
-  return step.argv[1] === 'run:android' ? 'android' : null;
-}
-
-/** The CLIs a plan step may invoke. Everything else is a step this version cannot run. */
-const RUNNABLE_CLIS = ['expo', 'eas'];
-
-/**
- * A plan step runs the `expo` CLI or the `eas` one. This guard turns a step for any other
- * (`expo-doctor`, `fingerprint`) into a clear error instead of a wrong invocation.
- */
-function assertRunnableStep(step: PlanStep): void {
-  if (!RUNNABLE_CLIS.includes(step.argv[0]!)) {
-    throw new CommandError(
-      'UNSUPPORTED_PLAN_STEP',
-      `Cannot run the plan step "${step.id}": it invokes "${step.argv[0]}", and this version of ${PROGRAM_NAME} only runs the ${RUNNABLE_CLIS.map((cli) => `"${cli}"`).join(' and ')} CLIs. Update ${PROGRAM_NAME}, or run the step yourself with "npx ${step.argv.join(' ')}".`
-    );
-  }
 }

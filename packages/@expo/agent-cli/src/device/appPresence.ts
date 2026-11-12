@@ -85,7 +85,7 @@ export interface ProbeAppPresenceOptions {
  * instance never have the app. With none nothing is asked.
  *
  * `AGENT_CLI_NO_DEVICE` answers `unknown` without spawning anything, the same way it turns off the
- * open (`src/dev/devAsync.ts`): a stubbed harness has no device this could be true about, and a
+ * open (`src/dev/runDevServerStep.ts`): a stubbed harness has no device this could be true about, and a
  * probe that ran anyway would make its runs depend on the host machine's simulators.
  *
  * Never throws. Every failure below is an `unknown`.

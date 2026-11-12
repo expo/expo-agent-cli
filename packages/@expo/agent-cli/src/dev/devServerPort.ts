@@ -10,7 +10,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import type { StartPlan } from '../project/types';
 import { CommandError } from '../utils/errors';
 import { isDevServerStep, withDevServerPort } from './forwardedArgs';
-import { findFreePortAsync, resolvePlannedPortAsync } from './portCollision';
+import { findFreePortAsync, formatPortMove, resolvePlannedPortAsync } from './portCollision';
 import { findPortListenerAsync } from './portListener';
 import type { DevOptions } from './resolveOptions';
 import { DEFAULT_DEV_STOP_SIGNAL, DEFAULT_DEV_STOP_TIMEOUT_MS } from './resolveStopOptions';
@@ -247,4 +247,23 @@ export async function portDemandedError(
       : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
   error.exitCode = EXIT_OUTCOME_FAILED;
   return error;
+}
+
+/**
+ * Warn on stderr, including in JSON mode, when the plan or retry picks a different port.
+ *
+ * @param expected The port to suggest requiring, or null if it is unknown.
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+ */
+export function warnPortMove(
+  move: Parameters<typeof formatPortMove>[0],
+  expected: number | null
+): void {
+  Log.warn(
+    `${formatPortMove(move)} ${
+      expected == null
+        ? 'Pass --port to name one yourself.'
+        : `Pass --port ${expected} to require that port instead of moving, which fails when it is taken.`
+    }`
+  );
 }

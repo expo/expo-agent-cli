@@ -117,7 +117,7 @@ exit a warning rather than a stopped plan.
 as `DecideStartPlanOptions.appPresence` the way `lastBuild` and `buildBackend` do. The plan runner
 knows the install step by its `--no-bundler`: it is the one `expo run:*` that must not be treated
 as a dev-server step, or a lock naming a port nothing listens on would be published for as long as
-the install takes (`src/dev/devAsync.ts` §isDevServerStep), and the detach-phase parser reads it as
+the install takes (`src/dev/forwardedArgs.ts` §isDevServerStep), and the detach-phase parser reads it as
 the compiling half of the plan, not the serving half (`src/dev/childVerdict.ts`).
 
 ### A stale build is two questions

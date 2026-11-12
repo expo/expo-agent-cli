@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** the open itself (`src/dev/openApp.ts`); the hook it hangs on (`src/start/startAsync.ts` §runDevServerAsync, `src/dev/devAsync.ts` §executePlanAsync); the plan's argv and reasons (`src/plan/decide.ts`, `src/plan/platformFlags.ts` §isNativePlatformFlag); the grace-window gate (`src/dev/childVerdict.ts` §stepOpensPlatform); the stub tier's device switch (`e2e/utils.ts`, `AGENT_CLI_NO_DEVICE`)
+**Systems:** the open itself (`src/dev/openApp.ts`); the hook it hangs on (`src/start/startAsync.ts`, `src/dev/runDevServerStep.ts`); the plan's argv and reasons (`src/plan/decide.ts`, `src/plan/platformFlags.ts` §isNativePlatformFlag); the grace-window gate (`src/dev/childVerdict.ts` §stepOpensPlatform); the stub tier's device switch (`e2e/utils.ts`, `AGENT_CLI_NO_DEVICE`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-09-05
 **Related:** [[0025-dev-requires-platform]], [[0005-runtime-loop-tools]], [[0010-agent-conventions]]

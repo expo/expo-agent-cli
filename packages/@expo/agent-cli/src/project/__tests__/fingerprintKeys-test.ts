@@ -368,7 +368,7 @@ describe('the native directories', () => {
     const after = await buildFingerprintKeyManifestAsync(projectRoot);
 
     // `@expo/agent-cli dev` drops the whole record after a plan step for exactly this reason
-    // (`src/dev/devAsync.ts`); a prebuild run some other way rides on the expiry.
+    // (`src/dev/executeDevPlanAsync.ts`); a prebuild run some other way rides on the expiry.
     expect(manifestsMatch(before, after)).toBe(true);
   });
 
