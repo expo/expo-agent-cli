@@ -9,6 +9,7 @@ import { env } from './env';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
+import { watchSubprocessSignals } from './subprocessSignals';
 
 /** What happens to the output of the subprocess. */
 export type SubprocessOutput =
@@ -71,11 +72,11 @@ export interface SubprocessOptions {
    */
   printFilter?: (line: string) => string | null;
   /**
-   * Checked right before the spawn, after any wait for the runner. Aborted then, nothing is
-   * spawned and the call rejects with the signal's reason. After the spawn it does nothing: the
-   * terminal-signal forwarder below reaches the child.
+   * Checked after waiting for the runner and forwarded to the captured live child.
    */
   signal?: AbortSignal;
+  /** A submitted remote operation must return its receipt before the run can finish. */
+  drainOnAbort?: boolean;
 }
 
 export interface SubprocessResult {
@@ -95,9 +96,6 @@ export interface SubprocessResult {
   /** Set when the child was killed for running past `timeoutMs`. */
   timedOut?: boolean;
 }
-
-/** Signals the terminal delivers to the whole process group, so the child gets them too. */
-const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 
 /**
  * Run another CLI and wait for it to finish.
@@ -179,6 +177,7 @@ function spawnNowAsync(
     timeoutMs,
     printFilter,
     signal,
+    drainOnAbort,
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
   if (signal?.aborted) return Promise.reject(signal.reason);
@@ -251,12 +250,11 @@ function spawnNowAsync(
       }
     });
 
-    const listeners = TERMINAL_SIGNALS.map((signal) => {
-      const forward = () => {
-        killProcessTree(child, signal);
-      };
-      process.on(signal, forward);
-      return { signal, forward } as const;
+    const stopSignals = watchSubprocessSignals(child, {
+      signal,
+      drainOnAbort,
+      processGroup: true,
+      forwardUnmanaged: true,
     });
     const stopWatching = () => {
       guard?.stop();
@@ -264,9 +262,7 @@ function spawnNowAsync(
       // A tool that ends without a trailing newline still said what it said.
       toOut.flush();
       toErr.flush();
-      for (const { signal, forward } of listeners) {
-        process.off(signal, forward);
-      }
+      stopSignals();
     };
 
     child.on('error', (spawnError: NodeJS.ErrnoException) => {

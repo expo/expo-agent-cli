@@ -11,9 +11,7 @@ import { spawn } from 'child_process';
 
 import { withRunnerLockAsync, runnerSpawnKey } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
-
-/** Signals the terminal delivers to the whole process group, so the child gets them too. */
-const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+import { watchSubprocessSignals } from './subprocessSignals';
 
 /**
  * Run a command with this process's stdio, and resolve with the exit code it reported.
@@ -80,18 +78,11 @@ function runInheritedNowAsync(
       shell: target.shell,
     });
 
-    const listeners = TERMINAL_SIGNALS.map((signal) => {
-      const forward = () => {
-        child.kill(signal);
-      };
-      process.on(signal, forward);
-      return { signal, forward } as const;
+    const stopForwardingSignals = watchSubprocessSignals(child, {
+      signal,
+      processGroup: false,
+      forwardUnmanaged: true,
     });
-    const stopForwardingSignals = () => {
-      for (const { signal, forward } of listeners) {
-        process.off(signal, forward);
-      }
-    };
 
     child.on('error', (error: NodeJS.ErrnoException) => {
       stopForwardingSignals();

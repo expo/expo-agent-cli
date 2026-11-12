@@ -4,6 +4,7 @@ import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
 import { assertSubprocessDeadline, trackSubprocessDeadline } from './subprocessDeadline';
 import { resolveSpawnTarget } from './windowsShim';
+import { watchSubprocessSignals } from './subprocessSignals';
 
 /** Outcome of one captured subprocess run. */
 export interface SpawnCaptureResult {
@@ -35,6 +36,8 @@ export interface SpawnCaptureBufferResult extends Omit<SpawnCaptureResult, 'stdo
 export interface SpawnCaptureOptions {
   cwd?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
+  drainOnAbort?: boolean;
 }
 
 /**
@@ -80,8 +83,12 @@ async function queuedCaptureAsync(
   args: string[],
   options: SpawnCaptureOptions
 ): Promise<SpawnCaptureBufferResult> {
-  const lock = await acquireRunnerLockAsync(key, { timeoutMs: options.timeoutMs });
+  const lock = await acquireRunnerLockAsync(key, {
+    timeoutMs: options.timeoutMs,
+    signal: options.signal,
+  });
   if (lock == null) {
+    options.signal?.throwIfAborted();
     // The same shape a killed deadline resolves to here: no code, nothing captured. The caller's
     // reason names the timeout it asked for, which is what the wait spent.
     return { stdout: Buffer.alloc(0), stderr: '', exitCode: null };
@@ -103,6 +110,7 @@ function spawnCaptureNowAsync(
   args: string[],
   options: SpawnCaptureOptions = {}
 ): Promise<SpawnCaptureBufferResult> {
+  if (options.signal?.aborted) return Promise.reject(options.signal.reason);
   return new Promise<SpawnCaptureBufferResult>((resolve, reject) => {
     // A `fingerprint` resolved inside a project is a batch shim on Windows, which needs `cmd.exe`.
     const target = resolveSpawnTarget(command, args, process.env);
@@ -118,6 +126,11 @@ function spawnCaptureNowAsync(
     });
 
     trackSubprocessDeadline(child);
+    const stopSignals = watchSubprocessSignals(child, {
+      signal: options.signal,
+      drainOnAbort: options.drainOnAbort,
+      processGroup: true,
+    });
 
     // A lookup tool that hangs must not hang the command that asked. Only set when a caller
     // names a deadline: every other caller runs a tool that ends on its own.
@@ -129,6 +142,7 @@ function spawnCaptureNowAsync(
     }
 
     const clearDeadline = () => {
+      stopSignals();
       if (deadline != null) {
         clearTimeout(deadline);
         deadline = null;
