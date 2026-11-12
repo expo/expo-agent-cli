@@ -48,42 +48,43 @@ One summary, one place. The one-line summary lives on the registry entry, not in
 
 ## The workflow map
 
-`@expo/agent-cli --help` leads with what to run, above the listing:
+`help workflow` states what to run. `@expo/agent-cli --help` does not repeat the map; it points at the topic above the listing, so the two screens cannot disagree.
 
 ```
   What to run, in order
+       Before you start
+         agents:setup           install Expo agent skills, then restart the agent
+         new <directory>        no project yet? create one
     1  Check the project
-         status                what this project is, and what to run next
+         status                 what this project is, and what to run next
     2  Start the app
-         dev --detach          start the dev server, keep this terminal
-         navigate /            open a route in the app on a device
+         dev --detach           start the dev server, keep this terminal
+         navigate /             open a route in the app on a device
     3  Edit and reload
-         runtime:reload        after your edit, run the code on disk
-         runtime:errors        what the app threw, over a time window
-         runtime:tree          what is on screen, and its testIDs
-         runtime:tap <testID>  tap it; --verify says what changed
+         runtime:reload         after your edit, run the code on disk
+         runtime:errors         what the app threw, over a time window
+         runtime:tree           what is on screen, and its testIDs
+         runtime:tap <testID>   tap it; --verify says what changed
+         install <package>      add it at the version this SDK wants
     4  Verify before you're done
-         smoke                 bundle, boot and error window, one exit code
-         typecheck             the type errors neither of those can see
-         doctor                what expo-doctor finds wrong with the setup
-    5  Release
-         deploy                publish the web app to EAS Hosting
-
-       One-time setup
-         new <directory>       create a project
-         install <package>     add it at the version this SDK wants
-         agents:setup          write AGENTS.md, link the agent skills
+         smoke --ios|--android  bundle, boot and error window, one exit code
+         typecheck              the type errors neither of those can see
+         doctor                 what expo-doctor finds wrong with the setup
+    5  Deploy
+         deploy                 publish the web app to EAS Hosting
 ```
 
-The titles are plain phrases, never labels. If a title needs a legend, it is the wrong title. The titles are pinned by a unit test. The title sits above its commands rather than in a third column. `One-time setup` is a block of its own rather than a sixth step: a reader following numbers is following a sequence, and "create a project" does not come after "release".
+The titles are plain phrases, never labels. If a title needs a legend, it is the wrong title. The title sits above its commands rather than in a third column. A unit test pins the titles, and the `help workflow` e2e test pins their order.
 
-The map is data (`workflow` and `oneTimeSetup` in `src/commandRegistry.ts`). A unit test resolves every rung, so a rename cannot leave the map naming a command that no longer exists. The on-ramp prints the same data with `npx @expo/agent-cli ` in front of it.
+`Before you start` is unnumbered and comes first. It is not a step of the loop: it runs once per user or per project, not once per change. It comes first because `agents:setup` takes effect only in an agent session started after it. `install` is in step 3, because a package is added during a change, not once.
+
+The map is data (`beforeYouStart` and `workflow` in `src/commandRegistry.ts`). A unit test resolves every rung, so a rename cannot leave the map naming a command that no longer exists. The on-ramp prints the same data with `npx @expo/agent-cli ` in front of it.
 
 The listing under it keeps its sections but loses its prose: one line per command, the summary in a column, and at most one short note per section. A listing is for finding the command.
 
 ## The on-ramp
 
-`npx @expo/agent-cli help workflow` is one screen written for an agent that has never seen this CLI: the five steps, which commands read and which act, the five exit-code bands and what to do about each, the `--json` contract including the failure envelope, the `Try:` convention, and the one command that asks EAS anything. Every help block ends with `New here? npx @expo/agent-cli help workflow`, and so does the top-level screen.
+`npx @expo/agent-cli help workflow` is one screen written for an agent that has never seen this CLI: the five steps, which commands read and which act, the five exit-code bands and what to do about each, the `--json` contract including the failure envelope, the `Try:` convention, and the one command that asks EAS anything. Every help block ends with `New here? npx @expo/agent-cli help workflow`, and so does the top-level screen. The AGENTS.md block that `agents:setup` writes names it too, because an agent reads that file before it runs any command.
 
 A topic is a positional argument, not a flag. `git help workflows`, `npm help folders`: a topic is a thing you ask for. It is `workflow`, not `how-to`. A topic is named after what it is about.
 

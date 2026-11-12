@@ -91,16 +91,17 @@ describe('the on-ramp', () => {
   it('states the steps, which the top-level screen leaves to it', async () => {
     const topic = await executeAgentCliAsync(projectRoot, ['help', 'workflow']);
 
-    for (const title of [
+    const titles = [
+      'Before you start',
       'Check the project',
       'Start the app',
       'Edit and reload',
       "Verify before you're done",
       'Deploy',
-      'One-time setup',
-    ]) {
-      expect(topic.stdout).toContain(title);
-    }
+    ];
+    const positions = titles.map((title) => topic.stdout.indexOf(title));
+    expect(positions).not.toContain(-1);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 });
 

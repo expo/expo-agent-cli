@@ -8,7 +8,7 @@
 // the same for every command, and repeating them in twenty help blocks would be twenty places to
 // get them wrong. So they are here, once, and every help block ends with the line that points here.
 //
-// The steps themselves are `workflow` and `oneTimeSetup`, defined below. This file owns them and
+// The steps themselves are `beforeYouStart` and `workflow`, defined below. This file owns them and
 // `help workflow` is the only screen that prints them; `@expo/agent-cli -h` only points at that
 // topic. Two screens that both claim to say what to run first are two screens that will one day
 // disagree.
@@ -76,6 +76,7 @@ export const workflow: WorkflowStep[] = [
       // sends the reader off to guess [found by the wave-34 naive-agent walk].
       { run: 'runtime:tree', gets: 'what is on screen, and its testIDs' },
       { run: 'runtime:tap <testID>', gets: 'tap it; --verify says what changed' },
+      { run: 'install <package>', gets: 'add it at the version this SDK wants' },
     ],
   },
   {
@@ -98,24 +99,22 @@ export const workflow: WorkflowStep[] = [
 ];
 
 /**
- * The commands run once per project rather than once per change.
+ * What to run once, before step 1: per user or per project, not per change.
  *
- * Kept out of {@link workflow} rather than added as a sixth step, because it is not one: a reader
- * following the numbers is following a sequence, and "create a project" does not come after
- * "release". It prints under the numbered steps, unnumbered.
+ * Unnumbered, so it does not read as part of the loop, and printed above step 1, because
+ * `agents:setup` only takes effect in an agent session started after it.
  */
-export const oneTimeSetup: WorkflowStep = {
-  title: 'One-time setup',
+export const beforeYouStart: WorkflowStep = {
+  title: 'Before you start',
   rungs: [
-    { run: 'new <directory>', gets: 'create a project' },
-    { run: 'install <package>', gets: 'add it at the version this SDK wants' },
-    { run: 'agents:setup', gets: 'confirm agent setup for a project or user home' },
+    { run: 'agents:setup', gets: 'install Expo agent skills, then restart the agent' },
+    { run: 'new <directory>', gets: 'no project yet? create one' },
   ],
 };
 
 /** Width of the command column, sized to the longest command anywhere in the steps. */
 function commandWidth(): number {
-  const runs = [...workflow, oneTimeSetup].flatMap(({ rungs }) =>
+  const runs = [beforeYouStart, ...workflow].flatMap(({ rungs }) =>
     rungs.map(({ run }) => `${PROGRAM_PREFIX} ${run}`.length)
   );
   return Math.max(...runs) + 2;
@@ -145,9 +144,8 @@ export function formatWorkflowTopic(): string {
     happened in a shape you can branch on: an exit code, plain text, and --json.
 
   ${color.heading('What to run, in order')}
+${stepLines(beforeYouStart, null)}
 ${workflow.map((step, index) => stepLines(step, index + 1)).join('\n')}
-
-${stepLines(oneTimeSetup, null)}
 
   ${color.heading('Which commands change something')}
     read only   status · typecheck · doctor · runtime:errors · runtime:tree · dev:logs

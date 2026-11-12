@@ -109,6 +109,7 @@ describe(generateAgentsMdBlock, () => {
       '@expo/agent-cli runtime:errors',
       '@expo/agent-cli navigate',
       '@expo/agent-cli skills:list',
+      '`npx @expo/agent-cli help workflow`',
     ]) {
       expect(block).toContain(command);
     }
