@@ -16,7 +16,7 @@ declare module '2g' {
     'dev:stop_lock_read': { held: boolean; pid: number | null; ownsTarget: boolean };
     /** `dev:stop --eas` asked the EAS Simulator session to end, and whether it did. */
     'dev:stop_session': { sessionId: string; ok: boolean; platform: 'ios' | 'android' | null };
-    'dev:stop_signalled': { pid: number; signal: string; ok: boolean };
+    'dev:stop_signalled': { pid: number; signal: string; ok: boolean; error: string | null };
     // The three checks, separately, because the conclusion is drawn from the first two and the
     // third is the one that used to be able to overrule them (llp/0005 §Stopping the app
     // listener). A reader of the stream can see which of them the verdict came from.
