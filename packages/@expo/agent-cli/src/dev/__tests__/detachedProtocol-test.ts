@@ -12,6 +12,7 @@ vi.unmock('node:fs');
 
 it('bounds invalid control frames without cancelling the captured attempt', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'control-'));
+  fs.mkdirSync(path.join(root, '.expo'));
   const id = randomUUID();
   const address = lockAddressFor(root, { name: `detached-${id}` }).address;
   let cancelled = 0;
@@ -60,6 +61,7 @@ it('bounds invalid control frames without cancelling the captured attempt', asyn
 
 it('reports acceptance separately from completed captured cleanup', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'control-'));
+  fs.mkdirSync(path.join(root, '.expo'));
   const id = randomUUID();
   const address = lockAddressFor(root, { name: `detached-${id}` }).address;
   let accept!: () => void;
