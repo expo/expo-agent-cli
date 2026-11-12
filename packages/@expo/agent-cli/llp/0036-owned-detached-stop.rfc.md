@@ -25,6 +25,8 @@ No new child registry, receipt journal, or recovery daemon is introduced.
 
 New clients use authenticated `POST /stop`. Old owners reject it before allocating a grant.
 New owners keep pre-lock `POST /cancel` for old clients and refuse its locked path.
+A plain grant release can use its validated drained receipt if the control listener has closed.
+An explicit release denial or a missing receipt still refuses that fallback.
 Non-default signals are refused for owned runs. Matching locked `--force` and `--release` use the cooperative policy;
 those modifiers remain unsupported before handoff. Foreground and unowned stops retain their ordinary behavior.
 

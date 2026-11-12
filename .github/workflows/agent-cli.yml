@@ -1,4 +1,4 @@
-name: Expo Agent CLI
+name: Windows detached stop native timeout probe
 
 on:
   workflow_dispatch: {}
@@ -7,13 +7,11 @@ permissions:
   contents: read
 
 jobs:
-  cancellation-proof:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022]
-    runs-on: ${{ matrix.os }}
+  native-timeout:
+    runs-on: windows-2022
     timeout-minutes: 20
+    env:
+      AGENT_NATIVE_TIMEOUT_TRACE_DIR: ${{ runner.temp }}/native-timeout-probe
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,31 +28,41 @@ jobs:
       - name: Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile
       - name: Build @expo/agent-cli
-        id: build
         run: bun run build
         working-directory: packages/@expo/agent-cli
-      - name: Trace fingerprint, recovery, and shipped plan stops
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        env:
-          AGENT_NATIVE_STOP_TRACE_DIR: ${{ runner.temp }}/managed-stop-traces
+      - name: Trace the native timeout row
+        id: probe
         run: |
-          $tracePath = (Join-Path $env:GITHUB_WORKSPACE 'scripts/diagnostics/trace-managed-stop.cjs').Replace('\', '/')
+          New-Item -ItemType Directory -Force -Path $env:AGENT_NATIVE_TIMEOUT_TRACE_DIR | Out-Null
+          $tracePath = (Join-Path $env:GITHUB_WORKSPACE 'scripts/diagnostics/trace-native-timeout.cjs').Replace('\', '/')
           $env:NODE_OPTIONS = '--require "' + $tracePath + '"'
-          bun run test:e2e -- dev-detached-owner-test dev-owned-stop-test -t "fingerprinting|manually quiesced|shipped EAS plan"
+          bun run test:e2e -- dev-owned-stop-test -t 'keeps the owner.*nativeTimeout..true'
         working-directory: packages/@expo/agent-cli
-      - name: Trace successful held-session stop schedules
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        env:
-          AGENT_NATIVE_STOP_TRACE_DIR: ${{ runner.temp }}/managed-stop-traces
+      - name: Save fixture files that still exist
+        if: ${{ always() && steps.probe.outcome != 'skipped' }}
         run: |
-          $tracePath = (Join-Path $env:GITHUB_WORKSPACE 'scripts/diagnostics/trace-managed-stop.cjs').Replace('\', '/')
-          $env:NODE_OPTIONS = '--require "' + $tracePath + '"'
-          bun run test:e2e -- dev-owned-stop-test -t "keeps the owner.*failure..false"
-        working-directory: packages/@expo/agent-cli
-      - name: Save native operation traces
-        if: always()
+          $directory = $env:AGENT_NATIVE_TIMEOUT_TRACE_DIR
+          if (!(Test-Path -LiteralPath $directory)) { exit 0 }
+          $roots = Get-ChildItem -LiteralPath $directory -Filter '*.jsonl' -File |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName } |
+            Where-Object { $_.Contains('"event":"fixture-launch"') } |
+            ForEach-Object { ($_ | ConvertFrom-Json).root } |
+            Sort-Object -Unique
+          foreach ($root in $roots) {
+            $name = Split-Path (Split-Path $root -Parent) -Leaf
+            $destination = Join-Path $directory $name
+            New-Item -ItemType Directory -Force -Path $destination | Out-Null
+            foreach ($file in @('owned-stop.jsonl', 'control.jsonl', 'spawned.jsonl')) {
+              $source = Join-Path $root $file
+              if (Test-Path -LiteralPath $source) {
+                Copy-Item -LiteralPath $source -Destination $destination
+              }
+            }
+          }
+      - name: Upload native timeout traces
+        if: ${{ always() && steps.probe.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: windows-managed-stop-traces
-          path: ${{ runner.temp }}/managed-stop-traces
+          name: windows-native-timeout-probe
+          path: ${{ runner.temp }}/native-timeout-probe
           if-no-files-found: error
