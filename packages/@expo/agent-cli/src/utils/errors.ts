@@ -434,7 +434,8 @@ function asError(thrown: unknown): Error {
  * Synchronous throughout. A handler that scheduled an async flush would hand control back to an
  * event loop that may have nothing left in it, and Node would then exit **0** for a crash.
  *
- * Exported for the tests that pin the exit code; registered on the process below.
+ * Registered by `src/cli.ts`, the one entry point. A module side effect would also install it in
+ * every test worker that imports `src/`, where it turns any crash into a bare `process.exit(1)`.
  */
 export function handleUncaughtException(thrown: unknown): void {
   const error = asError(thrown);
@@ -495,5 +496,3 @@ export function handleUncaughtException(thrown: unknown): void {
 
   process.exit(EXIT_ERROR);
 }
-
-process.on('uncaughtException', handleUncaughtException);
