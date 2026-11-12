@@ -141,7 +141,7 @@ class WorkScope implements DevRun {
   async finishAsync(): Promise<{ metro: MetroEvidence; cleanup: CapturedCleanup }> {
     this.finishing = true;
     return {
-      metro: { kind: 'exited', server: this.serving?.metro ?? null },
+      metro: this.metro,
       cleanup: { sessions: [], devices: [] },
     };
   }
@@ -193,6 +193,6 @@ function interruptedError(signal: 'SIGINT' | 'SIGTERM'): CommandError {
       'DEV_INTERRUPTED',
       `The dev run stopped on ${signal}. No later step ran. An EAS build already submitted may still run on EAS; "eas build:cancel" ends it.`
     ),
-    { exitCode: 128 + os.constants.signals[signal] }
+    { exitCode: 128 + os.constants.signals[signal], signal }
   );
 }
