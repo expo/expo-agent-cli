@@ -749,7 +749,6 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000); const exitCode = 0;'
         ),
       });
-      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
       try {
         // A detached run keeps its session, so the session is the stop's to end.
         const started = await executeAgentCliAsync(
@@ -758,6 +757,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           { env: { ...easRunEnv(projectRoot, 8587), STUB_EXPO_DELAY_MS: '2500' } }
         );
         const pid: number = JSON.parse(started.stdout).pid;
+        const logFile: string = JSON.parse(started.stdout).logFile;
         expect(
           await waitForAsync(
             () =>
@@ -767,20 +767,21 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           )
         ).toBe(true);
 
-        const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
-          env: stubExpoEnv(projectRoot),
-          reject: false,
-        });
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev:stop', '--json', '--timeout', '1s'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
 
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode).toBe(22);
         const report = JSON.parse(result.stdout);
-        // The dev server is gone; the pid finishes its session start, and nothing signals it.
         expect(report).toMatchObject({
           stopped: true,
           reason: null,
+          admission: 'retained',
           pid,
           lockHeld: true,
-          signal: null,
+          signal: 'SIGTERM',
           processStillRunning: true,
           easPlatform: 'ios',
         });
@@ -849,7 +850,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
   it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
-    'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro (%s)',
+    'reports its EAS build and stops before Metro (%s)',
     async (platform) => {
       const projectRoot = await setupAsync();
       await writeSchemeAsync(projectRoot, 'devclient');
@@ -872,40 +873,22 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         const pid: number = report.pid;
         expect(process.kill(pid, 0)).toBe(true);
 
-        // A second detach reports the same run and spawns no second child.
-        const again = await executeAgentCliAsync(
-          projectRoot,
-          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
-          { env, reject: false }
-        );
-        expect(again.exitCode).toBe(0);
-        expect(JSON.parse(again.stdout)).toMatchObject({
-          phase: 'building',
-          alreadyRunning: true,
-          pid,
-        });
-
-        // --wait-ready follows the build, and its budget ends while the build runs: exit 22.
-        const waited = await executeAgentCliAsync(
-          projectRoot,
-          ['dev', `--${platform}`, '--eas', '--detach', '--wait-ready', '--json'],
-          { env, reject: false }
-        );
-        expect(waited.exitCode).toBe(22);
-        const { error } = JSON.parse(waited.stdout);
-        expect(error).toMatchObject({ code: 'DEV_DETACH_STILL_BUILDING', data: { pid } });
-        expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
-          1
-        );
+        expect(
+          await waitForAsync(
+            () => easInvocationArgs(projectRoot).filter((args) => args[0] === 'build').length === 1,
+            10_000
+          )
+        ).toBe(true);
 
         const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
           env: stubExpoEnv(projectRoot),
           reject: false,
         });
         expect(stop.exitCode).toBe(0);
-        // The building run's lock names its EAS platform, so the stop names the session follow-up.
         expect(JSON.parse(stop.stdout)).toMatchObject({
-          stopped: true,
+          stopped: false,
+          reason: 'not-running',
+          admission: 'released',
           pid,
           lockHeld: true,
           easPlatform: platform,
@@ -934,7 +917,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
   it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
-    'reports a followed build that fails, and starts no second build (%s)',
+    'reports its own build failure and starts no replacement build (%s)',
     async (platform) => {
       const projectRoot = await setupAsync();
       await writeSchemeAsync(projectRoot, 'devclient');
@@ -943,33 +926,25 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         STUB_EAS_BUILD_DELAY_MS: '4000',
         STUB_EAS_BUILD_EXIT: '1',
         STUB_EAS_BUILD_STDERR: 'Build failed: e2e-followed',
-        AGENT_CLI_DETACH_TIMEOUT_MS: '1500',
+        AGENT_CLI_DETACH_TIMEOUT_MS: '15000',
       };
-      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
       try {
-        const first = await executeAgentCliAsync(
-          projectRoot,
-          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
-          { env, reject: false }
-        );
-        expect(JSON.parse(first.stdout).phase).toBe('building');
-
         const again = await executeAgentCliAsync(
           projectRoot,
           ['dev', `--${platform}`, '--eas', '--detach', '--wait-ready', '--json'],
-          { env: { ...env, AGENT_CLI_DETACH_TIMEOUT_MS: '15000' }, reject: false }
+          { env, reject: false }
         );
 
         expect(again.exitCode).not.toBe(0);
         const { error } = JSON.parse(again.stdout);
         expect(error.suggestedCommand).toMatch(/dev:logs$/);
-        // The followed run held a building lock, so the report says its build ended.
+        // The child held a building lock, so the report says its build ended.
         expect(error.message).toContain('ended during its build');
         expect(error.message).not.toContain('still running');
         expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
           1
         );
-        expect(fs.readFileSync(logFile, 'utf8')).toContain('Build failed: e2e-followed');
+        expect(fs.readFileSync(error.data.logFile, 'utf8')).toContain('Build failed: e2e-followed');
       } finally {
         await cleanUpAsync(projectRoot);
       }

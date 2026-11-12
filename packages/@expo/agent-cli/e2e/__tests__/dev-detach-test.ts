@@ -549,8 +549,8 @@ describe('@expo/agent-cli dev --detach', () => {
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a plain detach of a run
     // that builds reports at once, so its port is the plan's, not the one a busy-port retry takes
-    // later. A re-run once the lock says `serving` reports where the dev server is.
-    it('reports a building run at once, and a re-run reports the port the retry took', async () => {
+    // later. A refused re-run names the port the serving lock reports.
+    it('reports its building run, then refuses a re-run with the port the retry took', async () => {
       const projectRoot = await setupFixtureAsync('bare-app');
       await installStubFingerprintAsync(projectRoot);
       const env = {
@@ -582,10 +582,10 @@ describe('@expo/agent-cli dev --detach', () => {
           ['dev', '--ios', '--local', '--detach', '--json'],
           { env, reject: false }
         );
-        expect(again.exitCode, again.all).toBe(0);
-        const report = JSON.parse(again.stdout);
-        expect(report).toMatchObject({ phase: 'serving', alreadyRunning: true, port: lock!.port });
-        expect(report.port).not.toBe(8473);
+        expect(again.exitCode, again.all).toBe(20);
+        const { error } = JSON.parse(again.stdout);
+        expect(error).toMatchObject({ code: 'DEV_SERVER_RUNNING', data: { port: lock!.port } });
+        expect(error.data.port).not.toBe(8473);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
       }
@@ -610,13 +610,13 @@ describe('@expo/agent-cli dev --detach', () => {
 
   // The plan's rule: one detached dev server per project. A second one could not hold the lock, so
   // nothing would be able to find it or stop it — which is worse than a second foreground one.
-  it('reports the running server and starts nothing on a second --detach', async () => {
+  it.each([8397, 8396])('refuses a second --detach requesting port %s', async (port) => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
       const first = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--json'],
+        ['dev', '--ios', '--detach', '--json', '--port', '8397'],
         {
           env: detachEnv(projectRoot, 8397),
         }
@@ -625,22 +625,18 @@ describe('@expo/agent-cli dev --detach', () => {
 
       const second = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--json'],
-        { env: detachEnv(projectRoot, 8396) }
+        ['dev', '--ios', '--detach', '--json', '--port', String(port)],
+        { env: detachEnv(projectRoot, port), reject: false }
       );
 
-      // Idempotent: exit 0, and the report is of the server that is there.
-      expect(second.exitCode).toBe(0);
-      expect(JSON.parse(second.stdout)).toMatchObject({
-        alreadyRunning: true,
-        pid: firstPid,
-        port: 8397,
+      expect(second.exitCode, second.stderr).toBe(20);
+      expect(JSON.parse(second.stdout).error).toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        data: { pid: firstPid, port: 8397 },
       });
-
-      const human = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach'], {
-        env: detachEnv(projectRoot, 8396),
-      });
-      expect(human.stdout).toContain('so nothing was started');
+      expect(
+        readStubExpoInvocations(projectRoot).filter((call) => call.args[0] === 'start')
+      ).toHaveLength(1);
     } finally {
       await cleanUpDetachedAsync(projectRoot);
     }
