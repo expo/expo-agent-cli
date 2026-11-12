@@ -712,11 +712,13 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // is registered" are the two answers this field exists to keep apart.
     expect(typeof report.commandSocketClients).toBe('number');
 
-    // **Rung 1 is always taken.** On an iOS session it is `Page.reload` to the session's app: the
-    // SDK 58 iOS development build ignores the broadcast (llp/0005 §How it reloads). On Android it
-    // is the broadcast, which the app acts on.
+    // **Rung 1 is always taken.** It is `Page.reload` when the scope names an iOS EAS session: the
+    // SDK 58 iOS development build ignores the broadcast (llp/0005 §How it reloads). This run names
+    // no platform, so its scope decides: elsewhere rung 1 is the broadcast.
     const attempts = Object.fromEntries(report.attempts.map((a: any) => [a.method, a]));
-    const rungOne = CLOUD_PLATFORM === 'ios' ? 'page-reload' : 'dev-server';
+    const iosEasScope =
+      report.scope?.platform === 'ios' && report.scope?.device?.backend === 'cloud';
+    const rungOne = iosEasScope ? 'page-reload' : 'dev-server';
     expect(report.attempts[0].method).toBe(rungOne);
 
     // The ladder stops at the cheapest rung that proved the reload: rung 1, the app reloading itself
@@ -750,6 +752,26 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       }
     }
   });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — an iOS EAS session takes
+  // `Page.reload` first, on Expo Go and on a development build, and keeps the app's process.
+  it.runIf(CLOUD_PLATFORM === 'ios')(
+    'runtime:reload --eas --ios reloads the session app in place with Page.reload',
+    async () => {
+      await waitForCloudAppSettledAsync('before-reload-ios');
+      const result = await runLiveEasAsync(
+        run,
+        projectRoot,
+        ['runtime:reload', '--eas', '--ios', '--timeout', RELOAD_TIMEOUT, '--json'],
+        { label: 'reload-cloud-ios', env: suiteEnv() }
+      );
+      expectExit(result, 0);
+      const report = parseJson(result);
+      expect(report.attempts[0]).toMatchObject({ method: 'page-reload', ok: true });
+      expect(report).toMatchObject({ reloaded: true, verifiedBy: 'debugger-context-replaced' });
+      expect(report.attempts.map((a: any) => a.method)).not.toContain('device');
+    }
+  );
 
   // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
   // dev-build app (`apps/eas-example`, root route only) does not.
