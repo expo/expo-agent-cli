@@ -74,7 +74,7 @@ export async function discoverDevServerAsync(
     return { ...probe, devServerUrl: normalizeDevServerUrl(explicitUrl), ...foundBy('flag') };
   }
 
-  const withTimeout = async (url: string): Promise<DevServerProbe> => {
+  const withTimeout = async (url: string, budgetMs = timeoutMs): Promise<DevServerProbe> => {
     const abort = new AbortController();
     const probeSignal = signal == null ? abort.signal : AbortSignal.any([signal, abort.signal]);
     let timer: NodeJS.Timeout | undefined;
@@ -96,8 +96,8 @@ export async function discoverDevServerAsync(
             // undici keeps the `ConnectWrap` until its own 10 s connect ceiling. That case cannot
             // arise on this ladder, which only ever probes localhost, where a refusal is immediate.
             abort.abort();
-            resolve({ reachable: false, targets: [], reason: `no answer within ${timeoutMs}ms` });
-          }, timeoutMs);
+            resolve({ reachable: false, targets: [], reason: `no answer within ${budgetMs}ms` });
+          }, budgetMs);
           // Belt to the `clearTimeout` braces below: a timer this function somehow loses track of
           // still cannot hold the process open on its own.
           timer.unref?.();
@@ -113,10 +113,15 @@ export async function discoverDevServerAsync(
     }
   };
 
-  // Step 0 — the project's dev-server lock, in `./discoverByLock`.
+  // Step 0 — the project's dev-server lock, in `./discoverByLock`. A lock proves a live server of
+  // this project, so its probe gets the `/status` budget, not the port scan's.
   let lockMiss: string | null = null;
   if (projectRoot != null) {
-    const lock = await discoverByLockAsync(projectRoot, withTimeout, timeoutMs);
+    const lock = await discoverByLockAsync(
+      projectRoot,
+      (url) => withTimeout(url, statusTimeoutMs),
+      timeoutMs
+    );
     if (lock.found) return lock.found;
     lockMiss = lock.miss;
   }

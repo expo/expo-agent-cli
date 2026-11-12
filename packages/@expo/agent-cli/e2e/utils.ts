@@ -705,6 +705,8 @@ export type StubDevServerOptions = {
    * one has to be tested against that, not only against a server that is instantly ready.
    */
   statusDelayMs?: number;
+  /** Delay before the first `GET /json/list` answers, standing in for a slow first request. */
+  targetsDelayMs?: number;
   /**
    * Project root the `/status` answer names in its header, as the real dev server does.
    *
@@ -909,6 +911,7 @@ export async function startStubDevServerAsync({
   targets = [],
   readyWithFile,
   statusDelayMs = 0,
+  targetsDelayMs = 0,
   projectRoot = '/stub-project',
   bundle = 'compiles',
   manifestOrigin,
@@ -1005,6 +1008,12 @@ export async function startStubDevServerAsync({
     }
 
     if (route === '/json/list') {
+      if (targetsDelayMs > 0) {
+        const delay = targetsDelayMs;
+        targetsDelayMs = 0;
+        setTimeout(() => server.emit('request', request, response), delay).unref();
+        return;
+      }
       const started = targetsAppearWithFile == null || fs.existsSync(targetsAppearWithFile);
       const listed = typeof targets === 'function' ? targets() : listedTargets;
       if (listed == null) {
