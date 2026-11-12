@@ -541,7 +541,7 @@ export type DevLockInfo = {
   startedAt: string;
   projectRoot: string;
   /** The platform of the EAS Simulator session a `dev --eas` server runs. */
-  easPlatform?: 'ios' | 'android' | null;
+  easPlatform?: 'ios' | 'android';
   /** What the run does now; a lock with no phase reads as `serving`. */
   phase?: 'building' | 'serving' | 'finishing';
 };
