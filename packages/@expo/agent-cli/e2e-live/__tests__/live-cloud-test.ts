@@ -699,6 +699,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       'app-relaunch',
       'fresh-debugger-target',
       'dev-server-bundle',
+      'debugger-context-replaced',
     ]).toContain(report.verifiedBy);
     expect(report.bundle.ok).toBe(true);
     // The check stays on the local dev server and never touches the tunnel (llp/0010 §Other gates).
@@ -711,26 +712,25 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // is registered" are the two answers this field exists to keep apart.
     expect(typeof report.commandSocketClients).toBe('number');
 
-    // **Rung 1 is always taken, and it is always the socket that says what it found.** The rung is
-    // never skipped on the strength of `--cloud` — wave 21's correction — so this attempt exists on
-    // every run, whichever state the session is in.
+    // **Rung 1 is always taken.** On an iOS session it is `Page.reload` to the session's app: the
+    // SDK 58 iOS development build ignores the broadcast (llp/0005 §How it reloads). On Android it
+    // is the broadcast, which the app acts on.
     const attempts = Object.fromEntries(report.attempts.map((a: any) => [a.method, a]));
-    // **Rung 1 is always taken** — never skipped on the strength of `--cloud` (wave 21) — so this
-    // attempt exists on every run, whichever state the session is in.
-    expect(attempts['dev-server']).toBeTruthy();
+    const rungOne = CLOUD_PLATFORM === 'ios' ? 'page-reload' : 'dev-server';
+    expect(report.attempts[0].method).toBe(rungOne);
 
-    // **Which rung reloads a cloud session is the platform's to decide** [observed — 2026-09-05, both
-    // platforms live in one workflow run]. On an Android cloud Expo Go the command-socket broadcast
-    // reaches the app and it acts on it, so rung 1 is enough and the ladder never climbs. On iOS it
-    // does not take — zero clients, or one that took the broadcast and did nothing with it (F97, F99,
-    // 2026-08-27) — so the ladder climbs to the device relaunch. The CLI reloads at the cheapest rung
-    // that works; this asserts whichever one that was, rather than a platform it guessed.
-    if (attempts['dev-server'].ok) {
+    // The ladder stops at the cheapest rung that proved the reload: rung 1, the app reloading itself
+    // (rung 2, never on Expo Go), or the relaunch.
+    if (attempts[rungOne].ok) {
       expect(report.method).toBe('dev-server');
+    } else if (attempts.runtime?.ok) {
+      expect(report.method).toBe('runtime');
     } else {
-      expect(attempts['dev-server'].reason).toContain(
-        report.commandSocketClients > 0 ? 'did not act on it' : 'nothing to broadcast to'
-      );
+      if (rungOne === 'dev-server') {
+        expect(attempts['dev-server'].reason).toContain(
+          report.commandSocketClients > 0 ? 'did not act on it' : 'nothing to broadcast to'
+        );
+      }
       expect(report.method).toBe('device');
       expect(attempts.device.ok).toBe(true);
       // The cloud relaunch is two verbs, and the reason names both — that is the mechanism, quoted.
