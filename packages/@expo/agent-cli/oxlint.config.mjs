@@ -11,7 +11,7 @@ const longFiles = {
 // current size. Lower a cap when a file shrinks; delete the entry when the function is split.
 const longFunctionFiles = {
   'src/agents/installAgentAsync.ts': 255,
-  'src/dev/easSession.ts': 477,
+  'src/dev/easSession.ts': 469,
   'src/followups/smoke.ts': 277,
   'src/plan/decide.ts': 468,
   'src/runtime/discoverDevServer.ts': 194,

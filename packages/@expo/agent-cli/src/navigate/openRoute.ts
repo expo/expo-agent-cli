@@ -296,21 +296,7 @@ export async function openRouteAsync(
         : Math.max(budgetMs - (Date.now() - startedAt), ROUTE_ATTACH_FLOOR_MS),
   });
 
-  cliEvent('navigate', {
-    route: resolved.route,
-    url: resolved.url,
-    devServerUrl,
-    devServerSource: resolved.devServerSource,
-    deviceBackend: device.backend,
-    platform: device.platform,
-    deviceId: device.deviceId,
-    exitCode: result.exitCode,
-    reversedPort: reverse?.port ?? null,
-    attached: attach.confirmed,
-    launchUrl: launch?.url ?? null,
-  });
-
-  return {
+  const report: OpenRouteResult = {
     ...resolved,
     reverse,
     launch,
@@ -326,6 +312,24 @@ export async function openRouteAsync(
     stdout: result.stdout,
     stderr: result.stderr,
   };
+  reportOpen(report, devServerUrl);
+  return report;
+}
+
+function reportOpen(result: OpenRouteResult, devServerUrl: string): void {
+  cliEvent('navigate', {
+    route: result.route,
+    url: result.url,
+    devServerUrl,
+    devServerSource: result.devServerSource,
+    deviceBackend: result.deviceBackend,
+    platform: result.platform,
+    deviceId: result.deviceId,
+    exitCode: result.exitCode,
+    reversedPort: result.reverse?.port ?? null,
+    attached: result.attach.confirmed,
+    launchUrl: result.launch?.url ?? null,
+  });
 }
 
 /**

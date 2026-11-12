@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 
 import { cloudBindingFile, installStubEasAsync, STUB_EAS_SCRIPT, stubEasArgs } from './stubEas';
@@ -72,16 +73,17 @@ export async function detachedSessionFixture(platform: 'ios' | 'android') {
     executeAgentCliAsync(root, ['dev:stop', ...flags, '--timeout', timeout, '--json'], {
       reject: false,
     });
-  async function metroDown() {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/status`, {
-        signal: AbortSignal.timeout(300),
-      });
-      await response.text();
-      return false;
-    } catch {
-      return true;
-    }
+  function metroDown(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.createConnection({ host: '127.0.0.1', port });
+      const done = (closed: boolean) => {
+        socket.destroy();
+        resolve(closed);
+      };
+      socket.on('error', () => done(true));
+      socket.on('connect', () => done(false));
+      socket.setTimeout(300, () => done(false));
+    });
   }
   async function entered(phase: 'start' | 'stop') {
     expect(
@@ -97,6 +99,7 @@ export async function detachedSessionFixture(platform: 'ios' | 'android') {
     for (const name of ['start-entered', 'stop-entered', 'metro-pid']) {
       if (!fs.existsSync(mark(name))) continue;
       const pid = Number(fs.readFileSync(mark(name), 'utf8'));
+      if (!Number.isSafeInteger(pid) || pid <= 0) continue;
       try {
         process.kill(process.platform === 'win32' ? pid : -pid, 'SIGKILL');
       } catch {}

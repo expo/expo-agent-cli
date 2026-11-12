@@ -67,8 +67,16 @@ export async function devAsync(
     return withDevRunAsync(
       projectRoot,
       { request: startupRequestFrom(options), detached: null },
-      (run) => devAsync(projectRoot, options, run)
+      (run) => devInRunAsync(projectRoot, options, run)
     );
+  return devInRunAsync(projectRoot, options, owned);
+}
+
+async function devInRunAsync(
+  projectRoot: string,
+  options: DevOptions,
+  owned?: DevRun
+): Promise<number> {
   owned?.signal.throwIfAborted();
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
   // log, so a parent can tell which run wrote it.
@@ -77,10 +85,6 @@ export async function devAsync(
   }
   if (options.device !== undefined && boundPlatform(options) == null) {
     throw deviceNotBindableError(options);
-  }
-  if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
-    await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
-    owned?.signal.throwIfAborted();
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
@@ -103,6 +107,10 @@ export async function devAsync(
     });
   }
   owned?.signal.throwIfAborted();
+  if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
+    await assertEasProjectConfiguredAsync(projectRoot, { signal: owned?.signal });
+    owned?.signal.throwIfAborted();
+  }
   recordLastDevRequest(projectRoot, options);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.
   const orphan = await findUntrackedDevServerAsync(projectRoot, lock, options);

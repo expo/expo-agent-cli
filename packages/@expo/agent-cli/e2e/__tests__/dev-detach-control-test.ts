@@ -101,7 +101,15 @@ it.each(['ios', 'android'] as const)(
       expect(await waitForAsync(() => f.marks('entered').length === 1, 15000)).toBe(true);
       const stopped = await f.run(['dev:stop', '--eas', '--release', '--json']);
       expect(stopped.exitCode, stopped.all).toBe(0);
-      expect(JSON.parse(stopped.stdout).admission).toBe('released');
+      const report = JSON.parse(stopped.stdout);
+      expect(report.admission).toBe('released');
+      expect(report.session).toMatchObject({ id: 'prior-session', platform, stopped: true });
+      expect(report.devices).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ backend: 'cloud', id: 'prior-session', released: true }),
+          expect.objectContaining({ backend: 'local-android', id: 'captured-usb', released: true }),
+        ])
+      );
       expect(fs.existsSync(f.record(owner.id))).toBe(false);
       expect(fs.existsSync(cloudBindingFile(expoHomeOf(f.root), root, platform))).toBe(false);
       expect(stubEasArgs(f.root).filter(([verb]) => verb === 'simulator:stop')).toEqual([
