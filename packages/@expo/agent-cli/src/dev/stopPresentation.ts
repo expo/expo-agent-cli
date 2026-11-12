@@ -135,9 +135,11 @@ export function printHumanReport(report: DevStopResultJson, finishing: boolean):
       ? // Only a port that was looked at and found quiet shows that nothing runs; with no port, a
         // server a person started may be up, and the line says what was checked.
         chalk.dim(
-          report.portStillAnswering === false
-            ? 'Dev server not running'
-            : `No dev-server lock answered, and no dev server a killed run left was found · pass --port to check a port`
+          report.admission === 'released'
+            ? 'Starting run canceled before Metro readiness'
+            : report.portStillAnswering === false
+              ? 'Dev server not running'
+              : `No dev-server lock answered, and no dev server a killed run left was found · pass --port to check a port`
         )
       : chalk`{bold Stopped} ${report.stopped ? chalk.green('yes') : chalk.red('no')}${
           report.forced ? chalk.dim(' · forced') : ''

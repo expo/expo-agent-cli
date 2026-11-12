@@ -53,7 +53,7 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   recoveryCommand?: string | null;
   /** A dev server was running and is not running now. */
   stopped: boolean;
-  /** PID that was signalled, or the listener's PID when one was found but not signalled. */
+  /** Observed target PID, whether or not this command signalled it. */
   pid: number | null;
   /** Port the dev server was on, from the lock or from `--port`. */
   port: number | null;

@@ -2,7 +2,8 @@
 import type { ChildProcess } from 'child_process';
 
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
-import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
+import { devStopAsync } from '../dev/stopAsync';
+import type { DevStopResultJson } from '../dev/stopTypes';
 import type { NativePlatform } from '../plan/types';
 import { whatAndHow } from './deps/reasons';
 import type { SmokeReleaseResult } from './contract';

@@ -18,12 +18,6 @@ import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './po
 import { isProcessAlive } from './processLiveness';
 import { stopDevicesAsync } from './stopDevices';
 import type { DevStopReportOptions, DevStopResultJson } from './stopTypes';
-export type {
-  DevStopForceRefusal,
-  DevStopReportOptions,
-  DevStopResultJson,
-  DevStopSkipReason,
-} from './stopTypes';
 import { POLL_INTERVAL_MS, signalAndWaitAsync } from './processStop';
 import {
   claimEndedRunAsync,
