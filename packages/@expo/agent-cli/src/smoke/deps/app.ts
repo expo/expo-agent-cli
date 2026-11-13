@@ -6,9 +6,8 @@ import { CdpClient, isMethodNotFoundError } from '../../runtime/cdpClient';
 import { probeDevServerAsync } from '../../runtime/devServer';
 import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../../runtime/reload/evidence';
-import type { ReloadAttempt } from '../../runtime/reload/attempt';
-import { askableInPlace, reloadOverRuntimeAsync } from '../../runtime/reload/inPlace';
-import { prepareRungOneAsync, runRungOneAsync, settleRungOne } from '../../runtime/reload/rungOne';
+import { runInPlaceRungsAsync } from '../../runtime/reload/inPlaceRungs';
+import { prepareRungOneAsync } from '../../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { symbolicateRuntimeErrorsAsync } from '../../runtime/symbolicate';
 import { waitForAppConnectionAsync } from '../../runtime/waitReady';
@@ -179,29 +178,21 @@ async function reloadApp(
   const { projectRoot } = ctx;
   const deadline = Date.now() + timeoutMs;
   const remainingMs = () => Math.max(0, deadline - Date.now());
-  const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
+  const first = await prepareRungOneAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
     budgetMs: remainingMs(),
     preflight: ctx.lastObservation(),
   });
   const bundleMark = markBundleSignalSync(projectRoot);
-  const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
-  const attempts: ReloadAttempt[] = [rungOne.attempt];
-  const settled = settleRungOne(rungOne);
-  let ran = settled.ran;
-  let proof = settled.proof;
-  // Rung 2 keeps the app's process too, so the gate may take it; never on Expo Go.
-  const askable =
-    settled.relaunchWhy == null ? [] : askableInPlace(prepared.classifiedTargets.read);
-  if (askable.length > 0) {
-    const rungTwo = await reloadOverRuntimeAsync(devServerUrl, askable, remainingMs());
-    attempts.push(rungTwo.attempt);
-    ran ||= rungTwo.attempt.delivered === true;
-    if (rungTwo.kind === 'proved') proof = 'debugger-context-replaced';
-  }
+  const { prepared, attempts, churn, settled } = await runInPlaceRungsAsync(
+    devServerUrl,
+    projectRoot,
+    { prepared: first, rungs: 'auto', remainingMs }
+  );
+  const ran = settled.method != null;
   const last = attempts[attempts.length - 1]!;
   const result = {
     knownTargetIds: prepared.targets.map((target) => target.id),
-    commandSocketReconnected: rungOne.churn.reconnected > 0,
+    commandSocketReconnected: churn.reconnected > 0,
     targetOutcomes: attempts.flatMap((attempt) => ('outcomes' in attempt ? attempt.outcomes : [])),
   };
   if (!ran) {
@@ -216,8 +207,8 @@ async function reloadApp(
   }
   const { verifiedBy, evidence } = await observeReloadAsync(devServerUrl, projectRoot, {
     prepared,
-    mechanismProof: proof,
-    churn: rungOne.churn,
+    mechanismProof: settled.kind === 'proved' ? settled.proof : null,
+    churn,
     attempts,
     bundleMark,
     timeoutMs: remainingMs(),
