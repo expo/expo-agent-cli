@@ -35,6 +35,12 @@ export const BOOTED_SIMULATOR = {
   name: SIMULATOR_NAME,
   state: 'Booted',
 } as const;
+/** A second booted simulator, for a case with two. */
+export const SECOND_SIMULATOR = {
+  udid: 'E2E-SIM-0002',
+  name: 'iPhone 17',
+  state: 'Booted',
+} as const;
 /** The reachable phone in the `devicectl` fixture, with Developer Mode on. */
 export const PHONE_NAME = "Ada's iPhone";
 export const PHONE_UDID = '00001110-001111110110101A';
@@ -336,6 +342,7 @@ export async function installStubXcrunAsync(
     expoGoMissing = false,
     phone,
     bind = true,
+    listFails = false,
   }: {
     booted?: { fingerprint: string };
     simulators?: { udid: string; name: string; state?: 'Booted' | 'Shutdown' }[];
@@ -346,6 +353,8 @@ export async function installStubXcrunAsync(
     phone?: { fingerprint: string | null; postDelayMs?: number };
     /** Bind the first booted simulator to this fixture, as `dev` would. False leaves none bound. */
     bind?: boolean;
+    /** `simctl list devices booted` exits 1, as when CoreSimulator is down. */
+    listFails?: boolean;
   } = {}
 ): Promise<{ binDir: string; calls: StubCalls }> {
   const recordPath = path.join(root, '.xcrun-calls.jsonl');
@@ -399,6 +408,9 @@ export async function installStubXcrunAsync(
       `  process.exit(0);`,
       `}`,
       `if (args[0] === 'simctl' && args[1] === 'list') {`,
+      ...(listFails
+        ? [`  process.stderr.write('CoreSimulator is not running');`, `  process.exit(1);`]
+        : []),
       `  const listed = args.includes('booted') ? sims.filter((sim) => sim.state === 'Booted') : sims;`,
       `  process.stdout.write(JSON.stringify({ devices: listed.length ? { ${JSON.stringify(STUB_RUNTIME)}: listed } : {} }));`,
       `  process.exit(0);`,

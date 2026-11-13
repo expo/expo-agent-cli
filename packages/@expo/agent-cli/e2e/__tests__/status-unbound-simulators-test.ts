@@ -17,6 +17,7 @@ import {
 } from '../utils';
 import {
   BOOTED_SIMULATOR,
+  SECOND_SIMULATOR,
   SIMULATOR_NAME,
   SIMULATOR_UDID,
   bindingFixture,
@@ -70,16 +71,34 @@ describe.skipIf(process.platform !== 'darwin')(
     });
 
     it('does not name a booted simulator that another worktree bound', async () => {
-      const free = { udid: 'E2E-SIM-0002', name: 'iPhone 17', state: 'Booted' as const };
       await installStubXcrunAsync(projectRoot, {
-        simulators: [BOOTED_SIMULATOR, free],
+        simulators: [BOOTED_SIMULATOR, SECOND_SIMULATOR],
         bind: false,
       });
       await bindOtherWorktreeAsync(projectRoot, SIMULATOR_UDID, SIMULATOR_NAME);
 
       const row = await iosRowAsync();
 
-      expect(row).toMatchObject({ reason: 'no-device', unboundSimulators: ['iPhone 17'] });
+      expect(row).toMatchObject({
+        reason: 'no-device',
+        unboundSimulators: [SECOND_SIMULATOR.name],
+      });
+    });
+
+    it('says only that none is bound when the simulator list fails', async () => {
+      await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
+        bind: false,
+        listFails: true,
+      });
+
+      const row = await iosRowAsync();
+
+      expect(row).toMatchObject({
+        reason: 'no-device',
+        recommendation: expect.stringContaining('No iOS simulator is bound to this worktree'),
+      });
+      expect(row).not.toHaveProperty('unboundSimulators');
     });
 
     it('says none is bound, not that none is booted, when no simulator is booted', async () => {
@@ -104,13 +123,16 @@ describe.skipIf(process.platform !== 'darwin')(
           webSocketDebuggerUrl: `ws://127.0.0.1:1/inspector/debug?device=${id}&page=1`,
         });
 
-      async function statusLineAsync(targets: ReturnType<typeof makeTarget>[]) {
+      async function statusLineAsync(
+        targets: ReturnType<typeof makeTarget>[],
+        env: Record<string, string> = WITH_DEVICES
+      ) {
         const stub = await startStubDevServerAsync({ projectRoot, targets });
         try {
           const result = await executeAgentCliAsync(
             projectRoot,
             ['status', '--dev-server-url', stub.url],
-            { env: { ...WITH_DEVICES, STUB_FINGERPRINT_HASH: 'any' } }
+            { env: { ...env, STUB_FINGERPRINT_HASH: 'any' } }
           );
           return result.stdout.split('\n').find((line) => line.startsWith('dev server')) ?? '';
         } finally {
@@ -118,28 +140,39 @@ describe.skipIf(process.platform !== 'darwin')(
         }
       }
 
-      it("splits the count into this worktree's EAS session and a local simulator not bound here", async () => {
-        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
-        await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
-          id: 'sess-1',
-        });
+      it.each([
+        { name: 'an iOS session', platform: 'ios' as const, app: 'iPhone 17' },
+        {
+          name: "an Android session's own app",
+          platform: 'android' as const,
+          app: 'sdk_gphone64_arm64 - 15 - API 35',
+        },
+      ])(
+        "splits the count into this worktree's EAS session and a local simulator not bound here: $name",
+        async ({ platform, app }) => {
+          await installStubXcrunAsync(projectRoot, {
+            simulators: [BOOTED_SIMULATOR],
+            bind: false,
+          });
+          await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
+            id: 'sess-1',
+            platform,
+          });
 
-        const line = await statusLineAsync([
-          liveTarget('local', SIMULATOR_NAME),
-          liveTarget('session', 'iPhone 17'),
-        ]);
+          const line = await statusLineAsync([
+            liveTarget('local', SIMULATOR_NAME),
+            liveTarget('session', app),
+          ]);
 
-        expect(line).toContain(
-          `2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (${SIMULATOR_NAME})`
-        );
-      });
+          expect(line).toContain(
+            `2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (${SIMULATOR_NAME})`
+          );
+        }
+      );
 
       it('adds no split when a simulator of the same name is the one this worktree bound', async () => {
         await installStubXcrunAsync(projectRoot, {
-          simulators: [
-            BOOTED_SIMULATOR,
-            { udid: 'E2E-SIM-0002', name: SIMULATOR_NAME, state: 'Booted' },
-          ],
+          simulators: [BOOTED_SIMULATOR, { ...SECOND_SIMULATOR, name: SIMULATOR_NAME }],
           bind: false,
         });
         await bindingFixture(projectRoot, SIMULATOR_UDID);
@@ -164,51 +197,34 @@ describe.skipIf(process.platform !== 'darwin')(
         expect(line).not.toContain('EAS session');
       });
 
-      const FREE = { udid: 'E2E-SIM-0002', name: 'iPhone 17', state: 'Booted' as const };
-
       it("names the app on this worktree's own simulator, not as another app", async () => {
         await installStubXcrunAsync(projectRoot, {
-          simulators: [BOOTED_SIMULATOR, FREE],
+          simulators: [BOOTED_SIMULATOR, SECOND_SIMULATOR],
           bind: false,
         });
         await bindingFixture(projectRoot, SIMULATOR_UDID);
 
         const line = await statusLineAsync([
           liveTarget('own', SIMULATOR_NAME),
-          liveTarget('free', FREE.name),
+          liveTarget('free', SECOND_SIMULATOR.name),
         ]);
 
         expect(line).toContain(
-          `2 apps connected: 1 on this worktree's simulator, 1 on a local simulator not bound here (${FREE.name})`
+          `2 apps connected: 1 on this worktree's simulator, 1 on a local simulator not bound here (${SECOND_SIMULATOR.name})`
         );
       });
 
       it("names an app on another worktree's simulator", async () => {
         await installStubXcrunAsync(projectRoot, {
-          simulators: [BOOTED_SIMULATOR, FREE],
+          simulators: [BOOTED_SIMULATOR, SECOND_SIMULATOR],
           bind: false,
         });
-        await bindOtherWorktreeAsync(projectRoot, FREE.udid, FREE.name);
+        await bindOtherWorktreeAsync(projectRoot, SECOND_SIMULATOR.udid, SECOND_SIMULATOR.name);
 
-        const line = await statusLineAsync([liveTarget('foreign', FREE.name)]);
-
-        expect(line).toContain(`1 app connected: 1 on another worktree's simulator (${FREE.name})`);
-      });
-
-      it("counts an Android session's own app as the session's", async () => {
-        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
-        await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
-          id: 'sess-1',
-          platform: 'android',
-        });
-
-        const line = await statusLineAsync([
-          liveTarget('local', SIMULATOR_NAME),
-          liveTarget('phone', 'sdk_gphone64_arm64 - 15 - API 35'),
-        ]);
+        const line = await statusLineAsync([liveTarget('foreign', SECOND_SIMULATOR.name)]);
 
         expect(line).toContain(
-          `2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (${SIMULATOR_NAME})`
+          `1 app connected: 1 on another worktree's simulator (${SECOND_SIMULATOR.name})`
         );
       });
 
@@ -229,36 +245,15 @@ describe.skipIf(process.platform !== 'darwin')(
         expect(line).not.toContain('EAS session');
       });
 
-      it('asks no simulator list for an Android status', async () => {
+      it('asks no simulator list when devices are disabled', async () => {
         const xcrun = await installStubXcrunAsync(projectRoot, {
           simulators: [BOOTED_SIMULATOR],
           bind: false,
         });
-        const stub = await startStubDevServerAsync({
-          projectRoot,
-          targets: [liveTarget('local', SIMULATOR_NAME)],
-        });
-        try {
-          const result = await executeAgentCliAsync(
-            projectRoot,
-            ['status', '--platform', 'android', '--dev-server-url', stub.url],
-            { env: { ...WITH_DEVICES, STUB_FINGERPRINT_HASH: 'any' } }
-          );
-          expect(result.stdout).not.toContain('not bound here');
-        } finally {
-          await stub.close();
-        }
+
+        await statusLineAsync([liveTarget('local', SIMULATOR_NAME)], { AGENT_CLI_NO_DEVICE: '1' });
+
         expect(xcrun.calls().filter((args) => args[1] === 'list')).toEqual([]);
-      });
-
-      it('adds no split for the simulator this worktree bound', async () => {
-        await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
-        await bindingFixture(projectRoot, SIMULATOR_UDID);
-
-        const line = await statusLineAsync([liveTarget('own', SIMULATOR_NAME)]);
-
-        expect(line).toContain('1 app connected');
-        expect(line).not.toContain('not bound here');
       });
     });
   }
