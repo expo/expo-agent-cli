@@ -48,6 +48,8 @@ export interface TreeNodeJson {
    * the two indistinguishable.
    */
   placeholder: string | null;
+  /** A switch's state: the first boolean `value` of the element, or null when it has none. */
+  value: boolean | null;
   /**
    * The handler props this element carries, e.g. `["onPress"]`, in a fixed order.
    *
@@ -176,6 +178,8 @@ export interface TapVerifyJson {
   removed: TreeNodeJson[];
   /** Nodes both walks had, whose text differs. */
   changedText: { key: string; before: string | null; after: string | null }[];
+  /** Nodes both walks had, whose boolean `value` differs: a switch that was toggled. */
+  changedValue: { key: string; before: boolean | null; after: boolean | null }[];
 }
 
 /** What a tap and a type report in common. */
@@ -231,6 +235,8 @@ interface InteractCallJson {
 
 /** Machine shape of `@expo/agent-cli runtime:tap --json`. */
 export interface RuntimeTapJson extends InteractCallJson {
+  /** The argument of `onValueChange` when the tap toggled a switch, or null for a press. */
+  toggledTo: boolean | null;
   /** What changed after the tap, or null when `--verify` was not passed. */
   verify: TapVerifyJson | null;
 }

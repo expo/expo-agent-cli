@@ -238,17 +238,42 @@ const PRELUDE = `
   function findHandler(group, prop) {
     for (var i = 0; i < group.length; i++) {
       var p = propsOf(group[i].f);
-      if (p && typeof p[prop] === 'function') return { f: group[i].f, outside: false };
+      if (p && typeof p[prop] === 'function') return { f: group[i].f, outside: false, prop: prop };
     }
     var probe = group[group.length - 1].f['return'];
     var up = 0;
     while (probe && up < ${MAX_HANDLER_WALK_UP}) {
       var pp = propsOf(probe);
-      if (pp && typeof pp[prop] === 'function') return { f: probe, outside: true };
+      if (pp && typeof pp[prop] === 'function') return { f: probe, outside: true, prop: prop };
       probe = probe['return'];
       up++;
     }
     return null;
+  }
+
+  /**
+   * What \`runtime:tap\` calls: the group's \`onPress\`, else its switch, else an ancestor's \`onPress\`.
+   *
+   * A switch is a fiber of the group with an \`onValueChange\` function and a boolean \`value\`.
+   * Never an ancestor's: a touch on a switch in a pressable row does not press the row
+   * (llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it).
+   */
+  function findTapHandler(group) {
+    var press = findHandler(group, 'onPress');
+    if (press && !press.outside) return press;
+    for (var i = 0; i < group.length; i++) {
+      var p = propsOf(group[i].f);
+      if (p && typeof p.onValueChange === 'function' && typeof p.value === 'boolean') {
+        return { f: group[i].f, outside: false, prop: 'onValueChange', next: !p.value };
+      }
+    }
+    return press;
+  }
+
+  /** A switch's state: the boolean \`value\` prop, or null. */
+  function booleanValueOf(f) {
+    var p = propsOf(f);
+    return p && typeof p.value === 'boolean' ? p.value : null;
   }
 
   /**
@@ -352,6 +377,7 @@ const PRELUDE = `
           : p && typeof p.role === 'string' ? p.role : null,
       text: textOf(f),
       placeholder: placeholderOf(f),
+      value: booleanValueOf(f),
       handlers: handlers,
       interactive: handlers.length > 0,
       disabled: disabled != null,
@@ -394,6 +420,7 @@ const PRELUDE = `
       // change what the row says.
       if (node.text == null) node.text = textOf(group[i].f);
       if (node.placeholder == null) node.placeholder = placeholderOf(group[i].f);
+      if (node.value == null) node.value = booleanValueOf(group[i].f);
     }
     // In HANDLER_PROPS order, so two elements with the same handlers report them the same way.
     var handlers = [];
@@ -581,13 +608,14 @@ export interface CallExpressionOptions {
 /**
  * The fixed part of a tap or a type: find the element, refuse what should be refused, report.
  *
- * @param prop the handler prop this command calls.
+ * @param finder JavaScript source of a function from a group to its handler, or null.
  * @param extraFields report keys the command adds, in the same object literal as the shared ones —
  * so a run that stops at "no match" still answers with the whole key set, which is what lets a
  * caller read one field without checking whether it is there (llp/0006 §Output contract).
  */
-function callPrologue(prop: string, extraFields: string = ''): string {
+function callPrologue(finder: string, extraFields: string = ''): string {
   return `${PRELUDE}
+  var findFor = ${finder};
   var TARGET = TESTID;
   var report = {
     supported: true,
@@ -626,13 +654,13 @@ function callPrologue(prop: string, extraFields: string = ''): string {
   // command calls, and --index 0 would have failed for a different reason (F80).
   var candidatesWithHandler = 0;
   for (var ci = 0; ci < elements.length; ci++) {
-    var candidateHandler = findHandler(groupOf(elements[ci].f, TARGET), ${JSON.stringify(prop)});
+    var candidateHandler = findFor(groupOf(elements[ci].f, TARGET));
     if (candidateHandler) candidatesWithHandler++;
     report.candidates.push({
       index: ci,
       component: nameOf(elements[ci].f),
       screen: elements[ci].s,
-      handler: candidateHandler ? ${JSON.stringify(prop)} : null
+      handler: candidateHandler ? candidateHandler.prop : null
     });
   }
 
@@ -671,18 +699,18 @@ function callPrologue(prop: string, extraFields: string = ''): string {
     return report;
   }
 
-  var found = findHandler(group, ${JSON.stringify(prop)});
+  var found = findFor(group);
   if (!found) {
     report.reason = 'no-handler';
     return report;
   }
-  report.handler = ${JSON.stringify(prop)};
+  report.handler = found.prop;
   report.handlerOn = nameOf(found.f);
   report.handlerOutsideMatch = found.outside;
 `;
 }
 
-/** The `runtime:tap` expression: find the element, then call its `onPress`. */
+/** The `runtime:tap` expression: find the element, then call its `onPress` or toggle its switch. */
 export function buildTapExpression({
   testID,
   index,
@@ -694,10 +722,15 @@ export function buildTapExpression({
   var INDEX = ${literal(index)};
   var ALL_SCREENS = ${literal(allScreens)};
   var FORCE = ${literal(force)};
-${callPrologue('onPress')}
+${callPrologue('findTapHandler', ',\n    toggledTo: null')}
   report.called = true;
   try {
-    found.f.memoizedProps.onPress(syntheticEvent('press'));
+    if (found.prop === 'onValueChange') {
+      report.toggledTo = found.next;
+      found.f.memoizedProps.onValueChange(found.next);
+    } else {
+      found.f.memoizedProps.onPress(syntheticEvent('press'));
+    }
   } catch (err) {
     report.threw = describeThrow(err);
   }
@@ -728,7 +761,10 @@ export function buildTypeExpression({
   var FORCE = ${literal(force)};
   var TEXT = ${literal(text)};
   var SUBMIT = ${literal(submit)};
-${callPrologue('onChangeText', ',\n    submitted: false,\n    submitHandlerOn: null')}
+${callPrologue(
+  "function (group) { return findHandler(group, 'onChangeText'); }",
+  ',\n    submitted: false,\n    submitHandlerOn: null'
+)}
   report.called = true;
   try {
     found.f.memoizedProps.onChangeText(TEXT);

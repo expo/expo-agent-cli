@@ -11,9 +11,12 @@
 // than a mistake of the caller, so each one says what, why, and the command that recovers it
 // (llp/0006 §Errors are prompts) — the recovery is a paste, never a re-read.
 
+import { AGENT_DEVICE_SPEC } from '../../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
+import { easCommandPrefix } from '../../utils/easCli';
 import type { BundleCheckJson } from '../bundleCheck';
+import type { SelectedDevice } from '../targetSelection';
 import { wrapUntrustedAppOutput } from '../untrusted';
 import type {
   RuntimeTapJson,
@@ -103,6 +106,9 @@ function nodeLine(node: TreeNodeJson): string {
   if (node.text != null) {
     parts.push(`text=${JSON.stringify(node.text)}`);
   }
+  if (node.value != null) {
+    parts.push(`value=${node.value}`);
+  }
   // Its own key, never `text`: a placeholder is what an empty input shows (F70).
   if (node.placeholder != null) {
     parts.push(`placeholder=${JSON.stringify(node.placeholder)}`);
@@ -187,6 +193,9 @@ function foundLine(report: RuntimeTapJson | RuntimeTypeJson): string {
 const CALL_CAVEAT =
   'This called the prop, not the screen: there was no touch, no press timing and no gesture recognition, and the handler was given a synthetic event whose coordinates are zero.';
 
+const TOGGLE_CAVEAT =
+  'This called the prop, not the screen: the switch was not touched, and it shows the new state only if the app passes it back as value. --verify reads it back.';
+
 /** The human report of `@expo/agent-cli runtime:tap`. */
 export function formatTap(report: RuntimeTapJson): string {
   if (!report.called) {
@@ -197,17 +206,21 @@ export function formatTap(report: RuntimeTapJson): string {
     ].join('\n');
   }
 
+  const toggled = report.toggledTo != null;
+  const did = toggled
+    ? `Toggled ${report.testID}: called onValueChange(${report.toggledTo})`
+    : `Tapped ${report.testID}`;
   const lines = [
     report.threw
-      ? `Tapped ${report.testID}, and the app's own handler threw (dev server ${report.devServerUrl}).`
-      : `Tapped ${report.testID} (dev server ${report.devServerUrl}).`,
+      ? `${did}, and the app's own handler threw (dev server ${report.devServerUrl}).`
+      : `${did} (dev server ${report.devServerUrl}).`,
   ];
   if (report.forced && report.disabled) {
     lines.push(
       `Forced: the app reports this element disabled (${report.disabledOn} on ${report.disabledComponent}), so a user could not have pressed it.`
     );
   }
-  lines.push(CALL_CAVEAT);
+  lines.push(toggled ? TOGGLE_CAVEAT : CALL_CAVEAT);
 
   const body = [foundLine(report)];
   if (report.threw) {
@@ -290,6 +303,9 @@ function verifyLines(verify: TapVerifyJson): string[] {
       `  ~ ${change.key}: ${JSON.stringify(change.before)} -> ${JSON.stringify(change.after)}`
     );
   }
+  for (const change of verify.changedValue) {
+    lines.push(`  ~ ${change.key}: value ${change.before} -> ${change.after}`);
+  }
   return lines;
 }
 
@@ -311,13 +327,25 @@ function allScreensClause(report: RuntimeTapJson | RuntimeTypeJson): string {
 }
 
 /** What, why and how for a `runtime:tap` that called nothing, or whose handler threw. */
-export function explainTapFailure(report: RuntimeTapJson): InteractFailure {
+export function explainTapFailure(
+  report: RuntimeTapJson,
+  touch: TouchTarget = { device: null, appId: null }
+): InteractFailure {
+  if (report.reason === 'no-handler') {
+    return explainNoTapHandler(report, touch);
+  }
   return explainFailure(
     report,
     'runtime:tap',
     'onPress',
     `${PROGRAM_PREFIX} runtime:tap ${quoted(report.testID)}`
   );
+}
+
+/** Where a real touch goes: the device this run read, and the app's id from its debugger target. */
+export interface TouchTarget {
+  device: SelectedDevice | null;
+  appId: string | null;
 }
 
 /** What, why and how for a `runtime:type` that called nothing, or whose handler threw. */
@@ -454,6 +482,47 @@ function explainFailure(
   };
 }
 
+/**
+ * A tap on an element with no `onPress` and no switch: a real touch is the route that works.
+ *
+ * @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it. Not `runtime:tree`:
+ * the agent has usually read the tree already, and that line sent it back in a loop (N2-38).
+ */
+function explainNoTapHandler(report: RuntimeTapJson, touch: TouchTarget): InteractFailure {
+  const several = report.matched > 1;
+  const local = `npx ${AGENT_DEVICE_SPEC}`;
+  const eas = `${easCommandPrefix()} simulator:exec`;
+  const device = touch.device;
+  const runner = device?.backend === 'cloud' ? `${eas} ${local}` : local;
+  const selector =
+    device?.backend === 'local-ios'
+      ? ` --udid ${device.udid}`
+      : device?.backend === 'local-android'
+        ? ` --serial ${device.serial}`
+        : '';
+  const open = `${runner} open ${touch.appId ?? '<app-id>'} --foreground${selector}`;
+  const listed = report.candidates
+    .map(
+      (candidate) =>
+        `[${candidate.index}] ${candidate.component}${candidate.screen == null ? '' : ` on ${candidate.screen}`}`
+    )
+    .join(', ');
+  const elsewhere =
+    device == null
+      ? ` With several devices booted, add --udid <udid> or --serial <serial>. On an EAS session, run "${eas} ${local} open ${touch.appId ?? '<app-id>'} --foreground" and "${eas} ${local} press @eN --settle".`
+      : '';
+  return {
+    message: [
+      several
+        ? `None of the ${report.matched} elements carrying ${report.testID} has onPress or a switch, so nothing was tapped (dev server ${report.devServerUrl}).`
+        : `The element carrying ${report.testID} has no onPress and no switch, so nothing was tapped (dev server ${report.devServerUrl}).`,
+      `Why: this command calls onPress, or onValueChange(!value) where value is a boolean. No fiber of ${several ? 'these elements' : 'this element'} has either, and no ancestor has onPress: ${listed}.`,
+      `How: touch it through the device. Run "${open}", which prints the screen with @eN refs, then "${runner} press @eN --settle" with the ref of ${report.testID}.${elsewhere}`,
+    ].join('\n'),
+    suggestedCommand: open,
+  };
+}
+
 /** A clause reused as a sentence. */
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -536,14 +605,20 @@ export function diffSnapshots(
   const second = keyed(after);
   const added: TreeNodeJson[] = [];
   const removed: TreeNodeJson[] = [];
-  const changedText: { key: string; before: string | null; after: string | null }[] = [];
+  const changedText: TapVerifyJson['changedText'] = [];
+  const changedValue: TapVerifyJson['changedValue'] = [];
 
   for (const [key, node] of second) {
     const was = first.get(key);
     if (!was) {
       added.push(node);
-    } else if (was.text !== node.text) {
-      changedText.push({ key, before: was.text, after: node.text });
+    } else {
+      if (was.text !== node.text) {
+        changedText.push({ key, before: was.text, after: node.text });
+      }
+      if (was.value !== node.value) {
+        changedValue.push({ key, before: was.value, after: node.value });
+      }
     }
   }
   for (const [key, node] of first) {
@@ -554,9 +629,11 @@ export function diffSnapshots(
 
   return {
     waitedMs,
-    changed: added.length > 0 || removed.length > 0 || changedText.length > 0,
+    changed:
+      added.length > 0 || removed.length > 0 || changedText.length > 0 || changedValue.length > 0,
     added,
     removed,
     changedText,
+    changedValue,
   };
 }
