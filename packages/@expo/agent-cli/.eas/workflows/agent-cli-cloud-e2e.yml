@@ -11,9 +11,11 @@
 # then the session installs and runs that client — which subsumes the old `agent-cli-eas-build` (a real
 # native EAS build). Each job that reaches its session bills one EAS Simulator session; a broken tunnel
 # fails at the origin check before any session is billed. It runs on demand (workflow_dispatch) and on
-# every PR — unfiltered on purpose [decided 2026-09-05]: a path filter only sees changes on our side,
-# while EAS Simulator readiness, the Expo Go a session installs, and create-expo's scaffold all move
-# without touching this repo, and a PR is when somebody is looking. Four billed sessions per PR push.
+# every PR — with no path filter on purpose [decided 2026-09-05]: a path filter only sees changes on our
+# side, while EAS Simulator readiness, the Expo Go a session installs, and create-expo's scaffold all
+# move without touching this repo, and a PR is when somebody is looking. Four billed sessions per PR
+# push. The one exception is a PR that changes only agent-cli's LLPs, which skips (scripts/stack-gate.ts
+# prints `false`), so no job here may read llp/.
 # In a stack only the top PR runs: the gate job skips a PR whose head commit an open PR above it already
 # holds. [decided 2026-10-20]
 name: agent-cli-cloud-e2e
@@ -41,10 +43,10 @@ jobs:
     name: stack gate
     runs_on: linux-medium
     outputs:
-      run: ${{ steps.stack.outputs.run }}
+      full: ${{ steps.stack.outputs.full }}
     steps:
       - uses: eas/checkout
-      - name: Decide whether this PR runs CI
+      - name: Decide how much CI this PR runs
         id: stack
         run: |
           export GITHUB_REPOSITORY='${{ github.repository }}'
@@ -52,12 +54,12 @@ jobs:
           export PR_HEAD_REF='${{ github.event.pull_request.head.ref }}'
           export PR_HEAD_SHA='${{ github.event.pull_request.head.sha }}'
           export EVENT_ACTION='${{ github.event.action }}'
-          set-output run "$(bun scripts/stack-gate.ts || echo true)"
+          set-output full "$(bun scripts/stack-gate.ts || echo true)"
 
   cloud-e2e-expo-go-ios:
     name: live-cloud on EAS (iOS, Expo Go)
     needs: [stack]
-    if: ${{ needs.stack.outputs.run == 'true' }}
+    if: ${{ needs.stack.outputs.full == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
@@ -80,7 +82,7 @@ jobs:
   cloud-e2e-expo-go-android:
     name: live-cloud on EAS (Android, Expo Go)
     needs: [stack]
-    if: ${{ needs.stack.outputs.run == 'true' }}
+    if: ${{ needs.stack.outputs.full == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
@@ -103,7 +105,7 @@ jobs:
   cloud-e2e-dev-build-ios:
     name: live-cloud on EAS (iOS, dev build)
     needs: [stack]
-    if: ${{ needs.stack.outputs.run == 'true' }}
+    if: ${{ needs.stack.outputs.full == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
@@ -131,7 +133,7 @@ jobs:
   cloud-e2e-dev-build-android:
     name: live-cloud on EAS (Android, dev build)
     needs: [stack]
-    if: ${{ needs.stack.outputs.run == 'true' }}
+    if: ${{ needs.stack.outputs.full == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
