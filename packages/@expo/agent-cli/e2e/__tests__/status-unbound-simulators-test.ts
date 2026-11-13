@@ -21,6 +21,7 @@ import {
   SIMULATOR_NAME,
   SIMULATOR_UDID,
   bindingFixture,
+  installStubAdbAsync,
   installStubXcrunAsync,
 } from './installedAppStubs';
 
@@ -29,6 +30,7 @@ const BIND_COMMAND = 'npx @expo/agent-cli dev --ios --detach --wait-ready';
 
 type Report = {
   installed: { platforms: { platform: string; [key: string]: unknown }[] } | null;
+  devServer?: { owners?: Record<string, unknown> };
 };
 
 // Simulators exist only on macOS.
@@ -98,6 +100,9 @@ describe.skipIf(process.platform !== 'darwin')(
         reason: 'no-device',
         recommendation: expect.stringContaining('No iOS simulator is bound to this worktree'),
       });
+      expect(row?.recommendation).toContain(BIND_COMMAND);
+      expect(row?.recommendation).not.toContain('Boot one');
+      expect(row?.recommendation).not.toContain(SIMULATOR_NAME);
       expect(row).not.toHaveProperty('unboundSimulators');
     });
 
@@ -114,6 +119,23 @@ describe.skipIf(process.platform !== 'darwin')(
       expect(row?.recommendation).not.toContain('Boot one');
     });
 
+    it('adds the booted simulators to the row of an EAS session', async () => {
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], bind: false });
+      await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
+        id: 'sess-1',
+        platform: 'ios',
+      });
+
+      const row = await iosRowAsync();
+
+      expect(row).toMatchObject({
+        reason: 'cloud-session',
+        unboundSimulators: [SIMULATOR_NAME],
+        commands: [],
+        recommendation: `not checked; this check reads local devices, and the app runs on EAS Simulator session sess-1; 1 iOS simulator is booted (${SIMULATOR_NAME}), and none is bound to this worktree.`,
+      });
+    });
+
     describe('the dev server line', () => {
       const liveTarget = (id: string, deviceName: string) =>
         makeTarget({
@@ -123,18 +145,35 @@ describe.skipIf(process.platform !== 'darwin')(
           webSocketDebuggerUrl: `ws://127.0.0.1:1/inspector/debug?device=${id}&page=1`,
         });
 
+      let adbEnv: Record<string, string>;
+
+      // The default stub emulator reports a model that claims an Android session's app.
+      beforeEach(async () => {
+        const adb = await installStubAdbAsync(projectRoot, 'com.example.installedapp', {
+          attached: false,
+          bound: false,
+        });
+        adbEnv = adb.env;
+      });
+
       async function statusLineAsync(
         targets: ReturnType<typeof makeTarget>[],
-        env: Record<string, string> = WITH_DEVICES
+        env: Record<string, string> = WITH_DEVICES,
+        { json = false }: { json?: boolean } = {}
       ) {
         const stub = await startStubDevServerAsync({ projectRoot, targets });
+        const runAsync = (args: string[]) =>
+          executeAgentCliAsync(projectRoot, ['status', ...args, '--dev-server-url', stub.url], {
+            env: { ...adbEnv, ...env, STUB_FINGERPRINT_HASH: 'any' },
+          });
         try {
-          const result = await executeAgentCliAsync(
-            projectRoot,
-            ['status', '--dev-server-url', stub.url],
-            { env: { ...env, STUB_FINGERPRINT_HASH: 'any' } }
-          );
-          return result.stdout.split('\n').find((line) => line.startsWith('dev server')) ?? '';
+          const text = await runAsync([]);
+          const line =
+            text.stdout.split('\n').find((entry) => entry.startsWith('dev server')) ?? '';
+          const owners = json
+            ? (JSON.parse((await runAsync(['--json'])).stdout) as Report).devServer?.owners
+            : undefined;
+          return { line, owners };
         } finally {
           await stub.close();
         }
@@ -159,14 +198,22 @@ describe.skipIf(process.platform !== 'darwin')(
             platform,
           });
 
-          const line = await statusLineAsync([
-            liveTarget('local', SIMULATOR_NAME),
-            liveTarget('session', app),
-          ]);
+          const { line, owners } = await statusLineAsync(
+            [liveTarget('local', SIMULATOR_NAME), liveTarget('session', app)],
+            WITH_DEVICES,
+            { json: true }
+          );
 
           expect(line).toContain(
             `2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (${SIMULATOR_NAME})`
           );
+          expect(owners).toEqual({
+            simulatorApps: [],
+            localApps: [SIMULATOR_NAME],
+            otherWorktreeApps: [],
+            sessionApps: 1,
+            otherApps: 0,
+          });
         }
       );
 
@@ -177,9 +224,15 @@ describe.skipIf(process.platform !== 'darwin')(
         });
         await bindingFixture(projectRoot, SIMULATOR_UDID);
 
-        const line = await statusLineAsync([liveTarget('own', SIMULATOR_NAME)]);
+        const { line, owners } = await statusLineAsync(
+          [liveTarget('own', SIMULATOR_NAME)],
+          WITH_DEVICES,
+          { json: true }
+        );
 
+        expect(line).toContain('1 app connected');
         expect(line).not.toContain('not bound here');
+        expect(owners).toBeUndefined();
       });
 
       it('does not call an Android app an app on the EAS session', async () => {
@@ -188,7 +241,7 @@ describe.skipIf(process.platform !== 'darwin')(
           id: 'sess-1',
         });
 
-        const line = await statusLineAsync([
+        const { line } = await statusLineAsync([
           liveTarget('local', SIMULATOR_NAME),
           liveTarget('phone', 'sdk_gphone64_arm64 - 15 - API 35'),
         ]);
@@ -204,14 +257,22 @@ describe.skipIf(process.platform !== 'darwin')(
         });
         await bindingFixture(projectRoot, SIMULATOR_UDID);
 
-        const line = await statusLineAsync([
-          liveTarget('own', SIMULATOR_NAME),
-          liveTarget('free', SECOND_SIMULATOR.name),
-        ]);
+        const { line, owners } = await statusLineAsync(
+          [liveTarget('own', SIMULATOR_NAME), liveTarget('free', SECOND_SIMULATOR.name)],
+          WITH_DEVICES,
+          { json: true }
+        );
 
         expect(line).toContain(
           `2 apps connected: 1 on this worktree's simulator, 1 on a local simulator not bound here (${SECOND_SIMULATOR.name})`
         );
+        expect(owners).toEqual({
+          simulatorApps: [SIMULATOR_NAME],
+          localApps: [SECOND_SIMULATOR.name],
+          otherWorktreeApps: [],
+          sessionApps: 0,
+          otherApps: 0,
+        });
       });
 
       it("names an app on another worktree's simulator", async () => {
@@ -221,11 +282,31 @@ describe.skipIf(process.platform !== 'darwin')(
         });
         await bindOtherWorktreeAsync(projectRoot, SECOND_SIMULATOR.udid, SECOND_SIMULATOR.name);
 
-        const line = await statusLineAsync([liveTarget('foreign', SECOND_SIMULATOR.name)]);
+        const { line, owners } = await statusLineAsync(
+          [liveTarget('foreign', SECOND_SIMULATOR.name)],
+          WITH_DEVICES,
+          { json: true }
+        );
 
         expect(line).toContain(
           `1 app connected: 1 on another worktree's simulator (${SECOND_SIMULATOR.name})`
         );
+        expect(owners).toMatchObject({ otherWorktreeApps: [SECOND_SIMULATOR.name] });
+      });
+
+      it('names a free twin as not bound here when another worktree bound the other one', async () => {
+        await installStubXcrunAsync(projectRoot, {
+          simulators: [BOOTED_SIMULATOR, { ...SECOND_SIMULATOR, name: SIMULATOR_NAME }],
+          bind: false,
+        });
+        await bindOtherWorktreeAsync(projectRoot, SIMULATOR_UDID, SIMULATOR_NAME);
+
+        const { line } = await statusLineAsync([liveTarget('twin', SIMULATOR_NAME)]);
+
+        expect(line).toContain(
+          `1 app connected: 1 on a local simulator not bound here (${SIMULATOR_NAME})`
+        );
+        expect(line).not.toContain("another worktree's simulator");
       });
 
       it('does not guess which of two unplaced apps is the EAS session', async () => {
@@ -234,15 +315,20 @@ describe.skipIf(process.platform !== 'darwin')(
           id: 'sess-1',
         });
 
-        const line = await statusLineAsync([
-          liveTarget('local', SIMULATOR_NAME),
-          liveTarget('one', 'iPhone 17'),
-          liveTarget('two', 'iPhone 16e'),
-        ]);
+        const { line, owners } = await statusLineAsync(
+          [
+            liveTarget('local', SIMULATOR_NAME),
+            liveTarget('one', 'iPhone 17'),
+            liveTarget('two', 'iPhone 16e'),
+          ],
+          WITH_DEVICES,
+          { json: true }
+        );
 
         expect(line).toContain('3 apps connected: 1 on a local simulator not bound here');
         expect(line).toContain('2 other');
         expect(line).not.toContain('EAS session');
+        expect(owners).toMatchObject({ localApps: [SIMULATOR_NAME], sessionApps: 0, otherApps: 2 });
       });
 
       it('asks no simulator list when devices are disabled', async () => {
