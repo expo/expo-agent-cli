@@ -1,11 +1,5 @@
 const codeLines = { skipBlankLines: true, skipComments: true };
 
-// Known debt: files over the 800-line limit, each capped at its current size so it cannot grow.
-// Lower a cap when a file shrinks; delete the entry when it is under 800.
-const longFiles = {
-  'src/dev/detachAsync.ts': 997,
-};
-
 // Known debt: files that hold a function over the 100-line limit and have room under 800. The
 // disable comment on that function does not stop it from growing, so the file is capped at its
 // current size. Lower a cap when a file shrinks; delete the entry when the function is split.
@@ -64,7 +58,7 @@ export default {
       ],
       rules: { 'max-lines': 'off', 'max-lines-per-function': 'off', 'max-depth': 'off' },
     },
-    ...Object.entries({ ...longFiles, ...longFunctionFiles }).map(([file, max]) => ({
+    ...Object.entries(longFunctionFiles).map(([file, max]) => ({
       files: [file],
       rules: { 'max-lines': ['error', { max, ...codeLines }] },
     })),
