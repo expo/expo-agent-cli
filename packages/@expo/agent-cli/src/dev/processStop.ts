@@ -66,15 +66,18 @@ export async function signalAndWaitAsync(
  *
  * On Windows `process.kill` maps every signal onto an immediate terminate, and it reaches only the
  * process named — a dev server started through a batch shim has its bundler in a child that would
- * survive. `taskkill /T` covers the tree, so that is what is used there. It is best effort and
- * untested on that platform, which is why the result says whether the call was made rather than
- * whether it worked.
+ * survive. `taskkill /T` covers the tree, so that is what is used there.
+ *
+ * taskkill exits non-zero when one member of the tree ended on its own before taskkill reached it,
+ * which a tree whose members exit with their child does. So the pid decides: alive before the
+ * call and gone after it is a pid the call reached.
  */
 export async function signalProcessAsync(
   pid: number,
   signal: NodeJS.Signals
 ): Promise<{ delivered: boolean; error?: string }> {
   if (process.platform === 'win32') {
+    const wasAlive = isProcessAlive(pid);
     const result = await spawnCaptureAsync(
       windowsTaskkillCommand(),
       ['/PID', String(pid), '/T', '/F'],
@@ -82,9 +85,12 @@ export async function signalProcessAsync(
         timeoutMs: 5000,
       }
     );
-    return result.spawnError
-      ? { delivered: false, error: result.spawnError.message }
-      : { delivered: result.exitCode === 0, error: result.stderr.trim() || undefined };
+    if (result.spawnError) return { delivered: false, error: result.spawnError.message };
+    if (result.exitCode === 0) return { delivered: true };
+    return {
+      delivered: wasAlive && !isProcessAlive(pid),
+      error: `taskkill exited with ${result.exitCode}: ${result.stderr.trim()}`,
+    };
   }
   try {
     process.kill(pid, signal);
