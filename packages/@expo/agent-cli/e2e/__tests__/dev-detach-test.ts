@@ -16,7 +16,6 @@ import path from 'node:path';
 import { list as listSessions, tap } from '2g/api';
 
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
-import { rerunDevCommand } from '../../src/plan/rerun';
 import {
   executeAgentCliAsync,
   freePortAsync,
@@ -26,7 +25,6 @@ import {
   readEvents,
   readStubExpoInvocations,
   setupFixtureAsync,
-  startStubDevServerAsync,
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
@@ -89,30 +87,14 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
   it.each(['foreign', 'hanging'] as const)(
-    'follows its lock away from a %s status endpoint before refusing a repeat',
+    'refuses a repeat at once beside a %s status endpoint',
     async (answer) => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const own = await startStubDevServerAsync({ projectRoot, statusDelayMs: 200 });
-      let moveTimer: ReturnType<typeof setTimeout> | undefined;
-      let oldRequestClosed = false;
-      const info = {
-        url: '',
-        port: 0,
-        pid: process.pid,
-        projectRoot,
-        startedAt: new Date().toISOString(),
-      };
       const previous = http.createServer((request, response) => {
         if (request.url !== '/status') {
           response.writeHead(404).end();
           return;
         }
-        response.on('close', () => {
-          oldRequestClosed = true;
-        });
-        // Move only after the CLI has actually asked the old port, avoiding a startup-time race
-        // in the test itself. The lock payload is read anew for each connection.
-        moveTimer ??= setTimeout(() => Object.assign(info, { url: own.url, port: own.port }), 500);
         if (answer === 'foreign') {
           response.writeHead(200, {
             'X-React-Native-Project-Root': encodeURI(path.join(projectRoot, '..', 'sibling')),
@@ -121,9 +103,14 @@ describe('@expo/agent-cli dev --detach', () => {
         }
       });
       await new Promise<void>((resolve) => previous.listen(0, '127.0.0.1', resolve));
-      info.port = (previous.address() as net.AddressInfo).port;
-      info.url = `http://127.0.0.1:${info.port}`;
-      const release = await holdDevLockAsync(projectRoot, info);
+      const port = (previous.address() as net.AddressInfo).port;
+      const release = await holdDevLockAsync(projectRoot, {
+        url: `http://127.0.0.1:${port}`,
+        port,
+        pid: process.pid,
+        projectRoot,
+        startedAt: new Date().toISOString(),
+      });
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
@@ -131,20 +118,18 @@ describe('@expo/agent-cli dev --detach', () => {
           { env: stubExpoEnv(projectRoot), reject: false }
         );
         expect(result.exitCode, result.all).toBe(20);
+        // One /status probe picks the phase: the endpoint does not answer for this project.
         expect(JSON.parse(result.stdout).error).toMatchObject({
           code: 'DEV_SERVER_RUNNING',
-          data: { port: own.port, pid: process.pid },
+          data: { port, pid: process.pid, phase: 'starting' },
+          suggestedCommand: 'npx @expo/agent-cli status',
         });
-        expect(oldRequestClosed).toBe(true);
         expect(readStubExpoInvocations(projectRoot)).toEqual([]);
-        // The CLI must neither stop nor reconfigure the foreign server while waiting.
         expect(previous.listening).toBe(true);
       } finally {
-        clearTimeout(moveTimer);
         release();
         previous.closeAllConnections();
         await new Promise<void>((resolve) => previous.close(() => resolve()));
-        await own.close();
       }
     }
   );
@@ -294,7 +279,7 @@ describe('@expo/agent-cli dev --detach', () => {
   });
 
   it.each(['ios', 'android'] as const)(
-    'reports a serving plan and observes a pending %s no-wait repeat',
+    'reports a serving plan and refuses a %s repeat while it starts',
     async (platform) => {
       const projectRoot = await setupFixtureAsync('go-app');
       const args = ['dev', `--${platform}`, '--local', '--no-open', '--detach', '--json'];
@@ -305,10 +290,12 @@ describe('@expo/agent-cli dev --detach', () => {
 
         expect(JSON.parse(result.stdout).phase).toBe('serving');
         const repeated = await executeAgentCliAsync(projectRoot, args, { env, reject: false });
-        expect(repeated.exitCode, repeated.all).toBe(22);
-        expect(JSON.parse(repeated.stdout).error.suggestedCommand).toBe(
-          'npx @expo/agent-cli dev:logs'
-        );
+        expect(repeated.exitCode, repeated.all).toBe(20);
+        expect(JSON.parse(repeated.stdout).error).toMatchObject({
+          code: 'DEV_SERVER_RUNNING',
+          data: { phase: 'starting' },
+          suggestedCommand: 'npx @expo/agent-cli status',
+        });
       } finally {
         await cleanUpDetachedAsync(projectRoot);
       }
@@ -553,6 +540,19 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(first.exitCode, first.all).toBe(0);
         expect(JSON.parse(first.stdout)).toMatchObject({ phase: 'building', ready: null });
 
+        // A repeat during the build is refused, not reported as the run it found.
+        const repeated = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(repeated.exitCode, repeated.all).toBe(20);
+        expect(JSON.parse(repeated.stdout).error).toMatchObject({
+          code: 'DEV_SERVER_RUNNING',
+          data: { phase: 'building' },
+          suggestedCommand: 'npx @expo/agent-cli dev:logs',
+        });
+
         const deadline = Date.now() + 20_000;
         let lock = await readDevLockAsync(projectRoot);
         while (lock?.phase !== 'serving' && Date.now() < deadline) {
@@ -613,7 +613,7 @@ describe('@expo/agent-cli dev --detach', () => {
           expect(JSON.parse(repeated.stdout).error).toMatchObject({
             code: 'DEV_SERVER_RUNNING',
             data: { port, pid, phase: 'serving' },
-            suggestedCommand: `npx @expo/agent-cli dev:stop && ${rerunDevCommand(platform, repeatedArgs)}`,
+            suggestedCommand: `npx @expo/agent-cli smoke --${platform}`,
           });
         }
         expect(

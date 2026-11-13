@@ -652,10 +652,11 @@ the parent keeps waiting for its own server. The missing-header compatibility ru
 §A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
 reject a foreign root. Without the flag `ready` is `null`.
 
-Public detached local repeats refuse with `DEV_SERVER_RUNNING`, exit 20, when Metro answers
-for this project. The refusal names the pid and port and preserves the request in `dev:stop && dev`.
-A no-wait repeat before Metro answers returns 22 with `dev:logs`. EAS and smoke bootstrap retain reuse.
-`dev-detach-test` covers both platforms, request preservation, and port changes.
+One dev server per project. A local `dev --detach` stops on a live lock of this project as a
+foreground `dev` does (§A busy port): the same check in `devAsync`, the same `DEV_SERVER_RUNNING`
+refusal, exit 20, worded by the lock's phase. A detached run whose device is on EAS goes on to the
+running server and opens its session there ([[0035-one-device-per-worktree]] §Preserved sessions),
+and `smoke`'s bootstrap calls `devDetachAsync` directly and reports the running server.
 
 Reuse checks the process and its verdict after tunnel lookup and any final readiness
 probe, and before reporting a readiness timeout. Logs older than the lock's start time
@@ -713,7 +714,7 @@ Tests: dev-eas-test (the report, the 22, the follow by a re-run, a followed buil
 fails, the stop of a building run), dev-detach-test (a building `expo run:*` plan).
 
 Exit codes. `dev --detach` exits 0 for a successful first start, an EAS or internal
-reuse, and for a run that builds without `--wait-ready`. Local ready repeats exit 20. Exit 1 when the child never
+reuse, and for a run that builds without `--wait-ready`. A local repeat exits 20. Exit 1 when the child never
 published a lock, and 1 when `--wait-ready` gave up on a serving dev server, which is
 still running, as the message says. Exit 22 (`DEV_DETACH_STILL_BUILDING`) when
 `--wait-ready` ends while the run builds. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
@@ -749,20 +750,20 @@ with reason `in-use` (§Dev-server lock), the busy-port retry moves this server 
 next free port, and a named `--port` fails with `PORT_IN_USE`, naming that pid like any
 other holder.
 
-One dev server per project. A live lock of this project stops a foreground `dev` with
-`DEV_SERVER_RUNNING`, exit 20: before the project is probed and the plan resolved, before
+One dev server per project. A live lock of this project stops a foreground `dev`, and a
+local `dev --detach`, with `DEV_SERVER_RUNNING`, exit 20: before the project is probed and the plan resolved, before
 any step, before the port is probed, and before a device is bound. A second server could
 not hold the lock, so `status` and `dev:stop` could not see it or stop it, and it would
 sit on a port nothing names.
 
-Where the stop runs. `devAsync` reads the lock once, after the command refusals and the
-`--detach` branch, and before the project probe. A run that is not `--plan` stops there
+Where the stop runs. `devAsync` reads the lock once, after the command refusals, and before
+the `--detach` branch and the project probe. A run that is not `--plan` stops there
 when the lock is live, so a stopped run probes no project and refreshes no fingerprint
 cache, resolves no plan, asks EAS for no build, probes no toolchain, and reads, boots or
 matches no device. It records no last request either: the recovery preference `status`
 reads ([[0035-one-device-per-worktree]] §Lifecycle output) is written after the stop, so
 a request the lock refused never replaces the one that started the running server.
-`--detach` records in the child, or after a successful EAS reuse.
+A detached run records in its child, or after it opened its EAS session on the running server.
 `--device` on a run that binds nothing is still `BAD_ARGS` first: the refusals about the
 command come before the outcome about the project. The lock alone decides.
 Every plan `dev` can reach that has a step has a step that serves (`isDevServerStep`:
