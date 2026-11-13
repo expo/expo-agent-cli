@@ -17,7 +17,8 @@ import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
 import { deletedWorktreeSessions } from '../deviceBinding/reap';
 import { unreadableBindingFiles } from '../deviceBinding/records';
-import { readBindingSummaryAsync } from '../deviceBinding/summary';
+import { readConnectedAppsAsync } from './connectedApps';
+import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import type { DevServerLockInfo } from '../devLock';
@@ -271,15 +272,18 @@ export async function collectStatusReportAsync(
   const saved = readLastDevRequest(projectRoot);
   const request =
     saved && (!options.platform || options.platform === saved.platform) ? saved : null;
+  // Read once: the dev server section classifies its apps with the same bindings.
+  const bindingRead = readBindingSummaryAsync(
+    projectRoot,
+    options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS
+  );
   const [project, devServer, device, skills, auth, binding, ownLock] = await Promise.all([
     projectRead,
-    attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
+    attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request, bindingRead)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
     authRead,
-    attemptAsync(() =>
-      readBindingSummaryAsync(projectRoot, options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS)
-    ),
+    attemptAsync(() => bindingRead),
     readDevServerLockAsync(projectRoot, {
       timeoutMs: options.devServerTimeoutMs ?? DEV_SERVER_PROBE_TIMEOUT_MS,
     }),
@@ -640,7 +644,8 @@ async function readProjectAsync(
 async function probeDevServerStatusAsync(
   projectRoot: string,
   options: StatusOptions,
-  request: LastDevRequest | null
+  request: LastDevRequest | null,
+  bindingRead: Promise<BindingSummary[]>
 ): Promise<DevServerStatus> {
   const timeoutMs = options.devServerTimeoutMs ?? DEV_SERVER_PROBE_TIMEOUT_MS;
   const own =
@@ -710,13 +715,33 @@ async function probeDevServerStatusAsync(
       discovery.reachable ? discovery.devServerUrl : undefined
     ),
   ]);
-  return buildDevServerStatus(
+  const status = buildDevServerStatus(
     discovery.devServerUrl,
     discovery,
     readiness,
     { live: liveness.live, stale: liveness.stale.length },
     reach
   );
+  const live = discovery.targets.filter((target) => !liveness.stale.includes(target));
+  const deviceTimeoutMs = options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS;
+  // Within the device deadline, and only where a simulator can be asked about (llp/0004 §Reported by status).
+  const owners =
+    status.running &&
+    live.length > 0 &&
+    !devicesDisabled() &&
+    hostBindsPlatform('ios') &&
+    options.platform !== 'android'
+      ? await raceWithTimeoutAsync(
+          readConnectedAppsAsync(
+            projectRoot,
+            live,
+            await bindingRead.catch(() => []),
+            deviceTimeoutMs
+          ),
+          deviceTimeoutMs
+        )
+      : null;
+  return owners ? { ...status, owners } : status;
 }
 
 /**

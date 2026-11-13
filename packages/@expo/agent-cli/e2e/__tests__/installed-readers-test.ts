@@ -153,7 +153,13 @@ describe('the simulator reader over a stub xcrun', () => {
       status: 'no-device',
       hint: expect.stringContaining('dev --ios --detach --wait-ready'),
     });
-    expect(xcrun.calls().some((args) => args[0] === 'simctl')).toBe(false);
+    // It lists the booted simulators, to name them; it reads none of them.
+    expect(
+      xcrun
+        .calls()
+        .filter((args) => args[0] === 'simctl')
+        .map((args) => args[1])
+    ).toEqual(['list']);
   });
 });
 

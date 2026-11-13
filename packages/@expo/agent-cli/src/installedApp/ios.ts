@@ -7,6 +7,7 @@
 import { listConnectedIosDevicesAsync, type IosDevice } from '../device/devicectl';
 import { listBootedIosSimulatorsAsync } from '../device/simulators';
 import { findBoundDeviceAsync } from '../deviceBinding';
+import { liveIosBindings } from '../deviceBinding/records';
 import { CommandError } from '../utils/errors';
 import { readInstalledFingerprintIosDeviceAsync } from './iosDevice';
 import { readSimulatorsAsync, type IosSimulatorReaderDependencies } from './iosSimulator';
@@ -109,7 +110,18 @@ export async function readInstalledFingerprintIosAsync({
         ? `${devices.length > 1 ? `Physical iOS devices are connected (${names})` : `A physical iOS device is connected (${names})`}; check one with --device "<name>", which launches the app on it.`
         : null;
       const hint = [bound.hint, phoneHint].filter(Boolean).join(' ');
-      return hint ? { status: 'no-device', hint } : { status: 'no-device' };
+      // Listed, never read: a booted simulator that no worktree bound. One an other worktree
+      // bound is not offered. A `simctl` failure leaves the list empty, and the text then says
+      // only that none is bound.
+      const taken = new Set(liveIosBindings(projectRoot).map((binding) => binding.udid));
+      const unboundSimulators = (await listBootedIosSimulatorsAsync(deps).catch(() => []))
+        .filter((simulator) => !taken.has(simulator.identifier))
+        .map((simulator) => simulator.name);
+      return {
+        status: 'no-device',
+        ...(unboundSimulators.length ? { unboundSimulators } : {}),
+        ...(hint ? { hint } : {}),
+      };
     }
     simulators = [bound.simulator];
   }

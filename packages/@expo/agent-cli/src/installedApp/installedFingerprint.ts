@@ -52,7 +52,7 @@ export type InstalledAppDevice = {
 };
 
 export type InstalledFingerprintResult = (
-  | { status: 'no-device' }
+  | { status: 'no-device'; unboundSimulators?: string[] }
   | { status: 'app-not-installed'; appId: string; device: InstalledAppDevice }
   | { status: 'no-embedded-fingerprint'; appId: string; device: InstalledAppDevice }
   | { status: 'no-response'; appId: string; device: InstalledAppDevice }

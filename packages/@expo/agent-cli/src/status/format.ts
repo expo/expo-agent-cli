@@ -581,6 +581,43 @@ function fingerprintProvenance(freshness: FreshnessStatus): string | null {
   return `fingerprint: ${hash} (from cache, revalidated ${by} ${pinned}${age}) — pass --no-fingerprint-cache to hash the project again`;
 }
 
+/** The owner split of the connected apps, when some are not on this worktree's devices. */
+function connectedSplit(devServer: DevServerStatus): string {
+  const owners = devServer.owners;
+  if (!owners) {
+    return '';
+  }
+  const named = (names: string[]) => [...new Set(names)].join(', ');
+  const parts: string[] = [];
+  if (owners.simulatorApps.length > 0) {
+    parts.push(`${owners.simulatorApps.length} on this worktree's simulator`);
+  }
+  if (owners.sessionApps > 0) {
+    parts.push(`${owners.sessionApps} on this worktree's EAS session`);
+  }
+  if (owners.localApps.length > 0) {
+    const where = new Set(owners.localApps).size === 1 ? 'a local simulator' : 'local simulators';
+    parts.push(
+      `${owners.localApps.length} on ${where} not bound here (${named(owners.localApps)})`
+    );
+  }
+  if (owners.otherWorktreeApps.length > 0) {
+    parts.push(
+      `${owners.otherWorktreeApps.length} on another worktree's simulator (${named(owners.otherWorktreeApps)})`
+    );
+  }
+  const rest =
+    devServer.appsConnected -
+    owners.simulatorApps.length -
+    owners.sessionApps -
+    owners.localApps.length -
+    owners.otherWorktreeApps.length;
+  if (rest > 0) {
+    parts.push(`${rest} other`);
+  }
+  return `: ${parts.join(', ')}`;
+}
+
 function devServerLine(devServer: DevServerStatus): string {
   if (!devServer.running) {
     const foreign = devServer.foreignServers?.length
@@ -595,7 +632,7 @@ function devServerLine(devServer: DevServerStatus): string {
     `${chalk.green('running')} on ${devServer.url}`,
     chalk.dim(`via ${devServer.source}`),
     bundlerFact(devServer.ready),
-    `${devServer.appsConnected} ${apps} connected`,
+    `${devServer.appsConnected} ${apps} connected${connectedSplit(devServer)}`,
   ];
   // Named, never silently dropped: the count above is smaller than the dev server's own list, and
   // a reader comparing this line with `/json/list` has to be told why (F56).
