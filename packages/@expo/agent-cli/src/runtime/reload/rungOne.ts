@@ -48,7 +48,7 @@ const PEER_CHURN_TIMEOUT_MS = 8000;
  * window, it is separate from `--timeout`: a proof that does not come leaves the rest of the budget
  * to the relaunch.
  */
-const PAGE_RELOAD_PROOF_MS = 8000;
+export const PAGE_RELOAD_PROOF_MS = 8000;
 
 /** How often the peers are read while waiting for the app to reconnect. */
 const PEER_POLL_INTERVAL_MS = 250;
@@ -258,8 +258,16 @@ export const CHURN_NOT_ASKED: CommandSocketChurn = {
   reason: "the dev server's command socket was not asked on this run",
 };
 
+/**
+ * `skipped-app`: a broadcast would reload an app this run skips. `ios-eas-session`: the SDK 58 iOS
+ * development build on an EAS session ignores the broadcast (llp/0005 §How it reloads).
+ */
+export type InPlaceTrigger = 'skipped-app' | 'ios-eas-session';
+
 /** What rung 1 does on this run, and which evidence may prove it. */
 export type RungOnePolicy = {
+  /** Why rung 1 is `Page.reload`, or null when it is not. */
+  trigger: InPlaceTrigger | null;
   skippedApps: SkippedApp[];
   /** Listed apps outside `read` that the broadcast also reaches: other-platform and unplaced ones. */
   reachedOutside: number;
@@ -276,6 +284,11 @@ export type RungOnePolicy = {
     | { mechanism: 'none'; unread: string }
   );
 
+/** `iosEasInPlace: false` is a pinned `--method dev-server`: it broadcasts, as it names. */
+export interface RungOneChoice {
+  iosEasInPlace?: boolean;
+}
+
 /**
  * Decide rung 1 for one run's classified targets.
  *
@@ -288,15 +301,20 @@ export function rungOnePolicy(
   classifiedTargets: ClassifiedTargets,
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
-  unread: string | null = null
+  unread: string | null = null,
+  { iosEasInPlace = true }: RungOneChoice = {}
 ): RungOnePolicy {
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
-  // The SDK 58 iOS development build on an EAS session ignores the broadcast (llp/0005 §How it
-  // reloads), so its own targets take `Page.reload`.
-  const iosEasSession =
-    targetSelection.device?.backend === 'cloud' && targetSelection.platform?.value === 'ios';
-  const broadcast = classifiedTargets.skipped.length === 0 && !iosEasSession;
+  const trigger: InPlaceTrigger | null =
+    classifiedTargets.skipped.length > 0
+      ? 'skipped-app'
+      : iosEasInPlace &&
+          targetSelection.device?.backend === 'cloud' &&
+          targetSelection.platform?.value === 'ios'
+        ? 'ios-eas-session'
+        : null;
+  const broadcast = trigger == null;
   const outside = broadcast
     ? [
         ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
@@ -306,6 +324,7 @@ export function rungOnePolicy(
         ({ target }) => platformOfTarget(target, deviceInventory).platform
       );
   return {
+    trigger,
     ...(!broadcast
       ? { mechanism: 'page-reload' }
       : unread == null
@@ -332,7 +351,8 @@ export function prepareRungOne(
   targets: CdpTarget[],
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
-  unread: string | null = null
+  unread: string | null = null,
+  choice: RungOneChoice = {}
 ) {
   const classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
   return {
@@ -340,7 +360,8 @@ export function prepareRungOne(
     targetSelection,
     deviceInventory,
     classifiedTargets,
-    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory, unread),
+    choice,
+    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory, unread, choice),
   };
 }
 export type PreparedRungOne = ReturnType<typeof prepareRungOne>;
@@ -356,7 +377,11 @@ export async function prepareRungOneAsync(
   devServerUrl: string,
   projectRoot: string,
   targetSelection: TargetSelection,
-  { budgetMs, preflight }: { budgetMs: number; preflight: RungOneObservation | null }
+  {
+    budgetMs,
+    preflight,
+    choice = {},
+  }: { budgetMs: number; preflight: RungOneObservation | null; choice?: RungOneChoice }
 ): Promise<PreparedRungOne> {
   const deadline = Date.now() + Math.max(1, budgetMs);
   const left = () => Math.max(1, deadline - Date.now());
@@ -365,7 +390,7 @@ export async function prepareRungOneAsync(
       targets: [],
       deviceInventory: EMPTY_DEVICE_INVENTORY,
     };
-    return prepareRungOne(targets, targetSelection, deviceInventory, unread);
+    return prepareRungOne(targets, targetSelection, deviceInventory, unread, choice);
   };
   const probe = await probeDevServerAsync(devServerUrl, { signal: AbortSignal.timeout(left()) });
   if (!probe.reachable) {
@@ -384,7 +409,7 @@ export async function prepareRungOneAsync(
   ) {
     return keep('the device tools did not answer again');
   }
-  return prepareRungOne(probe.targets, targetSelection, deviceInventory);
+  return prepareRungOne(probe.targets, targetSelection, deviceInventory, null, choice);
 }
 
 /** What rung 1 came to. `proved` and `acted` keep `auto` on this rung; the rest relaunch. */
@@ -407,25 +432,35 @@ export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn
     }
 );
 
+/** The rungs that keep the app's process, and the method each one reports. */
+export type InPlaceMethod = 'dev-server' | 'runtime';
+
 /**
- * What rung 1 leaves for the rest of the run. `ran`: a mechanism reached an app, so the shared
- * observations decide what its own proof did not; `relaunchWhy`: rung 2, then the relaunch, may follow.
+ * What the in-place rungs leave for the rest of the run. `proved`: done. `observe`: a mechanism
+ * ran, and the shared observations (a fresh target, a bundle) decide; nothing relaunches.
+ * `relaunch`: in `auto`, the relaunch follows, opened by `why`.
  */
-export function settleRungOne(outcome: RungOneOutcome): {
-  ran: boolean;
-  proof: Extract<RungOneOutcome, { kind: 'proved' }>['proof'] | null;
-  relaunchWhy: string | null;
-} {
+export type Settled =
+  | {
+      kind: 'proved';
+      method: InPlaceMethod;
+      proof: Extract<RungOneOutcome, { kind: 'proved' }>['proof'];
+    }
+  | { kind: 'observe'; method: InPlaceMethod }
+  | { kind: 'relaunch'; method: InPlaceMethod | null; why: string };
+
+/** {@link Settled} for rung 1 alone. */
+export function settleRungOne(outcome: RungOneOutcome): Settled {
   switch (outcome.kind) {
     case 'proved':
-      return { ran: true, proof: outcome.proof, relaunchWhy: null };
+      return { kind: 'proved', method: 'dev-server', proof: outcome.proof };
     case 'acted':
-      return { ran: true, proof: null, relaunchWhy: null };
+      return { kind: 'observe', method: 'dev-server' };
     case 'delivered':
-      return { ran: true, proof: null, relaunchWhy: outcome.relaunchWhy };
+      return { kind: 'relaunch', method: 'dev-server', why: outcome.relaunchWhy };
     case 'not-delivered':
     case 'unprovable':
-      return { ran: false, proof: null, relaunchWhy: outcome.relaunchWhy };
+      return { kind: 'relaunch', method: null, why: outcome.relaunchWhy };
   }
 }
 
@@ -538,10 +573,10 @@ async function pageReloadAsync(
   { policy, own, deadline }: { policy: RungOnePolicy; own: CdpTarget[]; deadline: number }
 ): Promise<RungOneOutcome> {
   const skips = policy.skippedApps.length;
-  const why =
-    skips > 0
-      ? `No broadcast was sent, because the dev server relays it to every app, and this run skips ${skips} of them (\`skippedApps\`).`
-      : 'No broadcast was sent: the app on an iOS EAS Simulator session ignores it.';
+  const skippedApp = policy.trigger === 'skipped-app';
+  const why = skippedApp
+    ? `No broadcast was sent, because the dev server relays it to every app, and this run skips ${skips} of them (\`skippedApps\`).`
+    : 'No broadcast was sent: the app on an iOS EAS Simulator session ignores it.';
   const { kind, attempt, clause } = await reloadInPlaceAsync(devServerUrl, {
     mechanism: 'page-reload',
     own,
@@ -550,15 +585,15 @@ async function pageReloadAsync(
   });
   const churn = {
     ...CHURN_NOT_ASKED,
-    reason:
-      skips > 0
-        ? "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app"
-        : "the dev server's command socket was not asked: the app on an iOS EAS Simulator session ignores the broadcast",
+    reason: skippedApp
+      ? "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app"
+      : "the dev server's command socket was not asked: the app on an iOS EAS Simulator session ignores the broadcast",
   };
   return kind === 'proved'
     ? { kind, proof: 'debugger-context-replaced', attempt, churn }
     : {
-        kind,
+        // A lost `Page.reload` answer is not delivered, so only rung 2 is ever in flight.
+        kind: kind === 'in-flight' ? 'delivered' : kind,
         attempt,
         churn,
         relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,

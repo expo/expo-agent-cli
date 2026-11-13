@@ -15,14 +15,8 @@ import { debugEvent } from './events';
 
 export type InPlaceMechanism = 'page-reload' | 'runtime';
 
-/** How long rung 2 has to prove itself, so the relaunch keeps the rest of `--timeout`. */
+/** How long rung 2 has to prove itself, so the bundle observation or the relaunch keeps the rest. */
 const RUNTIME_RELOAD_PROOF_MS = 5000;
-
-/**
- * How long one target has to answer the action. `expo.reloadAppAsync` answers at once or never (its
- * context goes), so its bound is short and the marker reads keep most of rung 2's window.
- */
-const ANSWER_MS: Record<InPlaceMechanism, number> = { 'page-reload': 4000, runtime: 1500 };
 
 const RUNTIME_RELOAD_EXPRESSION = `(function () {
   var e = globalThis.expo;
@@ -38,13 +32,55 @@ const CANNOT_RELOAD: Record<string, string> = {
   'no-reload-function': `the app's "expo" global has no reloadAppAsync, so this runtime cannot be asked to reload itself — a newer expo package has it`,
 };
 
-const LABEL: Record<InPlaceMechanism, string> = {
-  'page-reload': 'Page.reload',
-  runtime: 'expo.reloadAppAsync',
-};
+/**
+ * What differs per mechanism. `answerMs` bounds one target's answer: `expo.reloadAppAsync` answers
+ * at once or never (its context goes), so its bound is short and the marker reads keep most of the
+ * window. `unproved` maps a check that saw no new context to the target's outcome.
+ */
+const MECHANISMS = {
+  'page-reload': {
+    label: 'Page.reload',
+    answerMs: 4000,
+    event: 'page_reload_sent',
+    // Nothing shows that a `Page.reload` whose answer was lost reached the app.
+    unproved: {
+      'not-replaced': 'delivered-unproved',
+      'answer-lost': 'not-delivered',
+      unmarkable: 'unmarkable',
+    },
+  },
+  runtime: {
+    label: 'expo.reloadAppAsync',
+    answerMs: 1500,
+    event: 'runtime_reload_sent',
+    // The call tears down the context that would answer it, so a lost answer is a call that ran.
+    unproved: {
+      'not-replaced': 'delivered-unproved',
+      'answer-lost': 'delivered-unproved',
+      unmarkable: 'unmarkable',
+    },
+  },
+} as const satisfies Record<
+  InPlaceMechanism,
+  {
+    label: string;
+    answerMs: number;
+    event: 'page_reload_sent' | 'runtime_reload_sent';
+    unproved: Record<Exclude<ContextReplaced['kind'], 'replaced'>, TargetReloadOutcome['outcome']>;
+  }
+>;
+
+/** The name of each in-place mechanism, as the reports say it. */
+export function inPlaceLabel(mechanism: InPlaceMechanism): string {
+  return MECHANISMS[mechanism].label;
+}
 
 export interface InPlaceReload {
-  kind: 'proved' | 'delivered' | 'unprovable' | 'not-delivered';
+  /**
+   * `in-flight`: an `expo.reloadAppAsync` call went out and its answer was lost, so the reload may
+   * still be on its way. Nothing should relaunch under it.
+   */
+  kind: 'proved' | 'in-flight' | 'delivered' | 'unprovable' | 'not-delivered';
   attempt: Extract<ReloadAttempt, { outcomes: TargetReloadOutcome[] }>;
   /** What happened, as the opening clause of whatever the run does next. */
   clause: string;
@@ -107,9 +143,11 @@ export async function reloadInPlaceAsync(
   }: { mechanism: InPlaceMechanism; own: CdpTarget[]; deadline: number; why?: string | null }
 ): Promise<InPlaceReload> {
   const provedOne = new AbortController();
-  const outcomes = await Promise.all(
+  const checked = await Promise.all(
     own.map((target) => reloadTargetAsync(devServerUrl, mechanism, target, deadline, provedOne))
   );
+  const outcomes = checked.map(({ outcome }) => outcome);
+  const answerLost = mechanism === 'runtime' && checked.some(({ lost }) => lost);
   const proved = outcomes.filter((each) => each.outcome === 'context-replaced');
   const answered = outcomes.filter(
     (each) => each.outcome === 'context-replaced' || each.outcome === 'delivered-unproved'
@@ -118,24 +156,27 @@ export async function reloadInPlaceAsync(
     .filter((each) => each.reason)
     .map((each) => `"${each.deviceName}": ${each.reason}`);
   const reloadable = outcomes.filter((each) => each.outcome !== 'unsupported');
-  debugEvent(mechanism === 'page-reload' ? 'page_reload_sent' : 'runtime_reload_sent', {
+  debugEvent(MECHANISMS[mechanism].event, {
     targets: reloadable.length,
     answered: answered.length,
   });
   const kind: InPlaceReload['kind'] =
     proved.length > 0
       ? 'proved'
-      : answered.length > 0
-        ? 'delivered'
-        : reloadable.length > 0 && reloadable.every((each) => each.outcome === 'unmarkable')
-          ? 'unprovable'
-          : 'not-delivered';
+      : answerLost
+        ? 'in-flight'
+        : answered.length > 0
+          ? 'delivered'
+          : reloadable.length > 0 && reloadable.every((each) => each.outcome === 'unmarkable')
+            ? 'unprovable'
+            : 'not-delivered';
   const names = (kind === 'proved' ? proved : answered)
     .map((each) => `"${each.deviceName}"`)
     .join(', ');
-  const label = LABEL[mechanism];
+  const label = MECHANISMS[mechanism].label;
   const clause = {
     proved: `${names} answered from a new JavaScript context after ${label}`,
+    'in-flight': `${names} took ${label} and did not answer, which is how a reload that has begun looks, and no new JavaScript context was seen yet`,
     delivered: `${names} answered ${label} over the debugger, and no new JavaScript context was seen`,
     unprovable: `no app of this worktree could carry the marker that proves the reload, so no ${label} was sent`,
     'not-delivered':
@@ -149,7 +190,7 @@ export async function reloadInPlaceAsync(
     attempt: {
       method: mechanism,
       ok: kind === 'proved',
-      delivered: kind === 'proved' || kind === 'delivered',
+      delivered: kind === 'proved' || kind === 'in-flight' || kind === 'delivered',
       outcomes,
       reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}${why ? `. ${why}` : ''}`,
       leftAppStopped: null,
@@ -163,16 +204,18 @@ async function reloadTargetAsync(
   target: CdpTarget,
   deadline: number,
   provedOne: AbortController
-): Promise<TargetReloadOutcome> {
+): Promise<{ outcome: TargetReloadOutcome; lost: boolean }> {
   const identity = { targetId: target.id, deviceName: target.deviceName };
+  const done = (outcome: TargetReloadOutcome, lost = false) => ({ outcome, lost });
   if (mechanism === 'page-reload' && target.reactNative?.capabilities?.nativePageReloads !== true) {
-    return {
+    return done({
       ...identity,
       outcome: 'unsupported',
       reason: 'the target does not support Page.reload',
-    };
+    });
   }
-  const answerMs = () => Math.max(1, Math.min(ANSWER_MS[mechanism], deadline - Date.now()));
+  const answerMs = () =>
+    Math.max(1, Math.min(MECHANISMS[mechanism].answerMs, deadline - Date.now()));
   try {
     const seen = await jsContextReplacedAsync(devServerUrl, target, {
       act: async (session) => {
@@ -203,42 +246,26 @@ async function reloadTargetAsync(
     });
     if (seen.kind === 'replaced') {
       provedOne.abort();
-      return { ...identity, outcome: 'context-replaced', reason: null };
+      return done({ ...identity, outcome: 'context-replaced', reason: null });
     }
     if (provedOne.signal.aborted) {
-      return { ...identity, outcome: 'stopped', reason: STOPPED };
+      return done({ ...identity, outcome: 'stopped', reason: STOPPED });
     }
-    return { ...identity, outcome: UNPROVED[mechanism][seen.kind], reason: seen.reason };
+    return done(
+      { ...identity, outcome: MECHANISMS[mechanism].unproved[seen.kind], reason: seen.reason },
+      seen.kind === 'answer-lost'
+    );
   } catch (error: unknown) {
-    return provedOne.signal.aborted
-      ? { ...identity, outcome: 'stopped', reason: STOPPED }
-      : {
-          ...identity,
-          outcome: 'not-delivered',
-          reason: firstLine(error instanceof Error ? error.message : String(error)),
-        };
+    return done(
+      provedOne.signal.aborted
+        ? { ...identity, outcome: 'stopped', reason: STOPPED }
+        : {
+            ...identity,
+            outcome: 'not-delivered',
+            reason: firstLine(error instanceof Error ? error.message : String(error)),
+          }
+    );
   }
 }
-
-/**
- * Nothing shows that a `Page.reload` whose answer was lost reached the app, so it is not counted as
- * answered. `expo.reloadAppAsync` tears down the context that would answer it, so a lost answer is
- * the usual shape of a call that ran: the run watches for a fresh target or a bundle.
- */
-const UNPROVED = {
-  'page-reload': {
-    'not-replaced': 'delivered-unproved',
-    'answer-lost': 'not-delivered',
-    unmarkable: 'unmarkable',
-  },
-  runtime: {
-    'not-replaced': 'delivered-unproved',
-    'answer-lost': 'delivered-unproved',
-    unmarkable: 'unmarkable',
-  },
-} as const satisfies Record<
-  InPlaceMechanism,
-  Record<Exclude<ContextReplaced['kind'], 'replaced'>, TargetReloadOutcome['outcome']>
->;
 
 const STOPPED = 'another app of this worktree proved the reload first, so this check stopped';

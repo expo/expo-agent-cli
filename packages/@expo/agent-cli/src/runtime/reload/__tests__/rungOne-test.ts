@@ -161,23 +161,23 @@ describe('what rung 1 leaves for the rest of the run', () => {
   it.each<{ outcome: RungOneOutcome; settled: ReturnType<typeof settleRungOne> }>([
     {
       outcome: { ...base, kind: 'proved', proof: 'message-socket-peers' },
-      settled: { ran: true, proof: 'message-socket-peers', relaunchWhy: null },
+      settled: { kind: 'proved', method: 'dev-server', proof: 'message-socket-peers' },
     },
     {
       outcome: { ...base, kind: 'acted', reachedOutside: 1 },
-      settled: { ran: true, proof: null, relaunchWhy: null },
+      settled: { kind: 'observe', method: 'dev-server' },
     },
     {
       outcome: { ...base, kind: 'delivered', relaunchWhy: 'why' },
-      settled: { ran: true, proof: null, relaunchWhy: 'why' },
+      settled: { kind: 'relaunch', method: 'dev-server', why: 'why' },
     },
     {
       outcome: { ...base, kind: 'not-delivered', relaunchWhy: 'why' },
-      settled: { ran: false, proof: null, relaunchWhy: 'why' },
+      settled: { kind: 'relaunch', method: null, why: 'why' },
     },
     {
       outcome: { ...base, kind: 'unprovable', relaunchWhy: 'why' },
-      settled: { ran: false, proof: null, relaunchWhy: 'why' },
+      settled: { kind: 'relaunch', method: null, why: 'why' },
     },
   ])('$outcome.kind', ({ outcome, settled }) => {
     expect(settleRungOne(outcome)).toEqual(settled);
