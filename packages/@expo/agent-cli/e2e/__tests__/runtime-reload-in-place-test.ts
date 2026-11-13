@@ -101,7 +101,7 @@ describe('runtime:reload on an iOS EAS session', () => {
           verifiedBy: 'debugger-context-replaced',
         });
         expect(report.attempts.map((each: Attempt) => [each.method, each.ok])).toEqual(attempts);
-        expect(report.attempts[0].reason).toContain('iOS EAS Simulator session');
+        expect(report.attempts[0].reason).toContain('iOS Expo simulator session');
         expect(report.attempts[0].reason).not.toContain('skippedApps');
         expect(server.broadcasts()).toBe(0);
         expect(stubEasArgs(root).filter((argv) => argv[0] === 'simulator:exec')).toEqual([]);
