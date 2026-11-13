@@ -212,13 +212,13 @@ describe('runtime:reload on an iOS EAS session, beside the in-place rungs', () =
     }
   });
 
-  it('names --eas in the relaunch advice on a session run without it', async () => {
+  it('names --eas in the relaunch advice on a session run without it, and only what it sent', async () => {
     const { root, target } = await onIosSessionAsync();
     const server = await startStubDevServerAsync({
       projectRoot: root,
-      targets: [target],
+      // No Page.reload: the target cannot take it. No expo.reloadAppAsync: the app has no `expo`.
+      targets: [{ ...target, reactNative: { ...target.reactNative, capabilities: {} } }],
       messageSocket: 'no-churn',
-      pageReload: 'keeps-context',
       inspectorEvaluate: (expression) =>
         /reloadAppAsync\(/.test(expression) ? 'no-expo-global' : undefined,
     });
@@ -236,9 +236,10 @@ describe('runtime:reload on an iOS EAS session, beside the in-place rungs', () =
         ],
         { reject: false }
       );
+      expect(result.exitCode, result.all).toBe(20);
       expect(result.all).toContain('runtime:reload --eas --method device');
       expect(result.all).not.toMatch(/runtime:reload --method device/);
-      expect(result.all).not.toContain('the broadcast');
+      expect(result.all).toContain('a runtime expo.reloadAppAsync could not reach');
     } finally {
       await server.close();
     }
