@@ -219,33 +219,56 @@ export function chooseNextAction({
       (deviceBackend !== 'eas' && !host.devicesDisabled && host.bindsPlatform(platform)))
   ) {
     // @ref llp/0021-honest-reports.rfc.md §How they show up
-    const restart = ownServer != null && easServer == null;
+    const restart = ownServer != null && easServer == null ? restartStop(ownServer) : null;
     const unreadable = host.unreadableBindingFile(platform);
     // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
     const command = easServer
       ? rerunDevCommand(platform, ['--eas', ...withoutPortArgs(devArgs.slice(backend ? 1 : 0))])
       : restart
-        ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}`
+        ? `${restart.stop} && ${devCommand}`
         : devCommand;
-    const easWhy = easServer
-      ? `${
-          host.childStartsSession(easServer, platform)
-            ? `The dev server's EAS Simulator session for ${platform} is starting.`
-            : `The dev server's EAS Simulator session for ${platform} is not bound yet.`
-        } This command waits for it, or reopens the app on the running Metro. No restart is needed.`
-      : null;
+    const easWhy = easServer ? easServerWhy(host, easServer, platform) : null;
     next = {
       ...devNext,
       command: unreadable ? `rm -f '${unreadable}' && ${command}` : command,
-      why: unreadable
-        ? `The binding file ${unreadable} does not parse; a newer CLI may have written it.`
-        : (easWhy ??
-          (bound.length
-            ? `The lease on the bound ${platform} device expired.`
-            : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
+      why:
+        (unreadable
+          ? `The binding file ${unreadable} does not parse; a newer CLI may have written it.`
+          : (easWhy ??
+            (bound.length
+              ? `The lease on the bound ${platform} device expired.`
+              : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`))) +
+        (restart?.ends ?? ''),
     };
   }
   return next;
+}
+
+/** Why `dev --eas` is the next step beside this platform's own EAS server. */
+function easServerWhy(
+  host: NextActionHost,
+  easServer: DevServerLockInfo,
+  platform: NativePlatform
+) {
+  return `${
+    host.childStartsSession(easServer, platform)
+      ? `The dev server's EAS Simulator session for ${platform} is starting.`
+      : `The dev server's EAS Simulator session for ${platform} is not bound yet.`
+  } This command waits for it, or reopens the app on the running Metro. No restart is needed.`;
+}
+
+/**
+ * The stop before a local `dev` beside this project's own server. A plain `dev:stop` leaves a run
+ * that still starts its EAS session holding the lock, so the `dev` after it would refuse; `--eas`
+ * waits for that start and ends the session.
+ */
+function restartStop({ easPlatform }: DevServerLockInfo): { stop: string; ends: string } {
+  return easPlatform == null
+    ? { stop: `${PROGRAM_PREFIX} dev:stop`, ends: '' }
+    : {
+        stop: `${PROGRAM_PREFIX} dev:stop --eas`,
+        ends: ` The stop also ends the dev server's ${easPlatform} EAS Simulator session, which bills until it stops.`,
+      };
 }
 
 /** The live cloud binding this CLI started for `platform`, else any it started; null for none. */

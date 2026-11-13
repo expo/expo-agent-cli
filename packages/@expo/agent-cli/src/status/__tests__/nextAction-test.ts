@@ -306,8 +306,8 @@ describe(chooseNextAction, () => {
         devServer: noApp,
         ownLock: easLock(platform === 'ios' ? 'android' : 'ios'),
       },
-      command: `${dev}:stop && ${dev} --${platform} --port 8081 --detach --wait-ready`,
-      why: restart(platform),
+      command: `${dev}:stop --eas && ${dev} --${platform} --port 8081 --detach --wait-ready`,
+      why: `${restart(platform)} The stop also ends the dev server's ${platform === 'ios' ? 'android' : 'ios'} EAS Simulator session, which bills until it stops.`,
     })),
     {
       name: 'binds the session of the lock on a host that binds no device',
