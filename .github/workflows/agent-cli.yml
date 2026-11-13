@@ -31,6 +31,8 @@ jobs:
     uses: ./.github/workflows/stack-gate.yml
 
   # Tier 0 of LLP 0002: deterministic, model-free, runs on every PR.
+  # It also runs on a PR that changes only llp/ (`full` is 'false'): src/__tests__/oldName-test.ts
+  # scans llp/. A test that reads llp/ belongs in this suite; a job that checks `full` must not read llp/.
   tier0-linux:
     needs: [stack]
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
@@ -74,7 +76,7 @@ jobs:
   # path (nothing else does).
   tier0-e2e:
     needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
+    if: needs.stack.outputs.full != 'false' && github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -108,7 +110,7 @@ jobs:
   # hand-started dev server on [::1] beside a killed run's Metro.
   tier0-e2e-macos:
     needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
+    if: needs.stack.outputs.full != 'false' && github.event_name != 'schedule'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -145,7 +147,7 @@ jobs:
   # else exercises — is sharded in `tier0-e2e` above.
   tier0-windows:
     needs: [stack]
-    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
+    if: needs.stack.outputs.full != 'false' && github.event_name != 'schedule'
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -173,7 +175,7 @@ jobs:
   tier1-agent-eval:
     needs: [stack]
     if: >-
-      needs.stack.outputs.run == 'true' &&
+      needs.stack.outputs.full != 'false' &&
       (github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'schedule' && github.repository == 'expo/expo-agent-cli'))
