@@ -55,13 +55,35 @@ describe('runtime:reload on an iOS EAS session', () => {
       ],
       method: 'runtime',
     },
+    // A target that cannot take Page.reload can still reload itself.
+    {
+      pageReload: 'replaces-context' as const,
+      nativePageReloads: false,
+      attempts: [
+        ['page-reload', false],
+        ['runtime', true],
+      ],
+      method: 'runtime',
+    },
+    // Right after `dev`, the session app may not be listed yet: the run reads the list again.
+    {
+      pageReload: 'replaces-context' as const,
+      listedFromRead: 3,
+      attempts: [['page-reload', true]],
+      method: 'dev-server',
+    },
   ])(
-    'reloads in place and never broadcasts or relaunches ($pageReload)',
-    async ({ pageReload, attempts, method }) => {
+    'reloads in place and never broadcasts or relaunches ($pageReload, $nativePageReloads, $listedFromRead)',
+    async ({ pageReload, attempts, method, nativePageReloads = true, listedFromRead = 0 }) => {
       const { root, target } = await onIosSessionAsync();
+      const own = {
+        ...target,
+        reactNative: { ...target.reactNative, capabilities: { nativePageReloads } },
+      };
+      let reads = 0;
       const server = await startStubDevServerAsync({
         projectRoot: root,
-        targets: [target],
+        targets: () => (++reads >= listedFromRead ? [own] : []),
         messageSocket: 'no-churn',
         pageReload,
       });
@@ -90,16 +112,12 @@ describe('runtime:reload on an iOS EAS session', () => {
   );
 });
 
-// A local development build that ignores the broadcast: the reload stays in place, and the
-// relaunch is left for an app this run cannot ask. Expo Go is not asked: on Expo Go the call can
-// close the app (llp/0005 §How it reloads).
+// Rung 2 is the iOS EAS session's alone, where it is measured live: a local build that ignores the
+// broadcast is relaunched, as before, and never asked to reload itself (llp/0005 §How it reloads).
 describe('runtime:reload after a broadcast that proved nothing', () => {
-  it.each([
-    { appId: 'dev.example.app', attempts: ['dev-server', 'runtime'], relaunched: false },
-    { appId: 'host.exp.Exponent', attempts: ['dev-server', 'device'], relaunched: true },
-  ])(
-    'asks $appId to reload itself only when it is not Expo Go',
-    async ({ appId, attempts, relaunched }) => {
+  it.each(['dev.example.app', 'host.exp.Exponent'])(
+    'relaunches %s on a local simulator and never asks it to reload itself',
+    async (appId) => {
       const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
       const { calls } = await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
       const evaluated: string[] = [];
@@ -122,23 +140,109 @@ describe('runtime:reload after a broadcast that proved nothing', () => {
         expect(
           report.attempts.map((each: Attempt) => each.method),
           result.all
-        ).toEqual(attempts);
-        expect(reloadCalls(evaluated)).toBe(relaunched ? 0 : 1);
+        ).toEqual(['dev-server', 'device']);
+        expect(reloadCalls(evaluated)).toBe(0);
         expect(calls().some((argv) => argv.join(' ').includes(`terminate ${SIMULATOR_UDID}`))).toBe(
-          relaunched
+          true
         );
-        if (!relaunched) {
-          expect(result.exitCode).toBe(0);
-          expect(report).toMatchObject({
-            method: 'runtime',
-            verifiedBy: 'debugger-context-replaced',
-          });
-        }
       } finally {
         await server.close();
       }
     }
   );
+});
+
+// The two in-place rules that are not "reload in place": a pinned method does what it names, and
+// an app that took the call and never answered is left to reload, not relaunched under it.
+describe('runtime:reload on an iOS EAS session, beside the in-place rungs', () => {
+  it('broadcasts under a pinned --method dev-server', async () => {
+    const { root, target } = await onIosSessionAsync();
+    const server = await startStubDevServerAsync({ projectRoot: root, targets: [target] });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--eas',
+          '--method',
+          'dev-server',
+          '--dev-server-url',
+          server.url,
+          ...FLAGS,
+        ],
+        { reject: false }
+      );
+      const report = JSON.parse(result.stdout);
+      expect(
+        report.attempts.map((each: Attempt) => each.method),
+        result.all
+      ).toEqual(['dev-server']);
+      expect(server.broadcasts()).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('waits on a lost expo.reloadAppAsync answer and never relaunches under it', async () => {
+    const { root, target } = await onIosSessionAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [target],
+      messageSocket: 'no-churn',
+      pageReload: 'keeps-context',
+      reloadAppAsyncAnswer: 'lost',
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        ['runtime:reload', '--ios', '--eas', '--dev-server-url', server.url, ...FLAGS],
+        { reject: false }
+      );
+      expect(result.exitCode, result.all).toBe(22);
+      const report = JSON.parse(result.stdout);
+      expect(report.method).toBe('runtime');
+      expect(report.attempts.map((each: Attempt) => each.method)).toEqual([
+        'page-reload',
+        'runtime',
+      ]);
+      expect(stubEasArgs(root).filter((argv) => argv[0] === 'simulator:exec')).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('names --eas in the relaunch advice on a session run without it', async () => {
+    const { root, target } = await onIosSessionAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [target],
+      messageSocket: 'no-churn',
+      pageReload: 'keeps-context',
+      inspectorEvaluate: (expression) =>
+        /reloadAppAsync\(/.test(expression) ? 'no-expo-global' : undefined,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--dev-server-url',
+          server.url,
+          '--timeout',
+          '6s',
+          '--no-followups',
+        ],
+        { reject: false }
+      );
+      expect(result.all).toContain('runtime:reload --eas --method device');
+      expect(result.all).not.toMatch(/runtime:reload --method device/);
+      expect(result.all).not.toContain('the broadcast');
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 describe('runtime:reload --method runtime', () => {
