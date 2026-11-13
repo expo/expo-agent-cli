@@ -785,6 +785,11 @@ export type StubDevServerOptions = {
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
+   * `lost`: the app never answers `expo.reloadAppAsync(reason)` and keeps its context, as an app
+   * whose call went out and whose new context never showed within the proof window.
+   */
+  reloadAppAsyncAnswer?: 'answers' | 'lost';
+  /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
    * An empty object is a dev server nothing has connected to, which is the case where there is
@@ -794,8 +799,8 @@ export type StubDevServerOptions = {
   /**
    * What `GET /json/list` reports after a reload has been asked for.
    *
-   * Either mechanism asks: a `reload` broadcast on a `v2` socket, or the
-   * `expo.reloadAppAsync()` evaluate `runtime:reload`'s debugger method sends.
+   * Either mechanism asks: a `reload` broadcast on a `v2` socket, or an
+   * `expo.reloadAppAsync(reason)` evaluate over the debugger.
    *
    * The peer churn and the debugger target list are two independent facts, and friction run 4
    * found `runtime:reload` believing the first about the second. The three values are the three
@@ -922,6 +927,7 @@ export async function startStubDevServerAsync({
   bundleLogPath = null,
   targetsAppearWithFile = null,
   inspectorEvaluate,
+  reloadAppAsyncAnswer = 'answers',
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1164,7 +1170,15 @@ export async function startStubDevServerAsync({
         if (setMarker) {
           globals.set(setMarker[1]!, setMarker[2]!);
         }
-        if (!setMarker && !readMarker && !removeMarker && !inspectorEvaluate) {
+        // The reload call over the debugger. The SDK 58 native function takes one string, the
+        // reason; called with none it rejects and reloads nothing [observed — SDK 58 development
+        // build, Expo simulator iOS session, 2026-11-12: "Received 0 arguments, but 1 was expected"].
+        const reloadCall = /reloadAppAsync\(/.test(expression);
+        const reloadsApp = /reloadAppAsync\(\s*(["'])[^"']+\1\s*\)/.test(expression);
+        if (reloadCall && reloadAppAsyncAnswer === 'lost') {
+          return;
+        }
+        if (!setMarker && !readMarker && !removeMarker && !inspectorEvaluate && !reloadCall) {
           return;
         }
         const value = setMarker
@@ -1173,12 +1187,14 @@ export async function startStubDevServerAsync({
             ? globals.get(readMarker[1]!) === readMarker[2]
             : removeMarker
               ? globals.delete(removeMarker[1]!)
-              : inspectorEvaluate!(expression, device);
-        // The reload asked for over the debugger, which `runtime:reload --method runtime` sends.
-        // Its probe half carries the diagnostic string below and the call does not, which is the
-        // only thing that tells them apart: every expression this CLI sends is wrapped, and the
-        // wrapper's own source is in both.
-        if (expression.includes('reloadAppAsync') && !expression.includes('no-expo-global')) {
+              : inspectorEvaluate
+                ? inspectorEvaluate(expression, device)
+                : reloadCall
+                  ? 'sent'
+                  : undefined;
+        // An app reloads only when the call ran: it answers `sent` (`src/runtime/reload/inPlace.ts`).
+        if (reloadsApp && value === 'sent') {
+          markers.delete(device);
           applyReloadTargets();
         }
         reply({
