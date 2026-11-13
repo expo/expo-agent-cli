@@ -31,6 +31,14 @@ declare module '2g' {
     'runtime:cdp_promise_release_failed': { reason: string };
     /** How many listed debugger targets still answered a handshake (`./targetLiveness.ts`). */
     'runtime:target_liveness': { listed: number; stale: number };
+    /** The unplaced targets of an EAS Simulator session, asked to answer (`./targetLiveness.ts`). */
+    'runtime:session_target_probe': {
+      timeoutMs: number;
+      answered: number;
+      silent: number;
+      unknown: number;
+      dead: number;
+    };
     /**
      * The dev server did not map a stack, so the raw bundle frames are reported instead.
      *
