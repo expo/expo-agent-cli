@@ -1,5 +1,8 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Reloading the app
 
+/** The argument SDK 58's native `reloadAppAsync` requires: called with none, it reloads nothing. */
+export const RELOAD_REASON = '@expo/agent-cli runtime:reload';
+
 /** Each target retains its own delivery and replacement evidence. */
 export interface TargetReloadOutcome {
   targetId: string;
@@ -17,13 +20,14 @@ export interface TargetReloadOutcome {
 
 /** One way of reloading, and what it did. */
 export type ReloadAttempt =
-  | (AttemptOutcome & { method: 'dev-server' | 'runtime' | 'device' })
+  | (AttemptOutcome & { method: 'dev-server' | 'device' })
   /**
-   * Rung 1 while the scope skips an app: CDP `Page.reload` to each of this worktree's targets, and
-   * no broadcast (llp/0005 §Target owner).
+   * A reload that keeps the app's process, proved on each own target: CDP `Page.reload` (rung 1
+   * while the scope skips an app or is an iOS EAS session) or `expo.reloadAppAsync(reason)`
+   * (rung 2, and `--method runtime`). llp/0005 §How it reloads.
    */
   | (AttemptOutcome & {
-      method: 'page-reload';
+      method: 'page-reload' | 'runtime';
       outcomes: TargetReloadOutcome[];
     });
 
@@ -68,7 +72,7 @@ const KEEPS_PAGE_ID: Record<ReloadAttempt['method'], string | null> = {
   'page-reload': 'the app answered Page.reload, which keeps its page id',
   device: 'a relaunched app registers again under the page id it had',
   'dev-server': null,
-  runtime: null,
+  runtime: 'the app reloaded itself, which keeps its page id',
 };
 
 /** {@link KEEPS_PAGE_ID} for the attempt the run settled on. */
@@ -80,7 +84,7 @@ export function keepsPageId(attempts: readonly ReloadAttempt[]): string | null {
 /** The witnesses behind the aggregate context-replaced label and human report. */
 export function contextReplacedTargets(attempts: readonly ReloadAttempt[]): TargetReloadOutcome[] {
   return attempts.flatMap((attempt) =>
-    attempt.method === 'page-reload'
+    'outcomes' in attempt
       ? attempt.outcomes.filter((each) => each.outcome === 'context-replaced')
       : []
   );

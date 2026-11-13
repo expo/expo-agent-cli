@@ -8,6 +8,7 @@ import { describeSkippedApps } from '../targetSelection';
 import { keepsPageId, settledAttempt } from './attempt';
 import { describeEvidence, type Unwatched } from './evidence';
 import { type ReloadOptions } from './resolveOptions';
+import { inPlaceLabel } from './inPlace';
 import { type RungOneOutcome } from './rungOne';
 import { easCommandPrefix } from '../../utils/easCli';
 import type { ReloadResultJson } from './reloadAsync';
@@ -247,7 +248,7 @@ export function explainReloadFailure(
       ),
       why,
       unprovable
-        ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
+        ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${relaunchCommand(report, options)}", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
         : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". ${options.cloud ? 'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ' : ''}${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.` : ''}`.trim(),
     ].join('\n');
   }
@@ -262,9 +263,9 @@ export function explainReloadFailure(
       // *not* running, and printing it for a connected app is how a reader was sent to start a
       // second copy of an app this command could see all along.
       state.rungOne?.kind === 'unprovable'
-        ? `How: no app of this worktree could keep the marker that proves a Page.reload, so none was sent. Run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch.`
+        ? `How: no app of this worktree could keep the marker that proves a Page.reload, so none was sent. Run "${relaunchCommand(report, options)}", which relaunches this worktree's app and proves it by the relaunch.`
         : report.appsConnected > 0
-          ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${report.attempts.some((attempt) => attempt.method === 'page-reload') ? 'Page.reload' : 'the broadcast'} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
+          ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${triedMechanisms(report)} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. ${report.attempts.some((attempt) => attempt.method === 'runtime') ? 'The deliberate method left is' : `The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and`} "${relaunchCommand(report, options)}", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
           : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
     ].join('\n');
   }
@@ -287,4 +288,32 @@ export function explainReloadFailure(
     `Why: ${report.devServerUrl}/json/list still names ${report.appsConnected === 1 ? 'the same debugger target' : `only the same ${report.appsConnected} debugger targets`} it named before the reload, and the dev server never reuses a target id — so the runtime that answers now is the one from before, not a reloaded one. Its errors and its state describe the run this reload was meant to replace.`,
     `How: run this command again with a longer --timeout, or run "${smokeBase}" and read the app after it. Do not believe "${PROGRAM_PREFIX} runtime:errors" until a reload reports a reconnected app.`,
   ].join('\n');
+}
+
+/**
+ * The command that relaunches this worktree's app. On an EAS scope it names `--eas`: without it,
+ * the relaunch refuses (llp/0005 §Cloud simulator).
+ */
+function relaunchCommand(report: ReloadResultJson, options: ReloadOptions): string {
+  const eas = options.cloud || report.scope.device?.backend === 'cloud';
+  return `${PROGRAM_PREFIX} runtime:reload${eas ? ' --eas' : ''} --method device`;
+}
+
+/** The in-place mechanisms this run sent, in the words of what they are. */
+function triedMechanisms(report: ReloadResultJson): string {
+  const tried = report.attempts.flatMap((attempt) => {
+    if (attempt.method === 'device') return [];
+    if (attempt.method === 'dev-server') {
+      // An attempt with no `delivered` sent no broadcast: the run could not see the apps, or the
+      // socket was never reached.
+      return attempt.delivered == null ? [] : ['the broadcast'];
+    }
+    const sent =
+      'outcomes' in attempt &&
+      attempt.outcomes.some(
+        (each) => each.outcome !== 'unsupported' && each.outcome !== 'unmarkable'
+      );
+    return sent ? [inPlaceLabel(attempt.method)] : [];
+  });
+  return tried.length > 0 ? tried.join(' and ') : 'this run';
 }

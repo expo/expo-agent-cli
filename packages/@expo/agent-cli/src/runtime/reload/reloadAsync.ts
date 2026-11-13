@@ -60,13 +60,11 @@ import { type ReloadOptions } from './resolveOptions';
 import {
   CHURN_NOT_ASKED,
   prepareRungOneAsync,
-  runRungOneAsync,
-  settleRungOne,
   type CommandSocketChurn,
   type PreparedRungOne,
   type RungOneOutcome,
 } from './rungOne';
-import { reloadOverRuntimeAsync } from './runtimeReload';
+import { runInPlaceRungsAsync } from './inPlaceRungs';
 import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
 import { printHumanReport, explainReloadFailure } from './report';
 
@@ -102,8 +100,8 @@ export interface ReloadResultJson {
    * band): this may name only a signal whose **own** evidence is in this payload and non-empty —
    * `commandSocketChurn.reconnected` for `message-socket-peers`, {@link appsReconnected} for
    * `fresh-debugger-target`, `bundlesAfterReload.count` for `dev-server-bundle`, and an `attempts`
-   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` attempt that
-   * worked for `debugger-context-replaced`. A label with nothing to show for
+   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` or `runtime`
+   * attempt that worked for `debugger-context-replaced`. A label with nothing to show for
    * itself is `null`, which makes `reloaded` false — the band, rather than a claim.
    */
   verifiedBy:
@@ -487,16 +485,12 @@ async function climbLadderAsync(
   // ids are what "the app came back" is measured against, and anything that reloaded the app in
   // the meantime — a save the watcher picked up — would otherwise be credited to this command.
   // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner. Rung 1, and the evidence that counts.
-  const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, targetSelection, {
+  const first = await prepareRungOneAsync(devServerUrl, projectRoot, targetSelection, {
     budgetMs: remainingMs(),
     preflight: devServer,
+    // A pinned `--method dev-server` broadcasts, as it names, also on an iOS EAS session.
+    choice: { iosEasInPlace: options.method !== 'dev-server' },
   });
-  const actionConnection: RuntimeConnection = { ...devServer, ...prepared };
-  // One inventory for the run: the prepared observation's. Only the whole list's `read` group is
-  // this run's: a fresh page, a count or a relaunch id of another app is not.
-  const own = (targets: CdpTarget[]) =>
-    classifyTargets(targets, targetSelection, actionConnection.deviceInventory).read;
-  observedApps = prepared.classifiedTargets.read.length;
 
   // Where the dev server's captured output stood before anything was reloaded. Marked on every rung
   // (wave 21): "was the app seen to come back" is one question, and a command that answered it two
@@ -507,68 +501,49 @@ async function climbLadderAsync(
   // bundle would otherwise be evidence for the reload it was gating.
   const bundleMark = markBundleSignalSync(projectRoot);
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. **Rungs one and two keep the app's
+  // process**: the broadcast or `Page.reload`, then, on an iOS EAS session, the app reloading
+  // itself (`./inPlaceRungs.ts`). A pinned `--method device` skips them, as a pinned method always
+  // has. Their settle says what follows: done, the shared observations (F97), or the relaunch.
+  const inPlace =
+    options.method === 'device'
+      ? null
+      : await runInPlaceRungsAsync(devServerUrl, projectRoot, {
+          prepared: first,
+          rungs:
+            options.method === 'runtime'
+              ? 'runtime'
+              : options.method === 'dev-server'
+                ? 'rung-one'
+                : 'auto',
+          remainingMs,
+        });
+  const prepared = inPlace?.prepared ?? first;
+  const actionConnection: RuntimeConnection = { ...devServer, ...prepared };
+  // One inventory for the run: the prepared observation's. Only the whole list's `read` group is
+  // this run's: a fresh page, a count or a relaunch id of another app is not.
+  const own = (targets: CdpTarget[]) =>
+    classifyTargets(targets, targetSelection, actionConnection.deviceInventory).read;
+  observedApps = prepared.classifiedTargets.read.length;
+
   // What the mechanism that ran observed *by itself*, apart from the app coming back. Peer churn
   // and a relaunch on a local device are observations already — the dev server's socket ids never
   // repeat, and `simctl terminate` names a process and fails when there is none. A cloud relaunch
   // and a debugger call are not (llp/0005 §Cloud simulator).
-  let mechanismProof: ReloadResultJson['verifiedBy'] = null;
-  const attempts: ReloadAttempt[] = [];
-  let method: ReloadResultJson['method'] = null;
+  const settled = inPlace?.settled ?? null;
+  let mechanismProof: ReloadResultJson['verifiedBy'] =
+    settled?.kind === 'proved' ? settled.proof : null;
+  const attempts: ReloadAttempt[] = [...(inPlace?.attempts ?? [])];
+  let method: ReloadResultJson['method'] = settled?.method ?? null;
   let device: NavigateDevice | null = null;
   let cloudUrl: string | null = null;
-  let rungOne: RungOneOutcome | null = null;
-  /**
-   * Why rung 1 did not prove the reload, or null when it did or did not run.
-   *
-   * The one fact that makes `auto` climb (F99). Separate from `method`, which names `dev-server`
-   * for a delivered reload: the report has to say a mechanism ran, and the ladder has to know it
-   * was not *proved* — those are the two halves F97 split apart, and this is the half rung two
-   * reads.
-   */
-  let relaunchWhy: string | null = null;
+  const rungOne = inPlace?.rungOne ?? null;
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — wave 21.
-  //
-  // **Rung one: the broadcast, when there is a client to broadcast to** — or `Page.reload` to
-  // this worktree's targets while the scope skips an app. `getpeers` answers the first question,
-  // and the answer — not `--eas`, not the location of the device — is what picks the rung. A
-  // pinned `--method` skips this, as a pinned method always has.
-  if (options.method === 'auto' || options.method === 'dev-server') {
-    rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
-    attempts.push(rungOne.attempt);
-    // @ref llp/0005 §How it reloads — F97. A delivered or acted reload is a mechanism that ran;
-    // its own proof is missing, so the two shared observations below — a fresh debugger target,
-    // or a bundle the dev server served — decide. That is the difference between exit `20` and
-    // exit `22`, and between watching for the evidence and not looking at all.
-    const settled = settleRungOne(rungOne);
-    method = settled.ran ? 'dev-server' : null;
-    mechanismProof = settled.proof;
-    relaunchWhy = settled.relaunchWhy;
-  }
-
-  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — the cloud loop, K2.
-  // **Never in `auto`**, and that is a live finding rather than caution: on Expo Go this call
-  // takes the app off the screen and nothing re-registers [observed — Expo Go SDK 57, iOS 26.5
-  // simulator, 2026-08-27: `runtime:eval "expo.reloadAppAsync()"` left `/json/list` empty and the
-  // device on its home screen, 13 s later]. It reloaded a cloud app, so the mechanism is
-  // real and runtime-dependent — which makes it a method a caller chooses, not one this command
-  // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
-  // a less predictable one.
-  if (method == null && options.method === 'runtime') {
-    const attempt = await reloadOverRuntimeAsync(actionConnection, observedApps);
-    attempts.push(attempt);
-    if (attempt.ok) {
-      // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
-      // made" and the proof is the wait below.
-      method = 'runtime';
-    }
-  }
-
-  // **Rung two: the relaunch, on the device backend in play.** `--eas` names *which* backend may
+  // **Rung three: the relaunch, on the device backend in play.** `--eas` names *which* backend may
   // act: the session's controller (`./cloudReload.ts`, wave 19's two verbs) or a device booted on
   // this machine.
   //
-  // Reached whenever rung 1 did not prove the reload (`relaunchWhy`), and the second state is F99
+  // Reached whenever rungs 1 and 2 settled `relaunch`, and the second state is F99
   // — the ladder climbing rather than stopping:
   //
   //  1. the reload reached no app: the socket had no client, or no own target took `Page.reload`;
@@ -585,8 +560,8 @@ async function climbLadderAsync(
   // cost is visible in (`withRelaunchCost`). A **pinned** `--method dev-server` never climbs:
   // a caller who named one rung excluded the others, cost and all.
   const relaunchRung =
-    options.method === 'device' || (options.method === 'auto' && relaunchWhy != null);
-  const why = relaunchWhy ?? '--method device named the relaunch';
+    options.method === 'device' || (options.method === 'auto' && settled?.kind === 'relaunch');
+  const why = settled?.kind === 'relaunch' ? settled.why : '--method device named the relaunch';
   if (relaunchRung && options.cloud) {
     const cloud = await reloadOnCloudSimulatorAsync(projectRoot, options, {
       // Only this worktree's apps: a skipped app's id would relaunch the wrong app.
