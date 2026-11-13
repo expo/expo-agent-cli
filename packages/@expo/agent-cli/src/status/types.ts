@@ -2,6 +2,7 @@
 // The shape of the status report: one object with a section per question the command answers.
 // Pure data, so the human formatter and the `--json` output describe exactly the same facts.
 
+import type { ConnectedAppOwners } from './connectedApps';
 import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevServerHostType } from '../dev/advertisedUrl';
 import type { LocalDeviceState } from '../device/localDevice';
@@ -300,6 +301,11 @@ export interface DevServerStatus {
   appsListed: number;
   /** Of those, the ones nothing answered on. Reported so the difference above is never silent. */
   appsStale: number;
+  /**
+   * Who the connected apps belong to, set only when some run on a booted local simulator this
+   * worktree did not bind or on another worktree's simulator (llp/0004 §Reported by status).
+   */
+  owners?: ConnectedAppOwners;
   /** Which step of discovery produced {@link url}, e.g. the project's lock or a port scan. */
   source: DevServerSource;
   /**
@@ -505,7 +511,7 @@ export interface InstalledPlatformStatus {
   deviceName: string | null;
   installedHash: string | null;
   currentHash: string | null;
-  /** Booted iOS simulators this worktree did not bind, when no device answered. */
+  /** Booted iOS simulators no worktree bound, on a `no-device` or `cloud-session` row. Absent when `simctl` gives no answer. */
   unboundSimulators?: string[];
 }
 

@@ -2,6 +2,7 @@
 // Compare the fingerprint embedded in the installed app with the project's, per platform, and turn
 // the comparison into one verdict per platform. Reported by `status`; not a command of its own.
 
+import { describeUnboundSimulators } from './describeUnbound';
 import fs from 'fs';
 import path from 'path';
 
@@ -47,6 +48,8 @@ export interface PlatformCheck {
   currentHash: string | null;
   /** Where the project hash came from: `computed`, `cache`, or null when there is none. */
   fingerprintSource: 'computed' | 'cache' | null;
+  /** Booted iOS simulators this worktree did not bind, when no device answered. */
+  unboundSimulators?: string[];
 }
 
 /** What the apps installed on this machine's devices say about the project. */
@@ -232,10 +235,11 @@ function installedVerdict(
     case 'no-device':
       return verdict('no-device', {
         ...current,
+        unboundSimulators: installed.unboundSimulators,
         recommendation: deviceFilter
           ? `No ${platform === 'ios' ? 'simulator or device' : 'device or emulator'} matched --device "${deviceFilter}".`
           : platform === 'ios'
-            ? 'No booted iOS simulator was found. Boot one, then run this command again.'
+            ? describeUnboundSimulators(installed.unboundSimulators)
             : 'No authorized Android device or emulator is connected.',
       });
     case 'app-not-installed':

@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
 // This only shapes the answer; `status` decides when the check runs.
 
+import { describeUnboundSimulators } from '../installedApp/describeUnbound';
 import { deviceCommand } from '../deviceBinding/errors';
 import type { InspectState } from '../deviceBinding/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
@@ -70,10 +71,13 @@ export function withCloudSessions(
           commands: [deviceCommand(entry.platform, { eas: true })],
         };
       }
+      const unbound = entry.unboundSimulators?.length
+        ? `; ${describeUnboundSimulators(entry.unboundSimulators)}`
+        : '';
       return {
         ...entry,
         reason: 'cloud-session',
-        recommendation: `not checked; this check reads local devices, and the app runs on EAS Simulator session ${session.id}`,
+        recommendation: `not checked; this check reads local devices, and the app runs on EAS Simulator session ${session.id}${unbound}`,
         commands: [],
       };
     }),
@@ -89,6 +93,7 @@ function toPlatformStatus(
   }
   return {
     platform,
+    unboundSimulators: check.unboundSimulators,
     status: check.status,
     reason: check.reason,
     recommendation: check.recommendation,

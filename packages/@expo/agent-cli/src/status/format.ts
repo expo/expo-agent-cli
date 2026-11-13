@@ -581,6 +581,45 @@ function fingerprintProvenance(freshness: FreshnessStatus): string | null {
   return `fingerprint: ${hash} (from cache, revalidated ${by} ${pinned}${age}) — pass --no-fingerprint-cache to hash the project again`;
 }
 
+/** "1 on a local simulator not bound here (A)", counting apps and naming each simulator once. */
+function onSimulators(names: string[], one: string, many: string, suffix = ''): string {
+  const distinct = [...new Set(names)];
+  return `${names.length} on ${distinct.length === 1 ? one : many}${suffix} (${distinct.join(', ')})`;
+}
+
+/** The owner split of the connected apps, when some are not on this worktree's devices. */
+function connectedSplit(devServer: DevServerStatus): string {
+  const owners = devServer.owners;
+  if (!owners) {
+    return '';
+  }
+  const parts: string[] = [];
+  if (owners.simulatorApps.length > 0) {
+    parts.push(`${owners.simulatorApps.length} on this worktree's simulator`);
+  }
+  if (owners.sessionApps > 0) {
+    parts.push(`${owners.sessionApps} on this worktree's EAS session`);
+  }
+  if (owners.localApps.length > 0) {
+    parts.push(
+      onSimulators(owners.localApps, 'a local simulator', 'local simulators', ' not bound here')
+    );
+  }
+  if (owners.otherWorktreeApps.length > 0) {
+    parts.push(
+      onSimulators(
+        owners.otherWorktreeApps,
+        "another worktree's simulator",
+        "other worktrees' simulators"
+      )
+    );
+  }
+  if (owners.otherApps > 0) {
+    parts.push(`${owners.otherApps} other`);
+  }
+  return `: ${parts.join(', ')}`;
+}
+
 function devServerLine(devServer: DevServerStatus): string {
   if (!devServer.running) {
     const foreign = devServer.foreignServers?.length
@@ -595,7 +634,7 @@ function devServerLine(devServer: DevServerStatus): string {
     `${chalk.green('running')} on ${devServer.url}`,
     chalk.dim(`via ${devServer.source}`),
     bundlerFact(devServer.ready),
-    `${devServer.appsConnected} ${apps} connected`,
+    `${devServer.appsConnected} ${apps} connected${connectedSplit(devServer)}`,
   ];
   // Named, never silently dropped: the count above is smaller than the dev server's own list, and
   // a reader comparing this line with `/json/list` has to be told why (F56).
