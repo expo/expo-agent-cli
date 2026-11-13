@@ -13,7 +13,6 @@ import { SIMCTL_CALL_TIMEOUT_MS } from '../../deviceBinding/ios';
 import { event as cliEvent } from '../../events';
 import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
-import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
@@ -24,6 +23,7 @@ import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { childLogOf } from './childLog';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../log');
@@ -157,7 +157,7 @@ it.each([false, true])(
     const result = devDetachAsync(
       projectRoot,
       resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json']),
-      { print: false }
+      { print: false, reuseRunning: reusing }
     ).catch((error) => error);
     await vi.advanceTimersByTimeAsync(40_000);
 
@@ -197,7 +197,8 @@ it.each([false, true])('detects death during the device probe (reusing=%s)', asy
 
   const result = devDetachAsync(
     projectRoot,
-    resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json'])
+    resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json']),
+    { reuseRunning: reusing }
   ).catch((error) => error);
   await vi.runAllTimersAsync();
 
@@ -295,7 +296,7 @@ describe('reusing a running server', () => {
     return devDetachAsync(
       projectRoot,
       { ...resolveDevOptions(['--ios', '--detach', '--local', '--json']), waitReady },
-      { print: false }
+      { print: false, reuseRunning: true }
     );
   }
 
@@ -455,7 +456,7 @@ describe('readiness belongs to this worktree', () => {
         ...resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json']),
         detachTimeoutMs: 5000,
       },
-      { print: false }
+      { print: false, reuseRunning: true }
     );
   }
 
@@ -656,7 +657,7 @@ describe('the bound device', () => {
       const result = devDetachAsync(
         projectRoot,
         { ...resolveDevOptions(['--ios', '--detach', '--eas']), waitReady },
-        { print: false, reopenEasSession: true }
+        { print: false }
       ).catch((error) => error);
       await vi.runAllTimersAsync();
 
@@ -697,7 +698,7 @@ describe('the bound device', () => {
     const result = devDetachAsync(
       projectRoot,
       resolveDevOptions(['--ios', '--detach', '--local']),
-      { print: false, reopenEasSession: true }
+      { print: false }
     ).catch((error) => error);
     await vi.runAllTimersAsync();
 
@@ -743,22 +744,6 @@ describe('the bound device', () => {
     }
   });
 });
-
-/** The log a detached child writes for `error`, line by line, as `logCmdError` prints it. */
-function childLogOf(error: CommandError): string[] {
-  vi.mocked(Log.exception).mockClear();
-  vi.mocked(Log.warn).mockClear();
-  process.env.__EXPO_AGENT_CLI_DETACHED = '1';
-  try {
-    void logCmdError(error);
-  } finally {
-    delete process.env.__EXPO_AGENT_CLI_DETACHED;
-  }
-  return [
-    ...vi.mocked(Log.exception).mock.calls.map(([printed]) => String(printed)),
-    ...vi.mocked(Log.warn).mock.calls.map((args) => args.join(' ')),
-  ];
-}
 
 /** The log of a detached `dev --eas` child: its pid on line 1, then its plan. */
 function easChildLog(pid: number, ...after: string[]): string {
@@ -806,10 +791,9 @@ describe('the EAS session under --wait-ready', () => {
   });
 
   function start(argv = ['--ios', '--eas', '--detach', '--wait-ready', '--json']) {
-    return devDetachAsync(projectRoot, resolveDevOptions(argv), {
-      print: true,
-      reopenEasSession: true,
-    }).catch((error) => error);
+    return devDetachAsync(projectRoot, resolveDevOptions(argv), { print: true }).catch(
+      (error) => error
+    );
   }
 
   function printedReport() {

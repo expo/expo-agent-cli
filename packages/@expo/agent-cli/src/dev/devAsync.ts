@@ -69,24 +69,23 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     await assertEasProjectConfiguredAsync(projectRoot);
   }
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
+  // the child does the probe: this run's whole job is to start that child and report on it. A
+  // detached run reads the lock in devDetachAsync.
+  if (options.detach) {
+    const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
+    return await devDetachAsync(projectRoot, options);
+  }
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
   // The lock is read once, before the project is probed. A run stops here on a live one and spends
   // nothing below this line, the last-request record included: a request the lock refused never
   // replaces the one that started the running server. A plan goes on, because it prints the rule
-  // and the reasons, and stops in its port block on the same lock. A detached EAS run goes on to
-  // open its session on the running server (§Daemonization).
-  const reopenEasSession = options.detach && options.deviceBackend === 'eas';
+  // and the reasons, and stops in its port block on the same lock.
   const lock = await readDevServerLockAsync(projectRoot);
-  if (lock && options.mode !== 'plan' && !reopenEasSession) {
+  if (lock && options.mode !== 'plan') {
     throw await devServerRunningStopAsync(projectRoot, lock, options.platform, {
       eas: options.deviceBackend === 'eas',
     });
-  }
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
-  // the child does the probe: this run's whole job is to start that child and report on it.
-  if (options.detach) {
-    const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
-    return await devDetachAsync(projectRoot, options, { reopenEasSession });
   }
   recordLastDevRequest(projectRoot, options);
   // Judged before the probe, stopped after the refusals: a run that refuses leaves it serving.

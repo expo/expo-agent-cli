@@ -14,6 +14,7 @@ import {
   OPEN_PLATFORM_GRACE_MS,
   readChildVerdictSync,
   relayedDeviceError,
+  relayedSpawnRefusal,
   resolveDetachFailure,
   waitFailureAsync,
   waitForChildVerdictAsync,
@@ -33,6 +34,7 @@ import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, statedSmokePlatform } from '../smoke/suggest';
 import { requestsTunnel } from '../start/followUps';
+import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { CommandError } from '../utils/errors';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
@@ -95,29 +97,29 @@ export interface DevDetachOptions {
    */
   print?: boolean;
   /**
-   * On a dev server that is already running, open this caller's EAS session on it and record the
-   * request.
-   *
-   * @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-   * `dev --eas` passes true. A local `dev` never reaches a running server here: it stops on the
-   * lock first. `smoke` leaves it unset and opens its device in its own boot phase.
+   * Report a dev server that is already running instead of stopping on it. `smoke` passes true and
+   * opens its device in its own boot phase.
    */
-  reopenEasSession?: boolean;
+  reuseRunning?: boolean;
 }
+
+/**
+ * What a detached run does beside this project's running dev server.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a local `dev` stops on it
+ * as a foreground `dev` does, `dev --eas` opens its session on it and records the request
+ * (llp/0035 §Preserved sessions), and `smoke` reuses it.
+ */
+type OnRunning = 'stop' | 'reopen-eas' | 'reuse';
 
 interface DetachContext {
   projectRoot: string;
   options: DevOptions;
   startedAt: number;
   print: boolean;
-  reopenEasSession: boolean;
+  onRunning: OnRunning;
   smokePlatform: NativePlatform;
 }
-
-type DetachSource =
-  | { kind: 'spawn' }
-  | { kind: 'existing'; lock: DevServerLockInfo }
-  | { kind: 'building'; lock: DevServerLockInfo };
 
 type ChildExit = { code: number | null; signal: NodeJS.Signals | null };
 type ChildState = { status: 'running' } | { status: 'exited'; exit: ChildExit };
@@ -130,27 +132,38 @@ type Readiness =
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, reopenEasSession = false }: DevDetachOptions = {}
+  { print = true, reuseRunning = false }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
+  const onRunning: OnRunning = reuseRunning
+    ? 'reuse'
+    : options.deviceBackend === 'eas'
+      ? 'reopen-eas'
+      : 'stop';
+  // The one lock read of a detached run, before anything this run could spend.
+  const running = await readDevServerLockAsync(projectRoot);
+  if (running && onRunning === 'stop') throw await runningStopAsync(projectRoot, options, running);
   const smokePlatform =
     statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
-  const context = { projectRoot, options, startedAt, smokePlatform, print, reopenEasSession };
-  const source = await resolveDetachSourceAsync(context);
-  switch (source.kind) {
-    case 'building':
-      return await reportBuildingRunAsync(context, source.lock, true);
-    case 'existing':
-      return await reuseRunningAsync(context, source.lock);
-    case 'spawn':
-      return await startDetachedAsync(context);
-  }
+  const context = { projectRoot, options, startedAt, smokePlatform, print, onRunning };
+  return running ? await followRunningAsync(context, running) : await startDetachedAsync(context);
 }
 
-async function resolveDetachSourceAsync(context: DetachContext): Promise<DetachSource> {
+function runningStopAsync(projectRoot: string, options: DevOptions, lock: DevServerLockInfo) {
+  return devServerRunningStopAsync(projectRoot, lock, options.platform, {
+    eas: options.deviceBackend === 'eas',
+  });
+}
+
+/** Apply this run's {@link OnRunning} to a running dev server's lock. */
+async function followRunningAsync(
+  context: DetachContext,
+  lock: DevServerLockInfo
+): Promise<number> {
   const { projectRoot, options, startedAt } = context;
-  let running = await readDevServerLockAsync(projectRoot);
-  if (running?.phase === 'building') {
+  if (context.onRunning === 'stop') throw await runningStopAsync(projectRoot, options, lock);
+  let running = lock;
+  if (running.phase === 'building') {
     const followed = running;
     const wait = await waitForDetachedStartupAsync(
       projectRoot,
@@ -158,17 +171,16 @@ async function resolveDetachSourceAsync(context: DetachContext): Promise<DetachS
       startedAt,
       () => !isProcessAlive(followed.pid)
     );
-    if (wait.kind === 'building') return { kind: 'building', lock: wait.lock };
+    if (wait.kind === 'building') return await reportBuildingRunAsync(context, wait.lock, true);
     if (wait.kind === 'build-ended' || wait.kind === 'unobserved') {
-      const verdict = await waitForChildVerdictAsync(projectRoot);
+      // A foreground run writes no detached log, so an older child's verdict is not this run's.
+      const verdict = await waitForChildVerdictAsync(projectRoot, Date.parse(followed.startedAt));
       throw relayedDeviceError(verdict) ?? buildEndedError(followed, verdict?.exitCode ?? null);
     }
     running = wait.lock;
   }
-  if (running?.phase === 'finishing') {
-    throw await devServerRunningStopAsync(projectRoot, running, options.platform);
-  }
-  return running ? { kind: 'existing', lock: running } : { kind: 'spawn' };
+  if (running.phase === 'finishing') throw await runningStopAsync(projectRoot, options, running);
+  return await reuseRunningAsync(context, running);
 }
 
 async function reportBuildingRunAsync(
@@ -231,7 +243,7 @@ async function reuseRunningAsync(
     checked?.result.ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // Read the verdict and PID after all probes: any can outlast the running server.
   await checkReuseFailureAsync(context, hasExited, lock, statusAnswering);
-  if (context.reopenEasSession) recordLastDevRequest(projectRoot, options);
+  if (context.onRunning === 'reopen-eas') recordLastDevRequest(projectRoot, options);
   return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning: true,
@@ -273,7 +285,8 @@ async function sessionForExistingRunAsync(
   tunnelUrl: string | null,
   hasExited: () => boolean
 ): Promise<string | null> {
-  const { projectRoot, options, reopenEasSession } = context;
+  const { projectRoot, options } = context;
+  const reopenEasSession = context.onRunning === 'reopen-eas';
   const sessionPlatform = reopenEasSession ? easOpenPlatform(options) : null;
   const followsSession =
     sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
@@ -356,6 +369,9 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
   const child = spawnDetachedChild(projectRoot, options);
   const { logFile, hasExited } = child;
   const wait = await waitForDetachedStartupAsync(projectRoot, options, startedAt, hasExited);
+  if ('lock' in wait && wait.lock.pid !== child.pid) {
+    return await followForeignLockAsync(context, child, wait.lock);
+  }
   if (wait.kind === 'building') return await reportBuildingRunAsync(context, wait.lock, false);
   // A run that ended in its build holds no lock any more, and its log says why.
   if (wait.kind === 'finishing') throw lostDevServerError(wait.lock, logFile);
@@ -364,7 +380,7 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
     const verdict = child.exit
       ? await waitForChildVerdictAsync(projectRoot)
       : readChildVerdictSync(projectRoot);
-    const relayed = relayedDeviceError(verdict);
+    const relayed = relayedSpawnRefusal(verdict);
     if (relayed) {
       throw relayed;
     }
@@ -436,6 +452,38 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
     log,
     smokePlatform,
   });
+}
+
+/**
+ * A lock another run took after this run's read: the child refuses on it with `DEV_SERVER_RUNNING`,
+ * and this run applies its {@link OnRunning} to that lock.
+ */
+async function followForeignLockAsync(
+  context: DetachContext,
+  child: DetachedChild,
+  lock: DevServerLockInfo
+): Promise<number> {
+  const { projectRoot, options, startedAt } = context;
+  const verdict = await waitForChildVerdictAsync(projectRoot, startedAt);
+  const device = relayedDeviceError(verdict);
+  if (device) throw device;
+  // Another spawn can truncate this child's log, so its exit code also names the refusal.
+  const refusedOnLock =
+    verdict?.code === 'DEV_SERVER_RUNNING' || child.exit?.code === EXIT_OUTCOME_FAILED;
+  if (!refusedOnLock) {
+    throw notStartedError(
+      projectRoot,
+      child.logFile,
+      child.exit,
+      child.pid,
+      Date.now() - startedAt,
+      options.platform
+    );
+  }
+  if (context.onRunning === 'stop') {
+    throw relayedSpawnRefusal(verdict) ?? (await runningStopAsync(projectRoot, options, lock));
+  }
+  return await followRunningAsync(context, lock);
 }
 
 async function checkSpawnedReadinessAsync(

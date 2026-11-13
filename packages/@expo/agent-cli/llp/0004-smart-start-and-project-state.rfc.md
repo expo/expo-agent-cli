@@ -652,11 +652,19 @@ the parent keeps waiting for its own server. The missing-header compatibility ru
 §A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
 reject a foreign root. Without the flag `ready` is `null`.
 
-One dev server per project. A local `dev --detach` stops on a live lock of this project as a
-foreground `dev` does (§A busy port): the same check in `devAsync`, the same `DEV_SERVER_RUNNING`
-refusal, exit 20, worded by the lock's phase. A detached run whose device is on EAS goes on to the
-running server and opens its session there ([[0035-one-device-per-worktree]] §Preserved sessions),
-and `smoke`'s bootstrap calls `devDetachAsync` directly and reports the running server.
+One dev server per project. A detached run reads the lock once, in `devDetachAsync`, and its
+caller picks what a live lock means. A local `dev --detach` stops on it as a foreground `dev` does
+(§A busy port): the same `DEV_SERVER_RUNNING` refusal, exit 20, worded by the lock's phase. A
+detached run whose device is on EAS goes on to the running server and opens its session there
+([[0035-one-device-per-worktree]] §Preserved sessions), and `smoke`'s bootstrap passes
+`reuseRunning` and reports the running server.
+
+A lock that another run takes after that read is not this run's child's: the parent compares the
+lock's pid with the child's. The child, a foreground `dev`, refuses on that lock with
+`DEV_SERVER_RUNNING`, and the parent relays the refusal unchanged. When another spawn emptied the
+child's log, the child's exit 20 says the same, and the parent builds the refusal from the lock.
+For `--eas` and `smoke`, the parent applies the caller's rule to that lock instead. A parent that
+follows a building run of another process reads no child verdict older than that run's start.
 
 Reuse checks the process and its verdict after tunnel lookup and any final readiness
 probe, and before reporting a readiness timeout. Logs older than the lock's start time
@@ -756,8 +764,9 @@ any step, before the port is probed, and before a device is bound. A second serv
 not hold the lock, so `status` and `dev:stop` could not see it or stop it, and it would
 sit on a port nothing names.
 
-Where the stop runs. `devAsync` reads the lock once, after the command refusals, and before
-the `--detach` branch and the project probe. A run that is not `--plan` stops there
+Where the stop runs. A foreground `devAsync` reads the lock once, after the command refusals and
+before the project probe; a detached run reads it in `devDetachAsync` before it spawns. A run that
+is not `--plan` stops there
 when the lock is live, so a stopped run probes no project and refreshes no fingerprint
 cache, resolves no plan, asks EAS for no build, probes no toolchain, and reads, boots or
 matches no device. It records no last request either: the recovery preference `status`
