@@ -16,8 +16,11 @@ import { formatGroupHelp, formatTopLevelHelp } from './help/listing';
 import * as Log from './log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import { configureColor } from './utils/color';
+import { handleUncaughtException } from './utils/errors';
 import { DETACHED_EVENT_DEBUG_ENV } from './utils/eventLogEnv';
 import { argvRequestsJson, setJsonRequested } from './utils/jsonMode';
+
+process.on('uncaughtException', handleUncaughtException);
 
 // Dogfood tunnel v2 throughout the process tree, including detached dev servers.
 // An explicit EXPO_UNSTABLE_TUNNEL_V2=0 keeps the previous tunnel implementation.
