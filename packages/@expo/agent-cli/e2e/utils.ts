@@ -1172,7 +1172,7 @@ export async function startStubDevServerAsync({
         }
         // The reload call over the debugger. The SDK 58 native function takes one string, the
         // reason; called with none it rejects and reloads nothing [observed — SDK 58 development
-        // build, EAS Simulator iOS session, 2026-11-12: "Received 0 arguments, but 1 was expected"].
+        // build, Expo simulator iOS session, 2026-11-12: "Received 0 arguments, but 1 was expected"].
         const reloadCall = /reloadAppAsync\(/.test(expression);
         const reloadsApp = /reloadAppAsync\(\s*(["'])[^"']+\1\s*\)/.test(expression);
         if (reloadCall && reloadAppAsyncAnswer === 'lost') {
