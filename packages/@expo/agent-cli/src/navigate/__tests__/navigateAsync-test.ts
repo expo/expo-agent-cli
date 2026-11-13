@@ -4,7 +4,7 @@ import { vol } from 'memfs';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
-import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
+import { readDevServerLockAsync } from '../../devLock';
 import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
@@ -21,7 +21,6 @@ vi.mock('@expo/config', () => ({
 }));
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
-  readLastLoggedDevServerPort: vi.fn(() => null),
 }));
 
 const projectRoot = '/project';
@@ -148,7 +147,6 @@ beforeEach(() => {
   originalFetch = globalThis.fetch;
   // `clearMocks` empties these between tests, and "no lock, no logged port" is the default state.
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
-  vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
   mockPlatform('darwin');
   seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});

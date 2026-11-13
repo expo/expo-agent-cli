@@ -113,7 +113,7 @@ type StatusReport = {
     url: string;
     running: boolean;
     appsConnected: number;
-    source: 'flag' | 'lock' | 'log' | 'default' | 'scan';
+    source: 'flag' | 'lock' | 'default' | 'scan';
     ready: boolean | null;
     projectRootMatched: boolean | null;
     /** The URLs that open the app on a device, encoded the way the launcher parses them (K7c). */
@@ -2237,34 +2237,6 @@ describe('@expo/agent-cli status', () => {
       const synced = await reportInAsync(projectRoot);
       expect(synced.skills!.linked).toBe(synced.skills!.discovered);
       expect(synced.followups.map((followup) => followup.id)).not.toContain('skills-sync');
-    });
-  });
-
-  describe('the dev server the project log names', () => {
-    it('finds it from the metro:instantiate event in start.log', async () => {
-      const projectRoot = await setupAsync('go-app');
-      const devServer = await startDevServerDoubleAsync([]);
-      try {
-        const port = new URL(devServer.url).port;
-        const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
-        await fs.promises.mkdir(logDir, { recursive: true });
-        await fs.promises.writeFile(
-          path.join(logDir, 'start.log'),
-          JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: Number(port) }) + '\n'
-        );
-
-        const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
-
-        expect(result.exitCode).toBe(0);
-        const report: StatusReport = JSON.parse(result.stdout);
-        expect(report.devServer).toMatchObject({
-          running: true,
-          source: 'log',
-          url: devServer.url,
-        });
-      } finally {
-        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
-      }
     });
   });
 

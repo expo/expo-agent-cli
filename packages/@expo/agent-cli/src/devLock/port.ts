@@ -9,7 +9,6 @@
 import { getEventLoggerInfo } from '2g';
 import { tap } from '2g/api';
 import fs from 'fs';
-import path from 'path';
 
 import { matchProjectRoot, readReportedProjectRootAsync } from '../runtime/projectRootHeader';
 
@@ -21,30 +20,6 @@ export const PORT_WATCH_INTERVAL_MS = 500;
 
 /** How long the dev server gets to report its port before the fallbacks are used. */
 export const PORT_WATCH_TIMEOUT_MS = 20_000;
-
-/** Structured log `expo start` writes its `metro:instantiate` event into, relative to a project. */
-const START_LOG_SEGMENTS = ['.expo', 'dev', 'logs', 'start.log'];
-
-/**
- * Last `metro:instantiate` port in `projectRoot/.expo/dev/logs/start.log`, or null.
- *
- * Only `@expo/cli` 57 writes this file. The dev-server lock does not read it; discovery and the
- * port-collision check still do.
- *
- * The log outlives the dev server that wrote it, so an entry alone proves nothing: without
- * `since` the port is a candidate a caller still has to probe, and with `since` an entry from an
- * earlier run is dropped outright. `2g` timestamps every line in the `_t` field, in epoch
- * milliseconds, which is what makes the cutoff possible.
- *
- * @param since Epoch milliseconds; entries written before this are ignored, as is an entry with
- * no timestamp at all — a line that cannot prove it belongs to this run does not get to.
- */
-export function readLastLoggedDevServerPort(
-  projectRoot: string,
-  { since }: { since?: number } = {}
-): number | null {
-  return portsInEventFile(path.join(projectRoot, ...START_LOG_SEGMENTS), since).at(-1) ?? null;
-}
 
 /**
  * The ports Metro reports in this process's own `2g` event log at or after `since`, as they

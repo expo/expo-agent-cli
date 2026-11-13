@@ -264,7 +264,7 @@ function noDevServerError(
       `Why: the request for its debugger target list failed (${reason ?? 'no answer'}).${
         explicit
           ? ''
-          : ` The project's dev-server lock, the port in its start.log, 8081 and the ports "expo start" falls back to were all tried.`
+          : ` The project's dev-server lock, 8081 and the ports "expo start" falls back to were all tried.`
       }`,
       `How: start a dev server with "${PROGRAM_PREFIX} dev --${platform}" and run this command again. ${howToNameTheDevServer(explicit)}`,
     ].join('\n')
