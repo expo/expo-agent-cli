@@ -73,6 +73,12 @@ describe('decide', () => {
     expect(io.paths.some((path) => path.includes('/files'))).toBe(false);
   });
 
+  it('runs everything for a fork PR from main, which lists itself as based on its head ref', async () => {
+    const self = { number: 1, head: { ref: 'main', sha: 'aaa' } };
+    const io = fakeIo(stack([self], [{ filename: 'src/x.ts' }], 'identical'));
+    expect((await decide({ ...input, headRef: 'main' }, io)).scope).toBe('all');
+  });
+
   it('runs the LLP scope when every file is an LLP', async () => {
     expect(await decide(input, fakeIo(stack([], llpFiles)))).toEqual({
       scope: 'llp',

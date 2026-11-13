@@ -120,11 +120,14 @@ async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
   const deadline = input.action === 'opened' ? input.waitSeconds * 1000 : 0;
   let waited = 0;
   for (;;) {
-    const above = (await github(
-      input,
-      io,
-      `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
-    )) as Pull[];
+    // A PR whose head ref is the default branch (a fork's main) lists itself here.
+    const above = (
+      (await github(
+        input,
+        io,
+        `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
+      )) as Pull[]
+    ).filter((pull) => pull.number !== input.prNumber);
     if (above.length > 0) {
       for (const pull of above) {
         const comparison = (await github(input, io, `/compare/${headSha}...${pull.head.sha}`)) as {
