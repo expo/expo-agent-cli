@@ -787,6 +787,11 @@ export type StubDevServerOptions = {
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
+   * `lost`: the app never answers `expo.reloadAppAsync(reason)` and keeps its context, as an app
+   * whose call went out and whose new context never showed within the proof window.
+   */
+  reloadAppAsyncAnswer?: 'answers' | 'lost';
+  /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
    * An empty object is a dev server nothing has connected to, which is the case where there is
@@ -925,6 +930,7 @@ export async function startStubDevServerAsync({
   bundleLogPath = null,
   targetsAppearWithFile = null,
   inspectorEvaluate,
+  reloadAppAsyncAnswer = 'answers',
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1176,8 +1182,11 @@ export async function startStubDevServerAsync({
         // The reload call over the debugger. The SDK 58 native function takes one string, the
         // reason; called with none it rejects and reloads nothing [observed — SDK 58 development
         // build, EAS Simulator iOS session, 2026-11-12: "Received 0 arguments, but 1 was expected"].
-        const reloadCall = /reloadAppAsync\(\s*(\S)?/.exec(expression);
-        const reloadsApp = reloadCall != null && reloadCall[1] != null && reloadCall[1] !== ')';
+        const reloadCall = /reloadAppAsync\(/.test(expression);
+        const reloadsApp = /reloadAppAsync\(\s*(["'])[^"']+\1\s*\)/.test(expression);
+        if (reloadCall && reloadAppAsyncAnswer === 'lost') {
+          return;
+        }
         if (!setMarker && !readMarker && !removeMarker && !inspectorEvaluate && !reloadCall) {
           return;
         }
@@ -1192,7 +1201,7 @@ export async function startStubDevServerAsync({
                 : reloadCall
                   ? 'sent'
                   : undefined;
-        // An app reloads only when the call ran: it answers `sent` (`src/runtime/reload/runtimeReload.ts`).
+        // An app reloads only when the call ran: it answers `sent` (`src/runtime/reload/inPlace.ts`).
         if (reloadsApp && value === 'sent') {
           markers.delete(device);
           applyReloadTargets();

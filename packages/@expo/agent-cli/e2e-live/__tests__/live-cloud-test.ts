@@ -712,28 +712,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // is registered" are the two answers this field exists to keep apart.
     expect(typeof report.commandSocketClients).toBe('number');
 
-    // **Rung 1 is always taken.** It is `Page.reload` when the scope names an iOS EAS session: the
-    // SDK 58 iOS development build ignores the broadcast (llp/0005 §How it reloads). This run names
-    // no platform, so its scope decides: elsewhere rung 1 is the broadcast.
+    // Which rung proved it depends on the scope, which this run leaves to the binding; the `--ios`
+    // case below pins the in-place rung. A relaunch, when the ladder reached it, names its two verbs.
     const attempts = Object.fromEntries(report.attempts.map((a: any) => [a.method, a]));
-    const iosEasScope =
-      report.scope?.platform === 'ios' && report.scope?.device?.backend === 'cloud';
-    const rungOne = iosEasScope ? 'page-reload' : 'dev-server';
-    expect(report.attempts[0].method).toBe(rungOne);
-
-    // The ladder stops at the cheapest rung that proved the reload: rung 1, the app reloading itself
-    // (rung 2, never on Expo Go), or the relaunch.
-    if (attempts[rungOne].ok) {
-      expect(report.method).toBe('dev-server');
-    } else if (attempts.runtime?.ok) {
-      expect(report.method).toBe('runtime');
-    } else {
-      if (rungOne === 'dev-server') {
-        expect(attempts['dev-server'].reason).toContain(
-          report.commandSocketClients > 0 ? 'did not act on it' : 'nothing to broadcast to'
-        );
-      }
-      expect(report.method).toBe('device');
+    if (report.method === 'device') {
       expect(attempts.device.ok).toBe(true);
       // The cloud relaunch is two verbs, and the reason names both — that is the mechanism, quoted.
       expect(attempts.device.reason).toContain('--relaunch');
