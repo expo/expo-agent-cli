@@ -811,7 +811,7 @@ describe(runSmokePhasesAsync, () => {
       expect(statusOf(run, 'boot-device')).toBeUndefined();
     });
 
-    // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke — the simulator is this worktree's bound one, so
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke — the simulator is this worktree's bound one, so
     // nothing is registered to shut it down, and the phase says nothing about putting it back.
     it(`keeps a bound simulator that registered no cleanup, and says so`, async () => {
       const run = await runSmokePhasesAsync(

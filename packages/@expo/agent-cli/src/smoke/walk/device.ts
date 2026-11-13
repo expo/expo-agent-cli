@@ -74,7 +74,7 @@ async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
 
 /**
  * The next value says whether the boot said its device has no app: a simulator the registry
- * created this run, whose disk holds nothing to read (llp/0035 §iOS smoke).
+ * created this run, whose disk holds nothing to read (llp/0035 §Lifecycle smoke).
  */
 async function bootStep(
   walk: PhaseWalk

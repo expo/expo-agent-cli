@@ -89,7 +89,7 @@ export async function readInstalledFingerprintIosAsync({
 
   let simulators: InstalledAppDevice[];
   if (deviceFilter) {
-    // `--device` lists to filter and binds nothing (llp/0035 Contract 3).
+    // `--device` lists to filter and binds nothing (llp/0035 Contract 2).
     const booted = await listBootedIosSimulatorsAsync(deps);
     simulators = booted.filter((simulator) => matchesDeviceFilter(deviceFilter, simulator));
     if (!simulators.length) {

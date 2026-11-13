@@ -778,7 +778,7 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
   //
   // The device a bootstrapping run boots is this worktree's own simulator, taken from the registry
   // or created there, and is released after the run. The stub `xcrun` keeps simulator state the

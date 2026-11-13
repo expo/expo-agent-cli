@@ -79,7 +79,7 @@ function lastLine(text: string | undefined): string | null {
 /**
  * Read the fingerprint out of the app on the Android device this worktree bound, or on every
  * authorized device `--device` matches, where the most informative one wins (`--device` lists to
- * filter and binds nothing, llp/0035 Contract 3). The file is a zip entry inside the APK, read
+ * filter and binds nothing, llp/0035 Contract 2). The file is a zip entry inside the APK, read
  * through ranged `dd` reads over `adb exec-out`, with a whole-APK pull as the fallback when the
  * device lacks the tools.
  *

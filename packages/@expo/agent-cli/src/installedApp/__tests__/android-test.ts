@@ -214,7 +214,7 @@ describe(readInstalledFingerprintAndroidAsync, () => {
     expect(fake.calls).toEqual([]);
   });
 
-  // `--device` lists to filter and binds nothing (llp/0035 Contract 3), and one unreachable match
+  // `--device` lists to filter and binds nothing (llp/0035 Contract 2), and one unreachable match
   // must not hide the evidence of the others.
   it(`skips an unreachable --device match and answers from the one that could be read`, async () => {
     const fake = fakeAdb([

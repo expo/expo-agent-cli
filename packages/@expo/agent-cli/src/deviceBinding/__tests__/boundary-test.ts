@@ -17,7 +17,7 @@ const sources = fs
   .map((name) => ({ name, text: fs.readFileSync(path.join(MODULE_DIR, name), 'utf8') }));
 
 describe('src/deviceBinding/', () => {
-  // deviceBinding-imports-nothing-from-verbs (Contract 10)
+  // deviceBinding-imports-nothing-from-verbs (Contract 9)
   it('imports nothing from navigate, smoke, dev or installedApp', () => {
     const offending = sources.flatMap(({ name, text }) =>
       [...text.matchAll(/from '([^']+)'/g)]

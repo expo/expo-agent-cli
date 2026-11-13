@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §Android tests
+// @ref llp/0035-one-device-per-worktree.rfc.md §Android boot
 import { vol } from 'memfs';
 
 import { canonicalizeExistingPath } from '../../utils/dir';
