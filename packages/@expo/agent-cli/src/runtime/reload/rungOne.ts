@@ -576,7 +576,7 @@ async function pageReloadAsync(
   const skippedApp = policy.trigger === 'skipped-app';
   const why = skippedApp
     ? `No broadcast was sent, because the dev server relays it to every app, and this run skips ${skips} of them (\`skippedApps\`).`
-    : 'No broadcast was sent: the app on an iOS EAS Simulator session ignores it.';
+    : 'No broadcast was sent: the app on an iOS Expo simulator session ignores it.';
   const { kind, attempt, clause } = await reloadInPlaceAsync(devServerUrl, {
     mechanism: 'page-reload',
     own,
@@ -587,7 +587,7 @@ async function pageReloadAsync(
     ...CHURN_NOT_ASKED,
     reason: skippedApp
       ? "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app"
-      : "the dev server's command socket was not asked: the app on an iOS EAS Simulator session ignores the broadcast",
+      : "the dev server's command socket was not asked: the app on an iOS Expo simulator session ignores the broadcast",
   };
   return kind === 'proved'
     ? { kind, proof: 'debugger-context-replaced', attempt, churn }
