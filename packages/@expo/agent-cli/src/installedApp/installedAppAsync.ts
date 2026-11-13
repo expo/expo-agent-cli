@@ -235,9 +235,7 @@ function installedVerdict(
     case 'no-device':
       return verdict('no-device', {
         ...current,
-        ...(installed.unboundSimulators?.length
-          ? { unboundSimulators: installed.unboundSimulators }
-          : {}),
+        unboundSimulators: installed.unboundSimulators,
         recommendation: deviceFilter
           ? `No ${platform === 'ios' ? 'simulator or device' : 'device or emulator'} matched --device "${deviceFilter}".`
           : platform === 'ios'

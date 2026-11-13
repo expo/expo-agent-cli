@@ -723,24 +723,14 @@ async function probeDevServerStatusAsync(
     reach
   );
   const live = discovery.targets.filter((target) => !liveness.stale.includes(target));
-  const deviceTimeoutMs = options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS;
-  // Within the device deadline, and only where a simulator can be asked about (llp/0004 §Reported by status).
-  const owners =
-    status.running &&
-    live.length > 0 &&
-    !devicesDisabled() &&
-    hostBindsPlatform('ios') &&
-    options.platform !== 'android'
-      ? await raceWithTimeoutAsync(
-          readConnectedAppsAsync(
-            projectRoot,
-            live,
-            await bindingRead.catch(() => []),
-            deviceTimeoutMs
-          ),
-          deviceTimeoutMs
-        )
-      : null;
+  const owners = status.running
+    ? await readConnectedAppsAsync(
+        projectRoot,
+        live,
+        bindingRead,
+        options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS
+      )
+    : null;
   return owners ? { ...status, owners } : status;
 }
 

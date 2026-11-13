@@ -581,13 +581,18 @@ function fingerprintProvenance(freshness: FreshnessStatus): string | null {
   return `fingerprint: ${hash} (from cache, revalidated ${by} ${pinned}${age}) — pass --no-fingerprint-cache to hash the project again`;
 }
 
+/** "1 on a local simulator not bound here (A)", counting apps and naming each simulator once. */
+function onSimulators(names: string[], one: string, many: string, suffix = ''): string {
+  const distinct = [...new Set(names)];
+  return `${names.length} on ${distinct.length === 1 ? one : many}${suffix} (${distinct.join(', ')})`;
+}
+
 /** The owner split of the connected apps, when some are not on this worktree's devices. */
 function connectedSplit(devServer: DevServerStatus): string {
   const owners = devServer.owners;
   if (!owners) {
     return '';
   }
-  const named = (names: string[]) => [...new Set(names)].join(', ');
   const parts: string[] = [];
   if (owners.simulatorApps.length > 0) {
     parts.push(`${owners.simulatorApps.length} on this worktree's simulator`);
@@ -596,24 +601,21 @@ function connectedSplit(devServer: DevServerStatus): string {
     parts.push(`${owners.sessionApps} on this worktree's EAS session`);
   }
   if (owners.localApps.length > 0) {
-    const where = new Set(owners.localApps).size === 1 ? 'a local simulator' : 'local simulators';
     parts.push(
-      `${owners.localApps.length} on ${where} not bound here (${named(owners.localApps)})`
+      onSimulators(owners.localApps, 'a local simulator', 'local simulators', ' not bound here')
     );
   }
   if (owners.otherWorktreeApps.length > 0) {
     parts.push(
-      `${owners.otherWorktreeApps.length} on another worktree's simulator (${named(owners.otherWorktreeApps)})`
+      onSimulators(
+        owners.otherWorktreeApps,
+        "another worktree's simulator",
+        "other worktrees' simulators"
+      )
     );
   }
-  const rest =
-    devServer.appsConnected -
-    owners.simulatorApps.length -
-    owners.sessionApps -
-    owners.localApps.length -
-    owners.otherWorktreeApps.length;
-  if (rest > 0) {
-    parts.push(`${rest} other`);
+  if (owners.otherApps > 0) {
+    parts.push(`${owners.otherApps} other`);
   }
   return `: ${parts.join(', ')}`;
 }

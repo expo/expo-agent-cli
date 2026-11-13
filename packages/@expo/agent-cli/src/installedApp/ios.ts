@@ -110,8 +110,8 @@ export async function readInstalledFingerprintIosAsync({
         ? `${devices.length > 1 ? `Physical iOS devices are connected (${names})` : `A physical iOS device is connected (${names})`}; check one with --device "<name>", which launches the app on it.`
         : null;
       const hint = [bound.hint, phoneHint].filter(Boolean).join(' ');
-      // Listed, never read: a booted simulator that no worktree bound. One an other worktree
-      // bound is not offered. A `simctl` failure leaves the list empty, and the text then says
+      // Listed, never read: a booted simulator that no worktree bound. A simulator another
+      // worktree bound is not offered. A `simctl` failure leaves the list empty, and the text then says
       // only that none is bound.
       const taken = new Set(liveIosBindings(projectRoot).map((binding) => binding.udid));
       const unboundSimulators = (await listBootedIosSimulatorsAsync(deps).catch(() => []))

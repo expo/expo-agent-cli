@@ -93,7 +93,7 @@ function toPlatformStatus(
   }
   return {
     platform,
-    ...(check.unboundSimulators ? { unboundSimulators: check.unboundSimulators } : {}),
+    unboundSimulators: check.unboundSimulators,
     status: check.status,
     reason: check.reason,
     recommendation: check.recommendation,
