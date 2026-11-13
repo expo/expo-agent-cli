@@ -511,7 +511,7 @@ export interface InstalledPlatformStatus {
   deviceName: string | null;
   installedHash: string | null;
   currentHash: string | null;
-  /** Booted iOS simulators this worktree did not bind, when no device answered. */
+  /** Booted iOS simulators no worktree bound, on a `no-device` or `cloud-session` row. Absent when `simctl` gives no answer. */
   unboundSimulators?: string[];
 }
 
