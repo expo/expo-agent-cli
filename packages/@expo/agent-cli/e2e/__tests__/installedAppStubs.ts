@@ -372,7 +372,8 @@ export async function installStubXcrunAsync(
     )
   );
   await fs.promises.rm(counterPath, { force: true });
-  // A booted simulator the stub lists is one `dev` bound to this fixture, or no verb would drive it.
+  // A booted simulator the stub lists is one `dev` bound to this fixture, or no verb would drive it;
+  // `bind: false` lists it with no binding at all.
   const bound = booted
     ? { udid: SIMULATOR_UDID, name: SIMULATOR_NAME }
     : simulators?.find((simulator) => simulator.state === 'Booted');
