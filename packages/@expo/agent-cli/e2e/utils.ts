@@ -785,6 +785,18 @@ export type StubDevServerOptions = {
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
+   * Devices whose page stays listed and whose `live` inspector socket opens, but answers no
+   * request. This is the app of an EAS Simulator session that ended while the dev server kept
+   * running [observed — iOS EAS session, SDK 58 development build, 2026-11-12: the socket opened in
+   * 4 ms, and `Runtime.evaluate` had no answer in 6 s].
+   */
+  inspectorSilent?: readonly string[];
+  /**
+   * Devices whose `live` inspector socket opens and closes when a request arrives, as a reloading
+   * app or an evicted debugger connection does. Not observed on an ended session's page.
+   */
+  inspectorClosing?: readonly string[];
+  /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
    * An empty object is a dev server nothing has connected to, which is the case where there is
@@ -922,6 +934,8 @@ export async function startStubDevServerAsync({
   bundleLogPath = null,
   targetsAppearWithFile = null,
   inspectorEvaluate,
+  inspectorSilent = [],
+  inspectorClosing = [],
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1070,13 +1084,20 @@ export async function startStubDevServerAsync({
     }
   };
 
-  /** The same targets under page ids the dev server has never used, which is what a reload does. */
+  /**
+   * The same targets under page ids the dev server has never used, which is what a reload does. A
+   * silent device's page has no app behind it to register again, so it keeps its id.
+   */
   const reloadedTargets = (current: unknown[]): unknown[] => {
     const pageId = nextPageId++;
-    return current.map((target) => ({
-      ...(target as Record<string, unknown>),
-      id: `${(target as { id?: string }).id ?? 'device'}-reloaded-${pageId}`,
-    }));
+    return current.map((target) =>
+      inspectorSilent.includes(listedDevice(target) ?? '')
+        ? target
+        : {
+            ...(target as Record<string, unknown>),
+            id: `${(target as { id?: string }).id ?? 'device'}-reloaded-${pageId}`,
+          }
+    );
   };
 
   const renamedTarget = (target: unknown): unknown => reloadedTargets([target])[0];
@@ -1132,6 +1153,13 @@ export async function startStubDevServerAsync({
   if (inspectorSocket === 'live') {
     inspectorServer?.on('connection', (socket: WebSocket, request: IncomingMessage) => {
       const device = new URL(request.url ?? '/', 'http://stub').searchParams.get('device') ?? '';
+      if (inspectorSilent.includes(device)) {
+        return;
+      }
+      if (inspectorClosing.includes(device)) {
+        socket.on('message', () => socket.close());
+        return;
+      }
       socket.on('message', (data) => {
         let message: { id?: number; method?: string; params?: { expression?: string } };
         try {

@@ -137,3 +137,46 @@ it('smoke takes an Android bundle as proof when Page.reload kept the context bes
     await server.close();
   }
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — an ended session's app
+it('smoke reads the app of its EAS session beside the app of an ended session', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+  await fs.promises.rm(await bindingFixture(root, BOOTED_SIMULATOR.udid, BOOTED_SIMULATOR.name));
+  await writeCloudBindingAsync(expoHomeOf(root), root, { id: 'session' });
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    // A development build: its app id places it on no platform, as on the live session.
+    targets: [
+      runtimeTarget('ended', { deviceName: 'iPhone 17' }),
+      runtimeTarget('own', { deviceName: 'iPhone 17' }),
+    ],
+    inspectorSilent: ['ended'],
+    inspectorEvaluate: () => 1,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'smoke',
+        '--ios',
+        '--dev-server-url',
+        server.url,
+        '--no-start',
+        '--no-reload',
+        '--no-screenshot',
+        '--window',
+        '100ms',
+        '--timeout',
+        '10s',
+        '--json',
+        '--no-followups',
+      ],
+      { reject: false, env: { AGENT_CLI_NO_DEVICE: '0' } }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout).appsConnected).toBe(1);
+  } finally {
+    await server.close();
+  }
+});

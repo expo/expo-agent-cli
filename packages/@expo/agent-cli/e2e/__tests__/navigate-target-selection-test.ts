@@ -53,6 +53,11 @@ type Scenario = {
   twin?: 'both' | 'bound' | 'neither';
   /** A second emulator of the bound model attaches with the app, while this run waits. */
   twinAttachesWhileWaiting?: boolean;
+  /**
+   * The app of an EAS session that ended while the dev server kept running is listed too: same
+   * model and app id, a socket that opens and answers nothing (llp/0005 §Target owner).
+   */
+  endedSessionApp?: boolean;
 };
 const scenarios: Scenario[] = [
   {
@@ -78,6 +83,13 @@ const scenarios: Scenario[] = [
     backend: 'cloud',
     platform: 'ios',
     initial: 'other',
+  },
+  {
+    name: "no flag, iOS session, its app attached beside an ended session's app",
+    backend: 'cloud',
+    platform: 'ios',
+    initial: 'own',
+    endedSessionApp: true,
   },
   {
     name: '--ios without --eas, iOS session, its app attached',
@@ -248,7 +260,14 @@ it.each(scenarios)('$name', async (scenario) => {
     appId: 'host.exp.exponent',
     deviceName: 'Pixel 9 - 15 - API 35',
   });
+  const ended = makeTarget({
+    id: 'ended',
+    appId: APP_ID,
+    deviceName: 'iPhone 17',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=ended&page=1',
+  });
   const initial = [
+    ...(scenario.endedSessionApp ? [ended] : []),
     ...(scenario.initial === 'empty' ? [] : scenario.initial === 'own' ? [own] : [other]),
     ...(scenario.otherModelApp ? [otherModel] : []),
   ];
@@ -256,6 +275,9 @@ it.each(scenarios)('$name', async (scenario) => {
   const server = await startStubDevServerAsync({
     projectRoot: root,
     manifestOrigin: scenario.backend === 'cloud' ? `https://${TUNNEL_HOST}` : undefined,
+    ...(scenario.endedSessionApp
+      ? { inspectorSilent: ['ended'], inspectorEvaluate: () => undefined }
+      : {}),
     targets: () => {
       if (scenario.twinAttachesWhileWaiting && device.opens().includes(launcher)) {
         fs.writeFileSync(stubEmulatorStatePath(root), 'emulator-5556\n');
