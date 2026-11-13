@@ -7,13 +7,13 @@ import {
   CdpPromisePendingError,
   CdpRequestError,
   createDefaultTargetSelector,
-  deriveInspectorOrigin,
   evaluateJsFromCdpAsync,
   isMethodNotFoundError,
   parseEvaluateResponse,
   RPC_METHOD_NOT_FOUND,
   type CdpTarget,
 } from '../cdpClient';
+import { deriveInspectorOrigin } from '../inspectorSocket';
 import { MockWebSocket } from './MockWebSocket';
 import LIVE from './fixtures/live-promise-frames.json';
 import { EVERY_TARGET_CLIENT, makeDeviceInventory } from './targetSelectionFixtures';
