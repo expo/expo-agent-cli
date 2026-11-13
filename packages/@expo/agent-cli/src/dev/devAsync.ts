@@ -70,14 +70,12 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
-  // the child does the probe: this run's whole job is to start that child and report on it. It
-  // records the request before it reports: a reused server is a server that runs.
+  // the child does the probe: this run's whole job is to start that child and report on it. A
+  // detached run reads the lock in devDetachAsync.
   if (options.detach) {
-    recordLastDevRequest(projectRoot, options);
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
-    return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
+    return await devDetachAsync(projectRoot, options);
   }
-
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
   // The lock is read once, before the project is probed. A run stops here on a live one and spends
   // nothing below this line, the last-request record included: a request the lock refused never

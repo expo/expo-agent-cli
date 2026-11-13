@@ -100,11 +100,6 @@ export interface SmokeFollowUpInput {
    * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
    */
   serverStopped: boolean;
-  /**
-   * This run released the device it bound, so `navigate` refuses `NO_BOUND_DEVICE`. On Android the
-   * release removes a spawned instance's binding, so `dev --detach` refuses `not-reusable` while
-   * this worktree's dev server still runs; a parked simulator keeps its binding.
-   */
   deviceReleased: boolean;
   /** The caller's `--port`, for a repeated run on the same dev server. */
   port: string | null;
@@ -270,21 +265,13 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   const deviceBack: FollowUp[] =
     !input.deviceReleased || input.serverStopped || input.cloud
       ? []
-      : input.platform === 'ios'
-        ? [
-            {
-              id: 'dev-detach',
-              command: start,
-              why: "This run released the simulator it booted, and the dev server it found still runs without a device. The simulator keeps this worktree's binding, so this binds it again beside that dev server.",
-            },
-          ]
-        : [
-            {
-              id: 'dev-restart',
-              command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
-              why: "This run released the emulator it bound, which removes a spawned instance's binding, and the dev server it found still runs without a device, which dev refuses to bind a new device to. This restarts the dev server, which binds a device, and keeps both running.",
-            },
-          ];
+      : [
+          {
+            id: 'dev-restart',
+            command: `${PROGRAM_PREFIX} dev:stop && ${start} --local`,
+            why: 'This run released its device while the dev server it found still runs. This restarts the dev server and binds a device again.',
+          },
+        ];
 
   const lookAgain =
     input.appsConnected === 0 ||

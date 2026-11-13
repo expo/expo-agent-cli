@@ -104,22 +104,6 @@ it.each(['unbound', 'missing', 'unavailable'] as const)(
   }
 );
 
-it('refreshes a stale snapshot for reuseOnly without creating another simulator', async () => {
-  const tools = fakeTools();
-  const gate = pauseSnapshots(tools, 1);
-  const waiting = acquireDeviceAsync(root, 'ios', { tools, reuseOnly: true }).catch(
-    (error) => error
-  );
-  await gate.ready;
-  await acquireDeviceAsync(root, 'ios', { tools });
-  gate.resume();
-
-  expect(await waiting).toMatchObject({ action: 'reused', device: { udid: 'CREATED-1' } });
-  expect(tools.calls.filter(([command]) => command === 'create')).toHaveLength(1);
-  expect(readBindingFile(file())).toMatchObject({ binding: { device: { udid: 'CREATED-1' } } });
-  expectDeviceCallsOutsideLock(tools);
-});
-
 it('does not refresh for lease or name changes and uses the current binding', async () => {
   const tools = fakeTools({ simulators: [{ udid: 'SIM', name: 'old', state: 'Booted' }] });
   await replaceBinding(tools, 'SIM');

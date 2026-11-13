@@ -299,12 +299,16 @@ describe(chooseNextAction, () => {
       command: `${dev} --android --eas --detach --wait-ready`,
       why: easWhy('android', 'is not bound yet'),
     },
-    {
-      name: 'never stops an EAS server for a caller who names the other platform',
-      facts: { devServer: noApp, ownLock: easLock('android') },
-      command: `${dev} --ios --port 8081 --detach --wait-ready`,
-      why: unbound('ios'),
-    },
+    ...(['ios', 'android'] as const).map((platform): Row => ({
+      name: `restarts an EAS server for an explicit local ${platform} request`,
+      facts: {
+        platform,
+        devServer: noApp,
+        ownLock: easLock(platform === 'ios' ? 'android' : 'ios'),
+      },
+      command: `${dev}:stop --eas && ${dev} --${platform} --port 8081 --detach --wait-ready`,
+      why: `${restart(platform)} The stop also ends the dev server's ${platform === 'ios' ? 'android' : 'ios'} EAS Simulator session, which bills until it stops.`,
+    })),
     {
       name: 'binds the session of the lock on a host that binds no device',
       facts: { devServer: noApp, ownLock: easLock('ios') },
@@ -360,9 +364,9 @@ describe(chooseNextAction, () => {
       why: unbound('ios'),
     },
     ...[null, own].map((ownLock): Row => ({
-      name: `reuses an expired binding (own server=${ownLock != null})`,
+      name: `recovers an expired binding (own server=${ownLock != null})`,
       facts: { ownLock, bindings: [binding({ state: 'gone', expiresAt: expired })] },
-      command: `${dev} --ios --port 8081 --detach --wait-ready`,
+      command: `${ownLock ? `${PROGRAM_PREFIX} dev:stop && ` : ''}${dev} --ios --port 8081 --detach --wait-ready`,
       why: 'The lease on the bound ios device expired.',
     })),
     {

@@ -150,10 +150,23 @@ export async function waitForChildVerdictAsync(
  * child's own `dev` or `dev:stop` command, not `dev:logs`.
  */
 export function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError | null {
-  if (verdict == null || !isRelayedDeviceCode(verdict.code)) {
-    return null;
-  }
-  const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
+  return verdict != null && isRelayedDeviceCode(verdict.code)
+    ? rebuiltChildError(verdict, verdict.code)
+    : null;
+}
+
+/**
+ * A spawned child's own refusal: a device refusal, or `DEV_SERVER_RUNNING` on a lock another run
+ * took after this run read it. Only a spawn reads it, so an earlier run's log never names this one.
+ */
+export function relayedSpawnRefusal(verdict: DetachedChildVerdict | null): CommandError | null {
+  return verdict?.code === 'DEV_SERVER_RUNNING'
+    ? rebuiltChildError(verdict, verdict.code)
+    : relayedDeviceError(verdict);
+}
+
+function rebuiltChildError(verdict: DetachedChildVerdict, code: string): CommandError {
+  const error = new CommandError(code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
   error.exitCode = verdict.exitCode ?? EXIT_OUTCOME_FAILED;
   if (verdict.data) {
     error.data = verdict.data;

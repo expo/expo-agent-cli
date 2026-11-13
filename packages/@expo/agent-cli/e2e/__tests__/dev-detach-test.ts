@@ -25,7 +25,6 @@ import {
   readEvents,
   readStubExpoInvocations,
   setupFixtureAsync,
-  startStubDevServerAsync,
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
@@ -88,30 +87,14 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
   it.each(['foreign', 'hanging'] as const)(
-    'follows its lock away from a %s status endpoint before reporting ready',
+    'refuses a repeat at once beside a %s status endpoint',
     async (answer) => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const own = await startStubDevServerAsync({ projectRoot, statusDelayMs: 200 });
-      let moveTimer: ReturnType<typeof setTimeout> | undefined;
-      let oldRequestClosed = false;
-      const info = {
-        url: '',
-        port: 0,
-        pid: process.pid,
-        projectRoot,
-        startedAt: new Date().toISOString(),
-      };
       const previous = http.createServer((request, response) => {
         if (request.url !== '/status') {
           response.writeHead(404).end();
           return;
         }
-        response.on('close', () => {
-          oldRequestClosed = true;
-        });
-        // Move only after the CLI has actually asked the old port, avoiding a startup-time race
-        // in the test itself. The lock payload is read anew for each connection.
-        moveTimer ??= setTimeout(() => Object.assign(info, { url: own.url, port: own.port }), 500);
         if (answer === 'foreign') {
           response.writeHead(200, {
             'X-React-Native-Project-Root': encodeURI(path.join(projectRoot, '..', 'sibling')),
@@ -120,34 +103,33 @@ describe('@expo/agent-cli dev --detach', () => {
         }
       });
       await new Promise<void>((resolve) => previous.listen(0, '127.0.0.1', resolve));
-      info.port = (previous.address() as net.AddressInfo).port;
-      info.url = `http://127.0.0.1:${info.port}`;
-      const release = await holdDevLockAsync(projectRoot, info);
+      const port = (previous.address() as net.AddressInfo).port;
+      const release = await holdDevLockAsync(projectRoot, {
+        url: `http://127.0.0.1:${port}`,
+        port,
+        pid: process.pid,
+        projectRoot,
+        startedAt: new Date().toISOString(),
+      });
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
           ['dev', '--web', '--detach', '--wait-ready', '--json'],
           { env: stubExpoEnv(projectRoot), reject: false }
         );
-        expect(result.exitCode, result.all).toBe(0);
-        expect(JSON.parse(result.stdout)).toMatchObject({
-          url: own.url,
-          port: own.port,
-          pid: process.pid,
-          alreadyRunning: true,
-          ready: true,
-          projectRootMatched: true,
+        expect(result.exitCode, result.all).toBe(20);
+        // One /status probe picks the phase: the endpoint does not answer for this project.
+        expect(JSON.parse(result.stdout).error).toMatchObject({
+          code: 'DEV_SERVER_RUNNING',
+          data: { port, pid: process.pid, phase: 'starting' },
+          suggestedCommand: 'npx @expo/agent-cli status',
         });
-        expect(oldRequestClosed).toBe(true);
         expect(readStubExpoInvocations(projectRoot)).toEqual([]);
-        // The CLI must neither stop nor reconfigure the foreign server while waiting.
         expect(previous.listening).toBe(true);
       } finally {
-        clearTimeout(moveTimer);
         release();
         previous.closeAllConnections();
         await new Promise<void>((resolve) => previous.close(() => resolve()));
-        await own.close();
       }
     }
   );
@@ -296,21 +278,29 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  it('says a plain dev-server plan is serving', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
+  it.each(['ios', 'android'] as const)(
+    'reports a serving plan and refuses a %s repeat while it starts',
+    async (platform) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const args = ['dev', `--${platform}`, '--local', '--no-open', '--detach', '--json'];
+      const env = detachEnv(projectRoot, 8397);
 
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--ios', '--detach', '--json'],
-        { env: detachEnv(projectRoot, 8397) }
-      );
+      try {
+        const result = await executeAgentCliAsync(projectRoot, args, { env });
 
-      expect(JSON.parse(result.stdout).phase).toBe('serving');
-    } finally {
-      await cleanUpDetachedAsync(projectRoot);
+        expect(JSON.parse(result.stdout).phase).toBe('serving');
+        const repeated = await executeAgentCliAsync(projectRoot, args, { env, reject: false });
+        expect(repeated.exitCode, repeated.all).toBe(20);
+        expect(JSON.parse(repeated.stdout).error).toMatchObject({
+          code: 'DEV_SERVER_RUNNING',
+          data: { phase: 'starting' },
+          suggestedCommand: 'npx @expo/agent-cli status',
+        });
+      } finally {
+        await cleanUpDetachedAsync(projectRoot);
+      }
     }
-  });
+  );
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
   // can complete — friction run 5, F48-4. The retry happens in the child, whose stderr goes to a
@@ -530,8 +520,8 @@ describe('@expo/agent-cli dev --detach', () => {
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a plain detach of a run
     // that builds reports at once, so its port is the plan's, not the one a busy-port retry takes
-    // later. A re-run once the lock says `serving` reports where the dev server is.
-    it('reports a building run at once, and a re-run reports the port the retry took', async () => {
+    // later.
+    it('reports a building run at once, then publishes the port the retry took', async () => {
       const projectRoot = await setupFixtureAsync('bare-app');
       await installStubFingerprintAsync(projectRoot);
       const env = {
@@ -550,6 +540,19 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(first.exitCode, first.all).toBe(0);
         expect(JSON.parse(first.stdout)).toMatchObject({ phase: 'building', ready: null });
 
+        // A repeat during the build is refused, not reported as the run it found.
+        const repeated = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(repeated.exitCode, repeated.all).toBe(20);
+        expect(JSON.parse(repeated.stdout).error).toMatchObject({
+          code: 'DEV_SERVER_RUNNING',
+          data: { phase: 'building' },
+          suggestedCommand: 'npx @expo/agent-cli dev:logs',
+        });
+
         const deadline = Date.now() + 20_000;
         let lock = await readDevLockAsync(projectRoot);
         while (lock?.phase !== 'serving' && Date.now() < deadline) {
@@ -557,16 +560,7 @@ describe('@expo/agent-cli dev --detach', () => {
           lock = await readDevLockAsync(projectRoot);
         }
         expect(lock).toMatchObject({ phase: 'serving' });
-
-        const again = await executeAgentCliAsync(
-          projectRoot,
-          ['dev', '--ios', '--local', '--detach', '--json'],
-          { env, reject: false }
-        );
-        expect(again.exitCode, again.all).toBe(0);
-        const report = JSON.parse(again.stdout);
-        expect(report).toMatchObject({ phase: 'serving', alreadyRunning: true, port: lock!.port });
-        expect(report.port).not.toBe(8473);
+        expect(lock!.port).not.toBe(8473);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
       }
@@ -589,43 +583,48 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  // The plan's rule: one detached dev server per project. A second one could not hold the lock, so
-  // nothing would be able to find it or stop it — which is worse than a second foreground one.
-  it('reports the running server and starts nothing on a second --detach', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
+  it.each(['ios', 'android'] as const)(
+    'refuses equivalent and changed %s repeats beside a ready local server',
+    async (platform) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const port = await freePortAsync();
+      const env = { ...detachEnv(projectRoot, port), STUB_EXPO_LISTEN: '1' };
+      const args = [`--${platform}`, '--local', '--no-open', '--detach', '--json'];
+      try {
+        const first = await executeAgentCliAsync(projectRoot, ['dev', ...args, '--wait-ready'], {
+          env,
+        });
+        const { pid } = JSON.parse(first.stdout);
+        expect(JSON.parse(first.stdout)).toMatchObject({ ready: true, port });
+        const lastRequest = path.join(projectRoot, '.expo', 'agent-cli-last-dev.json');
+        const startedBy = fs.readFileSync(lastRequest, 'utf8');
 
-    try {
-      const first = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--ios', '--detach', '--json'],
-        {
-          env: detachEnv(projectRoot, 8397),
+        for (const extra of [
+          [],
+          ['--wait-ready'],
+          ['--port', String(await freePortAsync()), '--', '--host', 'lan'],
+        ]) {
+          const repeatedArgs = [...args, ...extra];
+          const repeated = await executeAgentCliAsync(projectRoot, ['dev', ...repeatedArgs], {
+            env,
+            reject: false,
+          });
+          expect(repeated.exitCode, repeated.all).toBe(20);
+          expect(JSON.parse(repeated.stdout).error).toMatchObject({
+            code: 'DEV_SERVER_RUNNING',
+            data: { port, pid, phase: 'serving' },
+            suggestedCommand: `npx @expo/agent-cli smoke --${platform}`,
+          });
         }
-      );
-      const firstPid = JSON.parse(first.stdout).pid;
-
-      const second = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--ios', '--detach', '--json'],
-        { env: detachEnv(projectRoot, 8396) }
-      );
-
-      // Idempotent: exit 0, and the report is of the server that is there.
-      expect(second.exitCode).toBe(0);
-      expect(JSON.parse(second.stdout)).toMatchObject({
-        alreadyRunning: true,
-        pid: firstPid,
-        port: 8397,
-      });
-
-      const human = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach'], {
-        env: detachEnv(projectRoot, 8396),
-      });
-      expect(human.stdout).toContain('so nothing was started');
-    } finally {
-      await cleanUpDetachedAsync(projectRoot);
+        expect(
+          readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start')
+        ).toHaveLength(1);
+        expect(fs.readFileSync(lastRequest, 'utf8')).toBe(startedBy);
+      } finally {
+        await cleanUpDetachedAsync(projectRoot);
+      }
     }
-  });
+  );
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
   // A second foreground server could not hold the lock, so `status` and `dev:stop` could not see it.

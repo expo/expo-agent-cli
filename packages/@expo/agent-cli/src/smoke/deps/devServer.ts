@@ -121,7 +121,7 @@ async function startDevServer(
         detachTimeoutMs:
           target.buildLocation != null ? BUILD_DEV_SERVER_TIMEOUT_MS : START_DEV_SERVER_TIMEOUT_MS,
       },
-      { print: false }
+      { print: false, reuseRunning: true }
     );
   } catch (error: unknown) {
     return {

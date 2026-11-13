@@ -24,11 +24,7 @@ export function bindingIdentity(read: BindingRead): string {
 /** The section: read the own binding, choose, write. `simctl create` runs inside it. */
 export async function bindIosSectionAsync(
   projectRoot: string,
-  {
-    inventory,
-    reuseOnly,
-    tools,
-  }: { inventory: IosInventory; reuseOnly: boolean; tools: DeviceTools }
+  { inventory, tools }: { inventory: IosInventory; tools: DeviceTools }
 ): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction }> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const read = readBindingFile(file);
@@ -36,7 +32,7 @@ export async function bindIosSectionAsync(
     throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
   }
   const own = read.kind === 'binding' ? read.binding : null;
-  const choice = chooseIosDevice({ own, inventory, reuseOnly, digest: digestForRoot(projectRoot) });
+  const choice = chooseIosDevice({ own, inventory, digest: digestForRoot(projectRoot) });
   if (own != null && choice.kind !== 'reuse') {
     removeBindingFile(file);
   }

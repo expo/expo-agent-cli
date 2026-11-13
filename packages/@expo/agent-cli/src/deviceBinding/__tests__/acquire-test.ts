@@ -181,17 +181,6 @@ describe(acquireDeviceAsync, () => {
     expect(result.device).toMatchObject({ udid: 'CREATED-1' });
   });
 
-  it('refuses not-reusable with reuseOnly and nothing to reuse', async () => {
-    const tools = fakeTools();
-
-    const error = await acquireDeviceAsync(ROOT, 'ios', { tools, reuseOnly: true }).catch((e) => e);
-
-    expect(error.code).toBe('DEVICE_UNAVAILABLE');
-    expect(error.data).toEqual({ reason: 'not-reusable' });
-    expect(error.exitCode).toBe(20);
-    expect(tools.calls.some((call) => call[0] === 'create')).toBe(false);
-  });
-
   it('refuses no-ios-runtime before any create', async () => {
     const tools = fakeTools({ runtime: false });
 
