@@ -596,11 +596,12 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     async () => {
       const projectRoot = await setupAsync('go-app');
       const port = await freePortAsync();
+      const listenGate = path.join(projectRoot, 'stub-expo-listen-gate');
       const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas', '--port', String(port)], {
         env: {
           ...easRunEnv(projectRoot, port),
           STUB_EXPO_NO_PORT_REPORT: '1',
-          STUB_EXPO_LISTEN_DELAY_MS: '3000',
+          STUB_EXPO_LISTEN_GATE: listenGate,
         },
       });
       const foreign = http.createServer((_request, response) => {
@@ -617,6 +618,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
         await new Promise((resolve) => setTimeout(resolve, 1500));
         await new Promise((resolve) => foreign.close(resolve));
+        fs.writeFileSync(listenGate, '');
 
         expect(
           await waitForAsync(
