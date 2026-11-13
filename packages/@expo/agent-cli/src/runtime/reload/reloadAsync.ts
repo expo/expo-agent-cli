@@ -457,6 +457,9 @@ async function preflightAsync(
   };
 }
 
+/** How long a broadcast with churn waits for a fresh target or a bundle before `auto` climbs. */
+const BROADCAST_FOLLOW_MS = 10_000;
+
 async function climbLadderAsync(
   projectRoot: string,
   options: ReloadOptions,
@@ -544,6 +547,29 @@ async function climbLadderAsync(
     method = settled.ran ? 'dev-server' : null;
     mechanismProof = settled.proof;
     relaunchWhy = settled.relaunchWhy;
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — churn proves the app acted, not
+    // that it came back. The shared observations get a short bound here, and the relaunch the rest.
+    if (options.method === 'auto' && settled.proof === 'message-socket-peers') {
+      const followed = await observeReloadAsync(devServerUrl, projectRoot, {
+        prepared,
+        mechanismProof: null,
+        churn: rungOne.churn,
+        attempts,
+        bundleMark,
+        timeoutMs: Math.min(BROADCAST_FOLLOW_MS, remainingMs()),
+      });
+      if (!followed.evidence?.freshTargets && !followed.evidence?.bundle.observed) {
+        const bound = `no new debugger target and no bundle followed within ${BROADCAST_FOLLOW_MS}ms`;
+        attempts[attempts.length - 1] = {
+          ...rungOne.attempt,
+          ok: false,
+          delivered: true,
+          reason: `${rungOne.attempt.reason}, but ${bound}`,
+        };
+        relaunchWhy = `the app reconnected to the dev server's command socket after the broadcast, but ${bound}, so the app was relaunched`;
+      }
+    }
   }
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — the cloud loop, K2.
