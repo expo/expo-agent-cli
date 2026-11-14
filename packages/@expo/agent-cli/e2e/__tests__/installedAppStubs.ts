@@ -84,7 +84,7 @@ export async function bindingFixture(
 /**
  * Bind `serial` to the fixture worktree as an `explicit` Android binding, the lease 60 min ahead,
  * so every verb of the fixture drives this emulator (llp/0035 §Readers). What `dev --device`
- * (llp/0035 §Release) writes; until then the one way a case hands a verb an attached emulator.
+ * (llp/0035 §Choice) writes; until then the one way a case hands a verb an attached emulator.
  */
 export async function androidBindingFixture(projectRoot: string, serial: string) {
   const root = canonicalizeExistingPath(projectRoot);
