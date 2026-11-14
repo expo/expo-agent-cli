@@ -602,7 +602,7 @@ async function attemptPlanAsync(
           if (reused !== undefined) {
             return reused;
           }
-          // On the budget of status's own lookup (llp/0035 §Decisions).
+          // On the budget of status's own lookup (llp/0011 §The build-cache lookup).
           return lookUpEasSimulatorBuildAsync(root, platform, {
             fingerprintCache: options.fingerprintCache,
             timeoutMs: options.buildLookupTimeoutMs ?? easBuildLookupTimeoutMs(resolveEasCli(root)),

@@ -116,7 +116,7 @@ async function releaseDevicesAsync(
 
 /**
  * This worktree's run that still builds or serves. A `finishing` run has no dev server left, so
- * its devices can go (llp/0035 §Preserved sessions).
+ * its devices can go (llp/0035 §Release).
  */
 async function activeRunLockAsync(projectRoot: string): Promise<DevServerLockInfo | null> {
   const lock = await readDevServerLockAsync(projectRoot);
