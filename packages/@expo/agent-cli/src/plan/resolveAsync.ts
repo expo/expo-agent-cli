@@ -164,8 +164,8 @@ export async function resolveStartPlanAsync(
  * A draft that builds nothing: bind the device, then ask it whether the app is there.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
- * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — the exits, in order. The device question
- * is asked only where its answer would be acted on: a `web` or `none` draft has no app on a device,
+ * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — where the binding sits among the
+ * exits. The device question is asked only where its answer would be acted on: a `web` or `none` draft has no app on a device,
  * `--eas` puts the device on EAS, an `expo-go` draft is a runtime `dev` installs itself, a
  * `--no-open` caller keeps the serve-only plan, and a build routed to EAS did not ask for a local
  * compile on the way to a dev server. The binding happens before the `expo-go` and `--no-open`

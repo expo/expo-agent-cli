@@ -257,7 +257,7 @@ describe(runDevServerAsync, () => {
     await promise;
   });
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Lease timer
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Lease
   it(`should renew the worktree's device lease while the dev server runs`, async () => {
     const end = mockLongRunningStart();
     const promise = runDevServerAsync(projectRoot, ['run:ios'], { ...step(), agentSkills: false });
