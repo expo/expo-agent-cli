@@ -1,5 +1,5 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
-// @ref llp/0035-one-device-per-worktree.rfc.md §EAS
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session binding
 //
 // A foreground `dev --eas` opens the app in the same process as the dev server, so what the open
 // could not do is said on stderr and the server stays up. Each case runs `go-app` with a 5 s stub

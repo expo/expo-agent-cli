@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §--device on dev
+// @ref llp/0035-one-device-per-worktree.rfc.md §Choice
 import type { ExplicitRequest } from '../deviceBinding/explicit';
 import { CommandError } from '../utils/errors';
 

@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §iOS tests
+// @ref llp/0035-one-device-per-worktree.rfc.md §Invariant
 import fs from 'fs';
 import path from 'path';
 

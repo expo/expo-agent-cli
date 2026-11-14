@@ -1,5 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
-// @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
+// @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
 // Smoke binds and releases only its own platform through the registry.
 import { vol } from 'memfs';
 
