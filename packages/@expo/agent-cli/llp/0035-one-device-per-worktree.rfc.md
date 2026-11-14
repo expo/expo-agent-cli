@@ -19,13 +19,13 @@ Developers run several agents on one Expo app in parallel, one agent per git wor
 
 Decision [confirmed — Vojtech, 2026-09-30]: **each worktree gets its own device on each platform.** A **binding** records it. Every verb of that worktree uses the bound device and never "the first booted" one.
 
-| Device                    | Origin     | Who makes it            | The CLI may                     | Let go                      |
-| ------------------------- | ---------- | ----------------------- | ------------------------------- | --------------------------- |
-| iOS simulator             | `created`  | `dev`, `smoke`          | boot, shut down, park, delete   | park and shut down          |
-| Android emulator instance | `spawned`  | `dev`, `smoke`          | kill the instance it spawned    | kill                        |
-| A device the user named   | `explicit` | `dev --device`          | boot, never shut down or delete | expire the lease, keep file |
-| EAS session               | `started`  | `dev --eas`, `smoke`    | stop                            | stop the session            |
-| EAS session of the dotenv | `dotenv`   | adopted from the dotenv | stop only on `dev:stop --eas`   | forget the binding          |
+| Device                    | Origin     | Who makes it            | The CLI may                     | Let go             |
+| ------------------------- | ---------- | ----------------------- | ------------------------------- | ------------------ |
+| iOS simulator             | `created`  | `dev`, `smoke`          | boot, shut down, park, delete   | park and shut down |
+| Android emulator instance | `spawned`  | `dev`, `smoke`          | kill the instance it spawned    | kill               |
+| A device the user named   | `explicit` | `dev --device`          | boot, never shut down or delete | park               |
+| EAS session               | `started`  | `dev --eas`, `smoke`    | stop                            | stop the session   |
+| EAS session of the dotenv | `dotenv`   | adopted from the dotenv | stop only on `dev:stop --eas`   | forget the binding |
 
 The CLI owns its devices instead of adopting any free booted device. That removes device classification, adoption and takeover. The model follows `appandflow/stim`, which solves the same problem for agents in worktrees.
 
@@ -36,7 +36,7 @@ The CLI owns its devices instead of adopting any free booted device. That remove
 - **appandflow/stim** gives each worktree a device the tool created and writes every lease under a lock. Its liveness is process identity, which does not fit this CLI: our verbs are short processes, and nothing runs between two `navigate` calls.
 - **Expo CLI** `run:ios` uses the first booted simulator; `adb reverse` runs on every attached device.
 
-Rejected: adopt any free booted device. A first implementation did it and needed a full device inventory on every verb and liveness from two sources.
+Rejected: adopt any free booted device. It needs a full device inventory on every verb and liveness from two sources.
 
 ## Where exclusivity comes from
 
@@ -47,35 +47,33 @@ The claimants of a device decide where its ownership record lives. Only processe
 - **Root**: the canonical project root of the Expo app, the path the dev-server lock keys on. In a monorepo it is the app directory inside the worktree. "Worktree" in this RFC means the root. **Digest**: the hash of the root that the dev-server lock also uses.
 - **Registry**: the directory `<expo home>/agent-cli/bindings` and its lock. **Binding**: one JSON file in it per worktree, platform and backend. **Backend**: `local-ios`, `local-android` or `cloud`.
 - **Lease**: the binding's `expiresAt`. **Live**: not past. **Expired**: past. **Stale**: expired, or the root is deleted (Decision 6).
-- **Park**: set an own `created` binding's `expiresAt` to now and keep the file. Only simulators park.
+- **Park**: set a binding's `expiresAt` to now and keep the file.
 - **Inventory**: what the platform tool lists: `simctl list devices -j`, or `adb devices -l` and `emulator -list-avds`.
 - **Section**: one hold of the registry lock.
 - **Let go**: what happens to a binding's device when its worktree, or a reap, is done with it (§Records).
 - **Reap**: let go of other worktrees' stale bindings. **Release**: let go of the own bindings (`dev:stop --release`, smoke's cleanup).
-- **Session cap**: the longest an EAS session runs on the service: 40 min for a normal-priority account, 115 min for a high-priority one. The reap uses 115 min.
+- **Session cap**: the longest an EAS session runs on the service (EAS facts 2). The reap uses 115 min.
 - **How line**: the last line of every CLI error, one next action.
 
 ## Decisions
 
-1. **Hybrid ownership.** iOS: each worktree binds a simulator this CLI created. Android: every worktree boots its own instance of one AVD with `-read-only` on a free even console port. The CLI never chooses a device a human booted; `--device` binds the device the human names.
+1. **Hybrid ownership.** iOS: each worktree binds a simulator this CLI created. Android: every worktree boots its own instance of one AVD on a free even console port. The CLI never chooses a device a human booted; `--device` binds the device the human names.
    **Why.** Owned devices need no classification, takeover or capacity rule, and a human's device is never hijacked. Simulators share one runtime and own a small data container; an AVD owns a userdata image of several GB, and `-read-only` runs many instances off one image.
 2. **Every Android instance is `-read-only`, the first one too.**
    **Why.** An agent never writes the human's AVD image, and the first and the fifth worktree behave the same. The cost is a cold boot and a reinstall per instance start.
 3. **Liveness is a 60 min lease, renewed by use. Nothing else.** No agent pid, socket probe or mtime.
-   **Why.** One source of truth. Metro renews the lease on a timer, so a long Fast Refresh session never expires, and a crashed agent's binding is stale within 60 min. A pid would add a second source and a pid-reuse risk (Risk 9 is the one case it would catch).
+   **Why.** One source of truth. Metro renews the lease on a timer, so a long Fast Refresh session never expires, and a crashed agent's binding is stale within 60 min. A pid would add a second source and a pid-reuse risk (Risk 8 is the one case it would catch).
 4. **Only `dev` (with its EAS open and dev-wait) and `smoke` allocate. Every other verb reads the binding**, with one device-tool subprocess per binding and no network call before the EAS rung.
    **Why.** The hottest verb must not pay for the rarest decision.
 5. **A parked simulator is an expired `created` binding, not a second record.** A living worktree gets it back on the next `dev`; a deleted worktree's simulator is deleted by the next reap.
    **Why.** One record type cannot disagree with itself, and the worktree that paid for the native build keeps it. Nothing takes another worktree's simulator: `simctl create` is cheap, and the app on it is a foreign build anyway.
 6. **A deleted worktree's bindings are stale at once.** Deleted means `lstat` of the root fails with `ENOENT`.
-   **Why.** Its simulator should not hold RAM for 60 min. A parent check cannot tell a removed monorepo worktree from an unmounted volume, so there is none (Risk 14).
+   **Why.** Its simulator should not hold RAM for 60 min. A parent check cannot tell a removed monorepo worktree from an unmounted volume, so there is none (Risk 13).
 7. **Every registry write runs under one machine-wide lock, with tmp+rename. The lock also covers `simctl create` and the emulator spawn, and no other device call.**
    **Why.** A create under the lock ties the new device to its binding in one section, so two `dev` runs in one worktree never make two devices. A read verb never waits on a boot or a shutdown. The races that remain each cost one rerun of `dev` (§Risks).
-8. **Allocation ships only with binding-aware readers, lease renewal, release, smoke cleanup and reaping.**
-   **Why.** A device `dev` creates needs a cleanup path, and every reader must drive the device `dev` prepared.
-9. **`dev:stop` keeps the worktree's devices; `dev:stop --release` lets go of them now.**
+8. **`dev:stop` keeps the worktree's devices; `dev:stop --release` lets go of them now.**
    **Why.** The restart follow-up is `dev:stop && dev --detach`, and a killed read-only instance costs a cold boot and a reinstall. The lease reclaims a stopped worktree's device within 60 min anyway.
-10. **Decided, not open.** `start --ios` keeps Expo CLI's device choice, because `dev` is the verb that binds. `dev --no-open` still binds, because the build step must be pinned. Local devices come before an EAS session, because a session bills by the minute. `status` calls the network on every run ([[0011-impact-and-freshness]]).
+9. **Decided, not open.** `start --ios` keeps Expo CLI's device choice, because `dev` is the verb that binds. `dev --no-open` still binds, because the build step must be pinned. Local devices come before an EAS session, because a session bills by the minute.
 
 ## Invariant
 
@@ -85,22 +83,24 @@ The inventory is read before the lock and may be seconds stale. iOS acquisition 
 
 ## Contracts every verb honors
 
-| #   | Rule                                                                                                                                   | Test                                                                |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| 1   | Only `dev` (with its EAS open and dev-wait) and `smoke` write a device into a binding. A read verb changes only `expiresAt`.           | `src/deviceBinding/__tests__/inspect-test.ts`, `cloudRung-test.ts`  |
-| 2   | A read verb reads its binding and never lists devices to choose one; it spawns one subprocess per binding it inspects.                 | `src/deviceBinding/__tests__/inspect-test.ts`                       |
-| 3   | No code outside `src/deviceBinding/` lists devices to select one. `status --device` lists to filter and binds nothing.                 | none; review only                                                   |
-| 4   | Every binding write runs under the lock.                                                                                               | `src/deviceBinding/__tests__/registry-test.ts`, `acquire-test.ts`   |
-| 5   | A `created` simulator is never deleted while a binding names it. A simulator no binding names is never touched.                        | `src/deviceBinding/__tests__/reap-test.ts`, `explicit-test.ts`      |
-| 6   | A recorded emulator pid is killed only after its file is removed, and only while the instance check holds. Never `emu kill` by serial. | `src/deviceBinding/__tests__/android-test.ts`, `reap-test.ts`       |
-| 7   | `explicit` devices are booted at most, never shut down or deleted.                                                                     | `src/deviceBinding/__tests__/explicit-test.ts`, `lifecycle-test.ts` |
-| 8   | Every process that runs Metro or a build step on a bound device renews the lease, and on a lost lease writes nothing for that binding. | `src/deviceBinding/__tests__/lifecycle-test.ts`                     |
-| 9   | The EAS probe considers only sessions this worktree bound and the dotenv session.                                                      | `src/device/__tests__/cloudSimulator-test.ts`                       |
-| 10  | `src/deviceBinding/` imports nothing from `navigate`, `smoke`, `dev` or `installedApp`.                                                | `src/deviceBinding/__tests__/boundary-test.ts`                      |
+| #   | Rule                                                                                                                                   | Test                                                                                       |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 1   | Only `dev` (with its EAS open and dev-wait) and `smoke` write a device into a binding. A read verb changes only `expiresAt`.           | `src/deviceBinding/__tests__/inspect-test.ts`, `cloudRung-test.ts`                         |
+| 2   | A read verb reads its binding and never lists devices to choose one; it spawns one subprocess per binding it inspects.                 | `src/deviceBinding/__tests__/inspect-test.ts`                                              |
+| 3   | No code outside `src/deviceBinding/` lists devices to select one. `status --device` lists to filter and binds nothing.                 | the filter: `src/installedApp/__tests__/android-test.ts`; the rest: none (Open question 3) |
+| 4   | Every binding write runs under the lock.                                                                                               | `src/deviceBinding/__tests__/registry-test.ts`, `acquire-test.ts`                          |
+| 5   | A `created` simulator is never deleted while a binding names it. A simulator no binding names is never touched.                        | `src/deviceBinding/__tests__/reap-test.ts`, `explicit-test.ts`                             |
+| 6   | A recorded emulator pid is killed only after its file is removed, and only while the instance check holds. Never `emu kill` by serial. | `src/deviceBinding/__tests__/android-test.ts`, `reap-test.ts`                              |
+| 7   | `explicit` devices are booted at most, never shut down or deleted.                                                                     | `src/deviceBinding/__tests__/explicit-test.ts`, `lifecycle-test.ts`                        |
+| 8   | Every process that runs Metro or a build step on a bound device renews the lease, and on a lost lease writes nothing for that binding. | `src/deviceBinding/__tests__/lifecycle-test.ts`                                            |
+| 9   | The EAS probe considers only sessions this worktree bound and the dotenv session.                                                      | `src/device/__tests__/cloudSimulator-test.ts`                                              |
+| 10  | `src/deviceBinding/` imports nothing from `navigate`, `smoke`, `dev` or `installedApp`.                                                | `src/deviceBinding/__tests__/boundary-test.ts`                                             |
 
 ## Records
 
 One file per worktree, platform and backend, named `<digest>-<platform>-<backend>.json`, so a worktree has at most four. Code that acts on an existing file uses the root stored in it, never a recomputed digest, because a deleted worktree's canonical path can change. `dev` at a moved path gets a new device. A binding stores the device, the root, `boundAt` (the session-cap clock; a cloud reuse keeps it) and `expiresAt`.
+
+**States.** A binding file is absent, `unreadable`, live or expired; stale is derived (Glossary). Acquire and the cloud bind write a live file. A renew keeps a live file live and writes nothing for a lost one (§Lease); the one exception is the EAS open's provisional renew (§Session binding). Release and reap apply the let-go table below: release parks own `created` and `explicit` bindings, a reap parks other worktrees' `created` ones, and every other row removes the file. A failed device action writes back the file it removed, unchanged, unless another binding took the file; a failed Android release kill writes it back expired. An `unreadable` file refuses the verbs that read it, and its How line removes it. A device with no file is never touched again: a leaked create (Risk 4), a session whose start died before it returned an id (§Session start) and an emulator whose file another binding took (Risk 15) end only by hand or by their own timeout.
 
 Let go, one rule per binding, first match. The file action runs under the lock, the device action after it. A reap's delete or kill that fails writes the binding back, unless another binding took its file, so the next reap tries again. "Reap needs" is the inventory a reap must hold to act on the row; `dev:stop` and the cloud bind hold none.
 
@@ -111,7 +111,7 @@ Let go, one rule per binding, first match. The file action runs under the lock, 
 | `created`                                                                 | park, then `simctl shutdown` (skipped when the reap's inventory says `Shutdown`) | iOS inventory                                |
 | `spawned`                                                                 | remove the file, then kill the pid while the instance check holds                | nothing                                      |
 | `explicit`, root deleted                                                  | remove the file                                                                  | nothing                                      |
-| `explicit`                                                                | expire the lease and keep the file; a reap leaves it                             | —                                            |
+| `explicit`                                                                | park; a reap leaves it                                                           | —                                            |
 | `cloud` `started`, `boundAt` past the session cap                         | remove the file (reap only)                                                      | nothing                                      |
 | `cloud` `started`                                                         | remove the file, then stop the session                                           | nothing                                      |
 | `cloud` `dotenv`                                                          | remove the file; never stopped                                                   | nothing                                      |
@@ -131,7 +131,7 @@ Let go, one rule per binding, first match. The file action runs under the lock, 
 
 ## Lock
 
-- The lock is a directory `.lock` in the registry. It is made by renaming a temp directory that holds one marker `pid-<pid>-<nonce>`, so a lock never exists without a pid. A rename that fails with `EEXIST`, `ENOTEMPTY`, `EPERM` or `EACCES` means wait.
+- The lock is a directory `.lock` in the registry whose marker names the holder's pid. A `.lock` never exists without its marker, so every CLI version on the machine can tell a dead holder from a live one.
 - A waiter polls every 100 ms. It removes a dead pid's lock, and a `.lock` with no marker. No nesting.
 - Waits: acquire and release 30 s; read verbs and the timer 5 s. The refusal names the holder's pid, the lock's age and, where `ps` exists, its command.
 - Under the lock: record reads and writes, `simctl create` (20 s timeout; a timeout kills the child and refuses `create-timeout`), and the detached emulator spawn. Every other device call runs after the section.
@@ -141,7 +141,7 @@ Let go, one rule per binding, first match. The file action runs under the lock, 
 The choice is a pure function of the own binding, the other worktrees' bindings (each marked stale or not), the inventory and `--device`.
 
 - **Reuse.** The own binding, live or expired, whose device is present (iOS: listed and available; `spawned`: the instance check; `explicit` Android: serial listed). An own binding whose device is gone is removed in the section, and allocation goes on.
-- **iOS create.** The newest available iOS runtime that lists a mainstream iPhone, with its highest-numbered `iPhone <n> Pro`, else `iPhone <n>`, else `iPhone <n> Pro Max`. Only when no runtime has one does the newest runtime's first iPhone apply (Risk 15). None: `no-ios-runtime`.
+- **iOS create.** The newest available iOS runtime that lists a mainstream iPhone, with its highest-numbered `iPhone <n> Pro`, else `iPhone <n>`, else `iPhone <n> Pro Max`. Only when no runtime has one does the newest runtime's first iPhone apply (Risk 14). None: `no-ios-runtime`.
 - **Android spawn.** The first AVD of `emulator -list-avds` (none: `no-avd`) on the first free even console port in 5554..5584. A port is busy when `adb` lists its `emulator-NNNN` serial in any state, a live Android binding holds it, or a binding's emulator pid is alive. None free: `no-free-port`, naming each serial and its worktree.
 - **`--device`.** It matches a simulator by name or udid, case-insensitive, and an emulator by serial only, because instances share one AVD name.
   - Two or more matches, or none: `explicit-not-found` with the matches. A simulator named `agent-cli …` that no binding names is not found, so a leaked create is never bound.
@@ -172,8 +172,7 @@ The choice is a pure function of the own binding, the other worktrees' bindings 
 | local, device not listed                                                                          | `gone`, cause `device-gone` | next rung                                                                                                     |
 
 - **Use.** A reader that drives the device takes an `up` inspection and renews the lease per §Lease. It never inspects again and never boots.
-- **Release.** Lets go of the own local bindings, or one platform's. Under the lock it acts only when the file still holds the binding it read: the same root, `boundAt` and device, and for a `spawned` instance the same AVD, port and pid. A renewed `expiresAt` is the same binding. So a replacement binding keeps its file and its device. Release never reaps.
-- **Cloud bind.** Every session id a verb obtains is bound, a reuse and a start that failed after it created the session included, so a later reap can stop it. A reuse of the same id keeps `boundAt` and `origin`. When two starts ran at once in this worktree, the bind keeps the session `.env.eas-simulator` names, because only that one can be driven (§Session guard), and stops the other.
+- **Cloud bind.** Every session id a verb obtains is bound, a reuse and a start that failed after it created the session included, so a later reap can stop it. A reuse of the same id keeps `boundAt` and `origin`. When two starts on the same platform ran at once in this worktree, the bind keeps the session `.env.eas-simulator` names, because only that one can be driven (§Session guard), and stops the other.
 - **Cloud release.** `dev:stop --eas` removes the own cloud bindings of the given ids in one section, then stops each session in order. A failed stop writes its binding back. When the lock cannot be taken, it still stops the sessions and keeps the bindings. A run that stops only the session it started (foreground `dev --eas`, `smoke --eas`, a start it could not bind) keeps a session whose binding is `dotenv`, an unreadable file, or a lock it cannot take.
 
 ## Readers
@@ -221,7 +220,7 @@ A reap reports device cleanup only (`devServerCleanup: 'not-checked'`). A delete
 
 ## How `dev` uses it
 
-- The start-plan resolver serves `dev`, `smoke` and `status`; only `dev` acquires. The resolver's order for a native platform without `--eas`: exit for `web` and `none` drafts; acquire for `expo-go`, `dev-client` and `bare` drafts; exit for `expo-go`, unprobed; the `--no-open` exit; exit for an EAS build; the app-presence probe on the acquired device; the toolchain exit.
+- The start-plan resolver serves `dev`, `smoke` and `status`; only `dev` acquires. For a native platform without `--eas`, a draft binds after the `web`/`none` exit and before every other exit, so an `expo-go`, `--no-open` or EAS-build run still binds a device. The order of the other exits is in the resolver.
 - Acquisition runs only for a run that passed the dev-server lock. Beside this project's running server, a local `dev` (also `--detach`) stops on the lock before it binds a device ([[0004-smart-start-and-project-state]] §A busy port). A named `--port` that cannot bind refuses before acquisition.
 - A building draft acquires after the `--plan` return and after the refusals (the EAS route and project checks), so no simulator is made for a run that then refuses.
 - The probe answers `missing` without asking on a device the run just created or spawned, because a fresh device never has the app. On iOS a `Shutdown` simulator's apps are read off its disk.
@@ -235,12 +234,13 @@ A reap reports device cleanup only (`devServerCleanup: 'not-checked'`). A delete
 - After the section: poll `sys.boot_completed` until the boot timeout, accepted only while the child is alive and `adb devices` lists the serial. A child that exits during the boot fails it with the last line of `agent-cli-emulator-<port>.log` in the temp directory, truncated at each spawn.
 - `get-state` on a booting instance says `device offline`: that is `not-up`, not `unknown`. Only "not found" is missing.
 - Android selection needs SDK 58: several instances of one AVD are addressed by serial, which `run:android --device` takes from SDK 58 on.
+- A live gate on SDK 58 confirmed the basis of this design: a second `-read-only` instance boots beside the first and takes `adb reverse` and an install; an emulator on a taken port exits non-zero; the launcher keeps its pid; a cold boot plus the install fits the boot timeout.
 
 ## Release
 
-- `dev:stop` stops the dev server and keeps the devices; it reports them as kept and runs the reap once. So the restart follow-up `dev:stop && dev --detach` reuses the running device, with no boot and no install.
-- `dev:stop --release` lets go of the local bindings only when this worktree's own server stopped or is absent. It checks the own dev-server lock again first: a remaining or replacement server keeps the devices, and so does a dev server that answers on `--port` but holds no lock of this worktree, because a missing lock proves nothing. A listener on `--port` that is not an Expo dev server does not keep them. A `finishing` lock (§Preserved sessions) counts as no server.
-- Release acts only on the binding it validated in its section (§Entry points), so stale inventory or an earlier cleanup never removes a replacement's record.
+- **Release** lets go of the own local bindings, or one platform's. Under the lock it acts only when the file still holds the binding it read: the same root, `boundAt` and device, and for a `spawned` instance the same AVD, port and pid. A renewed `expiresAt` is the same binding. So stale inventory, an earlier cleanup or a replacement binding never loses its file or its device. Release never reaps.
+- A plain `dev:stop` (Decision 8) reports the devices as kept and runs the reap once.
+- `dev:stop --release` lets go of the local bindings only when this worktree's own server stopped or is absent. It checks the own dev-server lock again first: a remaining or replacement server keeps the devices, and so does a dev server that answers on `--port` but holds no lock of this worktree, because a missing lock proves nothing. A listener on `--port` that is not an Expo dev server does not keep them. A `finishing` lock ([[0004-smart-start-and-project-state]]) counts as no server.
 - A refused stop reports the listener's measured state; what it cannot identify is `null`.
 
 ## Lifecycle smoke
@@ -270,7 +270,6 @@ An EAS session belongs to the worktree that started it. The registry records whi
 
 - Every cloud device verb carries the selected session id to execution. `eas simulator:exec` loads `.env.eas-simulator` and starts a local guard with that environment. The guard starts the controller only when the loaded `EAS_SIMULATOR_SESSION_ID` equals the selected id. Else it exits 20, starts nothing, and the run refuses `CLOUD_SESSION_MISMATCH` with both ids (`selectedSessionId`, `loadedSessionId`) and the How line `dev:stop --eas`.
 - The guard checks the environment the controller gets, so a dotenv another run replaces during the command cannot change the session.
-- The guard program is one line, and the controller target crosses the outer shim as base64 JSON, so `cmd.exe` cannot end or unescape it on Windows.
 - The screenshot never throws: a mismatch is its reason for no picture. A report's `command` is the logical `eas simulator:exec npx agent-device@latest …`, not the guard.
 
 ### Session discovery
@@ -286,37 +285,34 @@ An EAS session belongs to the worktree that started it. The registry records whi
 - An unreadable binding file of this platform refuses before the probe, and no session starts.
 - The EAS open binds whenever it has a session id. A binding that cannot be written fails the open. A session no binding records belongs to no run, so the open stops a session it started and could not bind, unless a `dotenv` binding records that id; the check and the stop are one section.
 - The foreground `dev --eas` and `smoke --eas` stop the session they started at exit. `smoke --eas` passes no build id: with no EAS build of this fingerprint it fails its gate and starts nothing.
-- The cloud rung writes only the lease of the selected binding. An expired binding is `gone` with cause `expired`, unless the dotenv names a different live session.
+- The cloud rung writes only the lease of the selected binding. An expired binding does not hide a different live session that the dotenv names.
 - The start follow-ups and `status` read the own live cloud bindings, with no network call and no dotenv. `status` maps an installed row with no local device, beside a live binding of its platform, to `reason: 'cloud-session'` with no commands.
 
 ### Session cleanup
 
 - `dev:stop --eas` stops the probe's session (active or queued, bound or dotenv) and every other cloud binding of this worktree, expired ones included. It needs no `--release`. A stop that worked while the lock was not taken leaves the binding with `released: null` and says the record remains. `deviceError` names a failed stop, a lock error or an unreadable cloud file. A probe that is `unknown` or `unavailable` reports its reason in `session.reason`, not `deviceError`, so the stop exits 0 when every known session stopped.
 - A plain `dev:stop` keeps cloud bindings and reports each as recorded, not checked ([[0021-honest-reports]]), with `dev:stop --eas` next.
-- A reap stops a deleted or expired worktree's `started` session and only removes a `dotenv` one. Its line says why: "Stopped EAS Simulator session <id> of worktree <path>: that worktree no longer exists, so no other command can stop it."
+- A reap that stops a deleted worktree's `started` session (§Records) says why: "Stopped EAS Simulator session <id> of worktree <path>: that worktree no longer exists, so no other command can stop it."
 - `status` names the `started` sessions of deleted worktrees inside the session cap from their files, with no `eas` call and no lock: a `billing` line says they are recorded, not checked, and may still bill, and `--json` has `orphanSessions`. The command is `dev:stop`, whose reap stops them; beside a running dev server of this worktree it is `eas simulator:stop --id <id>`.
 - A session stopped by hand keeps its file until a reap, which stops it again with no error, because eas-cli answers a stopped session as stopped.
 
-### One session per worktree
+### One session per worktree at the open
 
 - eas-cli keeps one session's connection in `.env.eas-simulator`, only a start writes it, and the guard drives only that session. So the EAS open starts no session while this worktree has a live or queued session on another platform, bound or named by the dotenv. The refusal binds and stops nothing and names `dev:stop --eas`.
 - Its How line names the command that uses the existing session: `navigate / --eas --<its platform>` beside a running dev server, and `dev --<its platform> --eas --detach` in the detach pre-check, before the child spawns.
-- Two starts at once on two platforms can still bind two sessions; the guard refuses the one the dotenv does not name.
 
 ### Preserved sessions
 
-- The detached `dev --eas` child keeps its session and binding when Metro exits, so a plain `dev:stop` keeps both and `dev:stop --eas` owns their cleanup. The foreground `dev --eas` stops the session it started. The detached report's last follow-up is `dev:stop --eas`.
+- The detached `dev --eas` child keeps its session and binding when Metro exits, so a plain `dev:stop` keeps both and `dev:stop --eas` owns their cleanup. The detached report's last follow-up is `dev:stop --eas`.
 - **`--wait-ready` waits for the session.** The registry is the authority: the wait ends on a live cloud binding of the platform bound at or after the spawn, or, once the child's lock says `easOpenFinished`, on the platform's binding from before the spawn that the child reused and renewed. A finished open with no such binding ends the wait at once with exit 22 `DEV_DETACH_SESSION_PENDING`; so does the deadline, with `pid`, `url`, `tunnelUrl`, `platform` and `waitedMs`. The budget is 180 s after the bundler and the tunnel (`AGENT_CLI_EAS_SESSION_WAIT_MS`), because an Android session binds up to 120 s after the tunnel. It polls the registry each second, with no network call.
-- **A child still starting its session is followed, not reopened.** A rerun beside a Metro follows the child when the lock names this EAS platform, does not say `easOpenFinished`, the child's pid is alive, no binding of the platform is live or bound since the lock's `startedAt`, and the lock is younger than the start window (17 min: the 2 min tunnel wait plus the 15 min start timeout). The child sets `easOpenFinished` when its open returns, bound or failed; a port retry keeps the flag and renews `startedAt`. Outside that condition the rerun reopens.
-- **A finishing run binds its session.** When Metro stops during the session start, the run keeps its dev-server lock and marks it `finishing` until the start returns the id it binds. A `dev:stop` that reads `finishing` reports the server stopped, sends no SIGKILL (which would lose the id), and names `dev:stop --eas` first. `dev:stop --eas` beside a `finishing` lock waits until the open finished or the lock is gone, until the start window ends or 180 s pass, whichever comes first, then stops the sessions; at that deadline it stops nothing and exits 22. A start that returns after Metro stopped binds only when the listing still shows the session, or cannot be read.
+- **A child still starting its session is followed, not reopened.** A rerun beside a Metro follows the child when the lock names this EAS platform, does not say `easOpenFinished`, the child's pid is alive, no binding of the platform is live or bound since the lock's `startedAt`, and the lock is younger than the start window (17 min: the 2 min tunnel wait plus the 15 min start timeout). Outside that condition the rerun reopens; beside a `finishing` lock it refuses ([[0004-smart-start-and-project-state]]).
+- **A finishing run binds its session.** When Metro stops during the session start, the run keeps its dev-server lock as `finishing` until the start returns the id it binds, so nothing may kill it: a SIGKILL would lose that id. `dev:stop --eas` beside a `finishing` lock waits until the open finished or the lock is gone, until the start window ends or 180 s pass, whichever comes first, then stops the sessions; at that deadline it stops nothing and exits 22. A start that returns after Metro stopped binds only when the listing still shows the session, or cannot be read.
 - **An existing Metro can get a fresh session.** `dev --eas --detach` beside a running Metro checks its health, then opens the app through the EAS open: it reuses the bound session or starts one and binds it. A Metro with no tunnel refuses `DEVICE_UNAVAILABLE`, How: `dev:stop`, then `dev --<platform> --eas --detach`. A development build looks up its build id only when it starts a session.
 - A reused development-client session gets the connection URL of the current tunnel, built from the tunnel host the manifest names now. The open refuses a URL whose host is not that tunnel, so LAN or loopback is never sent.
 
 ## Not built
 
 The agent's pid in the binding; a take of another worktree's simulator; a cap on parked simulators; allocation from any free booted device; capacity from CPUs and RAM; mtime touch, lock token or heartbeat; a lock-free write path; dev-lock socket liveness; a writable first emulator; `emu kill` by serial; `--device` on `navigate`; a "still booting" inspect state; a stop of the old session when the cloud id changes; deleting `.env.eas-simulator` on `dev:stop --eas` (the registry lock does not cover eas-cli's write of it).
-
-**Recovery by tag.** The start passes no `--tag`, so a lost registry leaves its session unbound; `dev:stop --eas` and the dotenv id still reach it. The design, if built: tag each start `agent-cli:<digest>` and add a selection rung for a live session with that tag, recorded as `started`.
 
 ## EAS facts
 
@@ -331,26 +327,29 @@ Read in eas-cli 24.7.0 and the service source, 2026-10-01.
 
 Each accepted race costs one rerun of `dev`, never a lost build or a touched human device.
 
-1. Android facts a live gate on SDK 58 confirmed: a second `-read-only` instance boots beside the first and takes `adb reverse` and an install; an emulator on a taken port exits non-zero; the launcher keeps its pid; a cold boot plus the install fits the boot timeout.
-2. A reused pid of an unrelated process holds the registry lock until a human reads the message. Where `ps` does not exist, a reused emulator pid can be killed, and a verb can drive whatever answers on the serial.
-3. A pinned eas-cli 24.8.0 or older rejects `--status queued`, so the listing fails, the probe is `unknown` and no session starts.
-4. The service's idle semantics are unread; 30 min may stop a session during a long pause.
-5. A crash or a timeout during `simctl create` leaks one `Shutdown` `agent-cli …` simulator; nothing deletes it. A cold `simctl list` can exceed `status`'s probe deadline, so `status` reports `unknown`.
-6. `smoke` on a development-build project compiles onto the worktree's simulator, not onto one that already has the app.
-7. After a plain `dev:stop`, a cloud binding expires in 60 min unless a verb renews it; another worktree's reap then stops a `started` session. A session of another EAS account cannot be stopped from this machine.
-8. A different emulator that takes an `explicit` serial reads as `up`; Contract 7 keeps it unharmed. An instance answers `get-state` before `sys.boot_completed`, so a read verb can reach it seconds early.
-9. `dev:stop --release` during a build step of the same worktree finds no server and shuts down the simulator under the build. The next verb reports `gone` and the agent reruns `dev`.
-10. A simulator left `Booted` stays up until its lease expires and a reap with an iOS inventory parks it. After `git worktree move`, the next reap deletes the old path's simulator while its Metro may still run.
-11. Shutdowns run after the section, so a reap can shut down a simulator that a later section reused in the same seconds; that `dev` fails and is rerun.
-12. A sleep over 60 min with a server that `start` runs loses the device.
-13. Without a cap, each living worktree keeps one parked simulator with its build on disk until the worktree is removed.
-14. A worktree created at a deleted worktree's path inherits its bindings, devices and session. The bindings of an unmounted volume are stale, so its simulator is deleted and its emulator killed.
-15. The newest iOS runtime may list only a device no app renders on [observed — iOS 27.1 lists only iPhone Duo, 2026-10-08]; the choice prefers a mainstream iPhone across runtimes.
+1. A reused pid of an unrelated process holds the registry lock until a human reads the message. Where `ps` does not exist, a reused emulator pid can be killed, and a verb can drive whatever answers on the serial.
+2. A pinned eas-cli 24.8.0 or older rejects `--status queued`, so the listing fails, the probe is `unknown` and no session starts.
+3. The service's idle semantics are unread; 30 min may stop a session during a long pause.
+4. A crash or a timeout during `simctl create` leaks one `Shutdown` `agent-cli …` simulator; nothing deletes it. A cold `simctl list` can exceed `status`'s probe deadline, so `status` reports `unknown`.
+5. `smoke` on a development-build project compiles onto the worktree's simulator, not onto one that already has the app.
+6. After a plain `dev:stop`, a cloud binding expires in 60 min unless a verb renews it; another worktree's reap then stops a `started` session. A session of another EAS account cannot be stopped from this machine.
+7. A different emulator that takes an `explicit` serial reads as `up`; Contract 7 keeps it unharmed. An instance answers `get-state` before `sys.boot_completed`, so a read verb can reach it seconds early.
+8. `dev:stop --release` during a build step of the same worktree finds no server and shuts down the simulator under the build. The next verb reports `gone` and the agent reruns `dev`.
+9. A simulator left `Booted` stays up until its lease expires and a reap with an iOS inventory parks it. After `git worktree move`, the next reap deletes the old path's simulator while its Metro may still run.
+10. Shutdowns run after the section, so a reap can shut down a simulator that a later section reused in the same seconds; that `dev` fails and is rerun.
+11. A sleep over 60 min with a server that `start` runs loses the device.
+12. Without a cap, each living worktree keeps one parked simulator with its build on disk until the worktree is removed.
+13. A worktree created at a deleted worktree's path inherits its bindings, devices and session. The bindings of an unmounted volume are stale, so its simulator is deleted and its emulator killed.
+14. The newest iOS runtime may list only a device no app renders on [observed — iOS 27.1 lists only iPhone Duo, 2026-10-08]; the choice prefers a mainstream iPhone across runtimes.
+15. A failed kill of a released emulator whose file another binding took in the meantime leaves the instance running with no file; the release reports the failed kill, and nothing kills the instance later.
+16. Two EAS opens at once on two platforms can each bind a session. The guard drives only the one the dotenv names; the other bills until `dev:stop --eas`, which stops every cloud binding of the worktree, or until its idle timeout.
 
 ## Open questions
 
 1. Where does the idle check run on the service, and what counts as activity?
 2. Should `--device <session-id>` with `--eas`, refused as `BAD_ARGS` today, bind a session another tool started?
+3. Should a lint or boundary test enforce Contract 3: no listing of devices to select one outside `src/deviceBinding/`, and `status --device` binds nothing?
+4. Should each start pass `--tag agent-cli:<digest>`, with a selection rung for a live session of that tag recorded as `started`, so a lost registry does not leave a session unbound? Today `dev:stop --eas` and the dotenv id still reach it.
 
 ## Testing
 
