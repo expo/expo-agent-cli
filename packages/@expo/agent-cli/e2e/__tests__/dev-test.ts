@@ -1196,7 +1196,7 @@ describe('@expo/agent-cli dev', () => {
   // made *of* the device's answer. Nothing here can reach a real device: `adb`, `emulator` and
   // `xcrun` are all stubs of this project's own, and `ANDROID_HOME` points at a stub SDK so a
   // runner that has a real one is not preferred over them (llp/0002 §Tier 0). The first case spawns
-  // a stub emulator instance and binds it (llp/0035 §Android instance); the others reuse the bound attached stub
+  // a stub emulator instance and binds it (llp/0035 §Android boot); the others reuse the bound attached stub
   // emulator.
   describe('dev-client-install — the build is current and the device has not got it', () => {
     /** The application id the fixture is given, so there is a named app to ask a device about. */
@@ -1430,7 +1430,7 @@ describe('@expo/agent-cli dev', () => {
     });
   });
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §iOS tests
+  // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
   //
   // Two worktrees of one app, one stub `simctl` whose simulator state both runs share, and one
   // registry: each `dev --ios` creates its own simulator, binds it, boots it with `bootstatus -b`,
@@ -1492,7 +1492,7 @@ describe('@expo/agent-cli dev', () => {
     });
   });
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §State after Android binding
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Android boot
   //
   // Two worktrees of one app, one stub `adb` and `emulator` whose instance state both runs share,
   // and one registry: each `dev --android` spawns its own read-only instance of the one AVD on the

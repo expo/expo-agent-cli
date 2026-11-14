@@ -271,7 +271,7 @@ describe(devAsync, () => {
       });
     });
 
-    // @ref llp/0035-one-device-per-worktree.rfc.md §Lease timer
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Lease
     it(`should renew the worktree's device lease around a build step`, async () => {
       mockStaleDevClientState();
 
