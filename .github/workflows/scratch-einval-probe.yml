@@ -24,6 +24,7 @@ jobs:
       - name: Run the stop-test step 60 times
         working-directory: packages/@expo/agent-cli
         run: |
+          set +e
           node -v
           fail=0; einval=0
           for i in $(seq 1 60); do
