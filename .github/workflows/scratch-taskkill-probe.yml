@@ -7,9 +7,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        slot: [1, 2, 3, 4, 5, 6]
+        slot: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -24,12 +24,14 @@ jobs:
       - run: bun install --ignore-scripts --frozen-lockfile
       - run: bun run build
         working-directory: packages/@expo/agent-cli
-      - name: Run the dev:stop case 15 times
+      - name: Run shard 3 four times
         working-directory: packages/@expo/agent-cli
         run: |
           fail=0
-          for i in $(seq 1 15); do
-            if bun run test:e2e -- dev-detach-test -t "is stopped by dev:stop, which takes the whole tree with it" > run.log 2>&1; then echo "run $i pass"; else fail=$((fail+1)); echo "run $i FAIL"; grep -E 'Expected|Received|expected|AssertionError|Tests ' run.log | head -8; fi
+          for i in 1 2 3 4; do
+            bun run test:e2e -- --shard=3/3 > run.log 2>&1 && echo "run $i pass" || echo "run $i nonzero"
+            grep -E ' FAIL  ' run.log | sed 's/.*> //' | sort -u | sed "s/^/run $i failed: /"
+            if grep -q 'FAIL .*takes the whole tree' run.log; then fail=$((fail+1)); grep -A14 'FAIL .*takes the whole tree' run.log | grep -E '^[-+] ' ; fi
           done
           echo "PROBE_FAILURES=$fail"
-          node -e "const p=require('path').join(require('os').tmpdir(),'agent-cli-taskkill.log');console.log(require('fs').existsSync(p)?require('fs').readFileSync(p,'utf8'):'no log')"
+          node -e "const p=require('path').join(require('os').tmpdir(),'agent-cli-taskkill.log');const l=require('fs').existsSync(p)?require('fs').readFileSync(p,'utf8').trim().split('\\n'):[];console.log('TASKKILL_CALLS='+l.length);for(const x of l){if(!x.includes('\"exitCode\":0,'))console.log('TASKKILL_NONZERO '+x)}"
