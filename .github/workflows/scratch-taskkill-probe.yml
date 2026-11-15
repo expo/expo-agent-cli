@@ -27,6 +27,7 @@ jobs:
       - name: Run shard 3 four times
         working-directory: packages/@expo/agent-cli
         run: |
+          set +e
           fail=0
           for i in 1 2 3 4; do
             bun run test:e2e -- --shard=3/3 > run.log 2>&1 && echo "run $i pass" || echo "run $i nonzero"
