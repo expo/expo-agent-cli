@@ -82,6 +82,10 @@ export async function signalProcessAsync(
         timeoutMs: 5000,
       }
     );
+    require('node:fs').appendFileSync(
+      require('node:path').join(require('node:os').tmpdir(), 'agent-cli-taskkill.log'),
+      JSON.stringify({ pid, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, aliveAfter: isProcessAlive(pid) }) + '\n'
+    );
     return result.spawnError
       ? { delivered: false, error: result.spawnError.message }
       : { delivered: result.exitCode === 0, error: result.stderr.trim() || undefined };
