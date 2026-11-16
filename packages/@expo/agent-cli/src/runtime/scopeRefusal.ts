@@ -254,9 +254,8 @@ function noAppOnPlatformError(
   scopeWhy: string
 ): CommandError {
   const { value: platform, by } = targetSelection.platform;
-  const silent =
-    targetSelection.device?.backend === 'cloud' ? unansweredAppsText(unanswered, platform) : null;
   const cloud = targetSelection.device?.backend === 'cloud';
+  const silent = cloud ? unansweredAppsText(unanswered, platform) : null;
   const others = scoped.otherPlatform.map((entry) => entry.platform);
   const uniqueOthers = [...new Set(others)];
   // A flag hint only where the flag can help. Dropping a flag reads every app only when no device

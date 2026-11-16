@@ -412,7 +412,7 @@ export function classifyTargets(
  * session's app: a cloud scope that is not Android, and, with no platform named, no target already
  * read.
  */
-export function sessionSlotOpen(
+function sessionSlotOpen(
   targetSelection: TargetSelection,
   classifiedTargets: Pick<ClassifiedTargets, 'read'>
 ): boolean {
@@ -535,7 +535,7 @@ async function withSessionTargetLivenessAsync(
   targets: readonly CdpTarget[],
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
-  options?: { timeoutMs?: number }
+  options: { timeoutMs: number }
 ): Promise<DeviceInventory> {
   const classified = classifyTargets([...targets], targetSelection, deviceInventory);
   if (!sessionSlotOpen(targetSelection, classified) || classified.undetermined.length < 2) {
