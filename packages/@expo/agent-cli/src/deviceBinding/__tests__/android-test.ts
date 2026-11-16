@@ -401,7 +401,9 @@ describe(releaseWorktreeDevicesAsync, () => {
 
     const released = await releaseWorktreeDevicesAsync(ROOT, { platform: 'android', tools });
 
-    expect(released).toEqual([expect.objectContaining({ released: false, reason: 'kill EPERM' })]);
+    expect(released).toEqual([
+      expect.objectContaining({ released: false, reason: 'kill EPERM\nHow: run "kill 77".' }),
+    ]);
     const read = readBindingFile(file());
     expect(read.kind === 'binding' && read.binding).toMatchObject({
       device: { origin: { emulatorPid: 77 } },

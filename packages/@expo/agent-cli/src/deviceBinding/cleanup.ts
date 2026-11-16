@@ -4,6 +4,7 @@ import { easCommandPrefix } from '../utils/easCli';
 import { firstLine } from '../utils/text';
 import { killEmulatorIfOurs } from './android';
 import { event } from './events';
+import { killStep, withHow } from './manualStep';
 import { shutdownSimulatorAsync } from './ios';
 import { deviceReport } from './records';
 import { restoreBindingIfGoneAsync } from './release';
@@ -77,7 +78,7 @@ export async function runCleanupAsync(
     );
     // The How line rides on the error dev:stop prints, not on the progress line above.
     const step = report.error ? manualStep(item) : null;
-    if (step) report.error = `${report.error}\nHow: run "${step}".`;
+    if (step && report.error) report.error = withHow(report.error, step);
     if (item.reaped && item.reason === 'deleted-worktree') {
       Log.error(
         `Dev-server cleanup was not checked for deleted worktree ${item.binding.projectRoot}; a CLI or Metro process may still be running.`
@@ -136,7 +137,7 @@ function manualStep({ binding: { device }, action }: Cleanup): string | null {
   if (device.backend === 'local-ios' && (action === 'delete' || action === 'shutdown'))
     return `xcrun simctl ${action} ${device.udid}`;
   if (device.backend === 'local-android' && device.origin.kind === 'spawned' && action === 'kill')
-    return `kill ${device.origin.emulatorPid}`;
+    return killStep(device.origin.emulatorPid);
   return null;
 }
 

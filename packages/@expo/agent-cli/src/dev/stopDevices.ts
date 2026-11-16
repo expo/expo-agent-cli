@@ -79,8 +79,13 @@ async function stopLocalDevicesAsync(
             platform: unreadable.platform,
             path: unreadable.file,
           }).message;
-        if (report.devices.some((device) => device.released === false))
-          report.deviceError ??= `Some devices could not be released; see devices for details.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" again.`;
+        const failed = report.devices.filter((device) => device.released === false);
+        if (failed.length > 0) {
+          const step = failed
+            .flatMap((device) => device.reason?.split('\n') ?? [])
+            .find((line) => line.startsWith('How:'));
+          report.deviceError ??= `Some devices could not be released; see devices for details.\n${step ?? `How: run "${PROGRAM_PREFIX} dev:stop --release" again.`}`;
+        }
       }
     }
   } catch (error) {
