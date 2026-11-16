@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 // Where a run's lock points: resolve a step's port, publish it on the run's lock, follow Metro's report.
 
 import { lockAddressOrEmpty } from './address';

@@ -71,7 +71,7 @@ export async function startAsync(projectRoot: string, options: StartOptions): Pr
  * The delay keeps the dependency scan away from the first bundle, and the timer is
  * cancelled when the dev server exits first, so a failed start syncs nothing.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Status — the dev-server lock of
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the dev-server lock of
  * `src/devLock/` is published here, because this is the one place that knows a dev server is
  * starting and can wait for the port it ends up on. The caller owns `lock` and ends it.
  *

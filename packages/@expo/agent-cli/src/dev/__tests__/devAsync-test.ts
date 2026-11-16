@@ -282,7 +282,7 @@ describe(devAsync, () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — F121. The stub `expo`'s
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table — F121. The stub `expo`'s
   // launch failure prints a fixed stderr, never the Automation refusal, and `bare-app`, whose
   // `run:ios` can die of that refusal, has no fingerprint to record.
   describe('a build step that failed', () => {

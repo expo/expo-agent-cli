@@ -300,7 +300,7 @@ describe('resolveDevServerReachAsync', () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — with no lock, the log
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — with no lock, the log
   // may be an earlier run's. Only the running dev server's own manifest confirms its tunnel.
   describe('no lock answers', () => {
     beforeEach(() => {

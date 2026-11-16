@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 // When the lock is published: at the spawn when the arguments name a port, else when the dev
 // server reports one. Against a real lock address.
 

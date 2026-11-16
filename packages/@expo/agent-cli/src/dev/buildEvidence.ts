@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
 // Whether a `expo run:*` step got as far as putting the app it built on a device.
 //
 // `expo run:ios` and `expo run:android` are one subprocess that **builds, installs and then

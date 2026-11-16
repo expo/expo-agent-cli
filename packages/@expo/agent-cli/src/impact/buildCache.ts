@@ -1,6 +1,6 @@
 // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
 // "A finished build already exists for this exact fingerprint" — a materially better answer than
-// "you need a native build". `status` and the change classifier ask it; the local plan does not.
+// "you need a native build". `status` and the plan for an EAS device ask it; the local plan does not.
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Implemented in v1
 //
 // `eas build:list --fingerprint-hash <hash>` is what makes it possible [observed — eas-cli README,

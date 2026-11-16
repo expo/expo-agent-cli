@@ -226,7 +226,7 @@ export async function resolveDevServerReachAsync(
     Promise.resolve(readDevServerLogSync(projectRoot)),
   ]);
   const fromLog = resolveDevServerReach(captured, lock);
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — with no lock, only the
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — with no lock, only the
   // manifest of the dev server that answered names its tunnel, whatever the log says (S3, below).
   if (lock == null && devServerUrl != null) {
     const fromServer = await fetchAdvertisedUrlAsync(devServerUrl);
