@@ -15,7 +15,10 @@ beforeEach(() => {
   vol.reset();
   vol.fromJSON({ [`${ROOT}/package.json`]: '{}' });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 
 it('explicit-expires-keeps-file and explicit-never-shut-down', async () => {
   const tools = fakeTools({ simulators: [{ udid: 'HUMAN', name: 'human', state: 'Booted' }] });
@@ -103,4 +106,31 @@ it('a lost lease names the dev command, with --eas for a cloud file', async () =
     expect.stringContaining(`"${deviceCommand('ios')}"`),
     expect.stringContaining('dev --android --eas --detach --wait-ready'),
   ]);
+});
+
+it('under AGENT_CLI_NO_DEVICE the timer renews a cloud file and leaves a local file alone', async () => {
+  vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
+  vi.useFakeTimers();
+  const tools = fakeTools();
+  const local = bindingFor(ROOT, 'SIM');
+  writeBinding(file(), local);
+  const cloudFile = bindingPathFor(ROOT, 'android', 'cloud');
+  writeCloudBinding(ROOT, 'android', 'session');
+  let finish!: () => void;
+  const work = withLeaseExtendedAsync(
+    ROOT,
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    { tools }
+  );
+  tools.clock.now = new Date(tools.now().getTime() + EXTEND_EVERY_MS);
+  await vi.advanceTimersByTimeAsync(EXTEND_EVERY_MS);
+  finish();
+  await work;
+  expect(readBindingFile(cloudFile)).toMatchObject({
+    binding: { expiresAt: new Date(tools.now().getTime() + LEASE_MS).toISOString() },
+  });
+  expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: local });
 });

@@ -1,5 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Lease
 import { Log } from '../log';
+import { devicesDisabled } from '.';
 import { deviceCommand } from './errors';
 import { extendLeaseAsync, EXTEND_EVERY_MS } from './lease';
 import { ownBindingFiles } from './records';
@@ -16,11 +17,11 @@ export async function withLeaseExtendedAsync<T>(
     warn = Log.error,
   }: { tools?: DeviceTools; warn?: (message: string) => void } = {}
 ): Promise<T> {
-  if (process.env.AGENT_CLI_NO_DEVICE === '1') return work();
   const states = new Map<string, 'extended' | 'lost'>();
   let ticking: Promise<void> | undefined;
   const tick = async () => {
     for (const { file, platform, backend } of ownBindingFiles(projectRoot)) {
+      if (backend !== 'cloud' && devicesDisabled()) continue;
       if (!states.has(file) && readBindingFile(file).kind === 'none') continue;
       try {
         const state = await extendLeaseAsync(projectRoot, platform, backend, tools, {

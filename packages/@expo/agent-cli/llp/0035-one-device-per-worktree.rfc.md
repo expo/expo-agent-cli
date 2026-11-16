@@ -126,7 +126,7 @@ Let go, one rule per binding, first match. The file action runs under the lock, 
 
 - 60 min, renewed every 5 min by a running Metro or build step. A renewal of a live lease writes a new `expiresAt`; an expired or missing one, or, for a read verb, a file that now names another device, is **lost**, and nothing is written.
 - A read verb renews with a 5 s lock wait. A lock timeout warns and goes on; a lost lease refuses `gone`.
-- Metro (for `dev`, the detached child and `start`) and the build steps of a plan run inside a renewal timer. Each tick renews every file of the worktree that exists, so a cloud binding made after Metro started and a parked simulator that `dev --detach` revived are both kept alive. A tick that cannot take the lock in 5 s is skipped. The timer warns once per change to lost, with the `dev` command of §Output and errors (`--eas` for a cloud file), and never throws.
+- Metro (for `dev`, the detached child and `start`) and the build steps of a plan run inside a renewal timer. Each tick renews every file of the worktree that exists, so a cloud binding made after Metro started and a parked simulator that `dev --detach` revived are both kept alive. Under `AGENT_CLI_NO_DEVICE=1` the timer renews cloud bindings only, so a session that `dev --eas` bound stays leased while Metro runs. A tick that cannot take the lock in 5 s is skipped. The timer warns once per change to lost, with the `dev` command of §Output and errors (`--eas` for a cloud file), and never throws.
 - The foreground `dev` exit and the detached child touch no local binding; the lease expires on its own.
 
 ## Lock
@@ -344,7 +344,6 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 14. The newest iOS runtime may list only a device no app renders on [observed — iOS 27.1 lists only iPhone Duo, 2026-10-08]; the choice prefers a mainstream iPhone across runtimes.
 15. A device whose delete, kill or stop failed after another binding took its file keeps running with no file. The failure names the device and nothing retries.
 16. Two EAS opens at once on two platforms can each bind a session. The guard drives only the one the dotenv names; the other bills until `dev:stop --eas`, which stops every cloud binding of the worktree, or until its idle timeout.
-17. Under `AGENT_CLI_NO_DEVICE=1` no renewal timer runs, but `dev --eas` still binds its session, so that binding expires 60 min after the bind or a verb's last renewal while Metro runs, and another worktree's reap can then stop the `started` session.
 
 ## Open questions
 
