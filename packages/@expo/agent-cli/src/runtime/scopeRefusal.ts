@@ -111,6 +111,22 @@ export function noAppConnectedError({
 }
 
 /**
+ * What the refusal says when the liveness probe kept apps that opened and answered nothing: an Expo
+ * simulator session that ended leaves its app listed like that until the dev server restarts
+ * (llp/0005 §Target owner), and closing an app does not remove it.
+ */
+function unansweredAppsText(unanswered: number, platform: NavigatePlatform | null) {
+  if (unanswered === 0) {
+    return null;
+  }
+  const restart = `"${PROGRAM_PREFIX} dev --${platform ?? 'ios'} --eas --detach"${platform == null ? ' (or --android)' : ''}`;
+  return {
+    why: ` ${unanswered === 1 ? 'One of them' : `${unanswered} of them`} opened a debugger connection and did not answer: an Expo simulator session that ended leaves its app listed like that until the dev server restarts, and an app that is still loading answers late.`,
+    how: `How: if the session's app is still loading, run this command again. If an Expo simulator session ended on this dev server, restart the dev server: "${PROGRAM_PREFIX} dev:stop" keeps the session, then ${restart}. A dev server that this worktree did not start must be restarted by its owner.`,
+  };
+}
+
+/**
  * The failure for an EAS Simulator session with no platform flag whose app nothing places.
  *
  * Two or more unclaimed apps leave no way to say which one is the session's, and a device tool that
@@ -120,15 +136,18 @@ export function noAppConnectedError({
 function noSessionAppError(
   devServerUrl: string,
   unplaced: number,
+  unanswered: number,
   skippedWhy: string
 ): CommandError {
   const apps = `${unplaced} app${unplaced === 1 ? '' : 's'}`;
+  const silent = unansweredAppsText(unanswered, null);
   const error = new CommandError(
     'NO_APP_CONNECTED',
     [
       `No app connected to the Expo dev server at ${devServerUrl} could be shown to be the EAS Simulator session's app.`,
-      `Why: its debugger target list names ${apps} that nothing on this machine places. One unclaimed app is the session's only when the local device tools answered and no other app is unclaimed.${skippedWhy}`,
-      `How: close the apps on this dev server that are not the session's, then run this command again. A platform flag ("--ios --eas" or "--android --eas") only chooses which device tool has to answer; it does not choose between two unclaimed apps.`,
+      `Why: its debugger target list names ${apps} that nothing on this machine places. One unclaimed app is the session's only when the local device tools answered and no other app is unclaimed.${silent?.why ?? ''}${skippedWhy}`,
+      silent?.how ??
+        `How: close the apps on this dev server that are not the session's, then run this command again. A platform flag ("--ios --eas" or "--android --eas") only chooses which device tool has to answer; it does not choose between two unclaimed apps.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} status --json`;
@@ -170,8 +189,16 @@ export function emptyScopeError(
       ? ` This worktree is bound to ${describeSelectedDevice(targetSelection.device)}.`
       : '';
   const scopeWhy = `${skipped.length > 0 ? ` ${describeSkippedApps(skipped)}` : ''}${boundTo}`;
+  const unanswered = classifiedTargets.undetermined.filter((target) =>
+    deviceInventory.unansweredTargetIds.includes(target.id)
+  ).length;
   if (platform == null && classifiedTargets.undetermined.length > 0) {
-    return noSessionAppError(devServerUrl, classifiedTargets.undetermined.length, scopeWhy);
+    return noSessionAppError(
+      devServerUrl,
+      classifiedTargets.undetermined.length,
+      unanswered,
+      scopeWhy
+    );
   }
   if (
     targetSelection.platform != null &&
@@ -181,6 +208,7 @@ export function emptyScopeError(
       devServerUrl,
       { ...targetSelection, platform: targetSelection.platform },
       classifiedTargets,
+      unanswered,
       scopeWhy
     );
   }
@@ -222,9 +250,12 @@ function noAppOnPlatformError(
   devServerUrl: string,
   targetSelection: TargetSelection & { platform: NonNullable<TargetSelection['platform']> },
   scoped: Pick<ClassifiedTargets, 'otherPlatform' | 'undetermined'>,
+  unanswered: number,
   scopeWhy: string
 ): CommandError {
   const { value: platform, by } = targetSelection.platform;
+  const silent =
+    targetSelection.device?.backend === 'cloud' ? unansweredAppsText(unanswered, platform) : null;
   const cloud = targetSelection.device?.backend === 'cloud';
   const others = scoped.otherPlatform.map((entry) => entry.platform);
   const uniqueOthers = [...new Set(others)];
@@ -247,10 +278,12 @@ function noAppOnPlatformError(
         ].join('\n')
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
-          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.${scopeWhy}`,
-          cloud
-            ? `How: close the apps on this dev server that are not the EAS Simulator session's, then run this command again. --${platform} only chooses which device tool has to answer; it does not choose between two unclaimed apps.`
-            : `How: ${bound ? '' : `drop --${platform} to read the app that is connected, which is the honest command when only one is. Or `}connect the device where this machine's device tools can see it ("adb devices -l", "xcrun simctl list devices booted"), so its platform is recognised.`,
+          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.${silent?.why ?? ''}${scopeWhy}`,
+          silent
+            ? silent.how
+            : cloud
+              ? `How: close the apps on this dev server that are not the EAS Simulator session's, then run this command again. --${platform} only chooses which device tool has to answer; it does not choose between two unclaimed apps.`
+              : `How: ${bound ? '' : `drop --${platform} to read the app that is connected, which is the honest command when only one is. Or `}connect the device where this machine's device tools can see it ("adb devices -l", "xcrun simctl list devices booted"), so its platform is recognised.`,
         ].join('\n')
   );
   error.suggestedCommand =

@@ -68,22 +68,23 @@ export async function probeTargetLivenessAsync(
 export const SESSION_PROBE_TIMEOUT_MS = 1500;
 
 /**
- * The ids of the targets an ended EAS Simulator session left listed. A target is one when its
- * socket opened and it answered nothing within the deadline, and another target of the same device
- * name and app id answered.
+ * Ask unplaced targets of an Expo simulator session to answer. `dead` are the ones an ended session
+ * left listed: the socket opened, nothing answered within the deadline, and another target of the
+ * same device name and app id answered. `unanswered` opened and answered nothing, with no answering
+ * twin, so they are kept.
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
  * An ended session's page stays listed and its socket opens, so the handshake above calls it live.
  * Only a request tells: the page answers nothing. Its device name and app id are the live
  * session's, so an answer from any other device proves nothing about it.
  */
-export async function endedSessionTargetIdsAsync(
+export async function probeSessionTargetsAsync(
   targets: readonly CdpTarget[],
   {
     timeoutMs = SESSION_PROBE_TIMEOUT_MS,
     createWebSocket = createInspectorWebSocket,
   }: ProbeOptions = {}
-): Promise<string[]> {
+): Promise<{ dead: string[]; unanswered: string[] }> {
   const answers = new Map(
     await Promise.all(
       targets.map(
@@ -115,7 +116,12 @@ export async function endedSessionTargetIdsAsync(
     unknown: [...answers.values()].filter((answer) => answer === 'unreachable').length,
     dead: dead.length,
   });
-  return dead.map((target) => target.id);
+  return {
+    dead: dead.map((target) => target.id),
+    unanswered: targets
+      .filter((target) => answers.get(target.id) === 'opened' && !dead.includes(target))
+      .map((target) => target.id),
+  };
 }
 
 /**

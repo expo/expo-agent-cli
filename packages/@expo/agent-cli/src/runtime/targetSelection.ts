@@ -11,7 +11,7 @@ import { liveIosBindings, type LiveIosBinding } from '../deviceBinding/records';
 import { SIMCTL_TIMEOUT_MS } from '../device/simulators';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
-import { endedSessionTargetIdsAsync, SESSION_PROBE_TIMEOUT_MS } from './targetLiveness';
+import { probeSessionTargetsAsync, SESSION_PROBE_TIMEOUT_MS } from './targetLiveness';
 import { onAndroidModel, platformOfTarget } from './targetPlatform';
 
 /**
@@ -44,6 +44,11 @@ export interface DeviceInventory {
    * classification counts them.
    */
   deadTargetIds: readonly string[];
+  /**
+   * Ids of the listed targets the liveness probe asked that opened and answered nothing, but had no
+   * answering twin, so they are kept. A refusal names them.
+   */
+  unansweredTargetIds: readonly string[];
 }
 
 /** Facts that know nothing, for a run that did not need to ask the device tools. */
@@ -54,6 +59,7 @@ export const EMPTY_DEVICE_INVENTORY: DeviceInventory = {
   androidReverse: null,
   iosBindings: [],
   deadTargetIds: [],
+  unansweredTargetIds: [],
 };
 
 /** The device a run reads, independent of how it was resolved. */
@@ -535,10 +541,14 @@ async function withSessionTargetLivenessAsync(
   if (!sessionSlotOpen(targetSelection, classified) || classified.undetermined.length < 2) {
     return deviceInventory;
   }
-  const dead = await endedSessionTargetIdsAsync(classified.undetermined, options);
-  return dead.length === 0
+  const { dead, unanswered } = await probeSessionTargetsAsync(classified.undetermined, options);
+  return dead.length === 0 && unanswered.length === 0
     ? deviceInventory
-    : { ...deviceInventory, deadTargetIds: [...deviceInventory.deadTargetIds, ...dead] };
+    : {
+        ...deviceInventory,
+        deadTargetIds: [...deviceInventory.deadTargetIds, ...dead],
+        unansweredTargetIds: [...deviceInventory.unansweredTargetIds, ...unanswered],
+      };
 }
 
 /**
