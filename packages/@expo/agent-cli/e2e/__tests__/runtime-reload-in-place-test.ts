@@ -17,7 +17,7 @@ import {
   setupFixtureAsync,
   startStubDevServerAsync,
 } from '../utils';
-import { installStubXcrunAsync } from './installedAppStubs';
+import { installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
 
 const FLAGS = ['--timeout', '12s', '--json', '--no-followups'];
 
@@ -268,6 +268,83 @@ describe('runtime:reload --method runtime', () => {
       }
     }
   );
+
+  it('sends no expo.reloadAppAsync when its own app cannot keep the marker, and names --method device', async () => {
+    const { root, target } = await onIosSessionAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [target],
+      inspectorSocket: 'no-debugger',
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--eas',
+          '--method',
+          'runtime',
+          '--dev-server-url',
+          server.url,
+          ...FLAGS,
+        ],
+        { reject: false }
+      );
+      expect(result.exitCode, result.all).toBe(20);
+      expect(result.stderr).toContain(
+        'could keep the marker that proves a reload by expo.reloadAppAsync, so none was sent'
+      );
+      expect(result.stderr).toContain('runtime:reload --eas --method device');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('reloads a local Android app with the reason and proves it', async () => {
+    const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+    await installStubXcrunAsync(root, { simulators: [] });
+    const adb = await installStubAdbAsync(root, 'dev.example.app');
+    const evaluated: string[] = [];
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [
+        runtimeTarget('android', {
+          deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+          appId: 'dev.example.app',
+        }),
+      ],
+      inspectorEvaluate: (expression) => {
+        evaluated.push(expression);
+        return /reloadAppAsync\(/.test(expression) ? 'sent' : undefined;
+      },
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--android',
+          '--method',
+          'runtime',
+          '--dev-server-url',
+          server.url,
+          ...FLAGS,
+        ],
+        { reject: false, env: { ...adb.env, AGENT_CLI_NO_DEVICE: '0' } }
+      );
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        method: 'runtime',
+        verifiedBy: 'debugger-context-replaced',
+      });
+      expect(evaluated.find((expression) => /reloadAppAsync\(/.test(expression))).toMatch(
+        /reloadAppAsync\((['"])@expo\/agent-cli/
+      );
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 describe('smoke on an iOS EAS session', () => {
