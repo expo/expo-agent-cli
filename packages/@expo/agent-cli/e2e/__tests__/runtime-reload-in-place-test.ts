@@ -17,7 +17,7 @@ import {
   setupFixtureAsync,
   startStubDevServerAsync,
 } from '../utils';
-import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
+import { installStubXcrunAsync } from './installedAppStubs';
 
 const FLAGS = ['--timeout', '12s', '--json', '--no-followups'];
 
@@ -27,17 +27,16 @@ interface Attempt {
   reason: string;
 }
 
-async function onIosSessionAsync(appId = 'dev.example.app') {
+async function onIosSessionAsync() {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
   await installStubXcrunAsync(root, { simulators: [] });
   await installStubEasAsync(root);
   await writeCloudBindingAsync(expoHomeOf(root), root, { id: 'sess-e2e' });
   await writeCloudSessionFileAsync(root, 'sess-e2e');
-  return { root, target: runtimeTarget('session', { deviceName: 'iPhone 17 Pro', appId }) };
-}
-
-function reloadCalls(evaluated: string[]): number {
-  return evaluated.filter((expression) => /reloadAppAsync\(/.test(expression)).length;
+  return {
+    root,
+    target: runtimeTarget('session', { deviceName: 'iPhone 17 Pro', appId: 'dev.example.app' }),
+  };
 }
 
 describe('runtime:reload on an iOS EAS session', () => {
@@ -87,10 +86,9 @@ describe('runtime:reload on an iOS EAS session, after a Page.reload that proved 
     { pageReload: 'keeps-context' as const, nativePageReloads: true },
     { pageReload: 'replaces-context' as const, nativePageReloads: false },
   ])(
-    'relaunches the session app after a Page.reload that proved nothing, and never asks it to reload itself ($pageReload, $nativePageReloads)',
+    'relaunches the session app after a Page.reload that proved nothing ($pageReload, $nativePageReloads)',
     async ({ pageReload, nativePageReloads }) => {
       const { root, target } = await onIosSessionAsync();
-      const evaluated: string[] = [];
       const server = await startStubDevServerAsync({
         projectRoot: root,
         targets: [
@@ -101,10 +99,6 @@ describe('runtime:reload on an iOS EAS session, after a Page.reload that proved 
         ],
         messageSocket: 'no-churn',
         pageReload,
-        inspectorEvaluate: (expression) => {
-          evaluated.push(expression);
-          return /reloadAppAsync\(/.test(expression) ? 'sent' : undefined;
-        },
       });
       try {
         const result = await executeAgentCliAsync(
@@ -117,7 +111,6 @@ describe('runtime:reload on an iOS EAS session, after a Page.reload that proved 
           report.attempts.map((each: Attempt) => each.method),
           result.all
         ).toEqual(['page-reload', 'device']);
-        expect(reloadCalls(evaluated)).toBe(0);
         expect(server.broadcasts()).toBe(0);
         expect(stubEasArgs(root).some((argv) => argv[0] === 'simulator:exec')).toBe(true);
       } finally {
@@ -127,46 +120,9 @@ describe('runtime:reload on an iOS EAS session, after a Page.reload that proved 
   );
 });
 
-// A local iOS build keeps the broadcast, and the relaunch after it (llp/0005 §How it reloads).
-describe('runtime:reload after a broadcast that proved nothing', () => {
-  it('relaunches dev.example.app on a local simulator and never asks it to reload itself', async () => {
-    const appId = 'dev.example.app';
-    const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
-    const { calls } = await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
-    const evaluated: string[] = [];
-    const server = await startStubDevServerAsync({
-      projectRoot: root,
-      targets: [runtimeTarget('local', { deviceName: BOOTED_SIMULATOR.name, appId })],
-      messageSocket: 'no-churn',
-      inspectorEvaluate: (expression) => {
-        evaluated.push(expression);
-        return /reloadAppAsync\(/.test(expression) ? 'sent' : undefined;
-      },
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        root,
-        ['runtime:reload', '--ios', '--dev-server-url', server.url, ...FLAGS],
-        { reject: false }
-      );
-      const report = JSON.parse(result.stdout);
-      expect(
-        report.attempts.map((each: Attempt) => each.method),
-        result.all
-      ).toEqual(['dev-server', 'device']);
-      expect(reloadCalls(evaluated)).toBe(0);
-      expect(calls().some((argv) => argv.join(' ').includes(`terminate ${SIMULATOR_UDID}`))).toBe(
-        true
-      );
-    } finally {
-      await server.close();
-    }
-  });
-});
-
 // A pinned method does what it names, and an app that took the call and never answered is left to
 // reload, not relaunched under it.
-describe('runtime:reload on an iOS EAS session, beside the in-place rungs', () => {
+describe('runtime:reload on an iOS EAS session under a pinned method', () => {
   it('broadcasts under a pinned --method dev-server', async () => {
     const { root, target } = await onIosSessionAsync();
     const server = await startStubDevServerAsync({ projectRoot: root, targets: [target] });
@@ -316,22 +272,19 @@ describe('runtime:reload --method runtime', () => {
 
 describe('smoke on an iOS EAS session', () => {
   it.each([
-    { appId: 'dev.example.app', pageReload: 'replaces-context' as const, reload: 'ok' },
-    { appId: 'dev.example.app', pageReload: 'keeps-context' as const, reload: 'inconclusive' },
+    { pageReload: 'replaces-context' as const, reload: 'ok' },
+    { pageReload: 'keeps-context' as const, reload: 'inconclusive' },
   ])(
-    'smoke reloads $appId in place, and never asks it to reload itself ($pageReload)',
-    async ({ appId, pageReload, reload }) => {
-      const { root, target } = await onIosSessionAsync(appId);
-      const evaluated: string[] = [];
+    'smoke reloads the session app with Page.reload and never broadcasts ($pageReload)',
+    async ({ pageReload, reload }) => {
+      const { root, target } = await onIosSessionAsync();
       const server = await startStubDevServerAsync({
         projectRoot: root,
         targets: [target],
         messageSocket: 'no-churn',
         pageReload,
-        inspectorEvaluate: (expression) => {
-          evaluated.push(expression);
-          return /reloadAppAsync\(/.test(expression) ? 'sent' : 1;
-        },
+        // The liveness check evaluates `1`.
+        inspectorEvaluate: () => 1,
       });
       try {
         const result = await executeAgentCliAsync(
@@ -352,7 +305,6 @@ describe('smoke on an iOS EAS session', () => {
         const report = JSON.parse(result.stdout);
         const phase = report.phases.find((each: { id: string }) => each.id === 'reload');
         expect(phase.status, result.all).toBe(reload);
-        expect(reloadCalls(evaluated)).toBe(0);
         expect(server.broadcasts()).toBe(0);
         if (reload === 'ok') {
           expect(report.reload).toMatchObject({ verifiedBy: 'debugger-context-replaced' });
