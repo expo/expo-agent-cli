@@ -301,14 +301,8 @@ function relaunchCommand(report: ReloadResultJson, options: ReloadOptions): stri
 
 /** The mechanisms this run delivered, in the words of what they are. */
 function triedMechanisms(report: ReloadResultJson): string {
-  const tried = report.attempts.flatMap((attempt) => {
-    if (attempt.method === 'device') return [];
-    if (attempt.method === 'dev-server') {
-      // An attempt with no `delivered` sent no broadcast: the run could not see the apps, or the
-      // socket was never reached.
-      return attempt.delivered == null ? [] : ['the broadcast'];
-    }
-    return attempt.delivered ? [inPlaceLabel(attempt.method)] : [];
-  });
+  const tried = report.attempts
+    .filter((attempt) => attempt.method !== 'device' && attempt.delivered === true)
+    .map((attempt) => (isInPlaceAttempt(attempt) ? inPlaceLabel(attempt.method) : 'the broadcast'));
   return tried.length > 0 ? tried.join(' and ') : 'this run';
 }

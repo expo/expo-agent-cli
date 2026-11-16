@@ -167,8 +167,7 @@ export async function reloadInPlaceAsync(
         kind,
         attempt,
         churn,
-        // Only `auto` relaunches, and only after `Page.reload`: a pinned method never does.
-        relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,
+        relaunchWhy: clause,
       };
 }
 

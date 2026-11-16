@@ -31,7 +31,7 @@ import { platformOfTarget } from '../targetPlatform';
 import type { ReloadAttempt, Settled } from './attempt';
 import { markBundleSignalSync, type BundleSignalMark } from './bundleSignal';
 import { debugEvent } from './events';
-import { proofDeadline, reloadInPlaceAsync } from './inPlace';
+import { proofDeadline, reloadInPlaceAsync, type InPlaceMechanism } from './inPlace';
 import type { ReloadMethod } from './resolveOptions';
 
 /**
@@ -312,8 +312,16 @@ export function rungOnePolicy(
           targetSelection.platform?.value === 'ios'
         ? 'ios-eas-session'
         : null;
+  const chosen =
+    method === 'runtime'
+      ? ({ mechanism: 'runtime' } as const)
+      : trigger != null
+        ? ({ mechanism: 'page-reload', trigger } as const)
+        : unread != null
+          ? ({ mechanism: 'none', unread } as const)
+          : ({ mechanism: 'broadcast' } as const);
   // A broadcast reaches every listed app. `Page.reload` and `--method runtime` reach only `read`.
-  const reachesAll = method !== 'runtime' && trigger == null;
+  const reachesAll = chosen.mechanism === 'broadcast' || chosen.mechanism === 'none';
   const outside = reachesAll
     ? [
         ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
@@ -323,13 +331,7 @@ export function rungOnePolicy(
         ({ target }) => platformOfTarget(target, deviceInventory).platform
       );
   const mechanism: RungOneMechanism =
-    method === 'runtime'
-      ? { mechanism: 'runtime' }
-      : trigger != null
-        ? { mechanism: 'page-reload', trigger }
-        : unread != null
-          ? { mechanism: 'none', unread }
-          : { mechanism: 'broadcast', reachedOutside: outside.length };
+    chosen.mechanism === 'broadcast' ? { ...chosen, reachedOutside: outside.length } : chosen;
   return {
     ...mechanism,
     bundlePlatforms:
@@ -418,7 +420,7 @@ async function prepareOwnListedAsync(
   devServerUrl: string,
   projectRoot: string,
   prepared: PreparedRungOne,
-  { deadline, method }: { deadline: number; method: ReloadMethod }
+  { deadline, method }: { deadline: number; method: Exclude<ReloadMethod, 'device'> }
 ): Promise<PreparedRungOne> {
   const { policy } = prepared;
   if (policy.mechanism !== 'page-reload' || policy.trigger !== 'ios-eas-session') {
@@ -438,8 +440,7 @@ async function prepareOwnListedAsync(
 
 /**
  * Rung 1 from one fresh observation: prepare, read the list again while an iOS EAS session's app is
- * not listed yet, mark the dev server's output, and run the mechanism. `--method device` skips the
- * relist and the mechanism, so its `outcome` is null.
+ * not listed yet, mark the dev server's output, and run the mechanism.
  *
  * The mark is taken after the relist and before the mechanism, so everything the bundle watch counts
  * is output the dev server produced because of this run: a first load during the relist is not.
@@ -452,30 +453,32 @@ export async function firstStepAsync(
     preflight,
     method,
     remainingMs,
-  }: { preflight: RungOneObservation | null; method: ReloadMethod; remainingMs: () => number }
-): Promise<{
-  prepared: PreparedRungOne;
-  bundleMark: BundleSignalMark;
-  outcome: RungOneOutcome | null;
-}> {
+  }: {
+    preflight: RungOneObservation | null;
+    method: Exclude<ReloadMethod, 'device'>;
+    remainingMs: () => number;
+  }
+): Promise<{ prepared: PreparedRungOne; bundleMark: BundleSignalMark; outcome: RungOneOutcome }> {
   const first = await prepareRungOneAsync(devServerUrl, projectRoot, targetSelection, {
     budgetMs: remainingMs(),
     preflight,
     method,
   });
-  const deadline = proofDeadline(
-    first.policy.mechanism === 'runtime' ? 'runtime' : 'page-reload',
-    remainingMs()
-  );
+  const { mechanism } = first.policy;
+  const deadline =
+    mechanism === 'page-reload' || mechanism === 'runtime'
+      ? proofDeadline(mechanism, remainingMs())
+      : undefined;
   const prepared =
-    method === 'device'
+    deadline == null
       ? first
       : await prepareOwnListedAsync(devServerUrl, projectRoot, first, { deadline, method });
   const bundleMark = markBundleSignalSync(projectRoot);
-  const outcome =
-    method === 'device'
-      ? null
-      : await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs(), deadline });
+  const outcome = await runRungOneAsync(devServerUrl, {
+    prepared,
+    budgetMs: remainingMs(),
+    deadline,
+  });
   return { prepared, bundleMark, outcome };
 }
 
@@ -494,7 +497,7 @@ export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn
        * in-place reload, so none was sent.
        */
       kind: 'delivered' | 'not-delivered' | 'unprovable';
-      /** The clause the relaunch's attempt opens with. */
+      /** Why rung 1 proved nothing, as a clause: an `auto` relaunch opens its attempt with it. */
       relaunchWhy: string;
     }
 );
@@ -508,10 +511,10 @@ export function settleRungOne(outcome: RungOneOutcome): Settled {
     case 'acted':
       return { kind: 'observe', method };
     case 'delivered':
-      return { kind: 'relaunch', method, why: outcome.relaunchWhy };
+      return { kind: 'unproved', method, clause: outcome.relaunchWhy };
     case 'not-delivered':
     case 'unprovable':
-      return { kind: 'relaunch', method: null, why: outcome.relaunchWhy };
+      return { kind: 'unproved', method: null, clause: outcome.relaunchWhy };
   }
 }
 
@@ -522,7 +525,7 @@ export function settleRungOne(outcome: RungOneOutcome): Settled {
  * @param budgetMs the caller's budget. The broadcast's peer churn is watched for no longer (F95),
  * and keeps its minimum observation window.
  * @param deadline the end of rung 1's window (`proofDeadline`), which an in-place mechanism shares
- * across every target and all proof phases.
+ * across every target and all proof phases. Without one, an in-place mechanism opens its own.
  */
 export async function runRungOneAsync(
   devServerUrl: string,
@@ -530,9 +533,10 @@ export async function runRungOneAsync(
     prepared,
     budgetMs,
     deadline,
-  }: { prepared: PreparedRungOne; budgetMs: number; deadline: number }
+  }: { prepared: PreparedRungOne; budgetMs: number; deadline?: number }
 ): Promise<RungOneOutcome> {
   const { policy, classifiedTargets, targets } = prepared;
+  const window = (mechanism: InPlaceMechanism) => deadline ?? proofDeadline(mechanism, budgetMs);
   switch (policy.mechanism) {
     case 'none':
       return {
@@ -544,20 +548,20 @@ export async function runRungOneAsync(
           leftAppStopped: null,
         },
         churn: CHURN_NOT_ASKED,
-        relaunchWhy: `${policy.unread}, so no broadcast was sent and the app was relaunched instead`,
+        relaunchWhy: `${policy.unread}, so no broadcast was sent`,
       };
     case 'page-reload':
       return await pageReloadAsync(devServerUrl, {
         trigger: policy.trigger,
         own: classifiedTargets.read,
         skips: classifiedTargets.skipped.length,
-        deadline,
+        deadline: window('page-reload'),
       });
     case 'runtime':
       return await reloadInPlaceAsync(devServerUrl, {
         mechanism: 'runtime',
         own: classifiedTargets.read,
-        deadline,
+        deadline: window('runtime'),
         churn: CHURN_NOT_ASKED,
       });
     case 'broadcast':
@@ -615,14 +619,13 @@ async function broadcastAsync(
         attempt,
         churn,
         relaunchWhy:
-          "the reload was broadcast to a client on the dev server's command socket and nothing was seen to come of it, so the app was relaunched instead",
+          "the reload was broadcast to a client on the dev server's command socket and nothing was seen to come of it",
       }
     : {
         kind: 'not-delivered',
         attempt,
         churn,
-        relaunchWhy:
-          "no client was registered on the dev server's command socket, so the app was relaunched instead",
+        relaunchWhy: "no client was registered on the dev server's command socket",
       };
 }
 

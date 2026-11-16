@@ -195,7 +195,7 @@ describe('what rung 1 leaves for the rest of the run', () => {
     },
     {
       outcome: { ...base, kind: 'delivered', relaunchWhy: 'why' },
-      settled: { kind: 'relaunch', method: 'dev-server', why: 'why' },
+      settled: { kind: 'unproved', method: 'dev-server', clause: 'why' },
     },
     {
       outcome: {
@@ -204,15 +204,15 @@ describe('what rung 1 leaves for the rest of the run', () => {
         kind: 'delivered',
         relaunchWhy: 'why',
       },
-      settled: { kind: 'relaunch', method: 'runtime', why: 'why' },
+      settled: { kind: 'unproved', method: 'runtime', clause: 'why' },
     },
     {
       outcome: { ...base, kind: 'not-delivered', relaunchWhy: 'why' },
-      settled: { kind: 'relaunch', method: null, why: 'why' },
+      settled: { kind: 'unproved', method: null, clause: 'why' },
     },
     {
       outcome: { ...base, kind: 'unprovable', relaunchWhy: 'why' },
-      settled: { kind: 'relaunch', method: null, why: 'why' },
+      settled: { kind: 'unproved', method: null, clause: 'why' },
     },
   ])('$outcome.kind by $outcome.attempt.method', ({ outcome, settled }) => {
     expect(settleRungOne(outcome)).toEqual(settled);

@@ -177,14 +177,15 @@ async function reloadApp(
   const { projectRoot } = ctx;
   const deadline = Date.now() + timeoutMs;
   const remainingMs = () => Math.max(0, deadline - Date.now());
-  const step = await firstStepAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
+  const {
+    prepared,
+    bundleMark,
+    outcome: rungOne,
+  } = await firstStepAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
     preflight: ctx.lastObservation(),
     method: 'auto',
     remainingMs,
   });
-  const { prepared, bundleMark } = step;
-  // `auto` always runs rung 1.
-  const rungOne = step.outcome!;
   const result = {
     knownTargetIds: prepared.targets.map((target) => target.id),
     commandSocketReconnected: rungOne.churn.reconnected > 0,

@@ -47,18 +47,24 @@ import {
   type SkippedApp,
 } from '../targetSelection';
 import { countConnectedAppsAsync } from '../waitReady';
-import { type BundleSignalMark, type BundleSignalObservation } from './bundleSignal';
+import {
+  markBundleSignalSync,
+  type BundleSignalMark,
+  type BundleSignalObservation,
+} from './bundleSignal';
 import { reloadOnCloudSimulatorAsync } from './cloudReload';
-import { keepsPageId, type ReloadAttempt } from './attempt';
+import { isInPlaceAttempt, keepsPageId, type ReloadAttempt } from './attempt';
 import { observeReloadAsync, type ReloadEvidence, type Unwatched } from './evidence';
 import { debugEvent, event } from './events';
 import { type ReloadOptions } from './resolveOptions';
 import {
   CHURN_NOT_ASKED,
   firstStepAsync,
+  prepareRungOneAsync,
   settleRungOne,
   type CommandSocketChurn,
   type PreparedRungOne,
+  type RungOneObservation,
   type RungOneOutcome,
 } from './rungOne';
 import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
@@ -488,17 +494,22 @@ async function climbLadderAsync(
   //
   // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. **Rung 1 keeps the app's process**:
   // the broadcast, `Page.reload`, or under a pinned `--method runtime` `expo.reloadAppAsync`. A
-  // pinned `--method device` skips to the relaunch. The settle says what follows: done, the shared
-  // observations (F97), or the relaunch.
+  // pinned `--method device` skips to the relaunch. The settle says what rung 1 came to: proved, the
+  // shared observations decide (F97), or unproved, which in `auto` relaunches.
   const {
     prepared,
     bundleMark,
     outcome: rungOne,
-  } = await firstStepAsync(devServerUrl, projectRoot, targetSelection, {
-    preflight: devServer,
-    method: options.method,
-    remainingMs,
-  });
+  } = options.method === 'device'
+    ? await relaunchOnlyStepAsync(devServerUrl, projectRoot, targetSelection, {
+        preflight: devServer,
+        remainingMs,
+      })
+    : await firstStepAsync(devServerUrl, projectRoot, targetSelection, {
+        preflight: devServer,
+        method: options.method,
+        remainingMs,
+      });
   const settled = rungOne && settleRungOne(rungOne);
   const attempts: ReloadAttempt[] = rungOne ? [rungOne.attempt] : [];
   const actionConnection: RuntimeConnection = { ...devServer, ...prepared };
@@ -512,7 +523,7 @@ async function climbLadderAsync(
   // act: the session's controller (`./cloudReload.ts`, wave 19's two verbs) or a device booted on
   // this machine.
   //
-  // Reached whenever rung 1 settled `relaunch`, and the second state is F99
+  // Reached whenever `auto`'s rung 1 settled `unproved`, and the second state is F99
   // — the ladder climbing rather than stopping:
   //
   //  1. the reload reached no app: the socket had no client, or no own target took `Page.reload`;
@@ -529,8 +540,11 @@ async function climbLadderAsync(
   // cost is visible in (`withRelaunchCost`). A **pinned** `--method dev-server` never climbs:
   // a caller who named one rung excluded the others, cost and all.
   const relaunchRung =
-    options.method === 'device' || (options.method === 'auto' && settled?.kind === 'relaunch');
-  const why = settled?.kind === 'relaunch' ? settled.why : '--method device named the relaunch';
+    options.method === 'device' || (options.method === 'auto' && settled?.kind === 'unproved');
+  const why =
+    settled?.kind === 'unproved'
+      ? `${settled.clause}, so the app was relaunched${rungOne && isInPlaceAttempt(rungOne.attempt) ? " on this worktree's device" : ''} instead`
+      : '--method device named the relaunch';
   const relaunch = !relaunchRung
     ? null
     : options.cloud
@@ -574,6 +588,24 @@ async function climbLadderAsync(
     mechanismProof,
     actionConnection,
   };
+}
+
+/**
+ * `--method device` skips rung 1: one fresh observation for the relaunch's evidence, and the bundle
+ * mark taken before it.
+ */
+async function relaunchOnlyStepAsync(
+  devServerUrl: string,
+  projectRoot: string,
+  targetSelection: PreparedRungOne['targetSelection'],
+  { preflight, remainingMs }: { preflight: RungOneObservation; remainingMs: RemainingMs }
+): Promise<{ prepared: PreparedRungOne; bundleMark: BundleSignalMark; outcome: null }> {
+  const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, targetSelection, {
+    budgetMs: remainingMs(),
+    preflight,
+    method: 'device',
+  });
+  return { prepared, bundleMark: markBundleSignalSync(projectRoot), outcome: null };
 }
 
 async function observeAsync(

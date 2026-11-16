@@ -36,10 +36,9 @@ export function isInPlaceAttempt(attempt: ReloadAttempt): attempt is InPlaceAtte
 }
 
 /**
- * What rung 1 leaves for the rest of the run. `proved`: done. `observe`: a mechanism ran, and the
- * shared observations (a fresh target, a bundle) decide; nothing relaunches. `relaunch`: in `auto`,
- * the relaunch follows, opened by `why`. Under a pinned method the relaunch runs nothing, so a
- * `relaunch` with a method leaves the shared observations to decide, and one with none is a failure.
+ * What rung 1 came to. `proved`: its own proof arrived. `observe`: a mechanism ran, and the shared
+ * observations (a fresh target, a bundle) decide. `unproved`: no proof, and `clause` says why;
+ * `method` names the mechanism that reached an app, or is null when none did.
  */
 export type Settled =
   | {
@@ -48,7 +47,7 @@ export type Settled =
       proof: 'message-socket-peers' | 'debugger-context-replaced';
     }
   | { kind: 'observe'; method: 'dev-server' | 'runtime' }
-  | { kind: 'relaunch'; method: 'dev-server' | 'runtime' | null; why: string };
+  | { kind: 'unproved'; method: 'dev-server' | 'runtime' | null; clause: string };
 
 interface AttemptOutcome {
   /** The app was reloaded by this method. */
