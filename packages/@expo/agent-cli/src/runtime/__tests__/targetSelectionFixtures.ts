@@ -12,6 +12,8 @@ export function makeDeviceInventory(overrides: Partial<DeviceInventory> = {}): D
     androidDevices: [],
     androidReverse: null,
     iosBindings: [],
+    deadTargetIds: [],
+    unansweredTargetIds: [],
     ...overrides,
   };
 }

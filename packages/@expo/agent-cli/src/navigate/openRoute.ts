@@ -414,12 +414,10 @@ type AttachWaiter = (deadline: number) => Promise<number>;
 async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDevice) {
   const targetSelection = targetSelectionOf({ flags: { platform: null, eas: false }, device });
   const first = await probeDevServerAsync(devServerUrl);
-  const inventory = await deviceInventoryForSelectionAsync(
-    first.targets,
-    targetSelection,
-    null,
-    devServerUrl
-  );
+  // The inventory drops an ended session's app, and the waiter's inventory starts from this one.
+  const inventory = await deviceInventoryForSelectionAsync(first.targets, targetSelection, null, {
+    devServerUrl,
+  });
   return {
     decisionTargets: first.reachable
       ? classifyTargets(first.targets, targetSelection, inventory).read
