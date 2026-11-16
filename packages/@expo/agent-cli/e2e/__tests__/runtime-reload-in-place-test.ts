@@ -1,6 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — in place.
-// Real CLI, bindings and HTTP. The inspector, `eas` and `xcrun` are protocol doubles: the stub app
-// ignores the broadcast (`no-churn`), as the SDK 58 iOS development build does, and reloads on
+// Real CLI, bindings and HTTP. The inspector, `eas` and `xcrun` are protocol doubles: no broadcast
+// reloads the stub app (`no-churn`), as none reaches the SDK 58 iOS app through a tunnel, and it reloads on
 // `expo.reloadAppAsync` only when the call carries a reason, as SDK 58 requires.
 import fs from 'node:fs';
 
@@ -101,7 +101,9 @@ describe('runtime:reload on an iOS EAS session', () => {
           verifiedBy: 'debugger-context-replaced',
         });
         expect(report.attempts.map((each: Attempt) => [each.method, each.ok])).toEqual(attempts);
-        expect(report.attempts[0].reason).toContain('iOS Expo simulator session');
+        expect(report.attempts[0].reason).toContain(
+          'cannot reach the dev server through the tunnel'
+        );
         expect(report.attempts[0].reason).not.toContain('skippedApps');
         expect(server.broadcasts()).toBe(0);
         expect(stubEasArgs(root).filter((argv) => argv[0] === 'simulator:exec')).toEqual([]);
