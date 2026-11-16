@@ -31,7 +31,7 @@ import { platformOfTarget } from '../targetPlatform';
 import type { ReloadAttempt, Settled } from './attempt';
 import { markBundleSignalSync, type BundleSignalMark } from './bundleSignal';
 import { debugEvent } from './events';
-import { proofDeadline, reloadInPlaceAsync, type InPlaceMechanism } from './inPlace';
+import { proofDeadline, reloadInPlaceAsync } from './inPlace';
 import type { ReloadMethod } from './resolveOptions';
 
 /**
@@ -416,7 +416,8 @@ export async function prepareRungOneAsync(
 
 /**
  * Right after `dev`, an iOS EAS session's app may not be listed yet. Read the list again until an
- * own target shows, inside rung 1's window, so `Page.reload` gets what is left of it.
+ * own target shows, inside rung 1's window, so `Page.reload` gets what is left of it. A listed app
+ * that cannot be placed stops the wait: a relist does not make it this session's.
  */
 async function prepareOwnListedAsync(
   devServerUrl: string,
@@ -429,7 +430,11 @@ async function prepareOwnListedAsync(
     return prepared;
   }
   let current = prepared;
-  while (current.classifiedTargets.read.length === 0 && Date.now() < deadline) {
+  while (
+    current.classifiedTargets.read.length === 0 &&
+    current.classifiedTargets.undetermined.length === 0 &&
+    Date.now() < deadline
+  ) {
     await new Promise((resolve) => setTimeout(resolve, RELIST_INTERVAL_MS));
     current = await prepareRungOneAsync(devServerUrl, projectRoot, prepared.targetSelection, {
       budgetMs: Math.max(1, deadline - Date.now()),
@@ -466,15 +471,14 @@ export async function firstStepAsync(
     preflight,
     method,
   });
-  const { mechanism } = first.policy;
-  const deadline =
-    mechanism === 'page-reload' || mechanism === 'runtime'
-      ? proofDeadline(mechanism, remainingMs())
-      : undefined;
-  const prepared =
-    deadline == null
-      ? first
-      : await prepareOwnListedAsync(devServerUrl, projectRoot, first, { deadline, method });
+  const deadline = proofDeadline(
+    first.policy.mechanism === 'runtime' ? 'runtime' : 'page-reload',
+    remainingMs()
+  );
+  const prepared = await prepareOwnListedAsync(devServerUrl, projectRoot, first, {
+    deadline,
+    method,
+  });
   const bundleMark = markBundleSignalSync(projectRoot);
   const outcome = await runRungOneAsync(devServerUrl, {
     prepared,
@@ -527,7 +531,7 @@ export function settleRungOne(outcome: RungOneOutcome): Settled {
  * @param budgetMs the caller's budget. The broadcast's peer churn is watched for no longer (F95),
  * and keeps its minimum observation window.
  * @param deadline the end of rung 1's window (`proofDeadline`), which an in-place mechanism shares
- * across every target and all proof phases. Without one, an in-place mechanism opens its own.
+ * across every target and all proof phases.
  */
 export async function runRungOneAsync(
   devServerUrl: string,
@@ -535,10 +539,9 @@ export async function runRungOneAsync(
     prepared,
     budgetMs,
     deadline,
-  }: { prepared: PreparedRungOne; budgetMs: number; deadline?: number }
+  }: { prepared: PreparedRungOne; budgetMs: number; deadline: number }
 ): Promise<RungOneOutcome> {
   const { policy, classifiedTargets, targets } = prepared;
-  const window = (mechanism: InPlaceMechanism) => deadline ?? proofDeadline(mechanism, budgetMs);
   switch (policy.mechanism) {
     case 'none':
       return {
@@ -557,13 +560,14 @@ export async function runRungOneAsync(
         trigger: policy.trigger,
         own: classifiedTargets.read,
         skips: classifiedTargets.skipped.length,
-        deadline: window('page-reload'),
+        unplaced: classifiedTargets.undetermined.length,
+        deadline,
       });
     case 'runtime':
       return await reloadInPlaceAsync(devServerUrl, {
         mechanism: 'runtime',
         own: classifiedTargets.read,
-        deadline: window('runtime'),
+        deadline,
         churn: CHURN_NOT_ASKED,
       });
     case 'broadcast':
@@ -644,11 +648,13 @@ async function pageReloadAsync(
     trigger,
     own,
     skips,
+    unplaced,
     deadline,
   }: {
     trigger: 'skipped-app' | 'ios-eas-session';
     own: CdpTarget[];
     skips: number;
+    unplaced: number;
     deadline: number;
   }
 ): Promise<RungOneOutcome> {
@@ -656,6 +662,7 @@ async function pageReloadAsync(
   return await reloadInPlaceAsync(devServerUrl, {
     mechanism: 'page-reload',
     own,
+    unplaced: skippedApp ? 0 : unplaced,
     deadline,
     why: skippedApp
       ? `No broadcast was sent, because the dev server relays it to every app, and this run skips ${skips} of them (\`skippedApps\`).`

@@ -76,7 +76,7 @@ export const runtimeReloadHelp: CommandHelp = {
     `Run this after an edit, before any gate that reads the app: a component that threw keeps`,
     `running the old code, and runtime:errors replays what it already reported.`,
     `The command socket picks the rung: dev-server broadcasts a reload where it holds a client.`,
-    `On an iOS EAS session, or beside a skipped app, Page.reload goes to this worktree's app instead.`,
+    `On an iOS Expo simulator session, or beside a skipped app, Page.reload goes to this worktree's app instead.`,
     `--method runtime asks the app to reload itself: expo.reloadAppAsync('${RELOAD_REASON}').`,
     `On Expo Go SDK 57 the call closed the app; not measured on SDK 58.`,
     `Last, device relaunches the app, which costs the app's JavaScript state. --eas names its backend.`,

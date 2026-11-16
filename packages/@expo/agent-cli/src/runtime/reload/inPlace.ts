@@ -96,6 +96,8 @@ export function proofDeadline(mechanism: InPlaceMechanism, budgetMs: number): nu
  * proved is enough: it stops the other checks.
  *
  * @param why the sentence the attempt's reason ends with, or null.
+ * @param unplaced listed apps this session could not place, which the clause names when no own
+ * app is listed.
  * @param churn what the run reports for the command socket, which this rung does not ask.
  */
 export async function reloadInPlaceAsync(
@@ -105,11 +107,13 @@ export async function reloadInPlaceAsync(
     own,
     deadline,
     why = null,
+    unplaced = 0,
     churn,
   }: {
     mechanism: InPlaceMechanism;
     own: CdpTarget[];
     deadline: number;
+    unplaced?: number;
     why?: string | null;
     churn: CommandSocketChurn;
   }
@@ -148,7 +152,9 @@ export async function reloadInPlaceAsync(
     unprovable: `no app of this worktree could carry the marker that proves the reload, so no ${label} was sent`,
     'not-delivered':
       own.length === 0
-        ? unlisted
+        ? unplaced > 0
+          ? `${unplaced} listed app${unplaced === 1 ? '' : 's'} could not be placed on this session`
+          : unlisted
         : reloadable.length === 0
           ? `no app of this worktree takes ${label}`
           : `no app of this worktree answered ${label}`,
