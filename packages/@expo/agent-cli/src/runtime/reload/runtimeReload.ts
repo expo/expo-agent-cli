@@ -88,12 +88,11 @@ function describeOutcome({ deviceName, outcome, reason }: TargetReloadOutcome): 
       return `${name} was asked to reload with expo.reloadAppAsync, and no new JavaScript context was seen: ${reason}`;
     case 'unmarkable':
       return `${name} could not keep the marker that proves a reload, so expo.reloadAppAsync was not called: ${reason}`;
+    // `unsupported` and `stopped` do not occur: one target, no stop, and no capability check.
     case 'not-delivered':
-      return reason ?? `${name} did not answer expo.reloadAppAsync`;
-    // One target, never stopped by another, and the evaluate needs no capability.
     case 'unsupported':
     case 'stopped':
-      throw new Error(`a runtime reload cannot end ${outcome}`);
+      return reason ?? `${name} did not answer expo.reloadAppAsync`;
   }
 }
 
