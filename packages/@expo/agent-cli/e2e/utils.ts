@@ -687,10 +687,10 @@ export async function waitForDevLockAsync(
   }
 }
 
-/** How a stub dev server should answer, per {@link startStubDevServerAsync}. */
 /** An `inspectorEvaluate` answer that sends no reply, as an app whose answer is lost. */
 export const NO_ANSWER = Symbol('no answer');
 
+/** How a stub dev server should answer, per {@link startStubDevServerAsync}. */
 export type StubDevServerOptions = {
   /**
    * Debugger targets `GET /json/list` answers with — the apps a command under test will believe

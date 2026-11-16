@@ -65,7 +65,7 @@ export async function reloadOverRuntimeAsync(
     return targetProofAttempt(
       'runtime',
       [],
-      `no app is connected to the dev server, so there is no runtime to ask — this method reloads an app through its debugger and cannot start one`
+      `no app of this worktree is connected to the dev server, so there is no runtime to ask — this method reloads an app through its debugger and cannot start one`
     );
   }
   const target = await createDefaultTargetSelector()(own);
@@ -77,18 +77,6 @@ export async function reloadOverRuntimeAsync(
   return targetProofAttempt('runtime', [outcome], describeOutcome(outcome));
 }
 
-/** What the run settled on, in the shape rung 1's settlement has. */
-export function settleRuntime(attempt: TargetProofAttempt): {
-  ran: boolean;
-  proof: 'debugger-context-replaced' | null;
-} {
-  // A call that ran and proved nothing still ran: the bundle wait decides.
-  return {
-    ran: attempt.delivered === true,
-    proof: attempt.ok ? 'debugger-context-replaced' : null,
-  };
-}
-
 function describeOutcome({ deviceName, outcome, reason }: TargetReloadOutcome): string {
   const name = `"${deviceName}"`;
   switch (outcome) {
@@ -98,8 +86,12 @@ function describeOutcome({ deviceName, outcome, reason }: TargetReloadOutcome): 
       return `${name} was asked to reload with expo.reloadAppAsync, and no new JavaScript context was seen: ${reason}`;
     case 'unmarkable':
       return `${name} could not keep the marker that proves a reload, so expo.reloadAppAsync was not called: ${reason}`;
-    default:
-      return reason ?? 'expo.reloadAppAsync was not called';
+    case 'not-delivered':
+      return reason ?? `${name} did not answer expo.reloadAppAsync`;
+    // One target, never stopped by another, and the evaluate needs no capability.
+    case 'unsupported':
+    case 'stopped':
+      throw new Error(`a runtime reload cannot end ${outcome}`);
   }
 }
 

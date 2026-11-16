@@ -94,6 +94,21 @@ export function summarizeTargetOutcomes(
     : 'not-delivered';
 }
 
+/**
+ * What a mechanism proved on its targets leaves for the run. `ran`: it reached an app, so the
+ * bundle watch decides what its own proof did not.
+ */
+export function settleTargetProof(attempt: TargetProofAttempt): {
+  ran: boolean;
+  proof: 'debugger-context-replaced' | null;
+} {
+  const summary = summarizeTargetOutcomes(attempt.outcomes);
+  return {
+    ran: summary === 'proved' || summary === 'delivered',
+    proof: summary === 'proved' ? 'debugger-context-replaced' : null,
+  };
+}
+
 /** An attempt of a mechanism proved on its targets: `ok` and `delivered` follow the outcomes. */
 export function targetProofAttempt(
   method: TargetProofMethod,

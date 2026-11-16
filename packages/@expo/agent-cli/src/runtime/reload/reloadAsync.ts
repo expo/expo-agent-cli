@@ -53,7 +53,7 @@ import {
   type BundleSignalObservation,
 } from './bundleSignal';
 import { reloadOnCloudSimulatorAsync } from './cloudReload';
-import { keepsPageId, type ReloadAttempt } from './attempt';
+import { keepsPageId, settleTargetProof, type ReloadAttempt } from './attempt';
 import { observeReloadAsync, type ReloadEvidence, type Unwatched } from './evidence';
 import { debugEvent, event } from './events';
 import { type ReloadOptions } from './resolveOptions';
@@ -66,7 +66,7 @@ import {
   type PreparedRungOne,
   type RungOneOutcome,
 } from './rungOne';
-import { reloadOverRuntimeAsync, settleRuntime } from './runtimeReload';
+import { reloadOverRuntimeAsync } from './runtimeReload';
 import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
 import { printHumanReport, explainReloadFailure } from './report';
 
@@ -561,7 +561,7 @@ async function climbLadderAsync(
       remainingMs()
     );
     attempts.push(attempt);
-    const settled = settleRuntime(attempt);
+    const settled = settleTargetProof(attempt);
     method = settled.ran ? 'runtime' : null;
     mechanismProof = settled.proof;
   }

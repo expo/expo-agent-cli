@@ -883,6 +883,38 @@ describe('runtime:reload --method runtime', () => {
     expect(elapsedMs).toBeLessThan(5000);
   });
 
+  it('tells a person to relaunch, not to broadcast, when the app has no expo global', async () => {
+    const { root, env, target } = await onPlatformAsync('ios');
+    const stub = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [target],
+      messagePeers: {},
+      reloadTargets: 'stale',
+      inspectorEvaluate: (expression) =>
+        RELOAD_CALL.test(expression) ? 'no-expo-global' : undefined,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--method',
+          'runtime',
+          '--dev-server-url',
+          stub.url,
+          '--no-followups',
+        ],
+        { reject: false, env }
+      );
+      expect(result.exitCode, result.all).toBe(20);
+      expect(result.all).toContain('did not take expo.reloadAppAsync');
+      expect(result.all).not.toContain('the broadcast');
+    } finally {
+      await stub.close();
+    }
+  });
+
   // iOS only: the lost answer is decided in the driver, which does not read the platform.
   it('reports a lost answer as delivered, waits for a bundle, and never relaunches', async () => {
     const { result, report, xcrunCalls } = await reloadAsync('ios', {
