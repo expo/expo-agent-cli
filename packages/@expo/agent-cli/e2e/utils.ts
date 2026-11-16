@@ -688,6 +688,9 @@ export async function waitForDevLockAsync(
 }
 
 /** How a stub dev server should answer, per {@link startStubDevServerAsync}. */
+/** An `inspectorEvaluate` answer that sends no reply, as an app whose answer is lost. */
+export const NO_ANSWER = Symbol('no answer');
+
 export type StubDevServerOptions = {
   /**
    * Debugger targets `GET /json/list` answers with — the apps a command under test will believe
@@ -783,14 +786,10 @@ export type StubDevServerOptions = {
    * The expression arrives as the CLI sent it, wrapper and all (`src/runtime/promiseSettling.ts`),
    * so a responder recognises the call it cares about by a marker in the source. Returning
    * `undefined` answers `{type: "undefined"}`, which is what an expression whose value is nothing
-   * comes back as — and is what the target selector's own probe expects.
+   * comes back as — and is what the target selector's own probe expects. Returning
+   * {@link NO_ANSWER} sends no reply at all.
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
-  /**
-   * `lost`: the app never answers `expo.reloadAppAsync(reason)` and keeps its context, as an app
-   * whose call went out and whose new context never showed within the proof window.
-   */
-  reloadAppAsyncAnswer?: 'answers' | 'lost';
   /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
@@ -930,7 +929,6 @@ export async function startStubDevServerAsync({
   bundleLogPath = null,
   targetsAppearWithFile = null,
   inspectorEvaluate,
-  reloadAppAsyncAnswer = 'answers',
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1179,15 +1177,7 @@ export async function startStubDevServerAsync({
         if (setMarker) {
           globals.set(setMarker[1]!, setMarker[2]!);
         }
-        // The reload call over the debugger. The SDK 58 native function takes one string, the
-        // reason; called with none it rejects and reloads nothing [observed — SDK 58 development
-        // build, Expo simulator iOS session, 2026-11-12: "Received 0 arguments, but 1 was expected"].
-        const reloadCall = /reloadAppAsync\(/.test(expression);
-        const reloadsApp = /reloadAppAsync\(\s*(["'])[^"']+\1\s*\)/.test(expression);
-        if (reloadCall && reloadAppAsyncAnswer === 'lost') {
-          return;
-        }
-        if (!setMarker && !readMarker && !removeMarker && !inspectorEvaluate && !reloadCall) {
+        if (!setMarker && !readMarker && !removeMarker && !inspectorEvaluate) {
           return;
         }
         const value = setMarker
@@ -1196,14 +1186,15 @@ export async function startStubDevServerAsync({
             ? globals.get(readMarker[1]!) === readMarker[2]
             : removeMarker
               ? globals.delete(removeMarker[1]!)
-              : inspectorEvaluate
-                ? inspectorEvaluate(expression, device)
-                : reloadCall
-                  ? 'sent'
-                  : undefined;
-        // An app reloads only when the call ran and answered `sent`: a new context, so the marker
-        // is gone.
-        if (reloadsApp && value === 'sent') {
+              : inspectorEvaluate!(expression, device);
+        if (value === NO_ANSWER) {
+          return;
+        }
+        // The reload call over the debugger reloads only with a reason: the SDK 58 native function
+        // takes one string, and called with none it rejects and reloads nothing [observed — SDK 58
+        // development build, Expo simulator iOS session, 2026-11-12: "Received 0 arguments, but 1
+        // was expected"]. A new context has no marker.
+        if (value === 'sent' && /reloadAppAsync\(\s*(["'])[^"']+\1\s*\)/.test(expression)) {
           markers.delete(device);
           applyReloadTargets();
         }

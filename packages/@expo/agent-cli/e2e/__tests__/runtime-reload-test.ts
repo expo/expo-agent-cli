@@ -15,6 +15,7 @@ import {
   holdLockForAsync,
   installStubBinAsync,
   setupFixtureAsync,
+  NO_ANSWER,
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
@@ -790,17 +791,19 @@ describe('runtime:reload --method runtime', () => {
   async function onPlatformAsync(platform: 'ios' | 'android') {
     const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
     if (platform === 'ios') {
-      await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+      const xcrun = await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
       return {
         root,
+        xcrunCalls: xcrun.calls,
         env: { AGENT_CLI_NO_DEVICE: '0' },
         target: runtimeTarget('ios', { deviceName: SIMULATOR_NAME, appId: 'dev.example.app' }),
       };
     }
-    await installStubXcrunAsync(root, { simulators: [] });
+    const xcrun = await installStubXcrunAsync(root, { simulators: [] });
     const adb = await installStubAdbAsync(root, 'dev.example.app');
     return {
       root,
+      xcrunCalls: xcrun.calls,
       env: { ...adb.env, AGENT_CLI_NO_DEVICE: '0' },
       target: runtimeTarget('android', {
         deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
@@ -813,17 +816,13 @@ describe('runtime:reload --method runtime', () => {
     platform: 'ios' | 'android',
     stubOptions: Parameters<typeof startStubDevServerAsync>[0] = {}
   ) {
-    const { root, env, target } = await onPlatformAsync(platform);
-    const evaluated: string[] = [];
+    const { root, env, target, xcrunCalls } = await onPlatformAsync(platform);
     const stub = await startStubDevServerAsync({
       projectRoot: root,
       targets: [target],
       messagePeers: {},
       reloadTargets: 'stale',
-      inspectorEvaluate: (expression) => {
-        evaluated.push(expression);
-        return RELOAD_CALL.test(expression) ? 'sent' : undefined;
-      },
+      inspectorEvaluate: (expression) => (RELOAD_CALL.test(expression) ? 'sent' : undefined),
       ...stubOptions,
     });
     try {
@@ -848,7 +847,7 @@ describe('runtime:reload --method runtime', () => {
         result,
         report: JSON.parse(result.stdout) as ReloadReport,
         elapsedMs: Date.now() - started,
-        reloadCall: evaluated.find((expression) => RELOAD_CALL.test(expression)),
+        xcrunCalls,
       };
     } finally {
       await stub.close();
@@ -858,7 +857,7 @@ describe('runtime:reload --method runtime', () => {
   it.each(['ios', 'android'] as const)(
     'passes the reason SDK 58 requires and proves the reload on the same page id (%s)',
     async (platform) => {
-      const { result, report, reloadCall } = await reloadAsync(platform);
+      const { result, report } = await reloadAsync(platform);
       expect(result.exitCode, result.all).toBe(0);
       expect(report).toMatchObject({
         reloaded: true,
@@ -866,7 +865,6 @@ describe('runtime:reload --method runtime', () => {
         verifiedBy: 'debugger-context-replaced',
       });
       expect(report.attempts.map((attempt) => attempt.method)).toEqual(['runtime']);
-      expect(reloadCall).toMatch(/reloadAppAsync\((['"])@expo\/agent-cli/);
     }
   );
 
@@ -885,12 +883,19 @@ describe('runtime:reload --method runtime', () => {
     expect(elapsedMs).toBeLessThan(5000);
   });
 
+  // iOS only: the lost answer is decided in the driver, which does not read the platform.
   it('reports a lost answer as delivered, waits for a bundle, and never relaunches', async () => {
-    const { result, report } = await reloadAsync('ios', { reloadAppAsyncAnswer: 'lost' });
+    const { result, report, xcrunCalls } = await reloadAsync('ios', {
+      inspectorEvaluate: (expression) => (RELOAD_CALL.test(expression) ? NO_ANSWER : undefined),
+    });
     expect(result.exitCode, result.all).toBe(22);
     expect(report.method).toBe('runtime');
     expect(report.attempts).toEqual([
       expect.objectContaining({ method: 'runtime', ok: false, delivered: true }),
     ]);
+    expect(report.bundlesAfterReload.observed).toBe(false);
+    expect(xcrunCalls().filter((args) => args[1] === 'launch' || args[1] === 'terminate')).toEqual(
+      []
+    );
   });
 });

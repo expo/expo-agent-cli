@@ -60,6 +60,57 @@ export function settledAttempt(attempts: readonly ReloadAttempt[]): ReloadAttemp
   return attempts.findLast((attempt) => attempt.ok || attempt.delivered === true);
 }
 
+/** The mechanisms proved on the target they act on. */
+export type TargetProofMethod = 'page-reload' | 'runtime';
+export type TargetProofAttempt = Extract<ReloadAttempt, { method: TargetProofMethod }>;
+
+export function hasTargetOutcomes(attempt: ReloadAttempt): attempt is TargetProofAttempt {
+  return 'outcomes' in attempt;
+}
+
+/** What each mechanism sends to the target, as the report names it. */
+export const ACTION_NAME: Record<TargetProofMethod, string> = {
+  'page-reload': 'Page.reload',
+  runtime: 'expo.reloadAppAsync',
+};
+
+export function contextReplacedClause(names: string, method: TargetProofMethod): string {
+  return `${names} answered from a new JavaScript context after ${ACTION_NAME[method]}`;
+}
+
+/**
+ * What the targets' outcomes add up to. `proved`: a target answered from a new context.
+ * `delivered`: a target answered and no new context was seen. `unprovable`: every target that
+ * takes the action could not carry the marker, so the action was not sent.
+ */
+export function summarizeTargetOutcomes(
+  outcomes: readonly TargetReloadOutcome[]
+): 'proved' | 'delivered' | 'unprovable' | 'not-delivered' {
+  if (outcomes.some((each) => each.outcome === 'context-replaced')) return 'proved';
+  if (outcomes.some((each) => each.outcome === 'delivered-unproved')) return 'delivered';
+  const reloadable = outcomes.filter((each) => each.outcome !== 'unsupported');
+  return reloadable.length > 0 && reloadable.every((each) => each.outcome === 'unmarkable')
+    ? 'unprovable'
+    : 'not-delivered';
+}
+
+/** An attempt of a mechanism proved on its targets: `ok` and `delivered` follow the outcomes. */
+export function targetProofAttempt(
+  method: TargetProofMethod,
+  outcomes: TargetReloadOutcome[],
+  reason: string
+): TargetProofAttempt {
+  const summary = summarizeTargetOutcomes(outcomes);
+  return {
+    method,
+    ok: summary === 'proved',
+    delivered: summary === 'proved' || summary === 'delivered',
+    reason,
+    outcomes,
+    leftAppStopped: null,
+  };
+}
+
 /**
  * Why the mechanism brings the app back under the page id it had, or null when it does not. Then a
  * page id the dev server had not listed can prove the reload.
@@ -68,7 +119,7 @@ const KEEPS_PAGE_ID: Record<ReloadAttempt['method'], string | null> = {
   'page-reload': 'the app answered Page.reload, which keeps its page id',
   device: 'a relaunched app registers again under the page id it had',
   'dev-server': null,
-  runtime: 'the app reloaded itself, which keeps its page id',
+  runtime: 'the app answered expo.reloadAppAsync, which keeps its page id',
 };
 
 /** {@link KEEPS_PAGE_ID} for the attempt the run settled on. */
@@ -79,9 +130,7 @@ export function keepsPageId(attempts: readonly ReloadAttempt[]): string | null {
 
 /** The witnesses behind the aggregate context-replaced label and human report. */
 export function contextReplacedTargets(attempts: readonly ReloadAttempt[]): TargetReloadOutcome[] {
-  return attempts.flatMap((attempt) =>
-    attempt.method === 'page-reload' || attempt.method === 'runtime'
-      ? attempt.outcomes.filter((each) => each.outcome === 'context-replaced')
-      : []
-  );
+  return attempts
+    .filter(hasTargetOutcomes)
+    .flatMap((attempt) => attempt.outcomes.filter((each) => each.outcome === 'context-replaced'));
 }

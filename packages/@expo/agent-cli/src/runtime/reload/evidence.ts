@@ -2,7 +2,13 @@
 import type { NativePlatform } from '../../plan/types';
 import type { DeviceInventory, TargetSelection } from '../targetSelection';
 import { waitForFreshAppConnectionAsync } from '../waitReady';
-import { contextReplacedTargets, keepsPageId, type ReloadAttempt } from './attempt';
+import {
+  contextReplacedClause,
+  contextReplacedTargets,
+  hasTargetOutcomes,
+  keepsPageId,
+  type ReloadAttempt,
+} from './attempt';
 import {
   waitForNewBundleAsync,
   type BundleSignalMark,
@@ -28,11 +34,18 @@ export function describeEvidence(report: ReloadResultJson): string {
     case 'app-relaunch':
       return 'the app was stopped on the device and started again';
     case 'debugger-context-replaced':
-      return `${contextReplacedTargets(report.attempts)
-        .map((each) => each.deviceName)
-        .join(', ')} answered from a new JavaScript context after ${
-        report.method === 'runtime' ? 'expo.reloadAppAsync' : 'Page.reload'
-      }`;
+      return report.attempts
+        .filter(hasTargetOutcomes)
+        .filter((attempt) => attempt.ok)
+        .map((attempt) =>
+          contextReplacedClause(
+            contextReplacedTargets([attempt])
+              .map((each) => each.deviceName)
+              .join(', '),
+            attempt.method
+          )
+        )
+        .join('; ');
     default:
       return 'nothing';
   }

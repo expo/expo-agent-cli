@@ -4,7 +4,7 @@ import {
   makeTarget,
   makeTargetSelection,
 } from '../../__tests__/targetSelectionFixtures';
-import type { ReloadAttempt } from '../attempt';
+import { ACTION_NAME, type ReloadAttempt } from '../attempt';
 import { markBundleSignalSync } from '../bundleSignal';
 import { observeReloadAsync } from '../evidence';
 import { CHURN_NOT_ASKED, prepareRungOne } from '../rungOne';
@@ -50,7 +50,7 @@ const attempt = (method: ReloadAttempt['method'], ok: boolean, delivered?: boole
     delivered,
     reason: 'x',
     leftAppStopped: null,
-    ...(method === 'page-reload' || method === 'runtime' ? { outcomes: [] } : {}),
+    ...(method in ACTION_NAME ? { outcomes: [] } : {}),
   }) as ReloadAttempt;
 
 const realFetch = globalThis.fetch;

@@ -22,6 +22,9 @@ const ACT_MS = 5000;
 /** How often the marker is read again after the action. */
 const POLL_MS = 250;
 
+/** The app answered the action and did not take it. An answer, so never a lost one. */
+export class ActionRefusedError extends Error {}
+
 export type ContextReplaced =
   /** An evaluate answered on the same target, and the marker was gone. */
   | { kind: 'replaced' }
@@ -132,6 +135,7 @@ export async function jsContextReplacedAsync(
     const lost = await act(marked.session).then(
       () => null,
       (error: unknown) => {
+        if (error instanceof ActionRefusedError) throw error;
         if (error instanceof CdpTimeoutError || marked.session.closed || clock.signal().aborted) {
           return describe(error);
         }

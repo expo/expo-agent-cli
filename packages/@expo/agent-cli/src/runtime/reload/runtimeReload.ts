@@ -1,14 +1,19 @@
 import { createDefaultTargetSelector, runtimeEvaluateAsync, type CdpTarget } from '../cdpClient';
-import { jsContextReplacedAsync } from '../contextReplaced';
-import { type ReloadAttempt, type TargetReloadOutcome } from './attempt';
-import { firstLine } from '../../utils/text';
+import { ActionRefusedError } from '../contextReplaced';
+import {
+  contextReplacedClause,
+  targetProofAttempt,
+  type TargetProofAttempt,
+  type TargetReloadOutcome,
+} from './attempt';
+import { reloadTargetAsync, type TargetAction } from './targetProof';
 
 /**
  * SDK 58's native `reloadAppAsync` takes one string, the reason. Called with none it rejects with
  * "Received 0 arguments, but 1 was expected" and reloads nothing [observed — SDK 58 development
  * build, Expo simulator iOS session, 2026-11-12].
  */
-export const RELOAD_REASON = '@expo/agent-cli runtime:reload';
+const RELOAD_REASON = '@expo/agent-cli runtime:reload';
 
 /** Answers `sent` once the call is made; a rejection shows only as no new context. */
 const RELOAD_EXPRESSION = `(function () {
@@ -53,85 +58,66 @@ export async function reloadOverRuntimeAsync(
   devServerUrl: string,
   own: CdpTarget[],
   budgetMs: number
-): Promise<ReloadAttempt> {
-  const attempt = (
-    reason: string,
-    outcomes: TargetReloadOutcome[] = [],
-    outcome?: TargetReloadOutcome['outcome']
-  ): ReloadAttempt => ({
-    method: 'runtime',
-    ok: outcome === 'context-replaced',
-    delivered: outcome === 'context-replaced' || outcome === 'delivered-unproved',
-    reason,
-    outcomes,
-    leftAppStopped: null,
-  });
-
+): Promise<TargetProofAttempt> {
+  // Target selection probes over the debugger, so it spends from the same window.
+  const deadline = Date.now() + Math.min(Math.max(0, budgetMs), PROOF_MS);
   if (own.length === 0) {
-    return attempt(
+    return targetProofAttempt(
+      'runtime',
+      [],
       `no app is connected to the dev server, so there is no runtime to ask — this method reloads an app through its debugger and cannot start one`
     );
   }
   const target = await createDefaultTargetSelector()(own);
   if (target == null) {
-    return attempt('no app of this worktree answered over the debugger');
+    return targetProofAttempt('runtime', [], 'no app of this worktree answered over the debugger');
   }
 
-  const deadline = Date.now() + Math.min(Math.max(0, budgetMs), PROOF_MS);
-  const name = `"${target.deviceName}"`;
-  const settle = (outcome: TargetReloadOutcome['outcome'], reason: string) =>
-    attempt(
-      reason,
-      [
-        {
-          targetId: target.id,
-          deviceName: target.deviceName,
-          outcome,
-          reason: outcome === 'context-replaced' ? null : reason,
-        },
-      ],
-      outcome
-    );
-  try {
-    const seen = await jsContextReplacedAsync(devServerUrl, target, {
-      act: async (session) => {
-        const answer = await runtimeEvaluateAsync(session, RELOAD_EXPRESSION, {
-          returnByValue: true,
-          timeoutMs: Math.max(1, Math.min(ANSWER_MS, deadline - Date.now())),
-        });
-        if (answer.value !== 'sent') {
-          throw new Error(
-            (typeof answer.value === 'string' && CANNOT_RELOAD[answer.value]) ||
-              (answer.exceptionText
-                ? `the app threw while it was asked to reload itself: ${answer.exceptionText}`
-                : `the app answered the reload call with ${JSON.stringify(answer.value ?? null)}, which this command cannot read`)
-          );
-        }
-      },
-      timeoutMs: Math.max(0, deadline - Date.now()),
-      deadline,
-    });
-    switch (seen.kind) {
-      case 'replaced':
-        return settle(
-          'context-replaced',
-          `${name} answered from a new JavaScript context after expo.reloadAppAsync`
-        );
-      case 'unmarkable':
-        return settle(
-          'unmarkable',
-          `${name} could not keep the marker that proves a reload, so expo.reloadAppAsync was not called: ${seen.reason}`
-        );
-      default:
-        return settle(
-          'delivered-unproved',
-          `${name} was asked to reload with expo.reloadAppAsync, and no new JavaScript context was seen: ${seen.reason}`
-        );
-    }
-  } catch (error: unknown) {
-    return settle(
-      'not-delivered',
-      firstLine(error instanceof Error ? error.message : String(error))
-    );
+  const outcome = await reloadTargetAsync(devServerUrl, target, RUNTIME_RELOAD, { deadline });
+  return targetProofAttempt('runtime', [outcome], describeOutcome(outcome));
+}
+
+/** What the run settled on, in the shape rung 1's settlement has. */
+export function settleRuntime(attempt: TargetProofAttempt): {
+  ran: boolean;
+  proof: 'debugger-context-replaced' | null;
+} {
+  // A call that ran and proved nothing still ran: the bundle wait decides.
+  return {
+    ran: attempt.delivered === true,
+    proof: attempt.ok ? 'debugger-context-replaced' : null,
+  };
+}
+
+function describeOutcome({ deviceName, outcome, reason }: TargetReloadOutcome): string {
+  const name = `"${deviceName}"`;
+  switch (outcome) {
+    case 'context-replaced':
+      return contextReplacedClause(name, 'runtime');
+    case 'delivered-unproved':
+      return `${name} was asked to reload with expo.reloadAppAsync, and no new JavaScript context was seen: ${reason}`;
+    case 'unmarkable':
+      return `${name} could not keep the marker that proves a reload, so expo.reloadAppAsync was not called: ${reason}`;
+    default:
+      return reason ?? 'expo.reloadAppAsync was not called';
   }
 }
+
+const RUNTIME_RELOAD: TargetAction = {
+  act: async (session, deadline) => {
+    const answer = await runtimeEvaluateAsync(session, RELOAD_EXPRESSION, {
+      returnByValue: true,
+      timeoutMs: Math.max(1, Math.min(ANSWER_MS, deadline - Date.now())),
+    });
+    if (answer.value !== 'sent') {
+      throw new ActionRefusedError(
+        (typeof answer.value === 'string' && CANNOT_RELOAD[answer.value]) ||
+          (answer.exceptionText
+            ? `the app threw while it was asked to reload itself: ${answer.exceptionText}`
+            : `the app answered the reload call with ${JSON.stringify(answer.value ?? null)}, which this command cannot read`)
+      );
+    }
+  },
+  // The call tears down the context that would answer, so a lost answer is a call that ran.
+  answerLost: 'delivered-unproved',
+};
