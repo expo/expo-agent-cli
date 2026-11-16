@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fixturesDir, installStubExpoScriptSync } from '../../e2e/utils';
+
 export const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const cliBin = path.join(packageRoot, 'bin/cli.js');
 export const artifactRoot = path.resolve(
@@ -24,6 +26,9 @@ export function copyWorkspace(fixture: string, linkDependencies = false, destina
         path.basename(entryPath) !== '.git' &&
         !(linkDependencies && entryPath === path.join(source, 'node_modules')),
     });
+    if (source.startsWith(`${fixturesDir}${path.sep}`)) {
+      installStubExpoScriptSync(root);
+    }
     if (linkDependencies) {
       const dependencies = path.join(source, 'node_modules');
       if (!fs.existsSync(path.join(dependencies, 'expo/package.json'))) {

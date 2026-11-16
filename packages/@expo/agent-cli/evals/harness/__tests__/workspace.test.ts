@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { STUB_EXPO_SCRIPT } from '../../../e2e/utils';
 import { copyWorkspace, snapshot } from '../workspace';
 
 describe('Copying and snapshotting eval workspaces', () => {
@@ -21,6 +22,9 @@ describe('Copying and snapshotting eval workspaces', () => {
     const second = copyWorkspace('e2e/fixtures/skills-app');
     roots.push(first, second);
     expect(fs.existsSync(path.join(first, '.claude/skills/usage'))).toBe(false);
+    expect(fs.readFileSync(path.join(first, 'node_modules/expo/bin/cli'), 'utf8')).toBe(
+      fs.readFileSync(STUB_EXPO_SCRIPT, 'utf8')
+    );
     fs.writeFileSync(path.join(first, 'AGENTS.md'), 'changed');
     expect(snapshot(first)).toHaveProperty('AGENTS.md');
     expect(snapshot(second)).not.toHaveProperty('AGENTS.md');

@@ -19,6 +19,9 @@ export const bin = path.resolve(__dirname, '../bin/cli.js');
 /** Directory holding the committed fixture projects. */
 export const fixturesDir = path.resolve(__dirname, 'fixtures');
 
+/** The shared stub `expo` script. Its environment knobs are documented at the top of the file. */
+export const STUB_EXPO_SCRIPT = path.resolve(__dirname, 'stubs', 'expo.js');
+
 /**
  * The temporary directory to use when testing projects.
  * This resolves the `EXPO_E2E_TEMP_DIR` environment variable, or uses `os.tmpdir()`.
@@ -202,10 +205,22 @@ process.exit(result.status === null ? 1 : result.status);
 }
 
 /**
- * Write the executable shims that make `expo` resolve to the fixture's stub bin, both through
- * `PATH` (see {@link stubExpoEnv}) and through the project's `node_modules/.bin`.
+ * Copy the shared stub `expo` script to the bin path the fixture's `expo` package declares, so the
+ * copied project runs it the way a real project runs the Expo CLI.
  */
-async function installStubExpoAsync(projectRoot: string): Promise<void> {
+export function installStubExpoScriptSync(projectRoot: string): void {
+  const stubScript = path.join(projectRoot, 'node_modules', 'expo', 'bin', 'cli');
+  fs.mkdirSync(path.dirname(stubScript), { recursive: true });
+  fs.copyFileSync(STUB_EXPO_SCRIPT, stubScript);
+}
+
+/**
+ * Install the stub `expo` script into a fixture copy, and write the executable shims that make
+ * `expo` resolve to it, both through `PATH` (see {@link stubExpoEnv}) and through the project's
+ * `node_modules/.bin`.
+ */
+export async function installStubExpoAsync(projectRoot: string): Promise<void> {
+  installStubExpoScriptSync(projectRoot);
   const stubScript = path.join(projectRoot, 'node_modules', 'expo', 'bin', 'cli');
   const dirs = [
     path.join(projectRoot, '.stub-bin'),

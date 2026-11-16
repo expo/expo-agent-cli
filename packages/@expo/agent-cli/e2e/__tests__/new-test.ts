@@ -190,6 +190,7 @@ describe('@expo/agent-cli new', () => {
     const expoDir = path.join(projectRoot, 'node_modules/expo');
     await fs.promises.cp(path.join(fixtureModules, 'expo'), expoDir, { recursive: true });
     const installStub = path.join(expoDir, 'bin/cli');
+    await fs.promises.mkdir(path.dirname(installStub), { recursive: true });
     await fs.promises.writeFile(
       installStub,
       `

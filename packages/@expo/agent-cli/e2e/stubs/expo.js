@@ -284,10 +284,13 @@ if (args[0] === 'start') {
   // origin rather than the listen address (`BundlerDevServer.getDevServerUrl`). Delayed on purpose:
   // see STUB_EXPO_TUNNEL_HOST above.
   if (process.env.STUB_EXPO_TUNNEL_HOST) {
-    setTimeout(() => {
-      tunnelUp = true;
-      process.stdout.write(`Waiting on http://${process.env.STUB_EXPO_TUNNEL_HOST}\n`);
-    }, Number(process.env.STUB_EXPO_TUNNEL_DELAY_MS || 300));
+    setTimeout(
+      () => {
+        tunnelUp = true;
+        process.stdout.write(`Waiting on http://${process.env.STUB_EXPO_TUNNEL_HOST}\n`);
+      },
+      Number(process.env.STUB_EXPO_TUNNEL_DELAY_MS || 300)
+    );
   }
   if (process.env.STUB_EXPO_LISTEN && process.env.STUB_EXPO_LISTEN_GATE) {
     const gate = setInterval(() => {
@@ -347,7 +350,8 @@ function listen(port) {
                 ? 'https://' + process.env.STUB_EXPO_TUNNEL_HOST
                 : 'http://127.0.0.1:' + port) +
               '/index.bundle?platform=' +
-              request.headers['expo-platform'] + '&dev=true',
+              request.headers['expo-platform'] +
+              '&dev=true',
           },
         })
       );
@@ -357,10 +361,13 @@ function listen(port) {
     // server that has never bundled transforms the dependency graph before it answers this, and
     // that first compile is what `smoke` must not charge to the window meant for reading the app.
     if (route === '/index.bundle') {
-      setTimeout(() => {
-        response.writeHead(200, { 'Content-Type': 'application/javascript' });
-        response.end(request.method === 'HEAD' ? '' : 'var __BUNDLE_START_TIME__=0;');
-      }, Number(process.env.STUB_EXPO_BUNDLE_DELAY_MS || 0)).unref();
+      setTimeout(
+        () => {
+          response.writeHead(200, { 'Content-Type': 'application/javascript' });
+          response.end(request.method === 'HEAD' ? '' : 'var __BUNDLE_START_TIME__=0;');
+        },
+        Number(process.env.STUB_EXPO_BUNDLE_DELAY_MS || 0)
+      ).unref();
       return;
     }
     if (route !== '/status') {

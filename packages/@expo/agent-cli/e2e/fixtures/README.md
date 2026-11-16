@@ -46,16 +46,6 @@ directories to that copy, instead of committing a sixth near-identical project.
 
 Each fixture ships its own copy of these, because a fixture must stand alone once copied:
 
-- `node_modules/expo/bin/cli` — stub `expo` bin. It records every invocation as one JSON line in
-  `stub-expo-invocations.jsonl` and starts no Metro. `STUB_EXPO_LISTEN` makes `start` bind the port it
-  reports and answer `GET /status` the way a dev server whose bundler has finished does, which is what
-  lets `--wait-ready` be driven end to end; `STUB_EXPO_DIE_AFTER_STATUS_MS` then makes it die a fixed
-  time **after** that answer, printing the macOS Automation refusal the real CLI dies of. Keying the
-  death on the request rather than on a clock is what makes F140 — a dev server that answers and is
-  then gone — reproducible instead of a race. `expo config` answers with the
-  contents of the file `STUB_EXPO_CONFIG_JSON` names and exits, the way the real CLI prints one JSON
-  object there and nothing else — with the stub's own `stub_expo_start` line still above it, so the
-  "last JSON line wins" parse of `inspect:config-plugins` is tested against a stream that has two.
 - `node_modules/expo-constants/package.json` — `dev-client-fresh-app` only: its version (58.0.5) is
   what tells the installed-app check that this SDK embeds `app.fingerprint`. A test that wants an
   older SDK lowers it in its copy.
@@ -68,10 +58,23 @@ Each fixture ships its own copy of these, because a fixture must stand alone onc
   no dump for (these fixtures are SDK 54). Only `expo-camera`, `expo-dev-client` and
   `react-native-web` are in it, so any other native module is "unbundled".
 
-One double is shared rather than copied, because no fixture ships an `eas` and the CLI never resolves
-one — every EAS-backed command runs `npx eas-cli` through a package runner (`src/utils/easCli.ts`):
+Two doubles live once in `e2e/stubs/`, and fixture setup copies them into each fixture copy:
 
-- `e2e/stubs/eas.js` — the stub `eas`. `installStubEasAsync` (`e2e/stubEas.ts`) copies it into the
+- `e2e/stubs/expo.js` — the stub `expo` bin. `setupFixtureAsync` (`e2e/utils.ts`) and the evals'
+  `copyWorkspace` copy it into the fixture copy at `node_modules/expo/bin/cli`, the bin path the
+  stub `expo` package declares, so no fixture commits one. It records every invocation as one JSON line in
+  `stub-expo-invocations.jsonl` and starts no Metro. `STUB_EXPO_LISTEN` makes `start` bind the port it
+  reports and answer `GET /status` the way a dev server whose bundler has finished does, which is what
+  lets `--wait-ready` be driven end to end; `STUB_EXPO_DIE_AFTER_STATUS_MS` then makes it die a fixed
+  time **after** that answer, printing the macOS Automation refusal the real CLI dies of. Keying the
+  death on the request rather than on a clock is what makes F140 — a dev server that answers and is
+  then gone — reproducible instead of a race. `expo config` answers with the
+  contents of the file `STUB_EXPO_CONFIG_JSON` names and exits, the way the real CLI prints one JSON
+  object there and nothing else — with the stub's own `stub_expo_start` line still above it, so the
+  "last JSON line wins" parse of `inspect:config-plugins` is tested against a stream that has two.
+- `e2e/stubs/eas.js` — the stub `eas`. No fixture ships an `eas`, and the CLI never resolves one:
+  every EAS-backed command runs `npx eas-cli` through a package runner (`src/utils/easCli.ts`).
+  `installStubEasAsync` (`e2e/stubEas.ts`) copies it into the
   fixture copy's `.stub-bin` behind a stub `npx`/`bunx`, and `stubEasArgs` reads back what it was
   asked, one JSON line per invocation in `stub-eas-invocations.jsonl`. It answers `whoami`, `build`,
   `build:list` (filtered by `--fingerprint-hash` and friends from `STUB_EAS_BUILDS`),
