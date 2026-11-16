@@ -17,7 +17,7 @@ import {
   setupFixtureAsync,
   startStubDevServerAsync,
 } from '../utils';
-import { installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
+import { BOOTED_SIMULATOR, installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
 
 const FLAGS = ['--timeout', '12s', '--json', '--no-followups'];
 
@@ -27,28 +27,44 @@ interface Attempt {
   reason: string;
 }
 
-async function onIosSessionAsync() {
+/** `localSimulator` boots an unbound local simulator beside the session, so the scope skips its app. */
+async function onIosSessionAsync({ localSimulator = false } = {}) {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
-  await installStubXcrunAsync(root, { simulators: [] });
+  await installStubXcrunAsync(root, {
+    simulators: localSimulator ? [BOOTED_SIMULATOR] : [],
+    bind: false,
+  });
   await installStubEasAsync(root);
   await writeCloudBindingAsync(expoHomeOf(root), root, { id: 'sess-e2e' });
   await writeCloudSessionFileAsync(root, 'sess-e2e');
   return {
     root,
-    target: runtimeTarget('session', { deviceName: 'iPhone 17 Pro', appId: 'dev.example.app' }),
+    target: runtimeTarget('session', { deviceName: 'iPhone 17', appId: 'dev.example.app' }),
   };
 }
 
 describe('runtime:reload on an iOS EAS session', () => {
-  // Right after `dev`, the session app may not be listed yet: the run reads the list again.
-  it.each([0, 3])(
-    'reloads in place and never broadcasts or relaunches (listed from read %i)',
-    async (listedFromRead) => {
-      const { root, target } = await onIosSessionAsync();
+  // Right after `dev`, the session app may not be listed yet: the run reads the list again, also
+  // when the scope skips a local simulator's app.
+  it.each([
+    { listedFromRead: 0, skippedApp: false },
+    { listedFromRead: 3, skippedApp: false },
+    { listedFromRead: 4, skippedApp: true },
+  ])(
+    'reloads in place and never broadcasts or relaunches (listed from read $listedFromRead, skipped app: $skippedApp)',
+    async ({ listedFromRead, skippedApp }) => {
+      const { root, target } = await onIosSessionAsync({ localSimulator: skippedApp });
+      const local = runtimeTarget('local', {
+        deviceName: BOOTED_SIMULATOR.name,
+        appId: 'dev.example.app',
+      });
       let reads = 0;
       const server = await startStubDevServerAsync({
         projectRoot: root,
-        targets: () => (++reads >= listedFromRead ? [target] : []),
+        targets: () => [
+          ...(skippedApp ? [local] : []),
+          ...(++reads >= listedFromRead ? [target] : []),
+        ],
         messageSocket: 'no-churn',
         pageReload: 'replaces-context',
       });
@@ -73,6 +89,7 @@ describe('runtime:reload on an iOS EAS session', () => {
         );
         expect(report.attempts[0].reason).not.toContain('skippedApps');
         expect(server.broadcasts()).toBe(0);
+        expect(server.pageReloads()).toEqual([target.id]);
         expect(stubEasArgs(root).filter((argv) => argv[0] === 'simulator:exec')).toEqual([]);
       } finally {
         await server.close();

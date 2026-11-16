@@ -715,6 +715,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // Which rung proved it depends on the scope, which this run leaves to the binding; the `--ios`
     // case below pins the in-place rung. A relaunch, when the ladder reached it, names its two verbs.
     const attempts = Object.fromEntries(report.attempts.map((a: any) => [a.method, a]));
+    // An Android session keeps the broadcast as rung 1 (llp/0005 §How it reloads).
+    if (CLOUD_PLATFORM === 'android') {
+      expect(report.attempts[0].method).toBe('dev-server');
+    }
     if (report.method === 'device') {
       expect(attempts.device.ok).toBe(true);
       // The cloud relaunch is two verbs, and the reason names both — that is the mechanism, quoted.
