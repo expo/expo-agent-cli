@@ -422,26 +422,34 @@ describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
 describe(`${preflightRuntimeAsync.name} on an EAS Simulator session with no platform`, () => {
-  it(`should refuse two apps nothing places, and say how to name the session's platform`, async () => {
-    mockDevServer([
-      { ...TARGET, appId: 'com.example.app', deviceName: 'iPhone 17' },
-      { ...TARGET, id: '2', appId: 'com.example.app', deviceName: 'iPad Air' },
-    ]);
+  it.each([
+    { name: 'that answer', unansweredTargetIds: [], how: 'close the apps' },
+    {
+      name: 'that did not answer the liveness probe',
+      unansweredTargetIds: [TARGET.id, '2'],
+      how: 'dev:stop" keeps the session, then "npx @expo/agent-cli dev --ios --eas --detach" (or --android)',
+    },
+  ])(
+    `should refuse two apps nothing places $name, and say what to do next`,
+    async ({ unansweredTargetIds, how }) => {
+      mockDevServer([
+        { ...TARGET, appId: 'com.example.app', deviceName: 'iPhone 17' },
+        { ...TARGET, id: '2', appId: 'com.example.app', deviceName: 'iPad Air' },
+      ]);
 
-    const error = await preflightRuntimeAsync({
-      need: 'debugger-target',
-      devServerUrl,
-      cloud: true,
-      deviceInventory: makeDeviceInventory(),
-    }).catch((e) => e);
+      const error = await preflightRuntimeAsync({
+        need: 'debugger-target',
+        devServerUrl,
+        cloud: true,
+        deviceInventory: makeDeviceInventory({ unansweredTargetIds }),
+      }).catch((e) => e);
 
-    expect(error.code).toBe('NO_APP_CONNECTED');
-    expect(error.message).toContain('names 2 apps');
-    expect(error.message).toContain('--ios --eas');
-    expect(error.message).toContain('--android --eas');
-    expect(error.message).toContain('close the apps');
-    expect(error.data).toMatchObject({ debuggerTargets: 2, platform: null });
-  });
+      expect(error.code).toBe('NO_APP_CONNECTED');
+      expect(error.message).toContain('names 2 apps');
+      expect(error.message).toContain(how);
+      expect(error.data).toMatchObject({ debuggerTargets: 2, platform: null });
+    }
+  );
 });
 
 // The other half of `howToNameTheDevServer`: a caller who let this CLI find the dev server is told
