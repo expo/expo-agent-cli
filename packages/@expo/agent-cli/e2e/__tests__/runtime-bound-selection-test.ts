@@ -89,14 +89,25 @@ async function attachTwinAsync(root: string, reversing: string[], port: number) 
 const TWIN = 'emulator-5556';
 
 // Local iOS binding inspection intentionally only runs on macOS; cloud and Android rows run on all hosts.
+const CLOSE_APPS = 'close the apps on this dev server';
+const RESTART = 'dev:stop" keeps the session';
 const selectionCases: {
+  name?: string;
   binding: BindingKind;
   flag?: 'ios' | 'android';
   /** List the local emulator beside an EAS Android session. */
   emulatorAttached?: boolean;
   targets: AppId[];
-  selected: AppId;
+  /** Pages whose socket opens and answers nothing, as an ended session's page does. */
+  silent?: AppId[];
+  /** Pages whose socket closes on a request. */
+  closing?: AppId[];
+  /** `null`: the run refuses with NO_APP_CONNECTED, and its message holds `refusal`. */
+  selected: AppId | null;
+  refusal?: string;
   line: string | null;
+  /** The pages that answered the liveness probe, sorted. */
+  probed?: AppId[];
 }[] = [
   {
     binding: 'emulator',
@@ -150,19 +161,101 @@ const selectionCases: {
     selected: 'a',
     line: simulatorLine,
   },
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — an ended session's app beside the
+  // session's own. Two or more unplaced apps on a cloud scope are asked to answer.
+  {
+    name: 'the ended app listed first',
+    binding: 'ios-cloud',
+    targets: ['ended', 'cloud'],
+    silent: ['ended'],
+    selected: 'cloud',
+    line: sessionLine,
+    probed: ['cloud'],
+  },
+  {
+    name: 'the ended app listed last',
+    binding: 'ios-cloud',
+    flag: 'ios',
+    targets: ['cloud', 'ended'],
+    silent: ['ended'],
+    selected: 'cloud',
+    line: sessionLine,
+    probed: ['cloud'],
+  },
+  {
+    name: 'two ended apps beside the live one',
+    binding: 'ios-cloud',
+    targets: ['endedEarlier', 'cloud', 'ended'],
+    silent: ['endedEarlier', 'ended'],
+    selected: 'cloud',
+    line: sessionLine,
+    probed: ['cloud'],
+  },
+  {
+    name: 'both apps answer',
+    binding: 'ios-cloud',
+    targets: ['cloud', 'ended'],
+    selected: null,
+    refusal: CLOSE_APPS,
+    line: null,
+    probed: ['cloud', 'ended'],
+  },
+  {
+    name: 'the other app closes its socket',
+    binding: 'ios-cloud',
+    targets: ['ended', 'cloud'],
+    closing: ['ended'],
+    selected: null,
+    refusal: CLOSE_APPS,
+    line: null,
+    probed: ['cloud'],
+  },
+  {
+    name: 'neither app answers',
+    binding: 'ios-cloud',
+    targets: ['cloud', 'ended'],
+    silent: ['cloud', 'ended'],
+    selected: null,
+    refusal: RESTART,
+    line: null,
+  },
+  {
+    name: 'the session app is slow, and an app on another device answers',
+    binding: 'ios-cloud',
+    targets: ['cloud', 'phone'],
+    silent: ['cloud'],
+    selected: null,
+    refusal: RESTART,
+    line: null,
+    probed: ['phone'],
+  },
+  // The one-unplaced-target rule does not apply to an Android session, so nothing is asked.
+  {
+    name: 'an Android session beside two unplaced apps',
+    binding: 'android-cloud',
+    targets: ['cloud', 'ended'],
+    silent: ['ended'],
+    selected: null,
+    refusal: CLOSE_APPS,
+    line: null,
+  },
 ];
 for (const row of selectionCases) {
   it.skipIf(row.binding === 'simulator' && process.platform !== 'darwin')(
-    `eval with ${row.binding}, flag ${row.flag ?? 'none'}, reads ${row.selected}`,
+    `eval with ${row.binding}, flag ${row.flag ?? 'none'}, reads ${row.selected ?? 'none'}${row.name ? `: ${row.name}` : ''}`,
     async () => {
       const { root, env } = await setupBoundAsync(row.binding, {
         attached: row.emulatorAttached ?? row.binding === 'emulator',
       });
       const evaluated: string[] = [];
+      const probed: string[] = [];
       const server = await startStubDevServerAsync({
         projectRoot: root,
         targets: row.targets.map((id) => apps[id]),
+        inspectorSilent: row.silent ?? [],
+        inspectorClosing: row.closing ?? [],
         inspectorEvaluate: (expression, device) => {
+          if (expression === '1') probed.push(device);
           if (!expression.includes('selected-app-sentinel')) return undefined;
           evaluated.push(device);
           return device;
@@ -181,9 +274,17 @@ for (const row of selectionCases) {
           ],
           { reject: false, env }
         );
-        expect(result.exitCode, result.all).toBe(0);
-        expect(JSON.parse(result.stdout).value).toBe(row.selected);
-        expect(evaluated).toEqual([row.selected]);
+        if (row.selected) {
+          expect(result.exitCode, result.all).toBe(0);
+          expect(JSON.parse(result.stdout).value).toBe(row.selected);
+        } else {
+          expect(result.exitCode, result.all).toBe(1);
+          const { code, message } = JSON.parse(result.stdout).error;
+          expect(code).toBe('NO_APP_CONNECTED');
+          expect(message).toContain(row.refusal);
+        }
+        expect(evaluated).toEqual(row.selected ? [row.selected] : []);
+        expect(probed.sort()).toEqual(row.probed ?? []);
         expect(result.stderr.split('\n').filter((line) => line.startsWith('Scoped to'))).toEqual(
           row.line ? [row.line] : []
         );
@@ -193,158 +294,6 @@ for (const row of selectionCases) {
     }
   );
 }
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — an ended session's app
-it.each([
-  {
-    name: 'no flag, the ended app listed first',
-    targets: ['ended', 'cloud'],
-    silent: ['ended'],
-    read: 'cloud',
-  },
-  {
-    name: '--ios, the ended app listed last',
-    flag: 'ios',
-    targets: ['cloud', 'ended'],
-    silent: ['ended'],
-    read: 'cloud',
-  },
-  { name: 'both apps answer', targets: ['cloud', 'ended'], silent: [], read: null },
-  {
-    name: 'neither app answers',
-    targets: ['cloud', 'ended'],
-    silent: ['cloud', 'ended'],
-    read: null,
-    restart: true,
-  },
-  {
-    name: 'the other app closes its socket',
-    targets: ['ended', 'cloud'],
-    silent: [],
-    closing: ['ended'],
-    read: null,
-  },
-  {
-    name: 'two ended apps beside the live one',
-    targets: ['endedEarlier', 'cloud', 'ended'],
-    silent: ['endedEarlier', 'ended'],
-    read: 'cloud',
-  },
-  {
-    name: 'the session app is slow, and an app on another device answers',
-    targets: ['cloud', 'phone'],
-    silent: ['cloud'],
-    read: null,
-    restart: true,
-  },
-] satisfies {
-  name: string;
-  flag?: 'ios';
-  targets: AppId[];
-  silent: AppId[];
-  closing?: AppId[];
-  read: AppId | null;
-  /** The refusal says to restart the dev server, not to close apps. */
-  restart?: boolean;
-}[])(
-  'eval with ios-cloud beside an app that no local device claims: $name',
-  async ({ flag, targets, silent, closing = [], read, restart = false }) => {
-    const { root, env } = await setupBoundAsync('ios-cloud');
-    const evaluated: string[] = [];
-    const server = await startStubDevServerAsync({
-      projectRoot: root,
-      targets: targets.map((id) => apps[id]),
-      inspectorSilent: silent,
-      inspectorClosing: closing,
-      inspectorEvaluate: (expression, device) => {
-        if (!expression.includes('selected-app-sentinel')) return undefined;
-        evaluated.push(device);
-        return device;
-      },
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        root,
-        [
-          'runtime:eval',
-          '"selected-app-sentinel"',
-          ...(flag ? [`--${flag}`] : []),
-          '--dev-server-url',
-          server.url,
-          '--json',
-        ],
-        { reject: false, env }
-      );
-      const scopeLines = result.stderr.split('\n').filter((line) => line.startsWith('Scoped to'));
-      if (read) {
-        expect(result.exitCode, result.all).toBe(0);
-        expect(JSON.parse(result.stdout).value).toBe(read);
-        expect(scopeLines).toEqual([sessionLine]);
-      } else {
-        expect(result.exitCode, result.all).toBe(1);
-        const { code, message } = JSON.parse(result.stdout).error;
-        expect(code).toBe('NO_APP_CONNECTED');
-        expect(message).toContain(
-          restart ? 'dev:stop" keeps the session' : 'close the apps on this dev server'
-        );
-        expect(scopeLines).toEqual([]);
-      }
-      expect(evaluated).toEqual(read ? [read] : []);
-    } finally {
-      await server.close();
-    }
-  }
-);
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — where the one-unplaced-target rule cannot
-// apply, no unplaced target is asked to answer.
-it.each([
-  {
-    name: 'an Android session',
-    binding: 'android-cloud',
-    targets: ['cloud', 'ended'],
-    silent: ['ended'],
-  },
-  { name: 'one unplaced app', binding: 'ios-cloud', flag: 'ios', targets: ['cloud'], silent: [] },
-] satisfies {
-  name: string;
-  binding: BindingKind;
-  flag?: 'ios';
-  targets: AppId[];
-  silent: AppId[];
-}[])(
-  'eval asks no app to answer the liveness probe: $name',
-  async ({ binding, flag, targets, silent }) => {
-    const { root, env } = await setupBoundAsync(binding);
-    const probed: string[] = [];
-    const server = await startStubDevServerAsync({
-      projectRoot: root,
-      targets: targets.map((id) => apps[id]),
-      inspectorSilent: silent,
-      inspectorEvaluate: (expression, device) => {
-        if (expression === '1') probed.push(device);
-        return device;
-      },
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        root,
-        [
-          'runtime:eval',
-          '"selected-app-sentinel"',
-          ...(flag ? [`--${flag}`] : []),
-          '--dev-server-url',
-          server.url,
-          '--json',
-        ],
-        { reject: false, env }
-      );
-      expect(probed, result.all).toEqual([]);
-    } finally {
-      await server.close();
-    }
-  }
-);
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — rung 1 reads the target list again
 // Rung 1 starts from the preflight's dead ids, so the session app is asked once, not twice.

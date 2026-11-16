@@ -423,11 +423,17 @@ describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
 describe(`${preflightRuntimeAsync.name} on an EAS Simulator session with no platform`, () => {
   it.each([
-    { name: 'that answer', unansweredTargetIds: [], how: 'close the apps' },
+    {
+      name: 'that answer',
+      unansweredTargetIds: [],
+      how: ['--ios --eas', '--android --eas', 'close the apps'],
+    },
     {
       name: 'that did not answer the liveness probe',
       unansweredTargetIds: [TARGET.id, '2'],
-      how: 'dev:stop" keeps the session, then "npx @expo/agent-cli dev --ios --eas --detach" (or --android)',
+      how: [
+        'dev:stop" keeps the session, then "npx @expo/agent-cli dev --ios --eas --detach" (or --android)',
+      ],
     },
   ])(
     `should refuse two apps nothing places $name, and say what to do next`,
@@ -446,7 +452,7 @@ describe(`${preflightRuntimeAsync.name} on an EAS Simulator session with no plat
 
       expect(error.code).toBe('NO_APP_CONNECTED');
       expect(error.message).toContain('names 2 apps');
-      expect(error.message).toContain(how);
+      for (const text of how) expect(error.message).toContain(text);
       expect(error.data).toMatchObject({ debuggerTargets: 2, platform: null });
     }
   );
