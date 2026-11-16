@@ -47,7 +47,8 @@ jobs:
       - name: ⬢ Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          # 24.22.3 catches undici's setTypeOfService EINVAL on macOS (nodejs/undici#5544).
+          node-version: '^24.22.3'
       - name: 📦 Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile
       - name: 🛠 Build @expo/agent-cli
@@ -94,7 +95,7 @@ jobs:
       - name: ⬢ Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: '^24.22.3'
       - name: 📦 Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile
       - name: 🛠 Build @expo/agent-cli
@@ -123,7 +124,7 @@ jobs:
       - name: ⬢ Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: '^24.22.3'
       - name: 📦 Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile
       - name: 🛠 Build @expo/agent-cli
@@ -163,7 +164,7 @@ jobs:
       - name: ⬢ Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: '^24.22.3'
       - name: 📦 Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile
       - name: 🛠 Build @expo/agent-cli
@@ -200,7 +201,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: '^24.22.3'
       - name: Install locked dependencies (including the real Expo fixture)
         run: bun install --ignore-scripts --frozen-lockfile
       - name: Build CLI
