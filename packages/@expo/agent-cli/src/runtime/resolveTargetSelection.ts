@@ -78,12 +78,9 @@ export async function resolveTargetSelectionAsync(
   const targetSelection = await resolveScopeAsync(options);
   const deviceInventory =
     options.deviceInventory ??
-    (await deviceInventoryForSelectionAsync(
-      options.targets,
-      targetSelection,
-      options.projectRoot,
-      options.devServerUrl
-    ));
+    (await deviceInventoryForSelectionAsync(options.targets, targetSelection, options.projectRoot, {
+      devServerUrl: options.devServerUrl,
+    }));
   return {
     targetSelection,
     deviceInventory,

@@ -371,8 +371,7 @@ export async function prepareRungOneAsync(
     probe.targets,
     targetSelection,
     projectRoot,
-    devServerUrl,
-    left()
+    { devServerUrl, timeoutMs: left(), deadTargetIds: preflight?.deviceInventory.deadTargetIds }
   );
   if (
     preflight &&

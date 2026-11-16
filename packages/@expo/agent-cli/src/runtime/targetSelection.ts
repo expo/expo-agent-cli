@@ -491,20 +491,27 @@ export function deviceFactsLost(
   );
 }
 
-/** Read bindings and ask the tools only when their answer can change placement. */
+/**
+ * Read bindings and ask the tools only when their answer can change placement. `deadTargetIds` are
+ * targets an earlier read of this run found dead; they stay dead, so the probe does not ask them
+ * again.
+ */
 export async function deviceInventoryForSelectionAsync(
   targets: readonly CdpTarget[],
   targetSelection: TargetSelection,
   projectRoot: string | null,
-  devServerUrl: string | null = null,
-  timeoutMs: number = SIMCTL_TIMEOUT_MS
+  {
+    devServerUrl = null,
+    timeoutMs = SIMCTL_TIMEOUT_MS,
+    deadTargetIds = [],
+  }: { devServerUrl?: string | null; timeoutMs?: number; deadTargetIds?: readonly string[] } = {}
 ): Promise<DeviceInventory> {
   const deadline = Date.now() + timeoutMs;
   const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
   const inventory = await refreshDeviceInventoryAsync(
     targets,
     targetSelection,
-    { ...EMPTY_DEVICE_INVENTORY, iosBindings },
+    { ...EMPTY_DEVICE_INVENTORY, iosBindings, deadTargetIds },
     devServerUrl,
     timeoutMs
   );
