@@ -39,7 +39,7 @@ export function buildInstallFollowUps({
     followups.push({
       id: 'dev',
       command: devCommand(hostPlatform()),
-      why: `${rebuildReason(rebuild)}: this plans and makes a new development build.`,
+      why: rebuildReason(rebuild),
     });
   } else {
     // The command named here used to be `runtime:errors`, which reloads nothing — so the sentence
@@ -113,21 +113,27 @@ function reloadReason(reports: InstallImpactReport[]): string {
  * prebuild them, so its plugin clause says the change waits for prebuild.
  */
 function rebuildReason(rebuild: InstallImpactReport[]): string {
-  const of = (impact: InstallImpactReport['impact']) =>
+  const namesOf = (impact: InstallImpactReport['impact']) =>
     rebuild.filter((report) => report.impact === impact).map((report) => report.packageName);
-  const native = of('native-module');
-  const plugins = of('config-plugin');
-  const one = plugins.length === 1;
+  const native = namesOf('native-module');
+  const plugins = namesOf('config-plugin');
   const bare = rebuild.every((report) => report.action === 'native-sync');
-  const ships = (names: string[]) => `${names.join(', ')} ${names.length === 1 ? 'ships' : 'ship'}`;
-  const pluginNoun = one ? 'a config plugin' : 'config plugins';
-  const pluginClause = bare
-    ? `, which ${one ? 'changes' : 'change'} the checked-in native project only when prebuild runs`
-    : ` that ${one ? 'changes' : 'change'} the native project at prebuild`;
-  return [
-    native.length ? `${ships(native)} native code that the app running now does not have` : null,
-    plugins.length ? `${ships(plugins)} ${pluginNoun}${pluginClause}` : null,
-  ]
-    .filter(Boolean)
-    .join(', and ');
+
+  const clauses: string[] = [];
+  if (native.length) {
+    const ships = native.length === 1 ? 'ships' : 'ship';
+    clauses.push(
+      `${native.join(', ')} ${ships} native code that the app running now does not have`
+    );
+  }
+  if (plugins.length) {
+    const ships = plugins.length === 1 ? 'ships a config plugin' : 'ship config plugins';
+    const changes = plugins.length === 1 ? 'changes' : 'change';
+    clauses.push(
+      bare
+        ? `${plugins.join(', ')} ${ships}, which ${changes} the checked-in native project only when prebuild runs`
+        : `${plugins.join(', ')} ${ships} that ${changes} the native project at prebuild`
+    );
+  }
+  return `${clauses.join(', and ')}: this plans and makes a new development build.`;
 }

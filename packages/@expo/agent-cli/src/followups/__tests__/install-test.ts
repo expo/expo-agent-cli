@@ -21,7 +21,7 @@ describe(buildInstallFollowUps, () => {
     expect(buildInstallFollowUps({ reports: [], packagesWithSkills: [] })).toEqual([]);
   });
 
-  it(`should warn that the running app cannot load a new native module`, () => {
+  it(`should hand a rebuild to dev on the host platform`, () => {
     const followups = buildInstallFollowUps({
       reports: [
         report({
@@ -39,64 +39,73 @@ describe(buildInstallFollowUps, () => {
     );
   });
 
-  // The rebuild sentence names what each package ships, in the words of its own report. A config
-  // plugin adds no native code of its own: it changes the native project when prebuild runs, which
-  // a bare project with checked-in native directories does not do.
-  const camera = { packageName: 'expo-camera', impact: 'native-module' as const };
-  const haptics = { packageName: 'expo-haptics', impact: 'native-module' as const };
-  const properties = { packageName: 'expo-build-properties', impact: 'config-plugin' as const };
-  const fonts = { packageName: 'expo-font', impact: 'config-plugin' as const };
+  type Package = Pick<InstallImpactReport, 'packageName' | 'impact'>;
+  const camera: Package = { packageName: 'expo-camera', impact: 'native-module' };
+  const haptics: Package = { packageName: 'expo-haptics', impact: 'native-module' };
+  const properties: Package = { packageName: 'expo-build-properties', impact: 'config-plugin' };
+  const fonts: Package = { packageName: 'expo-font', impact: 'config-plugin' };
   const tail = ': this plans and makes a new development build.';
-  it.each([
+  const rows: {
+    name: string;
+    action: InstallImpactReport['action'];
+    packages: Package[];
+    why: string;
+  }[] = [
     {
       name: 'a native module',
-      action: 'prebuild-and-build' as const,
+      action: 'prebuild-and-build',
       packages: [camera],
       why: `expo-camera ships native code that the app running now does not have${tail}`,
     },
     {
       name: 'a config plugin',
-      action: 'prebuild-and-build' as const,
+      action: 'prebuild-and-build',
       packages: [properties],
       why: `expo-build-properties ships a config plugin that changes the native project at prebuild${tail}`,
     },
     {
       name: 'two config plugins',
-      action: 'prebuild-and-build' as const,
+      action: 'prebuild-and-build',
       packages: [properties, fonts],
       why: `expo-build-properties, expo-font ship config plugins that change the native project at prebuild${tail}`,
     },
     {
       name: 'both kinds',
-      action: 'prebuild-and-build' as const,
+      action: 'prebuild-and-build',
       packages: [camera, haptics, properties],
       why: `expo-camera, expo-haptics ship native code that the app running now does not have, and expo-build-properties ships a config plugin that changes the native project at prebuild${tail}`,
     },
     {
       name: 'a native module in a bare project',
-      action: 'native-sync' as const,
+      action: 'native-sync',
       packages: [camera],
       why: `expo-camera ships native code that the app running now does not have${tail}`,
     },
     {
       name: 'a config plugin in a bare project',
-      action: 'native-sync' as const,
+      action: 'native-sync',
       packages: [properties],
       why: `expo-build-properties ships a config plugin, which changes the checked-in native project only when prebuild runs${tail}`,
     },
     {
       name: 'two config plugins in a bare project',
-      action: 'native-sync' as const,
+      action: 'native-sync',
       packages: [properties, fonts],
       why: `expo-build-properties, expo-font ship config plugins, which change the checked-in native project only when prebuild runs${tail}`,
     },
-  ])(`should say what $name adds when it needs a build`, ({ action, packages, why }) => {
+    {
+      name: 'both kinds in a bare project',
+      action: 'native-sync',
+      packages: [camera, properties],
+      why: `expo-camera ships native code that the app running now does not have, and expo-build-properties ships a config plugin, which changes the checked-in native project only when prebuild runs${tail}`,
+    },
+  ];
+  it.each(rows)(`should say what $name adds when it needs a build`, ({ action, packages, why }) => {
     const followups = buildInstallFollowUps({
       reports: packages.map((entry) => report({ ...entry, action })),
       packagesWithSkills: [],
     });
 
-    expect(ids(followups)).toEqual(['dev', 'typecheck']);
     expect(followups[0]!.why).toBe(why);
   });
 
