@@ -328,7 +328,7 @@ function stopPromptFor(
         `The plan stopped at "${failure.step.id}": macOS refused "${invocation}" permission to control Simulator.app.`,
         `Why: the Expo CLI's launch step drives Simulator.app through AppleScript, and macOS refuses an application that has not been granted Automation permission. The Expo CLI does not catch that rejection, so it ends the whole process${failure.devServerStep ? ' — the dev server this run started exited with it, and nothing is listening for this project now' : ''}.`,
         `How: grant the permission in System Settings › Privacy & Security › Automation, then run this command again. To keep going without it, run "${PROGRAM_PREFIX} dev --${platform} --detach" — the build is recorded, so the next run starts the dev server and opens the app through "xcrun simctl openurl", which needs no grant.`,
-        // @ref llp/0004-smart-start-and-project-state.rfc.md §Implemented in v1 (F121)
+        // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table (F121)
         failure.buildRecorded
           ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform}" starts a dev server rather than building again.`
           : '',
@@ -415,7 +415,7 @@ function planStepFailedError(
       failure.devServerStep
         ? `Why: that step is the one that starts the dev server, and its process has exited, so no dev server is running for this project. The exit code above is the ${cliNameOf(failure.step)} CLI's own, not this command's.`
         : `Why: every later step of the plan depends on this one, so nothing after it ran. The exit code above is the ${cliNameOf(failure.step)} CLI's own, not this command's.`,
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §Implemented in v1 (F121)
+      // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table (F121)
       failure.buildRecorded
         ? `Note: the app it built is installed on the device, so that build is recorded — the next "${PROGRAM_PREFIX} dev --${platform}" starts a dev server for it instead of building again.`
         : '',
@@ -456,7 +456,7 @@ function recordBuildOf(projectRoot: string, step: PlanStep, state: ProjectState)
 /**
  * `expo run:*` can fail at launch after the app was installed. Use the install evidence.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Implemented in v1 (F121)
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table (F121)
  */
 function recordBuildReachedDevice(
   projectRoot: string,

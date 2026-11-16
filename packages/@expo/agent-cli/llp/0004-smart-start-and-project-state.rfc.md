@@ -5,486 +5,202 @@
 **Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); app presence on a device (`src/device/appPresence.ts`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-09-06
-**Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0008-guardrails]], [[0011-impact-and-freshness]], [[0015-backend-selection-and-config]], [[0021-honest-reports]]
+**Revised:** 2026-11-16
+**Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0008-guardrails]], [[0011-impact-and-freshness]], [[0015-backend-selection-and-config]], [[0021-honest-reports]], [[0035-one-device-per-worktree]]
 
 ## Summary
 
-One engine answers "what must run to get this app on a device?". Three callers consume
-it: the smart `dev` command, the post-install "what must rerun?" answer, and the Expo Go
-compatibility check. Agents and users do not decide when to prebuild, rebuild, or just
-start Metro.
+An agent that wants the app on a device must not decide when to prebuild, rebuild, install, or only start Metro. One engine answers "what must run to get this app on a device?". The smart `dev` runs the answer, `status` reports it, and `install` reports what a new package costs. `@expo/agent-cli start` is plain `expo start`.
 
-Per [[0001-agentic-cli-on-expo-cli]] §Constraints, the engine invokes `expo prebuild`,
-`expo run:*` and `expo start` as subprocesses and consumes their JSONL events. It does
-not import `@expo/cli` internals.
+The probe reads the project: is it an Expo app, are its dependencies installed, checked-in native directories versus CNG, `expo-dev-client`, Expo Go compatibility, and the `@expo/fingerprint` hash. The plan compares the hash with the build this CLI recorded (`.expo/agent-cli-last-build.json`). Per [[0001-agentic-cli-on-expo-cli]] §Constraints, the engine spawns `expo prebuild`, `expo run:*` and `expo start`; it never imports `@expo/cli`.
 
-`@expo/agent-cli dev` is the smart engine. `@expo/agent-cli start` is `expo start`.
+Decisions:
 
-## Inputs
-
-The project-state probe reads:
-
-- Target. Expo Go, a dev client, or web. Whether the target app is installed is a later
-  question; see §Implemented in v1.
-- Native state. Bare `ios/` / `android/` dirs versus CNG. An `@expo/fingerprint` hash of
-  the native surface.
-- Compatibility. The Expo Go check, and the post-install impact class.
+1. **One pure table.** The plan is a pure function of probed state. I/O (the toolchain, the device, EAS) happens before it, and its answers arrive as inputs.
+2. **The plan is printed, then run unchanged.** `--plan` stops after the print; a plan with build steps still runs without a prompt ([[0008-guardrails]] §The plan is announced, not negotiated).
+3. **One dev server per project, held by a lock.** The lock is a listening socket, so it cannot outlive its owner.
+4. **A probe that cannot answer changes nothing.** An `unknown` device answer keeps the serve-only plan; an undecided fingerprint diff keeps the prebuild.
 
 ## Decision table
 
-| State                                                    | Plan                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------- |
-| Not an Expo app (no `expo` dependency)                   | nothing. no steps                                       |
-| `expo` declared, not installed                           | nothing. no steps. the bare `install` first             |
-| Expo Go compatible, Go installed                         | start Metro, then open in Expo Go                       |
-| Dev client installed, fingerprint matches last build     | start Metro, then open the dev client                   |
-| Fingerprint matches, and the device has not got the app  | install the built app, then start Metro                 |
-| Fingerprint changed (new native module or config plugin) | prebuild (CNG), native build, install, start            |
-| Fingerprint changed, but not in anything prebuild writes | native build, install, start. no prebuild               |
-| Build cache hit for the current fingerprint              | download and install the cached build, then start Metro |
-| Bare project, native dirs dirty                          | pod install / gradle sync, build, start                 |
-| Web                                                      | start Metro for web                                     |
+The first row that matches decides. `rule` is the plan's `rule` in `--json`.
 
-The first row sits above the others and above the web short-circuit. It is the fact that
-there is no app. Without it, "no `expo` dependency" reads as "lacks a dev client", and
-`dev` plans `expo install expo-dev-client` plus a native build for whatever repository
-the caller is standing in.
+| #   | `rule`                       | State                                                                                      | Steps                                                              |
+| --- | ---------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| 1   | `not-expo-app`               | `package.json` declares no `expo` (§Not an Expo app)                                       | none; `target: none`                                               |
+| 2   | `dependencies-not-installed` | `expo` is declared, and no installed `expo` resolves (§Dependencies not installed)         | none; `target: none`                                               |
+| 3   | `web`                        | `--web`                                                                                    | `expo start --web`                                                 |
+| 4   | `bare-fresh`                 | a checked-in `ios/` or `android/`; the fingerprint matches the recorded build              | `expo start --dev-client`                                          |
+| 5   | `bare-install`               | as 4, and the device answered `missing`                                                    | `expo run:<platform> --no-bundler`, then `expo start --dev-client` |
+| 6   | `bare-stale`                 | a checked-in native directory; the fingerprint does not match                              | build: `expo run:<platform>`, or the EAS route                     |
+| 7   | `dev-client-fresh`           | CNG with `expo-dev-client`; the fingerprint matches                                        | `expo start --dev-client`                                          |
+| 8   | `dev-client-install`         | as 7, and the device answered `missing`                                                    | `expo run:<platform> --no-bundler`, then `expo start --dev-client` |
+| 9   | `dev-client-stale`           | as 7, the fingerprint moved, and a source `prebuild` writes from moved, or nobody can tell | prebuild, then build                                               |
+| 10  | `dev-client-rebuild`         | as 7, the fingerprint moved, and nothing `prebuild` writes from moved                      | build, no prebuild                                                 |
+| 11  | `expo-go`                    | no `expo-dev-client`; Expo Go compatible; the run target is not `dev-build`                | `expo start --go`                                                  |
+| 12  | `needs-dev-client`           | everything else                                                                            | `expo install expo-dev-client`, prebuild, build                    |
 
-Every command that would act on the plan stops before the table is reached. The row is
-also what the commands that only describe the directory print, so the guard and the
-engine cannot disagree.
+On an EAS device, a stale row whose fingerprint EAS already has a finished simulator build for plans `*-fresh` instead, and the session installs that build ([[0027-everything-on-eas]] §Reuse). The local route builds with `expo run:<platform>`; the EAS route is `eas build` then `expo start --dev-client`, with no prebuild ([[0015-backend-selection-and-config]]).
+
+"Checked-in" means present and not gitignored: `expo prebuild` writes `ios/` and `android/` that the template `.gitignore` covers, and those are still CNG. Freshness is the probe's fingerprint against `.expo/agent-cli-last-build.json`, per platform. A build is recorded when the app reaches the device (the `› Installing` line of `@expo/cli`), whatever the launch then does; the recorded hash is the probe's hash from before the build. An unrecorded project is stale, so the table over-plans a build at worst.
+
+Tests: `src/plan/__tests__/decide-test.ts` (every row, no project or device); `e2e/__tests__/dev-test.ts`, `plan-test.ts`.
 
 ### A current build is not an installed app
 
-A fingerprint that matches the recorded build proves the _build_ is current. It says nothing about
-where that build is. `dev` read the match as "there is nothing to do but serve", so a project whose
-build was recorded on this machine and then wiped with the simulator — or never installed at all,
-because the build was made by EAS — got a dev server and no app to answer it. The plan was right
-about the build and wrong about the run.
+A fingerprint that matches the recorded build proves the build is current. It does not say the device has it: the simulator may have been wiped, or EAS made the build. So rows 5 and 8 ask the device. The install step is `expo run:<platform> --no-bundler`, the command `smoke` installs a development build with; the Expo CLI owns "compile what is missing, install, launch" ([[0001-agentic-cli-on-expo-cli]] constraint 4). `--no-bundler` because the dev server is the next step.
 
-So the two "fresh" rows ask the device. `dev-client-install` and `bare-install` are `dev-client-fresh`
-and `bare-fresh` with one step in front: `expo run:<platform> --no-bundler`, which is the command
-`smoke` already installs a development build with (`src/device/installDevBuild.ts`). The Expo CLI
-owns "compile what is missing, reusing the toolchain's cache, then install and launch", and
-llp/0001 constraint 4 says to invoke that rather than reimplement it. `--no-bundler` because the dev
-server is the step after it. The platform switch behind the question — `simctl` for a simulator,
-`pm path` for Android, disk-exists guard and all — is `src/device/hasApp.ts`, extracted from `smoke`
-so the two callers cannot drift.
+The answer is `present`, `missing` or `unknown`. **Only `missing` moves a plan.** `unknown` is what a machine with no bound device answers, and a config with no app id, a platform tool that would not run, and an 8 s deadline that expired; all of them plan what the table planned without the question. A device this run just created or spawned is `missing` without asking. `AGENT_CLI_NO_DEVICE` answers `unknown` without spawning. A false `missing` costs an install; a false `present` leaves a dev server with no app.
 
-**Only `missing` moves a plan.** The probe is three-valued and the third value is load-bearing:
-`unknown` is what a machine with no booted device answers, and a project whose config names no
-`bundleIdentifier`, a platform tool that would not run, an unreadable simulator tree, and a deadline
-that expired (2.5 s, the same discipline the other two device-probe callers apply). Those all plan
-exactly what this table planned before it could ask. That is what makes the probe safe to put on
-the hot path — a probe that fails cannot cost anybody anything, because failing is the old
-behaviour. `AGENT_CLI_NO_DEVICE` answers `unknown` without spawning, so a stubbed harness's runs do
-not depend on the host machine's simulators.
+The question is asked only where the answer is acted on:
 
-The asymmetry is why `unknown` leans that way. A false `missing` spends a minute installing
-something that was already there; a false `present` is the bug above. But `unknown` is not a third
-cost to weigh, it is yesterday's plan.
+- Only a serving draft: a plan that builds ends in `expo run:*`, which installs what it built. `expo-go`, `web` and the two empty rows have no development build to look for.
+- Only a run that opens the app: a typed `--ios` or `--android`, and not `--no-open`. `smoke` spawns `dev --no-open` and installs in its own phase. `status` passes no typed platform, so it never asks.
+- Only a local device and a local build backend: a caller who routed builds to EAS did not ask for a local compile. On `missing`, a machine without the platform toolchain keeps the serve-only plan.
 
-**The question is asked only where its answer would be acted on**, and `resolveStartPlanAsync`
-holds all of the gates:
+The install step is pinned to the bound device with `--device` before the plan is printed. A non-zero exit after output that shows the app reached the device is a warning, not a stopped plan: the launch can fail on the macOS Automation grant that the install does not need. The plan runner treats the `--no-bundler` step as a build step, not a dev-server step.
 
-- **A plan that builds never asks.** It ends in `expo run:*`, which installs what it built, so the
-  answer would change nothing and the subprocesses would be spent on every stale run. `expo-go` is
-  left out with it — that runtime is a published app `expo start` offers to install itself — and so
-  are `web`, `not-expo-app` and `dependencies-not-installed`, which have no app to look for.
-- **Only the run that opens the app asks.** The install exists to serve the open, so the gate is
-  the same condition as the open's: a typed native platform flag, and not `--no-open`. That keeps
-  `dev` off devices a caller said to leave alone — `smoke` spawns `dev` with `--no-open` and
-  installs the app in its own phase — and it keeps `status` consistent and instant: `status`
-  resolves plans without a `requestedPlatform`, so it never probes, and its `next` line cannot
-  disagree with sections that never probe either.
-- **Only a local-backend run asks.** `expo run:* --no-bundler` compiles when the toolchain cache is
-  cold, and a caller who routed builds to EAS did not ask for a local compile on the way to a dev
-  server. When the answer is `missing`, the toolchain is checked too: the install runs through
-  Xcode or Gradle even when nothing compiles, so a machine without them keeps the serve-only plan
-  rather than gaining a step that can only fail.
-
-The install is pinned to the device that was asked: the probe hands back what
-`expo run:<platform> --device` calls it (the UDID on iOS, the resolved name on Android), and it
-goes into the step's argv at planning time — the plan approved is the plan run. And the step is
-judged by its result, the way `installDevBuildAsync` already judges the same command: `expo run:*`
-launches the app after installing it, that launch can fail on a permission the install does not
-need (the macOS Automation grant), and output showing the app reached the device makes a non-zero
-exit a warning rather than a stopped plan.
-
-`decideStartPlan` stays a pure function of probed state. The device is asked by
-`resolveStartPlanAsync`, which is already where the toolchain probe happens, and the answer arrives
-as `DecideStartPlanOptions.appPresence` the way `lastBuild` and `buildBackend` do. The plan runner
-knows the install step by its `--no-bundler`: it is the one `expo run:*` that must not be treated
-as a dev-server step, or a lock naming a port nothing listens on would be published for as long as
-the install takes (`src/dev/forwardedArgs.ts` §isDevServerStep), and the detach-phase parser reads it as
-the compiling half of the plan, not the serving half (`src/dev/childVerdict.ts`).
+Tests: `src/device/__tests__/appPresence-test.ts`, `src/plan/__tests__/resolveAsync-test.ts`, `resolveDevice-test.ts`, `decide-test.ts`; `e2e/__tests__/dev-test.ts`.
 
 ### A stale build is two questions
 
-The two "fingerprint changed" rows used to be one. Splitting them is the difference between
-"something moved" and "what moved", and the hash can only answer the first.
+"Something moved" and "what moved" are two questions; the hash answers only the first. Row 10 exists for a fingerprint that moved without changing anything `prebuild` writes from, such as an `eas.json` edit or a `package.json` `scripts` entry: a prebuild there writes the same `ios/` again.
 
-`dev-client-stale` is the row that was always there: the native project has to be written again,
-then compiled. `dev-client-rebuild` is the narrower one under it, for a fingerprint that moved
-without changing anything `prebuild` produces — an `eas.json` edit, a `package.json` `scripts`
-entry. Regenerating an identical `ios/` there spends a minute to write the file that was
-already on disk.
+The split reuses the change classifier of [[0011-impact-and-freshness]]; it is not a second one. Each change kind says whether it needs a prebuild (`src/impact/classify.ts`): a config plugin, the app config, a native-module change, and an unknown kind do; the native project, build config and build scripts do not. The comparison diffs the `sources` on the recorded build against the probe's, in process, with no second fingerprint run.
 
-**The split is not a second classifier.** `src/impact/classify.ts` has sorted a fingerprint diff by
-{@link ChangeKind} since [[0011-impact-and-freshness]], and it already says which side each kind
-falls on — a config plugin "writes different native code", an `eas.json` edit "moves the
-fingerprint without changing generated native code, so a cloud build is enough and prebuild is not
-needed". `KIND_NEEDS_PREBUILD` is that prose as a table, `sourceNeedsPrebuild` is the one
-row that needs the diff's _operation_ as well, and the decision table reads them. Two places
-deciding this separately is exactly how they would come to disagree.
+- **A module that enters or leaves `node_modules` needs no prebuild.** `prebuild` writes from the template, the app config and the config plugins it applies, and a new dependency is none of them. A package that needs generated code ships a config plugin and is named in the app config, and both move their own sources. `expo run:ios` runs `pod install` when the dependency list moved, and Gradle autolinks at configure time.
+- **`expo` itself is the exception.** The installed `expo` selects the prebuild template, so an added or removed `expo` plans a prebuild. A `changed` native module (an SDK upgrade moves every module's contents) also plans one.
+- **Undecided means prebuild.** A record with no `sources`, a fingerprint run that returned none, and a hash that moved over an empty diff all keep row 9. Being wrong toward prebuild costs a minute; being wrong the other way builds without the change.
 
-The comparison is `classifyAgainstRecordedBuild`, in process: it diffs the `sources` on the
-recorded build against the ones the probe took. No subprocess and no second fingerprint run, which
-is what makes it affordable on the path `dev` takes every time.
+Bare rows never prebuild: their native directories are checked in, and a prebuild would overwrite the change.
 
-**A module entering or leaving `node_modules` is on the cheap side, and the operation is what says so** [asked — Kudo, 2026-09-07]. The first cut of the table put every `native-module` change on the prebuild side, so `npx expo install expo-observe` — a package that ships no config plugin — cost a prebuild that regenerated an identical `ios/`. That is the same minute the `eas.json` row exists to save, on the change a project makes far more often.
-
-What `prebuild` writes comes from three things: the template, the app config, and the config plugins the app config applies. A new dependency is none of them. A package that _does_ need generated code ships a config plugin and is named in the app config to apply it, and both of those move sources of their own — `config-plugin` and `app-config`, which have always been on the prebuild side. So this row can be honest without any other row becoming less careful.
-
-The linking still happens, later and dynamically, which is the other half of why the prebuild is not owed. `expo run:ios` runs `pod install` when the dependency list has moved [reference — `@expo/cli` 57.0.22, `runIosAsync` → `maybePromptToSyncPodsAsync` → `hasPackageJsonDependencyListChangedAsync`; `install` defaults to true]. The generated `settings.gradle` calls `expoAutolinking.useExpoModules()` and `autolinkLibrariesFromCommand(...)`, both resolved at Gradle **configure** time [reference — `expo-template-bare-minimum`, `android/settings.gradle`]. Neither reads a file the prebuild would have rewritten. And a project whose gitignored `ios/` is simply absent is prebuilt by `expo run:*` itself, so the cheap row cannot leave a run with no native project to build.
-
-**The SDK itself is the exception, by name** [asked — Kudo, 2026-09-07]. `expo prebuild` generates the native project from `expo-template-bare-minimum` at the version the installed `expo` selects, so that one package is the dependency whose own movement changes prebuild's _output_ rather than only its inputs. It is planned as a prebuild whatever the operation was (`src/impact/classify.ts` §TEMPLATE_PACKAGES). `react-native` is deliberately not in that set: its version is pinned by the template rather than the other way round. The rule is belt and braces rather than a hole being closed — an upgrade moves the package's contents, which is a `changed` operation, and a hash that moved with nothing to explain it is undecided, which prebuilds too — but it means the guarantee no longer depends on how the fingerprint happens to represent the upgrade.
-
-**`changed` is the operation this does not skip, and that is the SDK upgrade.** Bumping Expo moves every autolinked module's contents at once, and the prebuild template travels with the SDK — so the project it would generate really is a different one. Telling the two apart by the operation rather than by the kind is what makes the cheap answer available without giving up the expensive one (`src/impact/classify.ts` §sourceNeedsPrebuild).
-
-**Undecided means prebuild.** Three inputs cannot answer: a record written before this CLI stored
-`sources`, a fingerprint run that returned none, and — the one that is easy to miss — a hash that
-moved over a diff explaining nothing. That last one is not "nothing prebuild owns changed"; it is
-two hashes disagreeing about a project neither side can account for, and reading it as `false`
-skips the prebuild and builds a native project without the change in it. It costs a minute to be
-wrong in the other direction.
-
-`bare-*` is untouched. Those rows never prebuilt — the native directories are checked in, and
-prebuild would overwrite the thing that changed — and `native-project` is on the `false` side of
-`KIND_NEEDS_PREBUILD` so an answer arriving from here keeps that true.
+Tests: `src/impact/__tests__/classify-test.ts`, `fromRecord-test.ts`; `src/plan/__tests__/decide-test.ts`; `e2e/__tests__/dev-test.ts`.
 
 ## Not an Expo app
 
-A directory whose `package.json` declares no `expo` dependency is not an Expo app. No
-command may plan work that would change it without that fact being surfaced first.
+A directory whose `package.json` declares no `expo` dependency is not an Expo app. No command may plan work that would change it without saying so first. The guard reads the declaration, not `node_modules`, so a fresh clone is still an Expo app (§Dependencies not installed). `react-native` without `expo` gets the same answer.
 
-The guard reads the _declaration_ of `expo` in `package.json`. It does not look in
-`node_modules`. A fresh clone with no `node_modules` is still an Expo app.
-`ProjectState.sdkVersion` is the installed half and stays what it was. The two fields
-answer two different questions, and `status` reports both.
+| Command                                                 | In a directory that is not an Expo app                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `dev`, `start`, `smoke`, `navigate`, `deploy`, `doctor` | stop with `NOT_EXPO_APP`, exit 1, before planning or spawning                  |
+| `skills:sync` / `:list` / `:show`                       | stop the same way; they read what the installed Expo packages ship             |
+| `agents:setup`                                          | offers the confirmed user-home plugin and skills install; skips project phases |
+| `status`                                                | reports `project.isExpoApp: false` and a `next` that says so; never refuses    |
+| `typecheck`                                             | unchanged: `checked: false`, "no TypeScript", exit 0                           |
+| `install`, `new`                                        | unchanged: they are the two ways out of this state                             |
+| `dev:stop`, `dev:logs`, `skills:clean`                  | unchanged: they clean up what is here                                          |
+| `runtime:*`                                             | unchanged: they need a live dev server, which the rows above deny              |
+| `login` / `logout` / `whoami` / `register`              | unchanged: they act on `~/.expo`                                               |
 
-`react-native` present with `expo` absent gets the same answer. v1 has no "bootstrap a
-bare React Native app" flow.
+`status` is how a caller finds out it is in the wrong place, so it reports instead of refusing. `doctor` stops, because `passed: 0, failed: 0` reads as a clean bill of health for a repository nothing checked. The stop's `Try:` line is `npx @expo/agent-cli new my-app`, the recovery that changes nothing here; `install expo` stays in the `How:` prose, because it writes into a repository the caller may only have walked past.
 
-| Command                                                 | In a directory that is not an Expo app                                        |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `dev`, `start`, `smoke`, `navigate`, `deploy`, `doctor` | stop with `NOT_EXPO_APP`, exit 1, before planning or spawning                 |
-| `skills:sync` / `:list` / `:show`                       | stop the same way. they read what the installed Expo packages ship            |
-| `agents:setup`                                          | offers confirmed user-home plugin/skills installation; skips project phases   |
-| `status`                                                | reports. `project.isExpoApp: false`. a `next` that says so. does not refuse   |
-| `typecheck`                                             | unchanged. `checked: false`, "no TypeScript", exit 0                          |
-| `install`, `new`                                        | unchanged. these are the two ways out of this state, and they are never gated |
-| `dev:stop`, `dev:logs`, `skills:clean`                  | unchanged. they clean up what is here                                         |
-| `runtime:*`                                             | unchanged. they need a live dev server, which the rows above deny             |
-| `login` / `logout` / `whoami` / `register`              | unchanged. they act on `~/.expo`                                              |
-
-`status` is how a caller finds out it is in the wrong place. Refusing it would take away
-the report that diagnoses the refusal.
-
-`doctor` stops. Left alone it exited 0 with `passed: 0, failed: 0`. An agent gating on
-`failed === 0` reads that as a clean bill of health for a repository nothing checked.
-
-The stop lives at the command entry, before the probe, before the plan, and before
-anything is spawned. The decision table gains a row anyway, above the web short-circuit
-and above every native row:
-
-```
-not-expo-app → target: none, steps: [], buildLocation: null
-```
-
-The engine is consumed by more than `dev`. `status` reads it for the `next` line, and
-`resolveAsync` for the backend. `ProjectTarget` gains `none` for it. That is the one
-value that is not a way of running the app.
-
-Exit 1, the same band as `NO_PROJECT`. Nothing ran here. The recovery that mutates
-nothing is the `Try:` line:
-
-```
-Try: npx @expo/agent-cli new my-app
-```
-
-`cd` is not a command this CLI can name. `npx @expo/agent-cli install expo` writes into
-a repository the caller most likely only walked past, so it stays in the `How:` prose.
-
-Pinned in `e2e/__tests__/project-shapes-test.ts`. An app whose dependencies are not
-installed is never refused as `NOT_EXPO_APP`. A guard that read `node_modules` would
-call every freshly cloned Expo app "not an Expo app". That app gets the next section's
-answer instead.
+Test: `e2e/__tests__/project-shapes-test.ts`; `src/project/__tests__/expoApp-test.ts`.
 
 ## Dependencies not installed
 
-An Expo app whose `expo` package does not resolve, from the project root or any
-directory above it, has no installed dependencies. A fresh clone or a new git worktree
-is in this state.
-
-The plan reads its facts from `node_modules`. The dev client counts only when
-`expo-dev-client` is installed, and the fingerprint needs `@expo/fingerprint`. Without
-them the table sees "no dev client" and "no fingerprint". It then plans
-`expo install expo-dev-client` and a new native build, which the project may not need.
-On `--eas` that build costs EAS time.
-
-The probe reports this state as one fact, and the decision table reads it in its second
-row, under `not-expo-app` and above every other row:
-
-```
-dependencies-not-installed → target: none, steps: [], buildLocation: null
-```
+An Expo app whose `expo` package does not resolve from the project root or any directory above it has no installed dependencies: a fresh clone or a new worktree. Every other row reads `expo-dev-client` and the fingerprint from `node_modules`, and would plan `expo install expo-dev-client` and a native build the project may not need, on `--eas` at EAS cost.
 
 | Command                                                                              | When the dependencies are not installed                                            |
 | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
 | `dev` (also `--plan`), `start`, `smoke`, `deploy`, `doctor`, `skills` except `clean` | stop with `DEPENDENCIES_NOT_INSTALLED`, exit 1, after a bad flag, before any spawn |
-| `status`                                                                             | reports. `next` and the one follow-up are the bare install                         |
+| `status`                                                                             | reports; `next` and the one follow-up are the bare install                         |
 | `install` with no arguments                                                          | installs the lockfile (llp/0010 §Forwarded codes)                                  |
 | every other `install`                                                                | stops with `DEPENDENCIES_NOT_INSTALLED`                                            |
 
-Each of these commands would otherwise fail inside an Expo tool that cannot read the SDK,
-and name a fix that does not install the dependencies, or print a raw Node stack. A bad
-flag is the caller's mistake on any machine, so it is named first; `start` forwards its
-flags to `expo start`, so it has none to name. `navigate` is not in the list: it needs a
-running dev server, and its own stop already says that there is none. `skills:clean` and
-`dev:stop` clean up what is here, so they run in this state too. A billing EAS session
-that a deleted worktree left behind is still the first `status` follow-up.
+A bad flag is named first, because it is wrong on any machine. `navigate` needs a running dev server, and its own stop says there is none. `skills:clean` and `dev:stop` run in this state. The `Try:` line of each stop, and the `next` of `status`, is `npx @expo/agent-cli install`. The `status` project line says `dependencies not installed`, and `next.rule` is `dependencies-not-installed` with no steps and no build location. A directory that is not an Expo app reports `dependenciesInstalled: null`.
 
-The `Try:` line of each stop, and the `next` of `status`, is:
-
-```
-npx @expo/agent-cli install
-```
-
-The `status` project line says `dependencies not installed`, beside the "SDK unknown" and
-"no dev client" that it causes. Its `next.rule` is `dependencies-not-installed`, with no
-steps and no build location. No device or EAS session `next` replaces it, because each of
-those runs `dev`. A directory that is not an Expo app reports `dependenciesInstalled: null`,
-because the question has no answer there.
-
-Pinned in `e2e/__tests__/project-shapes-test.ts`, §an Expo app whose dependencies are not
-installed, for these commands and `status`, and in
-`e2e/__tests__/install-bootstrap-test.ts` for `install`.
+Tests: `e2e/__tests__/project-shapes-test.ts` ("an Expo app whose dependencies are not installed"), `install-bootstrap-test.ts`.
 
 ## Plan contract
 
-Emit the plan first as a structured event (steps, reasons, and time-class estimates),
-then execute, streaming JSONL progress. `--plan` stops after emitting, so a driving
-agent can present it for approval ([[0008-guardrails]]).
+`dev` emits the plan first as a structured event (steps, reasons, time classes), then runs it and streams JSONL progress. `--plan` stops after the plan, so a driving agent can present it ([[0008-guardrails]]). Every other run proceeds, build steps included; the steps never change between the print and the run.
 
-Every run proceeds, terminal or not: `dev` runs the plan it printed, and a plan with
-build-class steps is no exception — those steps are the work the command was asked for.
-`--plan` is the dry run, and it is the caller's to ask for.
-See [[0008-guardrails]] §The plan is announced, not negotiated.
+A step's `reason` describes the step, not the goal: it is what a driving agent reads before it acts. The plan takes `requestedPlatform` (the flag the caller typed) apart from `platform` (always resolved). Native platform flags never appear in a step's argv and never reach `expo start`: `dev` opens the app itself ([[0026-dev-owns-the-open]]). With a typed flag the reason says the app is opened on that device; without one it says nothing opens and names `@expo/agent-cli navigate /`. The plan's `reasons` are written per rule, because the honest sentence depends on what the plan does with the platform. A follow-up that opens the app names `navigate /` first.
 
-### A step's reason describes the step
-
-A step's `reason` describes the step, not the goal. `expo start --go` serves a bundle
-and waits. It does not open the project in Expo Go. The reason used to say otherwise,
-which is the worst place for a wrong sentence, because it is what a driving agent reads
-before it acts.
-
-Two rules keep the plan honest about itself (`src/plan/decide.ts`):
-
-- A typed platform flag goes in the printed argv. The plan engine takes
-  `requestedPlatform`, the flag the caller typed, separately from `platform`, which is
-  always resolved and never appears on a command line. Only the typed one goes in the
-  argv. `@expo/agent-cli dev --ios` has always forwarded `--ios` to `expo start`. The
-  plan used to print `expo start --go` regardless.
-- The reason distinguishes the two forms. With a flag, `expo start --go --ios` really
-  does open the app. It uses the simulator bound to this worktree, booting it when it is down, installs Expo Go if it is
-  missing, and sends the `exp://` URL. Without a flag, the reason says so and names
-  `@expo/agent-cli navigate /`.
-
-The plan's `reasons` list says the same thing the step's `reason` does. It is built per
-rule rather than once before the branches, because the honest sentence depends on the
-plan: whether anyone named the platform, and whether the plan acts on it.
-
-### Opening the app is `navigate`
-
-`navigate` resolves the deep link and runs `simctl openurl`. Follow-ups name
-`@expo/agent-cli navigate /` first. A wait that only re-suggests the same wait cannot
-change the answer.
+Tests: `src/plan/__tests__/decide-test.ts`, `resolveDevice-test.ts`.
 
 ## Sub-features
 
-Expo Go compatibility check. Answer "can this run in Expo Go?" with reasons. Native
-modules are compared against a vendored autolink dump of `apps/expo-go`
-(`src/project/expoGoNativeModules.json`), captured per SDK major. Lookups are a Set. An SDK
-this CLI has not recaptured falls back to that project's
-`expo/bundledNativeModules.json`, so a new Expo release does not wait on an agent-cli
-update. Config plugins still use the catalog (optimistic for `expo-build-properties`).
-The fallback also recognizes `@expo/log-box` and `expo-modules-jsi` on SDK 57 and
-newer: both are internal runtime modules absent from the version catalog, present
-in the SDK 57 dump, and verified in SDK 58.0.0-preview.2 [observed, 2026-09-16].
-At that release's [source commit](https://github.com/expo/expo/tree/313e67f5c9dfb16f9deca74a271cd1d4f33a6f82),
-Expo Go's iOS and Android autolinking search paths include `packages/` without
-excluding `@expo/log-box`; `expo-modules-core` depends on `expo-modules-jsi`, links
-`ExpoModulesJSI` in its podspec, and includes `libexpo-modules-jsi.so` on Android.
-Installed package metadata confirms both dependency edges and the catalog omissions.
-These exact-name exceptions supplement only uncaptured SDKs; a captured dump still
-decides membership. They do not imply that every Expo package or transitive dependency
-is compatible. The fallback catalog remains optimistic for packages it does list.
-`custom-native-code` is a native directory that git does not ignore (bare), not
-merely one that exists: `expo prebuild` writes `ios/` and `android/` that the
-template gitignore covers, and those are still CNG. Local packages under
-`./modules` count as `unbundled-native-module`. Recapture with
-`scripts/capture-expo-go-modules.mjs --expo <expo/expo>`.
+**Expo Go compatibility.** "Can this run in Expo Go?", with reasons. Native modules are compared with a vendored autolink dump of `apps/expo-go` per SDK major (`src/project/expoGoNativeModules.json`). An SDK with no dump falls back to the project's `expo/bundledNativeModules.json`, so a new Expo release does not wait on this CLI; on SDK 57 and newer the fallback also accepts `@expo/log-box` and `expo-modules-jsi`, two internal runtime modules the catalog omits. A captured dump always decides membership. Config plugins use the catalog, optimistically for `expo-build-properties`. `custom-native-code` is a checked-in native directory; packages under `./modules` are `unbundled-native-module`. Recapture with `scripts/capture-expo-go-modules.mjs --expo <expo/expo>`. Tests: `src/project/__tests__/expoGo-test.ts`, `expoGoModules-test.ts`.
 
-Post-install impact. After `npx expo install {pkg}`, JS-only means keep the dev server
-and maybe reload. A new config plugin or native module under CNG means prebuild plus a
-new dev build. Bare native dirs mean pod install or gradle sync. The classifier lives in
-`src/project/impact.ts`. The change classifier (what a working-tree diff costs) is
-[[0011-impact-and-freshness]].
+**Post-install impact.** After `npx expo install <pkg>`, a JS-only package keeps the dev server; a config plugin or native module under CNG needs a prebuild and a new development build; checked-in native directories need a pod install or Gradle sync (`src/project/impact.ts`). The working-tree change classifier is [[0011-impact-and-freshness]]. Tests: `src/project/__tests__/impact-test.ts`, `src/install/__tests__/impactReport-test.ts`.
 
 ## Status
 
-`@expo/agent-cli status` is a `git status`-like overview: one fast, read-only command
-that answers "where is this project right now, and what would happen next".
-Human-readable sections by default. `--json` for the machine shape, with raw
-`ProjectState` under a `probe` key. Exit 0 always, because status is information rather
-than judgment. Argument errors still exit 1. No subprocess heavier than the fingerprint
-CLI and a dev-server probe on a short timeout.
+`@expo/agent-cli status` is a `git status` for the project: one fast, read-only command that answers "where is this project now, and what happens next". Text sections by default; `--json` for the machine shape, with the raw probe under `probe`. It exits 0, because it reports and does not judge; argument errors exit 1, and `--assert` turns it into a gate ([[0011-impact-and-freshness]]). It starts nothing, and runs no subprocess heavier than the fingerprint CLI, a dev-server probe and the device reads of §Installed-app fingerprint check.
 
-Sections:
+| Section    | Says                                                                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project    | name or slug, SDK version, CNG or bare, dev-client and web dependencies, `isExpoApp`, `dependenciesInstalled`                                                              |
+| Expo Go    | compatible or not, with a reason count; the reasons are in `probe`                                                                                                         |
+| Freshness  | the fingerprint against the recorded build per platform (`fresh`, `stale`, `unknown`), and the impact class of what changed since ([[0011-impact-and-freshness]])          |
+| EAS build  | whether EAS has a finished build of this fingerprint per platform (`found`, `none`, `unknown`); a project not linked to EAS is never asked ([[0011-impact-and-freshness]]) |
+| Installed  | §Reported by status                                                                                                                                                        |
+| Dev server | running or not, the connected apps, and `hostType` and `tunnelUrl` in `--json`; the text names a tunnel only                                                               |
+| Skills     | whether the agent selection is cached, and linked against discovered skills; hidden from the text when there is nothing to say, always in `--json`                         |
+| Device     | the bound simulator or an attached device: `present`, `absent` or `unknown`; `unknown` is never rounded down to "none"                                                     |
+| Next       | one line: what to run now                                                                                                                                                  |
 
-- Project. Name or slug, SDK version, CNG versus bare, dev-client and web deps.
-  `isExpoApp`.
-- Expo Go. Compatible or not, with a reason count. The reasons themselves live in the
-  `probe` key of `--json`.
-- Freshness and impact. The current fingerprint against
-  `.expo/agent-cli-last-build.json` per platform, giving `fresh`, `stale` or `unknown`.
-  The impact class of everything that changed since that build sits on its own `impact`
-  line (`js-only`, `dev-client-compatible`, or `needs-native-build`). See
-  [[0011-impact-and-freshness]].
-- EAS build. Whether EAS already has a finished build made from this exact fingerprint,
-  per platform, as `found`, `none` or `unknown`. The remembered answer is read first, and
-  EAS is asked for what it does not cover. A project whose static config is not linked to
-  EAS is never asked. See [[0011-impact-and-freshness]] for the lookup, the cache key, and
-  how long a `none` is believed.
-- Dev server. Running or not, and how many CDP targets are connected. The discovery
-  order is §Discovery ladder. `hostType` and `tunnelUrl` ride along in `--json`. Only a
-  tunnel is worth a word in the text, because `127.0.0.1:8081` already says "this
-  machine".
-- Skills. Whether the agent selection is cached, and how the linked skill count compares
-  to the discovered count. Hidden from the text report when no agent is selected and
-  nothing was discovered. The section stays in `--json` and in the `cli:status` event.
-  It returns to the text the moment either half has something to say, including when the
-  section could not be read at all.
-- Device. The bound simulator when it is up, or an attached device, reported as `present`, `absent`, or
-  `unknown`. `unknown` is never rounded down to "none".
-- Next. The smart-start rule that would fire, as one line. The exception is a dev server
-  this project can use already answering: then the line is `@expo/agent-cli smoke`. A
-  dev server with no app attached and no local device to open one on names the
-  `exp://<host>` link, or `@expo/agent-cli navigate / --print-url` when no link can be
-  named. Deliberately not `runtime:errors`: the `runtime-errors` follow-up already names
-  it, and `next` must not repeat a follow-up.
+**Next.** The line is the smart-start rule that would fire, unless a dev server this project can use already answers. `next` never repeats a follow-up.
 
-`--assert` and the OTA verdict live on this command as well. Their contracts belong to
-[[0011-impact-and-freshness]].
+| A usable dev server answers, and                              | `next`                                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| its lock says `building` / `finishing`                        | `dev:logs` / `dev:stop --eas` (§Dev-server lock)                                                  |
+| an EAS session is on record, and no local device is `present` | `smoke --<platform> --eas` with an app connected, else `navigate / --<platform> --eas`            |
+| an app is connected                                           | `smoke`                                                                                           |
+| no app is connected, and the local device is `absent`         | the one URL that opens the app there, or `navigate / --print-url` when no single URL can be named |
+| no app is connected                                           | `navigate /`                                                                                      |
+
+A device probe that could not run (`unknown`) never turns `navigate /` into a URL.
+
+**A server with no owner.** When `status` finds the untracked dev server a killed run left (§Daemonization; `status` only reads), the dev-server line says its CLI process ended (`ownerEnded: true`). With a live cloud binding of origin `started`, `next` is `dev:stop --eas`. With no lock, `status` takes the tunnel from the server's manifest, not from the captured log. When the log names a tunnel the manifest does not, the line says `tunnel unknown`, `tunnelUrl` is null, and no open link is built.
+
+Tests: `e2e/__tests__/status-test.ts`; `src/status/__tests__/sections-test.ts`, `nextAction-test.ts`, `statusAsync-test.ts`; `src/dev/__tests__/advertisedUrl-test.ts`; `e2e/__tests__/dev-eas-test.ts` ("after a SIGKILL, status names dev:stop --eas").
 
 ## Discovery ladder
 
-Five steps, in order, in `discoverDevServerAsync` (`src/runtime/devServer.ts`). Every
-step probes. None trusts. The step is reported as `source`.
+Every command that needs the dev server finds it by one ladder. Every step probes; none trusts. The result names its step as `source`.
 
-| #   | Step                                           | Reports   | Proves                                                              |
-| --- | ---------------------------------------------- | --------- | ------------------------------------------------------------------- |
-| 0   | An explicit `--dev-server-url` or `--port`     | `flag`    | the caller named it. nothing else is tried                          |
-| 1   | The project's dev-server lock                  | `lock`    | an `@expo/agent-cli`-started wrapper is alive, and its URL answered |
-| 2   | The port `.expo/dev/logs/start.log` last named | `log`     | this project started a server there once, and it answered now       |
-| 3   | 8081                                           | `default` | Metro's default answered                                            |
-| 4   | 8082-8085, in parallel                         | `scan`    | a Metro answered. not that it is this project's                     |
+| #   | Step                                           | `source`  | Proves                                                       |
+| --- | ---------------------------------------------- | --------- | ------------------------------------------------------------ |
+| 0   | An explicit `--dev-server-url` or `--port`     | `flag`    | the caller named it; nothing else is tried                   |
+| 1   | The project's dev-server lock                  | `lock`    | an `@expo/agent-cli` wrapper is alive, and its URL answered  |
+| 2   | The port `.expo/dev/logs/start.log` last named | `log`     | this project started a server there once, and it answers now |
+| 3   | 8081                                           | `default` | Metro's default answered                                     |
+| 4   | 8082-8085, in parallel                         | `scan`    | a Metro answered; not that it is this project's              |
 
-Steps 2, 3 and 4 read the project-root header of `GET /status` by the rule in §A busy
-port, so a server of another project is skipped and reported as foreign. A `/status`
-that does not answer within 3 s is not accepted, because it proves nothing; a socket error on that
-read gets one retry. The budget is longer than the probe's, so a slow `/status` is accepted; `status`
-reads with its own probe budget, because it is a report with a deadline.
+- Steps 1 to 4 read the project root that `/status` names, by the rule in §A busy port. A server of another project is skipped; a lock whose port another project answers is a miss, and the ladder goes on.
+- A `/status` that does not answer within 3 s proves nothing and is not accepted; a socket error gets one retry.
+- The scan prefers a server with listed debugger targets, then port order. A server with no targets is still a running server.
+- No step is skipped for speed: an `expo start` run by hand holds no lock, and a cleaned `.expo` names no port. `default` is also the source when nothing answered, because the error still needs a URL.
+- An explicit URL gets no timeout of its own, because a tunnel may be slow; the caller's signal stops it.
+- Every probe timer is cleared, so a finished command exits at once.
 
-The parallel scan prefers an accepted server with listed debugger targets, then scan-port order.
-Discovery publishes its best accepted candidate as replies arrive, using the same selection rule
-as its final answer. `status` gives discovery 3 s overall (twice its 1.5 s per-request budget).
-If that deadline expires, it retains the best candidate already accepted and cancels unfinished
-discovery requests, even when the retained result reports a running server. It does not await those
-requests again or accept later candidates. With no accepted candidate, it reports the existing
-timeout result. Readiness and target liveness are still checked under their separate budgets.
-A server with no listed targets remains a valid running server; a foreign or unanswered project
-check cannot become a fallback. The existing compatibility rule for a missing project-root header
-still applies.
+`status` is a report with a deadline: 1.5 s per request and 3 s for the ladder. At the deadline it keeps the best server accepted so far, cancels the rest, and accepts nothing later. When the last `dev` request recorded a port, `status` asks the lock or that port directly and reports `lock` or `last-request`. `dev:stop` reads the lock and never enters the ladder.
 
-Nothing may be skipped on the strength of a fast path. An `expo start` a developer ran
-by hand holds no lock. A project whose `.expo` was cleaned names no port. The scan is
-what finds those. `default` is also the reported source when nothing answered anywhere,
-because the caller still needs a URL to name in its error.
-
-Timers must be cleared. A probe that raced `setTimeout` and left the timer running
-printed a complete report in ~260 ms and then sat until the budget drained, about 1.3 s
-after the print. `status` exits 0 by setting `process.exitCode` and letting the loop
-drain, so the leak was paid at exit. A command that refuses goes through `process.exit`
-and hid the same leak. The timer is now cleared on the way out and `unref`ed while it
-runs, and the timeout aborts the request it abandoned.
-
-An explicit URL still gets no timeout of its own. A server on another host or behind a
-tunnel may legitimately be slow. The caller's `signal` is the only thing that stops it,
-which is why `status` passes one.
-
-Every caller of `discoverDevServerAsync` inherits this: `status`, `navigate`,
-`preflight` and through it every `runtime:*` action, `smoke`. `dev:stop` reads the lock
-directly and never enters the ladder.
+Tests: `src/runtime/__tests__/devServerDiscovery-test.ts`, `devServerLockDiscovery-test.ts`; `src/status/__tests__/statusAsync-test.ts`.
 
 ## Dev-server lock
 
-The lock lives in `@expo/agent-cli`, in `src/devLock/`. `@expo/agent-cli start` holds it
-while its dev server runs. An `@expo/agent-cli dev` run whose plan serves holds one lock
-for the whole run: from its first step until the run ends. A run with an EAS open lets
-go earlier: at Metro's exit when the open has returned, or when the open returns after
-Metro exited.
+`@expo/agent-cli start` holds the project's lock while its dev server runs. A `dev` run whose plan serves holds one lock from its first step until the run ends. A run with an EAS open lets go earlier: at Metro's exit when the open has returned, or when the open returns after Metro exited. A plan that serves nothing takes no lock.
 
-It is a listening socket. A file records a fact about a process, and that record
-outlives the process. A listening socket exists only while its owner does. A reader that
-got an answer got it from a process that was alive when it answered.
+The lock is a listening socket, not a file. A file outlives its process; a socket answers only while its owner lives.
 
-Address. A pure function of the project root.
-`projectRoot/.expo/agent-cli-dev-server.sock` on posix.
-`\\.\pipe\agent-cli-dev-server-<sha1(realpath(projectRoot))[0:16]>` on Windows, where a
-pipe is not a project file. Symlinks are resolved and the digest is lowercased, so one
-directory is one address. A posix project buried deeper than the kernel's ~104-byte cap
-on `sun_path` gets the same digest scheme under the temporary directory. Both sides make
-that choice from the path length alone.
+**Address.** A pure function of the project root: `<projectRoot>/.expo/agent-cli-dev-server.sock` on posix, `\\.\pipe\agent-cli-dev-server-<sha1(realpath(projectRoot))[0:16]>` on Windows. Symlinks are resolved and the digest is lowercase, so one directory has one address. A posix path longer than 100 bytes (the kernels cap `sun_path` at 104 or 108) moves to the same digest name under the temporary directory. Test: `src/devLock/__tests__/address-test.ts`.
 
-Protocol. The server writes one JSON line (`url`, `port`, `pid`, `startedAt`,
-`projectRoot`, `easPlatform`, `easOpenFinished`, `phase`) on connection and ends it. `easPlatform` is the platform of
-the EAS session the run opens the app on, or null; a reader treats a line without it as null. `easOpenFinished` is true once
-the run's EAS open returned, bound or failed. It is false before that and for a run with no EAS open. When the open
-returns, the server answers each later connection with the flag set, and a port update keeps it. A reader treats a line
-without it as false. A reader connects with a ~250 ms timeout and
-reads to the close. A refused connection or a timeout is "no dev server".
+**Protocol.** On each connection the server writes one JSON line and ends it: `url`, `port`, `pid`, `startedAt`, `projectRoot`, `easPlatform`, `easOpenFinished`, `phase`, `portReported`. A reader waits up to 2 s and reads the first line; a refused connection or a timeout is "no dev server". A line from an older writer reads `easPlatform` as null, `easOpenFinished` and `portReported` as false, and `phase` as `serving`. `easOpenFinished` is true once the run's EAS open returned, bound or failed. Test: `src/devLock/__tests__/lock-test.ts`.
 
-Phase. The lock says what its run does now, so a reader reads it and does not infer it:
+**Phase.** The lock says what its run does now, so a reader does not infer it:
 
-| `phase`     | The run                                                                                                                                                               | `url` and `port`                      | `startedAt`                                                 |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
-| `building`  | runs a step before its dev-server step (`eas build`, an install, a prebuild), or an `expo run:*` dev-server step whose `/status` does not answer for this project yet | the planned port; nothing listens yet | the start of the run, or the spawn of the `expo run:*` step |
-| `serving`   | runs its dev-server step: an `expo start` from its spawn, an `expo run:*` once `/status` answers; `/status` says whether Metro answers                                | as below                              | the spawn of the dev-server step, renewed at a port retry   |
-| `finishing` | its dev-server step exited, and its EAS open has not returned                                                                                                         | the last port; nothing listens        | unchanged                                                   |
+| `phase`     | The run                                                                                                                                | `url` and `port`                      |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `building`  | runs a step before its dev-server step (`eas build`, an install, a prebuild), or an `expo run:*` step whose `/status` has not answered | the planned port; nothing listens yet |
+| `serving`   | runs its dev-server step: `expo start` from its spawn, `expo run:*` once `/status` answers for this project                            | the dev server                        |
+| `finishing` | its dev-server step exited, and its EAS open has not returned                                                                          | the last port; nothing listens        |
 
-`start` always answers `serving`. `expo run:*` builds, starts Metro, and then installs
-and launches the app (`@expo/cli` 58), so `/status` is the first sign that its build ended,
-in every output mode. A reader treats a line without `phase` as `serving`. A lock answers
-`building` only for a plan with a dev-server step: a plan that serves nothing takes no lock.
+`start` always answers `serving`. `startedAt` is the start of the run, or the spawn of the step that holds the lock, renewed at a port retry.
 
-Transitions. One writer changes the run's lock, and one table decides each change. The
-run's state is the phase it answers, `unlocked` (it holds no lock: before the take, after
-a foreign port, or when the take failed), or `released`. Beside the phase the run keeps
-its EAS open (`none`, `running`, `returned`) and, while it holds the lock, the port the
-lock names. A cell names the phase and the EAS open after the event.
+**Transitions.** One writer changes the lock, and one pure table decides each change. The run's state is its phase, `unlocked` (no lock: before the take, after a foreign port, or when the take failed), or `released`, together with its EAS open (`none`, `running`, `returned`). A cell names the state after the event.
 
 | state \ event      | published(p) | foreign port      | Metro reports a port | `/status` answers | EAS open starts   | EAS open returns   | Metro exits        | run ends |
 | ------------------ | ------------ | ----------------- | -------------------- | ----------------- | ----------------- | ------------------ | ------------------ | -------- |
@@ -500,609 +216,185 @@ lock names. A cell names the phase and the EAS open after the event.
 | finishing, running | illegal      | illegal           | new port             | unchanged         | illegal           | released           | illegal            | released |
 | released           | illegal      | unchanged         | unchanged            | unchanged         | unchanged         | unchanged          | unchanged          | released |
 
-`published` is the take before a build step, a dev-server spawn, or a busy-port retry,
-with the step's phase, port, spawn time and EAS platform; the lock then names that port.
-When Metro reports a port, a held lock names it, with `portReported`. `published` is legal
-whatever the EAS open does; no publish follows an open, because the run makes no
-busy-port retry after one (below). A step tells its caller a port only after the lock
-names it, so the caller's `/status` wait never answers a lock not yet taken. An EAS open starts once per run and returns only
-after it started; any other open event is illegal. When Metro exits with no EAS open
-started, the lock keeps its phase, because a busy-port retry may follow on the same lock,
-and the run releases it when it ends. Metro's exit is said after the step's port watch
-ends, so no event of a step lands after it. A `released` run ignores late reports. An
-illegal pair changes nothing and is reported on the debug event stream as
-`cli:dev_lock_illegal_transition`; the lock is never the reason a run fails. Test:
-runState-test, one case per cell.
+`published` is the take before a build step, a dev-server spawn, or a busy-port retry. When Metro exits with no EAS open, the lock keeps its phase, because a busy-port retry may follow on the same lock. A run makes no busy-port retry after any open starts, local or on EAS. An illegal pair changes nothing and emits `cli:dev_lock_illegal_transition`; the lock is never the reason a run fails. Tests: `src/devLock/__tests__/runState-test.ts` (one case per cell), `runLock-test.ts`.
 
-A run makes no busy-port retry after any open starts, local or on EAS. The run keeps that
-rule, because the table sees only the EAS open: a local open has no exit work, and the
-lock must not say `finishing` for it.
+**Readers.**
 
-What each reader does with the phase:
+| Reader                           | `building`                                                                                                                        | `serving`                                                            | `finishing`                                                 |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `dev:stop`                       | signals the pid; the run stops before its next step                                                                               | signals the pid, waits for it and the lock to go, or for `finishing` | no signal; reports the dev server stopped and the pid alive |
+| `dev --detach` parent and re-run | reports the run at once, `phase: "building"`; with `--wait-ready` waits, and at the deadline exits 22 `DEV_DETACH_STILL_BUILDING` | §Daemonization                                                       | refuses: the run still binds a session                      |
+| foreground `dev`                 | stops with `DEV_SERVER_RUNNING`, worded for the phase (§A busy port)                                                              | same                                                                 | same                                                        |
+| `status`                         | next step `dev:logs`                                                                                                              | §Status                                                              | next step `dev:stop --eas`                                  |
 
-| Reader                           | `building`                                                                                                                                | `serving`                                                            | `finishing`                                                                          |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `dev:stop`                       | signals the pid; the run stops before its next step                                                                                       | signals the pid, waits for it and the lock to go, or for `finishing` | no signal; reports the dev server stopped, the pid alive, and `dev:stop --eas` first |
-| `dev --detach` parent and re-run | reports the run at once, exit 0, `phase: "building"`; with `--wait-ready` waits, and at the deadline exits 22 `DEV_DETACH_STILL_BUILDING` | as §Daemonization                                                    | refuses: the run still binds a session                                               |
-| foreground `dev`                 | stops with `DEV_SERVER_RUNNING`, worded for the phase                                                                                     | same                                                                 | same                                                                                 |
-| `status`                         | next step `dev:logs`                                                                                                                      | as today                                                             | next step `dev:stop --eas`                                                           |
+Tests: `src/dev/__tests__/stopAsync-test.ts`; `e2e/__tests__/dev-eas-test.ts`, `dev-detach-test.ts`, `dev-test.ts` (`building` through `expo run:*` on iOS and Android), `status-test.ts`.
 
-Tests: lock-test (`phase` on the wire, a line without it), stopAsync-test and
-dev-eas-test (each `dev:stop` column), dev-eas-test and dev-detach-test (the detached
-column), dev-test (`building` through an `expo run:*` build on iOS and Android).
+**Acquisition and release.** On posix, `EADDRINUSE` is a live owner or an orphaned socket file; only a connection tells them apart, and an orphan is unlinked before the next listen. On Windows a pipe dies with its process, so `EADDRINUSE` is a live owner. The run releases the lock when it ends and on process exit.
 
-Acquisition. `EADDRINUSE` on posix means either a live owner or an orphaned socket file.
-Only a connection tells them apart. An answer means another `@expo/agent-cli` owns the
-project's dev server. Silence means the file is an orphan, which is unlinked before
-listening again. On Windows a pipe dies with its process, so `EADDRINUSE` is a live
-owner by definition.
+**Never load-bearing.** A lock another process holds emits `cli:dev_lock_skipped` with reason `in-use` and no warning; any other failure to take it warns once with reason `error`. Neither fails the run.
 
-Release. When the run ends, and on process exit, with a best-effort unlink. A
-leftover socket file answers nothing. The next acquisition removes it.
+**Which port the lock names.** With `--port` in the arguments, the lock names that port at the spawn: `dev` passes `--port` on every serving step, and the Expo CLI binds it or exits. With none, it names the port the dev server reports, else 8081. The report is Metro's `metro:instantiate` event in this process's `2g` event log (its session, or its `LOG_EVENTS` file); a later report updates the lock and sets `portReported`. A log this process cannot read back (a file descriptor, or a `2g` parent over IPC) gives no report, and the lock keeps its port after the watch's 20 s. A port whose `/status` names another project root is never published (`cli:dev_lock_skipped`, reason `foreign-port`), and a `dev` run releases a `building` lock in that case. Tests: `e2e/__tests__/wrapper-test.ts` ("answers with the port the dev server reported"), `src/devLock/__tests__/port-test.ts`, `publishPort-test.ts`.
 
-Never load-bearing. An address that cannot be taken produces one warning and a
-`cli:dev_lock_skipped` event with reason `in-use`, never a failure. When the arguments name a port, the lock
-is published at the spawn with that port: `dev` passes `--port` on every step that
-serves, and the Expo CLI either binds it or exits. The watch goes on, and a port the
-dev server reports after the spawn timestamp updates the lock's answer and sets its
-`portReported`. The report is Metro's `metro:instantiate` event, which the Expo CLI sends
-to this process's `2g` event log: its session, followed live through `2g/api`, or its
-`LOG_EVENTS` file (`wrapper-test` "answers with the port the dev server reported"). One
-`LOG_EVENTS` file can serve two runs, so a reported port whose `/status` names another
-project is skipped (`port-test` "skips a reported port another project's dev server
-answers"). An event log this process cannot read back (`LOG_EVENTS` naming a file
-descriptor, or a `2g` parent over IPC) gives no report to a foreground run, and its lock
-falls back after the watch's 20 s.
-With no port in the arguments, the port published is the one the dev server reported,
-falling back to 8081. A `--port` or default port whose `/status` names another project
-root is never published [observed — live suite, 2026-10-05: a lock on 8081 pointed at
-another project's Metro]; the log watch goes on while the dev server runs, and nothing is
-published if the server exits first (`cli:dev_lock_skipped`, reason `foreign-port`). A
-`dev` run that already holds its lock in `building` releases it in that case.
-
-Still probed. The lock proves the wrapper is alive. Only an HTTP probe of the URL proves
-the dev server behind it is. Discovery uses the lock to stop guessing which port.
-
-Two accepted limits. A dev server started by `expo start` directly holds no lock, so the
-port in `start.log` plus the scan is still the answer. A posix project path long enough
-to push the socket past the kernel's cap moves it out of `.expo`.
+The lock proves the wrapper is alive; only an HTTP probe of its URL proves the dev server is. A dev server started with `expo start` directly holds no lock, so discovery still needs the log and the scan (§Discovery ladder).
 
 ## Daemonization
 
-`@expo/agent-cli dev --detach [--wait-ready]` starts the dev server in a process of its
-own and gives the terminal back. `@expo/agent-cli dev:logs` reads what it printed.
+`@expo/agent-cli dev --detach [--wait-ready]` starts the run in a process of its own and gives the terminal back. `dev:logs` reads what it printed.
 
-`--detach` spawns this CLI, not `expo start`:
-`spawn(process.execPath, [bin, 'dev', ...argv], { detached: true, stdio: ['ignore', logFd, logFd] })`
-then `unref()`. The child gets no `2g` IPC variables from the parent: a detached run
-outlives the parent, and events sent to the parent's IPC socket would be lost when it
-exits. The child writes to the parent's `LOG_EVENTS` file when there is one, and opens its
-own `2g` session otherwise; `expo start` logs to the child (`dev-detach-test` "returns once
-the dev server reports its port through 2g"). The wrapper is what takes the lock. A
-detached server that published no
-lock would be a process nothing could find, wait on, or stop. The lock names its port
-and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
-`expo` child exactly as the foreground one does.
+**The child is this CLI, not `expo start`.** The wrapper takes the lock; a detached server with no lock is a process nothing can find, wait on, or stop. `--detach`, `--wait-ready` and `--json` are stripped from the child's command line. The child gets no `2g` IPC variables, because it outlives the parent; it writes to the parent's `LOG_EVENTS` file when there is one, and opens its own `2g` session otherwise.
 
-A run killed with `SIGKILL` leaves its Metro running with no lock: an untracked dev server.
-The lock is a socket so that nothing claims a process is alive after it is gone. Beside it,
-the holder keeps a run record (`.expo/agent-cli-dev-run.json`: its pid, the port, and the
-pid listening there), written once the dev server reported its port and removed when the lock
-is released or when `dev:stop` stops the run through its lock (a Windows stop skips the
-holder's cleanup). The record outlives its run only when the run died
-without its cleanup, and it is read only as proof of that death.
+**The parent waits for the lock, not for the child.** A detached start is finished when the child's lock answers. With `--wait-ready` the parent also waits until `/status` answers for this project; a port change moves the wait to the new URL within the same budget, and another project's answer never ends it. Without the flag `ready` is `null`. The budget is 120 s (`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
 
-A dev server is an untracked one when four things hold: no lock answers, the record names a
-pid that is gone (a zombie counts as gone), the only process listening on the record's port is
-the one the record names, and its `/status` names this project's root. Two processes can hold
-one port (`expo start --localhost` on `[::1]` beside a Metro on `127.0.0.1`), and then neither
-is proved: the record names no pid, and a record whose pid still listens is kept. A port can be taken again;
-a pid names one process. So a dev server a person started (`npx expo start`) is never one,
-even on the port of a run that died with its own Metro (a closed terminal): `dev:stop`
-reports it and stops it only with `--force`, and `dev` moves to the next port, as before. A
-run killed before its dev server reported left no record, so nothing is its orphan.
-Reading the record changes nothing; `dev:stop` and a `dev` run (not `--plan`, not `status`)
-remove a record whose port answers for another process, another project, or not at all.
+**One dev server per project.** A local `dev --detach` beside a live lock stops as a foreground `dev` does (§A busy port). A detached run whose device is on EAS goes on to the running server and opens its session there ([[0035-one-device-per-worktree]] §Preserved sessions), and `smoke`'s bootstrap reuses the running server. A lock that another run takes after the parent's read is not the child's: the parent compares the lock's pid with the child's, and relays the child's `DEV_SERVER_RUNNING` refusal.
 
-There is one record per project. A later run that does not stop the orphan (its stop failed,
-`start` never looks for one, or its proof ran out of time) and serves elsewhere writes its own
-record over the orphan's, and that orphan is then anyone's server: `--force` stops it. Refusing
-to start beside an orphan, and one record per port, were considered and rejected: the case is
-rare, and losing the proof can only spare a server, never stop the wrong one.
+**A run that builds says so.** A detached run never says "the dev server started" while the plan compiles; the lock's `phase` is the one source ([[0021-honest-reports]]). Without `--wait-ready`, the parent reports its child as soon as the lock says `building`: exit 0, `phase: "building"`, the pid and the URL the dev server will take. With `--wait-ready` it waits, and at the deadline, with the child alive and still `building`, it exits 22 `DEV_DETACH_STILL_BUILDING` with the pid, the log file, and the same command as the next step. A re-run beside a `building` lock spawns nothing: it reports that run, or follows it with the same wait and the same 22. A followed run that ends in its build is reported as not started, with `dev:logs`. A re-run beside a `finishing` lock spawns nothing and refuses with `dev:stop --eas`.
 
-`dev:stop`, with no `--port` or with the record's port, stops an untracked server without
-`--force`: the pid match is the proof `--force` would ask for, so it signals that pid and
-reports `untracked: true` and `forced: false`.
+| `dev --detach` ends with                                               | Exit                            |
+| ---------------------------------------------------------------------- | ------------------------------- |
+| a first start; an EAS or `smoke` reuse; a build without `--wait-ready` | 0                               |
+| a live lock of this project, local run                                 | 20 `DEV_SERVER_RUNNING`         |
+| a child that never published a lock                                    | 1                               |
+| `--wait-ready` gave up on a serving dev server (it still runs)         | 1                               |
+| `--wait-ready` ended while the run builds                              | 22 `DEV_DETACH_STILL_BUILDING`  |
+| `--wait-ready --eas` ended before the session is bound                 | 22 `DEV_DETACH_SESSION_PENDING` |
 
-| Server on the port                        | `dev:stop`                     | `dev`                                                   |
-| ----------------------------------------- | ------------------------------ | ------------------------------------------------------- |
-| a lock answers for it                     | stops it                       | stops on the lock                                       |
-| left by a killed run (record + `/status`) | stops it, `untracked: true`    | stops it, takes its port                                |
-| any other, this project's root or not     | reports it; `--force` stops it | moves to the next port; `--port` on it is `PORT_IN_USE` |
+22 means: run the same command again. The re-run finds the run through its log and the lock, so no command adds a `--port` the caller did not type.
 
-The e2e cases "after a SIGKILL of a foreground dev" in `e2e/__tests__/stop-test.ts` enforce
-the three rows: the stop, the port the next `dev` takes (and a `dev` that refuses leaves the
-server running), and a server started by hand on a dead run's port that both commands leave
-running. `src/devLock/__tests__/lock-test.ts` and
-`publishPort-test.ts` enforce the record's life.
+**Stopping.** A run stops on SIGINT or SIGTERM between steps: the running step gets the signal, no later step starts, and the run exits 130 or 143. So a plain `dev:stop` stops a `building` run and no dev server starts after it. An `eas build` already submitted keeps running on EAS; `eas build:cancel` ends it.
 
-When no lock answers and no dev server a killed run left is found, the text report opens without a red `Stopped no`: with `--port` on a port where nothing listens, it says `Dev server not running`; with no `--port`, no port was looked at and a server a person started may be up, so it says what was checked and to pass `--port`. `--json` keeps `stopped: false` and `reason: 'not-running'`.
+**The log.** One file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. Line 1 is `Detached dev run, pid <n>.`; only line 1 is read for the pid, so later output cannot fake it. `dev:logs` has no `--follow`, because a tail that never returns is what `--detach` avoids. It prints the last 100 lines by default, ANSI stripped, fenced as untrusted ([[0008-guardrails]]). It exits 1 `NO_DEV_LOG` when the project has no log; a dev server started attached has none.
 
-When `status` finds the untracked dev server a killed run left (the rule above, which only reads), the dev-server line says that its CLI process ended and nothing owns it (`ownerEnded: true` in `--json`). When this worktree also has a live cloud binding of origin `started`, `next` is `dev:stop --eas`, which stops the server and the session; without one, `next` is what it is for any running server. A tracked server, or a server the rule does not name (one a person started), shows no such line. The e2e cases "dev:stop stops the dev server it left with no lock" in `e2e/__tests__/stop-test.ts` and "after a SIGKILL, status names dev:stop --eas" in `e2e/__tests__/dev-eas-test.ts`, and the `chooseNextAction` table, enforce it.
+**A killed run leaves an untracked dev server.** `SIGKILL` on the run leaves its Metro with no lock. Beside the lock, the holder keeps a run record, `.expo/agent-cli-dev-run.json` (its pid, the port, and the pid listening there). It is written once the dev server reported its port and removed with the lock, so it outlives its run only when the run died without cleanup. A dev server is untracked when four things hold: no lock answers, the record's run pid is gone (a zombie counts as gone), the only process listening on the record's port is the one the record names, and its `/status` names this project's root. A pid names one process; a port can be taken again. So a server a person started is never untracked, even on a dead run's port. A run killed before its dev server reported left no record.
 
-With no lock, nothing ties the captured log to the dev server that answers, so `status`
-does not take its tunnel from the log. It asks that server's manifest
-(`resolveDevServerReachAsync(projectRoot, devServerUrl)`), only when the server answered. A
-manifest that names a tunnel is the tunnel, whatever the log says. When the log names a tunnel
-the manifest does not, the line says `tunnel unknown`, `tunnelUrl` is null, and no open link
-is built: not on that tunnel, and not on the LAN address in its place.
-`src/dev/__tests__/advertisedUrl-test.ts` and `src/status/__tests__/sections-test.ts` enforce it.
+| Server on the port                        | `dev:stop`                                   | `dev`                                                   |
+| ----------------------------------------- | -------------------------------------------- | ------------------------------------------------------- |
+| a lock answers for it                     | stops it                                     | stops on the lock                                       |
+| left by a killed run (record + `/status`) | stops it; `untracked: true`, `forced: false` | stops it and takes its port (§A busy port)              |
+| any other, this project's root or not     | reports it; `--force` stops it               | moves to the next port; `--port` on it is `PORT_IN_USE` |
 
-Three flags are stripped from the child's command line. `--detach` would detach a
-detached run forever. `--wait-ready` names a wait the parent performs. `--json` would
-print an object nobody reads and switch the plan's subprocess output to `capture`, which
-is the output the log file exists to hold. `buildDetachSpawn` is a pure function over
-argv for that reason.
+There is one record per project. A later run that serves elsewhere without stopping the orphan writes over its record, and that orphan then needs `--force`. One record per port, and refusing to start beside an orphan, were rejected: the case is rare, and losing the proof can only spare a server, never stop the wrong one.
 
-The parent waits for the lock, not for the child. A detached start is finished when the
-lock answers. Under `--wait-ready` it holds one `/status` request open while following
-that child's lock. A port change cancels the old request and checks the new URL within
-the remaining budget. A ready response naming another project never completes this wait;
-the parent keeps waiting for its own server. The missing-header compatibility rule in
-§A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
-reject a foreign root. Without the flag `ready` is `null`.
+When no lock answers and no untracked server is found, `dev:stop --json` reports `stopped: false`, `reason: 'not-running'`. The text says `Dev server not running` for a `--port` where nothing listens; with no `--port` it says what was checked and to pass `--port`.
 
-One dev server per project. A detached run reads the lock once, in `devDetachAsync`, and its
-caller picks what a live lock means. A local `dev --detach` stops on it as a foreground `dev` does
-(§A busy port): the same `DEV_SERVER_RUNNING` refusal, exit 20, worded by the lock's phase. A
-detached run whose device is on EAS goes on to the running server and opens its session there
-([[0035-one-device-per-worktree]] §Preserved sessions), and `smoke`'s bootstrap passes
-`reuseRunning` and reports the running server.
-
-A lock that another run takes after that read is not this run's child's: the parent compares the
-lock's pid with the child's. The child, a foreground `dev`, refuses on that lock with
-`DEV_SERVER_RUNNING`, and the parent relays the refusal unchanged. When another spawn emptied the
-child's log, the child's exit 20 says the same, and the parent builds the refusal from the lock.
-For `--eas` and `smoke`, the parent applies the caller's rule to that lock instead. A parent that
-follows a building run of another process reads no child verdict older than that run's start.
-
-Reuse checks the process and its verdict after tunnel lookup and any final readiness
-probe, and before reporting a readiness timeout. Logs older than the lock's start time
-cannot supply a current verdict. Reuse adds no platform-opening grace period.
-
-The log is one file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. A
-name carrying the port could not be resolved by `dev:logs` before the port was known. A
-file that accumulated across runs would answer with last week's output.
-
-`dev:logs` has no `--follow`. A tail that never returns is the thing `--detach` exists
-to avoid. It polls instead. Each read is the last 100 lines by default, ANSI stripped,
-fenced as untrusted per [[0008-guardrails]]. A dev server started attached has no log at
-all, and the command says that.
-
-A detached run may not say "the dev server started on `<url>`" while the plan is still
-compiling. The run's lock is the one source: `building` while a step before the
-dev-server step runs, and through an `expo run:*` dev-server step until `/status`
-answers. `dev --detach --json` carries that `phase`. The child's log names only the
-dev-server step, which decides the window after a claim when the step also opens the
-app ([[0021-honest-reports]]).
-
-The child prints `Detached dev run, pid <n>.` as line 1 of its log, before anything
-else. Only line 1 is read, so later output cannot fake it. A re-run reads it to tell
-whether the run that holds the lock is the run that wrote the log
-([[0035-one-device-per-worktree]] §Preserved sessions).
-
-Tests: childVerdict-test (the pid on line 1 only) and devAsync-test (the pid line).
-
-A build is recorded when the app reaches the device, whatever the launch then does
-(`src/dev/buildEvidence.ts`). The install line is what is read (`› Installing …` from
-`@expo/cli`). A step that failed still has its output read. Two cases are not recorded:
-a build that died before the install, and anything in `inherit` output mode, where
-nothing is captured.
-
-A plan that builds, such as `eas build` then `expo start` or a cold `expo run:*`, builds
-for minutes. Without `--wait-ready`, the parent reports its child as soon as the lock
-says `building`: exit 0, `phase: "building"`, the pid and the URL the dev server will
-take. With `--wait-ready`, it waits while the lock says `building`. At the deadline,
-with the child alive and still `building`, it exits 22 `DEV_DETACH_STILL_BUILDING` with
-the pid, the log file and the same command as the next step. It never says that the dev
-server did not start. A re-run of the same command beside a `building` lock spawns
-nothing: without `--wait-ready` it reports that run, and with it it follows that run with
-the same wait and the same 22. A followed run that ends in its build is reported as not
-started, with `dev:logs`, and no second child starts. A re-run beside a `finishing` lock
-spawns nothing and refuses with `dev:stop --eas`. The budget is 120 s
-(`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
-
-A run stops on SIGINT or SIGTERM between steps. The step that was running gets the
-signal and ends, and the run starts no later step and exits 130 or 143. So a plain
-`dev:stop` stops a run in `building`, and no dev server starts after the interrupted
-build. An `eas build` that was already submitted keeps running on EAS; `eas build:cancel`
-ends it. On Windows `dev:stop` ends the process tree at once, with the same result.
-
-Tests: dev-eas-test (the report, the 22, the follow by a re-run, a followed build that
-fails, the stop of a building run), dev-detach-test (a building `expo run:*` plan).
-
-Exit codes. `dev --detach` exits 0 for a successful first start, an EAS or internal
-reuse, and for a run that builds without `--wait-ready`. A local repeat exits 20. Exit 1 when the child never
-published a lock, and 1 when `--wait-ready` gave up on a serving dev server, which is
-still running, as the message says. Exit 22 (`DEV_DETACH_STILL_BUILDING`) when
-`--wait-ready` ends while the run builds. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
-runs out before the session is bound ([[0035-one-device-per-worktree]] §Preserved sessions). 22 means: run
-the same command again. The command has no `--port` that the caller did not type: a
-re-run finds the run through its log and the lock, and the lock names its port.
-For the same reason `status` does not add `--port` to a re-run that follows this
-project's own running EAS dev server. `dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the
-project has none.
+Tests: `e2e/__tests__/dev-detach-test.ts`, `dev-eas-test.ts`, `dev-logs-test.ts`, `stop-test.ts` ("after a SIGKILL of a foreground dev"), `dev-test.ts` (signal exits); `src/dev/__tests__/detach-test.ts`, `detachAsync-test.ts`, `detachRunningServer-test.ts`, `childVerdict-test.ts`, `untrackedDevServer-test.ts`; `src/devLock/__tests__/lock-test.ts`, `publishPort-test.ts` (the record's life).
 
 ## A busy port
 
-When the Expo CLI stops on `Use port 8181 instead?`, `@expo/agent-cli dev` picks a free
-port itself and runs the step again. Unless the caller named `--port`. Then it is
-`PORT_IN_USE`, exit 20.
+**One dev server per project.** A live lock of this project stops a foreground `dev` and a local `dev --detach` with `DEV_SERVER_RUNNING`, exit 20. A second server could not hold the lock, so `status` and `dev:stop` could not see it. The stop runs after the command's own refusals (`BAD_ARGS`, `NOT_EXPO_APP`) and before the project probe, the plan, the port probe and the device: a stopped run binds no device and records no last request ([[0035-one-device-per-worktree]] §Lifecycle output). The error carries `{ port, pid, phase }` as `error.data`, and its wording and How follow the phase:
 
-This is not a needs-human. No account, no permission, and no click is involved. The
-carve-out lives in `src/dev/portCollision.ts` and is checked before the needs-human
-classifier. `expo-prompt` still covers every other question the Expo CLI asks.
+| `phase`     | Means                                                                       | How names            |
+| ----------- | --------------------------------------------------------------------------- | -------------------- |
+| `building`  | the lock says so                                                            | `dev:logs`           |
+| `serving`   | the lock says `serving`, and `/status` answers for this project             | `smoke --<platform>` |
+| `starting`  | the lock says `serving`, and `/status` does not answer for this project yet | `status`             |
+| `finishing` | the lock says so                                                            | `dev:stop --eas`     |
 
-A named `--port` is a requirement. Moving the server would leave every URL the caller
-had already written pointing at nothing. The message names the pid that holds the port
-and recovers into a different command: `dev:stop --port <n> --force`, or a free port.
-Before the plan runs, the holder of a busy port is never this project's own dev server:
-a live lock stops the run before the port is probed. The lock is not read again. Another
-command can start a dev server for this project after the lock read and before the
-serving step spawns: `@expo/agent-cli start` in a second terminal, or a `dev --detach`.
-That gap is as long as the steps before the serving one. It is nothing when the plan only
-serves. It is the prebuild for a stale project, and the cloud build on the EAS route.
-`expo run:*` takes the lock when it spawns, before it compiles. A server that appears in
-the gap takes the lock and the port. The serving step then reports `cli:dev_lock_skipped`
-with reason `in-use` (§Dev-server lock), the busy-port retry moves this server to the
-next free port, and a named `--port` fails with `PORT_IN_USE`, naming that pid like any
-other holder.
+The How never names the `dev` that just stopped; `dev:stop`, then the same command, is the other way out. The smoke platform is a device platform: a `--web` caller gets the project's default. `smoke` reuses the running server and does not rebuild, so after a native change the way out is `dev:stop`, then `dev`.
 
-One dev server per project. A live lock of this project stops a foreground `dev`, and a
-local `dev --detach`, with `DEV_SERVER_RUNNING`, exit 20: before the project is probed and the plan resolved, before
-any step, before the port is probed, and before a device is bound. A second server could
-not hold the lock, so `status` and `dev:stop` could not see it or stop it, and it would
-sit on a port nothing names.
+Under `--plan` the probe and the resolver still run, but the plan lists no steps and a reason says why. `devServerPort` is `{ port, movedFrom: null, state: 'running', phase }`, the plan says nothing about a device, and its one follow-up is the command the error's How names. The plain `start` wrapper allows a second server and reports `cli:dev_lock_skipped`.
 
-Where the stop runs. A foreground `devAsync` reads the lock once, after the command refusals and
-before the project probe; a detached run reads it in `devDetachAsync` before it spawns. A run that
-is not `--plan` stops there
-when the lock is live, so a stopped run probes no project and refreshes no fingerprint
-cache, resolves no plan, asks EAS for no build, probes no toolchain, and reads, boots or
-matches no device. It records no last request either: the recovery preference `status`
-reads ([[0035-one-device-per-worktree]] §Lifecycle output) is written after the stop, so
-a request the lock refused never replaces the one that started the running server.
-A detached run records in its child, or after it opened its EAS session on the running server.
-`--device` on a run that binds nothing is still `BAD_ARGS` first: the refusals about the
-command come before the outcome about the project. The lock alone decides.
-Every plan `dev` can reach that has a step has a step that serves (`isDevServerStep`:
-`expo start`, or `run:*` without `--no-bundler`), and the two empty plans,
-`not-expo-app` and `dependencies-not-installed`, are refused by the command before
-`devAsync` runs. Under
-`--plan` the probe and the resolver run, because the plan prints its rule and its
-reasons: the device callback of [[0035-one-device-per-worktree]] §How `dev` uses it
-answers null on a live lock instead of inspecting the own binding, and the port block
-after the resolver builds the stopped plan, on the lock alone, whatever the forwarded
-arguments made of the last step. Every foreground `dev` that binds a device has
-therefore passed a lock that was not live. Device acquisition can reuse a retained
-binding after an explicit stop and restart.
+**The port is resolved before the plan runs.** It is the named `--port`, or the first port from 8081 (`RCT_METRO_PORT` when set) that binds on the unspecified address and on `127.0.0.1`. The probe is a copy of Expo's own, so this CLI and the dev server agree on which port is free. The port goes as `--port` to `expo start` and to every `expo run:*` that serves, because `expo run:*` left to ask skips its dev server on a busy port, deep-links the app to whatever holds the port, and exits 0. The plan reports it as `devServerPort`, whose `state` is `picked` (with `movedFrom`), `named` (with `taken` when it cannot be bound), or `running`.
 
-The word. One `/status` probe of the lock's URL
-(`probeBundlerAsync(lock.url, { projectRoot })`) picks it: `serving` when it answers for
-this project, else `starting`, which covers a `run:*` build that has not reached Metro, a
-Metro not yet up, and another project's Metro on the lock's port while this project's
-retry moves off it. The message names the port and the pid, carries `{ port, pid, phase }`
-as `error.data`, and recovers into `smoke --<platform>` for a serving server and `status`
-for a starting one. The smoke platform is a device platform: a `--web` caller gets the
-project's default. `smoke` reuses the running server and does not rebuild an installed
-development build, so after a native change it tests the old binary; the way out is
-`dev:stop`, then `dev`. Never the `dev` that just stopped, which stops in the same place
-until the server is stopped; `dev:stop` is the other way out, and the How names it. The
-probe, the reason and the error live in `src/dev/runningDevServer.ts`.
+**A named `--port` is a requirement.** A busy named port is `PORT_IN_USE`, exit 20; moving would break every URL the caller already wrote. The message names the pid on the port and recovers into `dev:stop --port <n> --force`, or a free port. A busy port with no live lock of this project behind it is busy whoever holds it, an `npx expo start` of this project included: an unnamed port moves to the next free one. This is not a needs-human: no account, permission or click is involved.
 
-Under `--plan` the plan lists no steps, because the run does none, and a reason says so.
-`devServerPort` is `{ port, movedFrom: null, state: 'running', phase }`, and the table
-line reads `Dev server: port <n>, already running` or `still starting`. The plan says
-nothing about a device, with or without `--device`: no pinned step, no "will reuse or
-create a simulator", no `Device:` line, because the run binds none. Its one follow-up is
-the one the run's error suggests: `smoke --<platform>` when the server answers, `status`
-while it is still starting, never the `dev` that would stop in the same place. The smoke
-platform is the typed one when it is a device platform, else the project's default by
-the one rule the run uses (`defaultSmokePlatform`): a single checked-in native folder,
-then the host.
+**One retry.** The pre-resolved port is a hint, and the retry is the guarantee: two worktrees can pick the same free port at once. When the serving step's output shows a collision on the step's own port (the Expo CLI's `Use port … instead?` and `Port <n> is …` lines, Metro's `listen EADDRINUSE`, or the `became busy … while the app was compiling` stop), `dev` picks a free port and runs the step once more. The check runs whatever the exit code, because `expo run:*` exits 0 after it skipped its dev server. A bare `Skipping dev server` is the Expo CLI reusing this project's own server, and the step succeeded. A dev server that reported or logged its port bound it, so its output is not scanned. No plan has two dev-server steps, so this is one retry per plan. A collision still present after the retry stops the run with `PORT_TAKEN_AFTER_RETRY`, exit 20; the message names both ports, the pid on the second, and the Expo CLI's exit code.
 
-Smoke's internal bootstrap can reuse a running server. The plain `start` wrapper keeps
-allowing a second server, reported through `cli:dev_lock_skipped` (§Dev-server lock).
+**The untracked dev server is the one exception** (§Daemonization). A `dev` run whose plan serves stops it by its pid and takes its port, with a warning that names the port and the pid. Reusing it was rejected: no lock names its pid, so nothing can follow or stop it, and its tunnel is not known. Leaving it was rejected: that is two servers for one project. A run that refuses or serves nothing leaves it serving, and `--plan` stops nothing; a reason names the server. When the stop fails and the run would take that port, the run stops with `UNTRACKED_DEV_SERVER`, exit 20, and recovers into `dev:stop --port <n> --signal SIGKILL`; a run on another `--port` warns and goes on.
 
-The port is resolved before the plan runs: the named `--port`, or the first port from
-8081 (`RCT_METRO_PORT` when set) that binds on `::` and `127.0.0.1`. It goes as `--port`
-to `expo start` and to every `expo run:*` that serves, and the plan reports it as
-`devServerPort`, because `expo run:*` left to ask skips its dev server, deep-links the
-app to whatever holds the port, and exits 0.
+**Whose server is on a port.** A server is this project's unless `/status` names another project root in the `X-React-Native-Project-Root` header. No header, or a root that contains this project (a monorepo Metro), is this project's; a sibling is not. A containing root counts only in the same checkout: no directory from the project up to that root, the root excluded, holds a `.git` entry. So the main checkout's Metro never answers for a worktree inside it. Every consumer of `/status` reads this one rule, discovery's lock step included. An open aimed at a named port waits until `/status` answers there for this project; another project's answer does not end the wait.
 
-A busy port with no live lock of this project behind it is busy whoever holds it, an
-`npx expo start` run outside this CLI included: the plan moves to the next free port.
+**A `--detach` run moves in the child.** The lock is published at the spawn, before Metro binds. So the parent reports the port once the lock answers `portReported: true`, or 20 s after the lock's `startedAt`. A lock on a port other than the plan's is `portMoved`. The move message the child prints is for a person and carries no protocol.
 
-One exception: the untracked dev server a killed run of this project left (§Daemonization).
-A `dev` run finds it before the project is probed, and stops it by its pid and takes its port
-only after its refusals, and only for a plan whose step serves: a run that refuses (a busy
-named `--port`, the implicit-EAS route) or serves nothing leaves it serving. Its port counts as
-this run's in the named-port check. It is not reused, as a locked server is: no lock names its
-pid, so nothing can follow it, wait on it, or stop it, and its tunnel is not known. It is not
-left beside a second server either, because that is two servers for one project. Stopping it
-and taking its port is the nearest thing to the lock rule: one project, one dev server, held
-by a lock. A warning names the port and the pid. When its pid is gone and its port still
-answers, the run does not take that port: it picks again, and a named `--port` on it is
-`PORT_IN_USE`. Under `--plan` nothing is stopped: a reason names the server and says the run
-stops it, and `devServerPort` is its port. When the stop fails and the run would take that
-port, the run stops with `UNTRACKED_DEV_SERVER`, exit 20, and recovers into
-`dev:stop --port <n> --signal SIGKILL`; a run that serves on another `--port` warns and goes on,
-and its warning names a stop that works once its own record replaced the orphan's
-(`--force --signal SIGKILL`). A run on another `--port` replaces the orphan too: leaving it
-was rejected, because it keeps two dev servers for one project and the new run's record
-hides the orphan from every later proof.
-
-A server on a port is this project's unless `/status` names another project root in the
-`X-React-Native-Project-Root` header. No header, or a root that contains this project (a
-monorepo `metro.config.js` sets `projectRoot` to the workspace root), is this project's
-server; a sibling is not. A containing root counts only in the same checkout: no
-directory from the project up to that root, the root excluded, holds a `.git` entry, so
-the main checkout's Metro never answers for a worktree inside it
-(`<repo>/.claude/worktrees/<name>`). Every consumer of the `/status` probe reads this one
-rule. Discovery's lock step (`discoverDevServerAsync` step 0) reads it too: the lock
-names its port at the spawn, before Metro binds it, so a lock whose port answers with
-another project's root is not found there, and discovery goes on to its other steps. An
-open aimed at a port the command line named waits until `/status` answers there and
-names no other project's root. Another project's answer does not end that wait, because
-that server may leave before this project's Metro binds the port; the switch of a
-`building` lock to `serving` waits the same way. It never comes when the dev server exits
-first.
-
-`devServerPort.state` says what the plan does about the port: `picked`, `named` (with
-`taken` when the named port cannot be bound), or `running` (with `phase`, `serving` or
-`starting`, when this project's dev server holds the lock and the run stops).
-
-One retry. No plan has two dev-server steps, so that is one retry per plan. The check
-runs whatever the step's exit code, because `expo run:*` that skipped its dev server on
-a busy port exits 0; the `Port <n> is …` line it prints before the skip is the
-collision. A bare `Skipping dev server`, with no such line, is the Expo CLI reusing this
-project's own dev server, and the step succeeded. A second collision means the port this
-CLI picked was taken between the bind test and the dev server's own bind.
-
-The pre-resolved port is a hint, and the retry is the guarantee: two worktrees can pick
-the same free port at once, and the one that binds second fails in Metro with
-`listen EADDRINUSE`, which the retry reads as a collision like the Expo CLI's own lines.
-On a `run:*` build the same race surfaces as the Expo CLI's `Port "<n>" became busy …
-while the app was compiling` stop, which the retry reads too. A collision is the step's
-own only when it names the step's port (its `--port`, else Expo's default) or names no
-port: a `run:*` step's output carries other listeners' errors too. A dev server that
-logged where it listens after the step started bound its port, so its output is never
-scanned. The check reads that log itself, because the port watch stops before a `run:*`
-build ends.
-
-A collision still present after the retry, whatever the step's exit code, stops the run
-with `PORT_TAKEN_AFTER_RETRY`, exit 20. It names the port the step asked for, the port
-the retry moved to and lost, the pid on that port, and the Expo CLI's own exit code. Its
-How is the caller's own command line with a free `--port`. With no free port, it is
-`dev:stop --port <n> --force` when the holder answers as an Expo dev server and its
-process looks like one, and otherwise the pid to stop.
-
-A `--detach` run moves in the child, so the parent computes the move: from the plan it
-reads from the child's log and the lock the child publishes. The lock is published at the
-spawn, before Metro binds, so the parent reports it once the lock answers
-`portReported: true`, or once the port watch's 20 s have passed since the lock's
-`startedAt` (the spawn of the step that holds it). The parent reads no log for this. A lock that is not confirmed when the child exits or
-the budget ends is still the answer, and the checks after it judge the child. The port
-the caller expected is the plan's `movedFrom`, or its planned port when the plan did not
-move. A lock on any other port is `portMoved`. The move message the child prints is for
-a person and carries no protocol.
-
-The port probe is Expo's own `freePortAsync`, copied into `src/utils/freeport.ts`, so
-this CLI and the dev server agree on which port is free. It asks the unspecified address,
-where Metro listens, and `127.0.0.1`, because on macOS a loopback-only listener leaves the
-unspecified address bindable.
+Tests: `src/dev/__tests__/runningDevServer-test.ts`, `portCollision-test.ts`, `devAsync-test.ts`, `detachAsync-test.ts`; `src/runtime/__tests__/waitReady-test.ts` (the root rule); `e2e/__tests__/dev-test.ts`, `dev-detach-test.ts`, `stop-test.ts`.
 
 ## Where a build runs
 
-Every build this CLI plans, suggests, or waits on says where it runs. `local` is on this
-machine. `eas` is in the cloud on EAS. The probe, the vocabulary, and the selection of
-steps from those two facts all live in [[0015-backend-selection-and-config]]. Selection
-happens while the plan is decided, so a machine that cannot build gets `eas build` in
-the plan's steps. The steps never change between being printed and being run.
+Every build this CLI plans, suggests, or waits on says where it runs: `local` on this machine, or `eas`. The probe, the vocabulary and the selection live in [[0015-backend-selection-and-config]]. Selection happens while the plan is decided, so a machine that cannot build gets `eas build` in the plan's steps, and the steps never change between the print and the run.
 
 ## Implemented in v1
 
-The engine shipped in `src/project/`, `src/plan/`, `src/status/`, `src/dev/`, as
-`@expo/agent-cli dev [--plan]`, with these approximations of the table above.
+How the engine differs from an ideal table:
 
-1. No device probe in the plan. "Go or dev client installed on the device" is
-   unobservable without simctl or adb, so those rows are dropped. `expo start` prompts
-   for Go itself. `expo run:*` installs what it builds.
-2. The plan engine still does not consult the EAS build cache. Freshness is the probe
-   fingerprint against `.expo/agent-cli-last-build.json`, written when the app reaches
-   the device. Unrecorded means stale, so v1 over-plans a build at worst. `status` and
-   the change classifier do consult the cache ([[0011-impact-and-freshness]]). `dev`
-   still plans a build for a project whose fingerprint EAS already has a build for.
-3. The `web` rule fires only on an explicit `--web`, because `ProjectState` cannot prove
-   "web-only".
-4. Every value read from the app config (scheme, slug, app id, plugins, router root, EAS
-   project id) comes from one reader: a static file as written, and a dynamic
-   `app.config.js/ts` evaluated with `@expo/config` in `development` mode after the env files
-   are loaded ([[0005-runtime-loop-tools]] §Pointing an app at this dev server). No config
-   plugin runs, so a plugin module that is not installed does not fail the read, and the
-   `plugins` the config declares are kept. One command evaluates a dynamic config once per project, so every value it reads comes from
-   one call of the config. A change to the static file evaluates it again, because a build writes
-   undeclared ids into `app.json` and a function config beside it returns them. A dynamic config that fails to evaluate keeps the
-   static values and reports why, so a missing value reads as unknown. Its plugins and router
-   root are unknown: Expo Go gets an `unknown-app-config` reason, and the route check is skipped. `inspect:config-plugins` reads the declared plugins
-   out of the introspect payload, where a dynamic config with no `plugins` key declares none.
-   [[0011-impact-and-freshness]] spawns `expo config --json --type public` to resolve
-   `runtimeVersion`, because config plugins can set it. The fingerprint's asset sources read
-   the static file only ([[0023-fingerprint-caching]]). The recorded hash is the pre-build probe hash. Bare-versus-CNG uses "any native dir present".
-   `sdkVersion: null` never forces a rule. `expoGo.compatible` is the single Go verdict.
-
-## Testing
-
-The decision table is pure logic over probed state, so it is exhaustively unit-tested
-with no model and no device (tier 0 in [[0002-testing-and-evals]]). Probe and execution
-paths get e2e coverage against fixtures, via subprocess and JSONL assertions. The
-not-an-Expo-app grid is `e2e/__tests__/project-shapes-test.ts`.
+1. **The device is asked one question.** The plan asks whether the development build is installed, only as §A current build is not an installed app says. It never asks whether Expo Go is installed; `dev`'s open installs it.
+2. **The build cache is consulted only on EAS.** For a local device, freshness is the last-build record alone, so `dev` plans a build even when EAS has one for the fingerprint. For an EAS device, a finished EAS build is reused ([[0027-everything-on-eas]] §Reuse). `status` and the change classifier consult the cache ([[0011-impact-and-freshness]]).
+3. **`web` fires only on an explicit `--web`.** The probe cannot prove "web-only".
+4. **One reader for the app config.** Every value read from the app config (scheme, slug, app id, plugins, router root, EAS project id) comes from one reader: a static file as written, and a dynamic `app.config.js/ts` evaluated with `@expo/config` in `development` mode after the env files are loaded ([[0005-runtime-loop-tools]] §Pointing an app at this dev server). No config plugin runs, so a plugin that is not installed does not fail the read. One command evaluates a dynamic config once per project, and again when the static file changes. A dynamic config that fails to evaluate keeps the static values and reports why; its plugins and router root are unknown, so Expo Go gets an `unknown-app-config` reason and the route check is skipped. `runtimeVersion` is the exception: [[0011-impact-and-freshness]] spawns `expo config --json --type public`, because config plugins can set it. The fingerprint's asset sources read the static file only ([[0023-fingerprint-caching]]). `sdkVersion: null` never forces a rule.
 
 <!-- installed-app-check -->
 
 ## Installed-app fingerprint check
 
-### Purpose
-
-`status` answers "do I need to build again" from a record this CLI wrote after a build it ran
-([[0011-impact-and-freshness]]). The record says what the last build was made from. It does not say
-what is on the device. A build from EAS, a build from Xcode, a simulator that was wiped, a phone that
-holds last week's build: the record is silent about all of them, and `dev` treats "unrecorded" as
-stale.
-
-The check asks the device instead. A debug build on SDK 58 or later carries the fingerprint it was
-built from (the `expo-constants` build phase writes it; expo/expo#49905). The check reads that file
-out of the installed app ([[0005-runtime-loop-tools]] §Installed-app fingerprint check), computes the
-project fingerprint for the same platform, and compares the two hashes. The answer is about this
-project and this device, whoever made the build.
-
-The check lives in this CLI. What stays in the expo repository is the producer side only: the
-build-time embed (expo/expo#49905) and the dev-launcher responder (expo/expo#49494). `@expo/cli` is
-untouched. The fingerprint comes from the project's own `fingerprint` CLI as a subprocess, and every
-device tool is spawned ([[0001-agentic-cli-on-expo-cli]] §Constraints).
+The freshness record says what the last build this CLI ran was made from. It does not say what is on the device: a build from EAS or Xcode, a wiped simulator, and a phone with last week's build are all invisible to it. The check asks the device. A debug build on SDK 58 or later carries the fingerprint it was built from (`expo-constants` embeds it). The check reads that file from the installed app ([[0005-runtime-loop-tools]] §Installed-app fingerprint check), computes the project fingerprint for the same platform with the wrapper `status` and `dev` use, and compares the hashes. The check lives in this CLI; the embed and the dev-launcher responder live in expo/expo, and `@expo/cli` is not touched.
 
 ### What the answer is
 
 One verdict per platform:
 
-| Reason                                                                                                                                                                        | Status             | `commands`                 |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | -------------------------- |
-| `hash-match`                                                                                                                                                                  | `up-to-date`       | none                       |
-| `hash-mismatch`                                                                                                                                                               | `rebuild-required` | `expo run:<platform>`      |
-| `fingerprint-version-mismatch`                                                                                                                                                | `unknown`          | none                       |
-| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed`, `cloud-session` | `unknown`          | as the recommendation says |
+| Reason                                                                                                                                                       | Status             | `commands`                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------------------------------------------------- |
+| `hash-match`                                                                                                                                                 | `up-to-date`       | none                                                                 |
+| `hash-mismatch`                                                                                                                                              | `rebuild-required` | `npx expo run:<platform>`                                            |
+| `fingerprint-version-mismatch`                                                                                                                               | `unknown`          | none                                                                 |
+| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says                                           |
+| `cloud-session`                                                                                                                                              | `unknown`          | none for a live binding; `dev --<platform> --eas` for an expired one |
 
-The reason `cloud-session` has no commands. Its recommendation reads "not checked; this check reads local devices, and the app runs on EAS Simulator session <id>".
+- **Versions.** Equal hashes match, whatever made them. Different hashes compare only when one `@expo/fingerprint` version made both, because hashing changes between versions. Two known, different versions with different hashes are `fingerprint-version-mismatch` with no command: an agent runs what `commands` says, and a native rebuild after every `expo` upgrade is the cost of a wrong answer. A build that embedded no version still compares.
+- **Sources.** A `hash-mismatch` names the project sources that moved, when the installed file carries them. Dependency sources are left out.
+- **Outcome.** The report's `outcome` is the strongest verdict: `rebuild-required`, then `unknown`, then `up-to-date`. A platform with `no-device` or `app-id-unknown` does not count while another platform produced a verdict.
+- **Several devices** are ranked so a stale one cannot hide a match: a matching app, an app with a hash, an app without one, "not installed", then silence.
+- **Which app.** The app id comes from the app config (`ios.bundleIdentifier`, `android.package`), and on Android also from the `applicationId` a prebuild wrote. Nothing is read from an Xcode project. Expo Go is never the target. No id for a platform is `app-id-unknown`.
+- **No simulator bound here.** Without `--device`, the iOS check reads only the simulator bound to this worktree ([[0035-one-device-per-worktree]]). So iOS `no-device` means "none is bound here". The recommendation never says "boot one"; it names the booted simulators no worktree bound (`unboundSimulators`), and the command that binds one. A simulator another worktree bound is never named or read.
 
-**No simulator bound here.** Without `--device`, the iOS check reads only the simulator bound to this worktree (llp/0035). So iOS `no-device` means "none is bound to this worktree", not "none is booted". The recommendation never says "boot one", because a second simulator breaks the one-device rule. It names the booted simulators that no worktree bound, when there are any: "1 iOS simulator is booted (iPhone 17 Pro), and none is bound to this worktree." It then gives the command that binds one. With none booted it says "No iOS simulator is bound to this worktree." and gives the same command. The names are in `unboundSimulators`; a simulator that another worktree bound is not in it, and when `simctl` gives no answer the key is absent, the text names no simulator, and it gives the same command. A `cloud-session` row adds the same sentence. The check reads none of these simulators, because another worktree can use it. Enforced by `e2e/__tests__/status-unbound-simulators-test.ts`.
-
-An equal hash is a match whatever produced it. Two hashes that differ are only comparable when the
-same `@expo/fingerprint` version produced both: reason tags and hashing change between versions, so
-an unchanged project hashes differently across a version bump. Two known, different versions with
-differing hashes are `fingerprint-version-mismatch`, and that verdict suggests no command — an agent
-runs what `commands` says, and a needless native rebuild after every `expo` upgrade is the cost of
-getting this wrong. A build that embedded no version still compares: "cannot tell" is not
-"different".
-
-A `hash-mismatch` names the project sources that moved, when the installed file carries its sources.
-Dependency sources are left out of the sentence: they point at code the developer did not write.
-
-The report's `outcome` is the strongest per-platform verdict, `rebuild-required` before `unknown`
-before `up-to-date`. A platform that had no reachable device does not count while another platform
-produced one: a Mac with an Android emulator and no simulator answers for Android.
-
-Several devices are ranked, so a stale one cannot hide a matching install on another: a matching
-app, then any app with a hash, then an app without one, then a definite "not installed", then
-silence. The device is read last, once the verdict is known to need it.
+Tests: `src/installedApp/__tests__/installedAppAsync-test.ts`; `src/project/__tests__/sourceDiff-test.ts`; `src/status/__tests__/installed-test.ts`; `e2e/__tests__/status-installed-test.ts`, `status-unbound-simulators-test.ts`.
 
 ### Reported by status
 
-The verdict is the `installed` section of `status`, one row per platform, with the strongest verdict
-as the section's `outcome` and the commands that fix a stale one. It sits below `freshness`, because
-the two answer the same question from opposite ends: `freshness` is about the build this machine
-recorded making, `installed` is about the build that is on the device, whoever made it.
+The verdict is the `installed` section of `status`: one row per platform, the strongest verdict as `outcome`, and the commands that fix a stale one. `freshness` is about the build this machine recorded; `installed` is about the build on the device.
 
-**On every run.** Every answer costs a device read and a per-platform fingerprint, bounded by the
-deadline below. A physical phone is launched only when `--device <name>` names it.
-`AGENT_CLI_NO_DEVICE` turns the section off the way it turns off `dev`'s open
-([[0002-testing-and-evals]] §Tier 0): a stubbed harness has no device this could be true about.
+- **On every run.** `AGENT_CLI_NO_DEVICE` turns the section off ([[0002-testing-and-evals]] §Tier 0).
+- **Naming the phone is the consent.** `status` starts nothing, and the physical-iPhone probe launches the app. So a phone is asked only when `--device <name>` names it, and the launch is announced on stderr. `--device-timeout <secs>` (15 by default) bounds the phone's answer.
+- **One deadline over the whole read.** The fingerprint and every device read share 15 s. A per-call timeout would let an expired read start its fallback and wait again. At the deadline every subprocess under it is killed, none starts, and the section reports the timeout in `errors.installed` while the rest of the report stands. A probe that launches a phone restarts the deadline with its launch and answer budget.
+- **A report, not a gate.** `--assert` is about the impact class, not about this. A caller that branches reads `installed.outcome`.
+- **Who the connected apps belong to.** An app on a booted local simulator can connect to this dev server by itself, so the dev-server line splits the count, for example "2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (iPhone 17 Pro)". The split uses the placement rules of `runtime:eval` ([[0005-runtime-loop-tools]] §Target owner). An app is on a local simulator not bound here when a booted simulator has its device name and no worktree bound a booted simulator of that name. It is on another worktree's simulator when only other worktrees bound every booted simulator of that name. One app that no other rule placed is the EAS session's; two or more are "N other", because a physical device and another session look the same. `--json` adds `devServer.owners` (`simulatorApps`, `localApps`, `otherWorktreeApps`, `sessionApps`, `otherApps`) only when the split applies. The split costs one `simctl` and one `adb` call, and none under `AGENT_CLI_NO_DEVICE`.
 
-**Naming the phone is the consent.** `status` promises to start nothing, and the physical-iPhone
-probe launches the app ([[0005-runtime-loop-tools]] §Installed-app fingerprint check). So a phone is
-asked only when `--device <name>` names it, and the launch is announced on stderr. `--device-timeout
-<secs>` bounds how long the phone gets to answer once the app was launched, 15 s by default. A probe that
-really launches extends the section's deadline by the launch budget and that answer time, from
-inside the read; a `--device` that names an emulator or a simulator pays nothing extra.
-
-**One deadline over the whole read.** A device read is a chain of tools, and each has a fallback, so
-a per-call timeout would let an expired read start its fallback and wait again. The section runs
-under `withSubprocessDeadlineAsync` (`src/utils/subprocessDeadline.ts`): 15 seconds for the
-fingerprint and every device read together, carried by `AsyncLocalStorage` so the spawn helpers
-register their children without the caller threading anything through. When it expires, every
-subprocess under it is killed, no further one starts, and the section reports the timeout in
-`errors.installed` while the rest of the report stands.
-
-**Who the connected apps belong to.** An app on a booted local simulator can connect to this dev server by itself. The dev-server line then splits the count: "2 apps connected: 1 on this worktree's EAS session, 1 on a local simulator not bound here (iPhone 17 Pro)". The split reads the apps with the scope of this worktree's binding, so it uses the placement rules of `runtime:eval` (llp/0005 §Target owner). An app is "on this worktree's simulator" when it runs on the simulator this worktree bound, and "on this worktree's EAS session" when it is the app the session's scope reads. An app is "on a local simulator not bound here" when a booted simulator has its device name, this worktree bound none of the booted simulators of that name, and no worktree bound at least one of them, whatever platform this worktree's session runs. When this worktree bound a simulator of that name, the app stays this worktree's (llp/0005 §Target owner). It is "on another worktree's simulator" when only other worktrees bound every booted simulator of that name. The split names an EAS-session app only when exactly one app is left that no other rule placed: a physical device and another session look the same, so with two or more the line says "N other". The split costs one `simctl` and one `adb` call in the dev-server section, within the status device deadline, next to the one `simctl` list of the installed check, and none under `AGENT_CLI_NO_DEVICE` or on a host that cannot bind iOS. A line with nothing to split stays "N apps connected". `--json` adds one `owners` object to `devServer`, with `simulatorApps`, `localApps`, `otherWorktreeApps`, `sessionApps` and `otherApps`, only when the split applies. Enforced by `e2e/__tests__/status-unbound-simulators-test.ts`.
-
-**This is a report, not a gate.** `status` exits `0` unless `--assert` turned it into one, and
-`--assert` is about impact class, not about this. A caller that wants to branch reads
-`installed.outcome` out of `--json`. If a gate turns out to be needed, extending `--assert` is the
-shape to reach for, and it is a decision for a later revision of this document.
-
-### Which app
-
-The app id comes from the app config (`ios.bundleIdentifier`, `android.package`); on Android
-also from the `applicationId` a prebuild wrote into `build.gradle`, which `navigate` already reads.
-Nothing is read out of an Xcode project: build variants and extension targets make that a guess, and
-a wrong id is worse than none. Expo Go is never the target: it carries no project fingerprint. A
-project that names no id for a platform reports `app-id-unknown` for it.
-
-### Which fingerprint
-
-`generateFingerprintAsync(projectRoot, { platform })`, the same wrapper `status` and `dev` use, so
-the two answers cannot disagree about the project. The embed side computes
-`createProjectHashAsync(projectRoot, { platforms: [platform], silent: true })`; the `fingerprint`
-CLI's `fingerprint:generate --platform <p>` resolves the same defaults, and both load the project's
-`.env` files before evaluating a dynamic config. A hash that matched at build time matches here.
-
-The cache of [[0023-fingerprint-caching]] applies, with its ten-minute bound and its blindness to
-`ios/` and `android/`. `--no-fingerprint-cache` turns it off for one run, and the report says which
-source answered.
+Tests: `e2e/__tests__/status-installed-test.ts`, `status-unbound-simulators-test.ts`, `subprocess-deadline-test.ts`.
 
 ### What this cannot see
 
-- **An app built with `expo-constants` before 58.0.5.** That is the first release whose build phase
-  embeds the file, so no build of an older project carries it, and no rebuild would add it. The
-  check reads the installed `expo-constants` version and answers `embed-unsupported` before
-  hashing the project or touching a device. `unknown`, with no command: the only fix is the SDK
-  upgrade, and that is not this check's to suggest.
-- A release build embeds nothing. Only debug builds carry the file, so a release build is
-  `no-embedded-fingerprint`.
-- A build made before `expo-constants` learned to embed the file, or with
-  `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
-- `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single
-  fingerprint describes that binary.
-- A phone answers only when its build carries the dev-launcher responder and it can reach this
-  machine over the LAN. A release build, an older `expo-dev-client`, a firewall or a different
-  network all read as `no-response`, which is `unknown`. The responder sends the hash and its
-  fingerprint version, not the sources, so a mismatch on a phone cannot name the input that moved.
-- `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that
-  list moves nothing, so a rebuild the app needs for it is not reported.
-- A stale generated `ios/` or `android/` directory. On a CNG project the fingerprint hashes the
-  inputs, not the generated code, and `expo run:<platform>` only prebuilds when the directory is
-  missing — so a build made outside this CLI after a config change compiles stale native code and
-  still matches. `dev` cannot do that: its plan prebuilds when the app config or a plugin moved.
-  A `hash-match` on a generated directory with no last-build record therefore says so and names
-  `prebuild`; recording what a prebuild generated from was considered and dropped (#60).
+- **`expo-constants` before 58.0.5** embeds nothing, and no rebuild adds it. The check answers `embed-unsupported` before it hashes the project or reads a device, with no command.
+- **A release build**, or a build with `EXPO_SKIP_FINGERPRINT_EMBED`, is `no-embedded-fingerprint`.
+- **A phone** answers only when its build has the dev-launcher responder and reaches this machine over the LAN; anything else is `no-response`. The responder sends no sources, so a mismatch on a phone names no input.
+- **An asset outside the fingerprint's allowlist** moves no hash.
+- **A stale generated `ios/` or `android/`.** On a CNG project the fingerprint hashes the inputs, and `expo run:<platform>` prebuilds only when the directory is missing. A build made outside this CLI after a config change then compiles stale native code and still matches. So a `hash-match` on a generated directory with no last-build record says so and names `prebuild`.
+- **The cache of [[0023-fingerprint-caching]]** applies; `--no-fingerprint-cache` turns it off for one run.
 
-### Proof
+Tests: `src/installedApp/__tests__/embedSupport-test.ts`, `installedAppAsync-test.ts`; `e2e/__tests__/status-installed-test.ts`.
 
-`src/installedApp/__tests__/installedAppAsync-test.ts`: the verdict table over every reason, the
-old-SDK gate (no hash, no device read, no command), the version rule in all three shapes (equal hashes across versions, differing hashes across versions, a
-build with no version), the named source on a mismatch, that the device is not read when the project
-cannot be hashed, that a caller-supplied app id wins, the prebuild warning on a match over an unrecorded generated directory, that one platform's failure keeps the other's
-verdict, and the aggregate outcome. `src/project/__tests__/sourceDiff-test.ts`: the identity rule,
-dependency paths on both path separators, the readable names, and the truncation.
-`src/status/__tests__/installed-test.ts`: which platforms this host asks, and the section's shape.
-`src/status/__tests__/statusAsync-test.ts`: that the device is read on a plain run, that
-`AGENT_CLI_NO_DEVICE` reads none, and that the deadline costs the section and nothing else.
-`e2e/__tests__/status-installed-test.ts`, across the process boundary: a stub `adb` that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded
-hash and then to another one; the `installed` section of `status --json` in both cases and
-for an app that is not installed, with both hashes and the command in JSON on a mismatch; an app whose
-file is not the JSON `expo-constants` writes (`no-embedded-fingerprint`, rebuild suggested); two
-`@expo/fingerprint` versions (`fingerprint-version-mismatch`, no command); the prebuild warning on a
-match over a generated `android/` this CLI never built, and its absence with the recorded build; the
-whole-APK pull when the device cannot serve ranges; that a
-harness run reads no device; that a hung `adb` is killed at the deadline with
-no fallback started; on macOS, a stub `xcrun` serving a booted simulator's app container, alone and
-narrowed by `--device`.
+## Risks
+
+1. A build made outside this CLI leaves no record, so the local plan builds again (§Implemented in v1, item 2).
+2. A stale generated native directory can match the installed fingerprint (§What this cannot see).
+3. A later run can write over an orphan's run record; that server then needs `dev:stop --force` (§Daemonization).
+4. A port can be taken between the bind test and Metro's bind twice in a row; the run then stops with `PORT_TAKEN_AFTER_RETRY`.
+5. An event log this process cannot read back gives no port report, so the lock confirms its port only after 20 s.
+
+## Open questions
+
+1. Should the installed-app verdict become a gate? Extending `--assert` is the shape to use.
+2. Should the local plan consult the EAS build cache, as the EAS device path does?
+
+## Testing
+
+The decision table is pure, so it is unit-tested with no model and no device (tier 0 in [[0002-testing-and-evals]]). The probe and the run paths have e2e tests against fixtures and stub tools.
+
+| Section                                       | Tests                                                                                                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §Decision table and its subsections           | `src/plan/__tests__/decide-test.ts`, `resolveAsync-test.ts`; `src/impact/__tests__/fromRecord-test.ts`; `e2e/__tests__/dev-test.ts`, `plan-test.ts` |
+| §Not an Expo app, §Dependencies not installed | `e2e/__tests__/project-shapes-test.ts`, `install-bootstrap-test.ts`                                                                                 |
+| §Sub-features                                 | `src/project/__tests__/expoGo-test.ts`, `impact-test.ts`                                                                                            |
+| §Status                                       | `e2e/__tests__/status-test.ts`; `src/status/__tests__/sections-test.ts`, `nextAction-test.ts`                                                       |
+| §Discovery ladder                             | `src/runtime/__tests__/devServerDiscovery-test.ts`, `devServerLockDiscovery-test.ts`                                                                |
+| §Dev-server lock                              | `src/devLock/__tests__/runState-test.ts`, `lock-test.ts`, `address-test.ts`; `e2e/__tests__/wrapper-test.ts`                                        |
+| §Daemonization                                | `e2e/__tests__/dev-detach-test.ts`, `dev-eas-test.ts`, `stop-test.ts`, `dev-logs-test.ts`                                                           |
+| §A busy port                                  | `src/dev/__tests__/portCollision-test.ts`, `runningDevServer-test.ts`; `e2e/__tests__/dev-test.ts`                                                  |
+| §Installed-app fingerprint check              | `src/installedApp/__tests__/installedAppAsync-test.ts`; `e2e/__tests__/status-installed-test.ts`, `status-unbound-simulators-test.ts`               |

@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Inputs
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Summary
 // The project-state probe: one read of everything the decision table needs. Every field is
 // observable from the project itself, so a probe needs no device, no dev server and no network.
 import { readAppStateSync } from './expoApp';
