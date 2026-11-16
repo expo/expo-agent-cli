@@ -339,13 +339,18 @@ it.each([
 );
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner — rung 1 reads the target list again
+// Rung 1 starts from the preflight's dead ids, so the session app is asked once, not twice.
 it('reload with ios-cloud proves its reload on the session app beside an ended session app', async () => {
   const { root, env } = await setupBoundAsync('ios-cloud');
+  const probed: string[] = [];
   const server = await startStubDevServerAsync({
     projectRoot: root,
     targets: [apps.ended, apps.cloud],
     inspectorSilent: ['ended'],
-    inspectorEvaluate: () => undefined,
+    inspectorEvaluate: (expression, device) => {
+      if (expression === '1') probed.push(device);
+      return undefined;
+    },
   });
   try {
     const result = await executeAgentCliAsync(
@@ -365,6 +370,7 @@ it('reload with ios-cloud proves its reload on the session app beside an ended s
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({ reloaded: true, appsConnected: 1 });
+    expect(probed).toEqual(['cloud']);
   } finally {
     await server.close();
   }
