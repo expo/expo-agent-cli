@@ -280,7 +280,8 @@ export type RungOnePolicy = {
 
 /**
  * The run's input to rung 1. `method` is the run's `--method`: a pinned `dev-server` broadcasts, as
- * it names, also on an iOS EAS session, and a pinned `runtime` reloads only `read` targets. `smoke`
+ * it names, also on an iOS EAS session; `device` sends no `Page.reload`, so it takes no
+ * `ios-eas-session` proof scope either; a pinned `runtime` reloads only `read` targets. `smoke`
  * passes `auto`. `unread` says why the fresh read failed, so this is an older observation.
  */
 export interface RungOneInput {
@@ -305,12 +306,13 @@ export function rungOnePolicy(
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
   const trigger =
-    classifiedTargets.skipped.length > 0
-      ? 'skipped-app'
-      : method !== 'dev-server' &&
-          targetSelection.device?.backend === 'cloud' &&
-          targetSelection.platform?.value === 'ios'
-        ? 'ios-eas-session'
+    method !== 'dev-server' &&
+    method !== 'device' &&
+    targetSelection.device?.backend === 'cloud' &&
+    targetSelection.platform?.value === 'ios'
+      ? 'ios-eas-session'
+      : classifiedTargets.skipped.length > 0
+        ? 'skipped-app'
         : null;
   const chosen =
     method === 'runtime'
@@ -548,7 +550,7 @@ export async function runRungOneAsync(
           leftAppStopped: null,
         },
         churn: CHURN_NOT_ASKED,
-        relaunchWhy: `${policy.unread}, so no broadcast was sent`,
+        relaunchWhy: `no broadcast was sent, because ${policy.unread}`,
       };
     case 'page-reload':
       return await pageReloadAsync(devServerUrl, {

@@ -78,6 +78,7 @@ export const runtimeReloadHelp: CommandHelp = {
     `The command socket picks the rung: dev-server broadcasts a reload where it holds a client.`,
     `On an iOS EAS session, or beside a skipped app, Page.reload goes to this worktree's app instead.`,
     `--method runtime asks the app to reload itself: expo.reloadAppAsync('${RELOAD_REASON}').`,
+    `On Expo Go SDK 57 the call closed the app; not measured on SDK 58.`,
     `Last, device relaunches the app, which costs the app's JavaScript state. --eas names its backend.`,
     `The entry bundle is checked first, so a reload never lands on one that does not compile.`,
     `A reload is reported only when it was observed — a new debugger target, or a new Bundled`,

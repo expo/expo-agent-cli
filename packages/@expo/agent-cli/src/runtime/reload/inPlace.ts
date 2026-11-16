@@ -57,7 +57,7 @@ const MECHANISMS = {
     answerMs: 1500,
     event: 'runtime_reload_sent',
     unlisted:
-      'no app is connected to the dev server, so there is no runtime to ask — this method reloads an app through its debugger and cannot start one',
+      'no app of this worktree is listed on the dev server, so there is no runtime to ask — this method reloads an app through its debugger and cannot start one',
     // The call tears down the context that would answer it, so a lost answer is a call that ran.
     unproved: {
       'not-replaced': 'delivered-unproved',
@@ -200,8 +200,9 @@ async function reloadTargetAsync(
           answerMs()
         )) as { result?: { value?: unknown }; exceptionDetails?: { text?: string } };
         const value = answer.result?.value;
-        // An answer that is not `sent` is an app that was not asked: it fails here, at once, and
-        // is not delivered, rather than read as a reload that proved nothing.
+        // `sent` says the call was made, not that it resolved: a rejection is caught in the app and
+        // shows only as no new context. An answer that is not `sent` is an app that was not asked:
+        // it fails here, at once, and is not delivered, rather than read as a reload that proved nothing.
         if (value !== 'sent') {
           throw new Error(
             (typeof value === 'string' && CANNOT_RELOAD[value]) ||

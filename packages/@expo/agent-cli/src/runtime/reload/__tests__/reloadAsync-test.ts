@@ -867,7 +867,9 @@ describe('an app the command socket cannot see', () => {
     expect(explained).toContain('the app is connected');
     // And what the other one costs on Expo Go, said where the caller is deciding.
     expect(explained).toContain('--method runtime');
-    expect(explained).toContain('closes the app');
+    expect(explained).toContain(
+      'on Expo Go SDK 57 the call closed the app; not measured on SDK 58'
+    );
   });
 
   it(`runtime:reload without --eas on a worktree bound to an EAS session names --eas, not an expired local binding`, async () => {

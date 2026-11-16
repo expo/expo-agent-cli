@@ -155,6 +155,21 @@ describe('what rung 1 does, and which bundle proves it', () => {
       policy: { mechanism: 'page-reload', trigger: 'ios-eas-session', bundlePlatforms: ['ios'] },
     },
     {
+      // The session's trigger keeps the relist; the skipped app still keeps its bundle out.
+      name: 'names the iOS EAS session, not the skipped app, beside a skipped iOS app',
+      targets: [onCloudIos, onClone],
+      targetSelection: CLOUD_IOS,
+      policy: { mechanism: 'page-reload', trigger: 'ios-eas-session', bundlePlatforms: [] },
+    },
+    {
+      // `--method device` sends no Page.reload, so it keeps the broadcast's bundle rule.
+      name: 'a pinned --method device on an iOS EAS session beside an app nothing places: no bundle proves it',
+      targets: [onCloudIos, elsewhere],
+      targetSelection: CLOUD_IOS,
+      method: 'device',
+      policy: { mechanism: 'broadcast', reachedOutside: 2, bundlePlatforms: [] },
+    },
+    {
       name: 'broadcasts on an Android EAS session',
       targets: [onCloudAndroid],
       targetSelection: CLOUD_ANDROID,
