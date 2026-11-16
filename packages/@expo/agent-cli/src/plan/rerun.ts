@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §--device on dev
+// @ref llp/0035-one-device-per-worktree.rfc.md §Choice
 import { PROGRAM_PREFIX } from '../programName';
 import { quoteArgument } from '../utils/consent';
 import { isPlatformFlag } from './platformFlags';

@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §EAS
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session start
 import fs from 'fs';
 import path from 'path';
 

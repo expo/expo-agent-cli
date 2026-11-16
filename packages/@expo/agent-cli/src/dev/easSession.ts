@@ -237,7 +237,7 @@ export async function ensureEasSessionAsync(
   return session;
 }
 
-// @ref llp/0035-one-device-per-worktree.rfc.md §EAS
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session start
 async function excludeCloudSessionEnvFromGitAsync(
   projectRoot: string
 ): Promise<EnsureEasSessionReport['gitExclude']> {

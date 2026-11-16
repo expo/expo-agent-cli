@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle tests
+// @ref llp/0035-one-device-per-worktree.rfc.md §Release
 // Two worktrees share one machine registry and simctl, through the published bin.
 import fs from 'node:fs';
 import path from 'node:path';

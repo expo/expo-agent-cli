@@ -1,4 +1,4 @@
-// @ref llp/0035-one-device-per-worktree.rfc.md §iOS tests
+// @ref llp/0035-one-device-per-worktree.rfc.md §Readers
 import { vol } from 'memfs';
 
 import { bindingPathFor } from '../registry';
