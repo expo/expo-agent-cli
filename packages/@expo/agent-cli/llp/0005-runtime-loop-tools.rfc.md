@@ -139,7 +139,7 @@ The host comes from the `Waiting on <url>` line of `.expo/dev/logs/dev-detached.
 
 `--wait-ready` returns before the tunnel is up. `dev --detach --tunnel` waits up to 20 s for the host and reports `tunnelUrl` (`null` when none came) in `--json` and on `cli:dev_detach`.
 
-`hostType` classifies the printed URL: `localhost`, `lan` (an IP literal), or `tunnel` (any other host name).
+`hostType` classifies the printed URL: `localhost` (a loopback name or address, or `0.0.0.0`), `lan` (any other IP literal), or `tunnel` (any other host name).
 
 An EAS run refuses a `localhost` or `lan` URL before anything opens, with `CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER`, naming `dev --<platform> --detach --tunnel`. `<scheme>://<route>` has no host (`hostType: null`) and passes.
 
@@ -165,9 +165,9 @@ The refusals:
 
 The codes hold under a gate flag: `runtime:errors --fail-on-error` is 1 with no dev server and 22 with an empty list, never 0.
 
-The How line takes its steps from one ladder in one order: `npx @expo/agent-cli dev --detach --<platform>`, then `navigate / --<platform>`, then `smoke --<platform>`. `NO_DEV_SERVER` names `dev --detach` and `navigate /`. `NO_APP_CONNECTED` names `navigate /`, `navigate / --print-url` for a device this machine cannot drive, and `smoke`. With no platform flag, the ladder names the host's platform: iOS on macOS, Android elsewhere. When the caller passed `--eas`, `navigate` and `smoke` keep `--eas`, and `dev --detach` gets `--tunnel`, because an EAS session cannot reach this machine's loopback. Of the family, only `runtime:reload` and `runtime:stop` take `--eas`. When the caller named the dev server, `NO_DEV_SERVER` names that URL and says that nothing else was tried; otherwise it names `--dev-server-url` and `--port`.
+The How line takes its steps from one ladder in one order: `npx @expo/agent-cli dev --detach --<platform>`, then `navigate / --<platform>`, then `smoke --<platform>`. `NO_DEV_SERVER` names `dev --detach` and `navigate /`. The exit-22 `NO_APP_CONNECTED` names `navigate /`, `navigate / --print-url` for a device this machine cannot drive, and `smoke`. An exit-1 `NO_APP_CONNECTED` names the step for its scope: `navigate / --<platform>` on this worktree's device, closing the apps that are not the session's, or the `adb` step for model twins. With no platform flag, the ladder names the host's platform: iOS on macOS, Android elsewhere. When the caller passed `--eas`, `navigate` and `smoke` keep `--eas`, and `dev --detach` gets `--tunnel`, because an EAS session cannot reach this machine's loopback. Of the family, only `runtime:reload` and `runtime:stop` take `--eas`. When the caller named the dev server, `NO_DEV_SERVER` names that URL and says that nothing else was tried; otherwise it names `--dev-server-url` and `--port`.
 
-`error.data` in the `--json` envelope holds what the refusal observed: `devServerUrl`, `devServerReachable`, `debuggerTargets`, `commandSocketClients`, `platform` ([[0010-agent-conventions]] §The `--json` error envelope). Every key is present. `devServerReachable` is a boolean, and `debuggerTargets` is `0` when nothing was counted. `commandSocketClients` and `platform` are `null` when the run does not have the fact; `commandSocketClients` is `null` except in `runtime:reload`, the only command that opens `/message`. Rejected: a caller that parses the English message for these counts.
+`error.data` in the `--json` envelope holds what the refusal observed: `devServerUrl`, `devServerReachable`, `debuggerTargets`, `commandSocketClients`, `platform` ([[0010-agent-conventions]] §The `--json` error envelope). Every key is present. `devServerReachable` is a boolean, and `debuggerTargets` is `0` when nothing was counted. `platform` is `null` when the run does not have the fact. `commandSocketClients` is always `null` in `error.data`, because every refusal comes before a command opens `/message`; only the `runtime:reload` result carries the count. Rejected: a caller that parses the English message for these counts.
 
 The connection is asked before the bundle gate. With nothing attached, `runtime:tree`, `runtime:tap` and `runtime:type` exit 22 whatever the code on disk compiles to, and do not spend the gate's 20 s budget.
 
@@ -641,7 +641,7 @@ A start phase that compiles rewrites the app config: `expo prebuild` writes unde
 
 #### A refused link is a device without the app
 
-When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The rows of §Two mismatches, two next actions give every other answer. The follow-ups branch on the value. On `app-not-installed` they do not lead with `navigate`, which the device refuses in the same way every time. With no finding (`appMismatchKind: null`), a refused link leads with `navigate <route> --<platform>` (Risk 20).
+When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The rows of §Two mismatches, two next actions give every other answer. The follow-ups branch on the value. On `app-not-installed` they do not lead with `navigate`, which the device refuses in the same way every time. With no finding (`appMismatchKind: null`), the follow-ups name `navigate <route> --<platform>`: first, or after the `dev` restart when the run stopped its dev server or released its device (Risk 20).
 
 ### A link nobody can approve is a link that never opens
 
@@ -827,7 +827,7 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 17. With `--route`, a local relaunch opens the route link as the relaunch and again after the app is back. The first open comes before the observation (§Reloading the app).
 18. After `Page.reload`, a served bundle can prove the reload beside an unplaced app, which could have fetched that bundle (§What proves a reload).
 19. With no captured dev server log, the failure names `dev:logs`, not `dev --detach`, which is the command that captures the log (§What proves a reload).
-20. A refused link with no `appMismatchKind` leads the follow-ups with `navigate`, which the device refuses in the same way (§A refused link is a device without the app).
+20. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
 21. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
 22. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
 
