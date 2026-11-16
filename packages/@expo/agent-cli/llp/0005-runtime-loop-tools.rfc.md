@@ -6,7 +6,7 @@
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
 **Revised:** 2026-08-30 · 2026-09-08 · 2026-11-16
-**Related:** [[0001-agentic-cli-on-expo-cli]], [[0004-smart-start-and-project-state]], [[0008-guardrails]], [[0010-agent-conventions]], [[0016-v1-scope]], [[0017-deferred-commands]], [[0018-interaction-commands]], [[0021-honest-reports]], [[0022-live-tier]], [[0027-everything-on-eas]], [[0035-one-device-per-worktree]]
+**Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0004-smart-start-and-project-state]], [[0006-agent-native-cli-surface]], [[0008-guardrails]], [[0010-agent-conventions]], [[0015-backend-selection-and-config]], [[0016-v1-scope]], [[0017-deferred-commands]], [[0018-interaction-commands]], [[0021-honest-reports]], [[0022-live-tier]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]], [[0035-one-device-per-worktree]]
 
 ## Summary
 
@@ -18,7 +18,7 @@ Decisions:
 2. One preflight and one scope rule serve every command that reads the app (§One preflight for the runtime family, §Which app a run reads). A run never reads another worktree's app (§Target owner).
 3. A report claims only what an observation shows ([[0021-honest-reports]] §The rules). A reload is reported only when the CLI saw the app come back (§What proves a reload).
 4. `smoke` asks the other commands' questions in one process, and brings its own environment: it starts, boots and installs what is missing, and stops only what it started (§The smoke gate, §The run brings its own environment).
-5. An EAS Simulator session is a third device backend, reached through `eas` subprocesses (§Cloud simulator).
+5. An EAS Simulator session (below: an EAS session) is a third device backend, reached through `eas` subprocesses (§Cloud simulator).
 
 | Command          | Question                                      | Rules              |
 | ---------------- | --------------------------------------------- | ------------------ |
@@ -33,7 +33,7 @@ App output is fenced as untrusted ([[0008-guardrails]] §Untrusted-content marki
 
 ## What ships
 
-`runtime:eval`, `runtime:errors`, `runtime:reload`, `runtime:stop`, `navigate` and `smoke`. The space forms (`runtime eval`) are the same commands. `runtime:network` is deferred ([[0017-deferred-commands]] §runtime:network).
+The space forms (`runtime eval`) are the same commands as the Summary's colon forms. `runtime:network` is deferred ([[0017-deferred-commands]] §runtime:network).
 
 Every CDP connection sends a same-origin `Origin` header. Metro's inspector proxy refuses the handshake without it (HTTP 401).
 
@@ -123,10 +123,9 @@ A connect URL loads an app; a route link navigates a loaded one (§Loading the a
 
 `navigate` and `smoke` add `__expo_disable_onboarding=1`, `__expo_disable_fab=1` and `__expo_disable_auto_launch=1` to the connect URL. `EXPO_NO_DEV_MENU=0` drops them. Route links, full URLs and Expo Go links do not get them.
 
-One device scope decides the app kind, the URL, the launcher choice and the attachment:
+One device scope decides the app kind, the URL, the launcher choice and the attachment. An open counts only the apps attached on the device it opens (§Which app a run reads).
 
 - The project and route are checked before the device is chosen. The URL is finalized after.
-- Attached apps count only on the device the run opens: a local simulator's own app; an EAS session's app and no local one; a local Android device's app, told apart from a same-model twin through `adb reverse` ([[0035-one-device-per-worktree]] §Readers). An app of another platform, or one that cannot be placed, does not count.
 - Each wait asks the device tools again, so an app that attaches after an accepted dialog or a recovery counts.
 - `--print-url` and `dev --eas` read the worktree's binding and count the same apps. An unreadable binding refuses them once the dev server lists an app.
 - An attached app gets only the route link.
@@ -148,7 +147,7 @@ On Android a loopback host needs `adb reverse tcp:<port> tcp:<port>`; `am start`
 
 ## One preflight for the runtime family
 
-Every runtime command asks one question before it does any work: is a dev server running, and is an app connected to it? One preflight asks it for every command, and every command prints the same refusals.
+Every runtime command asks one question before it does any work: is a dev server running, and is an app attached to it? One preflight asks it for every command, and every command prints the same refusals.
 
 | Command                                                                         | Needs             | No dev server answers   | The dev server lists no app                             |
 | ------------------------------------------------------------------------------- | ----------------- | ----------------------- | ------------------------------------------------------- |
@@ -170,13 +169,13 @@ The How line is one ladder in one order: `npx @expo/agent-cli dev --detach --<pl
 
 `error.data` in the `--json` envelope holds what the refusal observed: `devServerUrl`, `devServerReachable`, `debuggerTargets`, `commandSocketClients`, `platform` ([[0010-agent-conventions]] §The `--json` error envelope). Every key is present, and a fact the run does not have is `null`. `commandSocketClients` is `null` except in `runtime:reload`, the only command that opens `/message`. Rejected: a caller that parses the English message for these counts.
 
-The connection is asked before the bundle gate. With nothing connected, `runtime:tree`, `runtime:tap` and `runtime:type` exit 22 whatever the code on disk compiles to, and do not spend the gate's 20 s budget.
+The connection is asked before the bundle gate. With nothing attached, `runtime:tree`, `runtime:tap` and `runtime:type` exit 22 whatever the code on disk compiles to, and do not spend the gate's 20 s budget.
 
 Every command of the family takes `--port <n>` as shorthand for `--dev-server-url http://127.0.0.1:<n>`; both together is `BAD_ARGS`. Every command takes `--platform ios|android` beside `--ios` and `--android`. `--ios --platform ios` is accepted; `--ios --platform android` is `BAD_ARGS`.
 
 ## Which app a run reads
 
-A run reads only the apps in its scope. The scope comes from the caller's flags, from the device the run opens, and from the device bound to this worktree ([[0035-one-device-per-worktree]] §Readers). Every reader of the connected apps applies it: the preflight, the attach wait, and the debugger client's choice of target. The runtime reads, `smoke` and `navigate` resolve the scope by the same rules.
+A run reads only its own apps. An own app is an app that the run's scope reads, and an own target is its debugger target. An app is attached when it has a debugger target on the dev server and it is an own app. The scope comes from the caller's flags, from the device the run opens, and from the device bound to this worktree ([[0035-one-device-per-worktree]] §Readers). Every reader of the dev server's apps applies it: the preflight, the attach wait, and the debugger client's choice of target. The runtime reads and `smoke` resolve the scope by the same rules. An open (`navigate`, and the `app` phase of `smoke`) scopes to the device it opens and reads no other worktree's binding (§Target owner).
 
 The dev server does not name a target's platform. The run places each target by evidence, strongest first:
 
@@ -186,43 +185,38 @@ The dev server does not name a target's platform. The run places each target by 
 | 2   | The device name has React Native Android's shape, `<model> - <release> - API <sdk>`                                   | Android         |
 | 3   | The app id is Expo Go's: `host.exp.Exponent` on iOS, `host.exp.exponent` on Android                                   | iOS, or Android |
 
-A target that no row places is undetermined. An undetermined target is never read, and it never earns a platform's verdict. A target's model and an `adb` model are compared in one spelling: every character that is not a letter or a digit is `_`, as `adb devices -l` writes it.
+A target that no row places is unplaced. A target's model and an `adb` model are compared in one spelling: every character that is not a letter or a digit is `_`, as `adb devices -l` writes it.
 
-A target on a simulator that only other worktrees bind is skipped first (§Target owner). Next, a scope with a platform skips a target placed on the other platform. Then these rows apply:
+The rows below are in precedence order. The first row that matches a target decides.
 
-| Scope source                        | Target                                                                                               | Result                 | Test                                                                                                |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- |
-| none                                | any                                                                                                  | read                   | `runtime-reload-test` "checks the bundle on both platforms"                                         |
-| flag only                           | placed on the flag's platform                                                                        | read                   | `runtime-preflight-test` "reads the app it places"                                                  |
-| flag only                           | placed on the other platform                                                                         | skip as other-platform | `runtime-preflight-test` "reads the app it places"                                                  |
-| flag only                           | not placed                                                                                           | undetermined           | `runtime-preflight-test` "does not read an app nothing places"                                      |
-| EAS session                         | the name of a booted local simulator, or the model of an attached Android device                     | skip as other-device   | `runtime-bound-selection-test` "eval with"                                                          |
-| EAS session                         | placed on the session's platform, when the scope's device tools answered or the host cannot run them | read                   | `cloud-simulator-test` "counts the app"; `targetInventory-test` "reads an Android session"          |
-| EAS session, iOS or no platform     | the one target nothing places, when the scope's device tools answered or the host cannot run them    | read                   | `runtime-bound-selection-test` "eval with"; `targetInventory-test` "allows cloud attribution"       |
-| EAS session, iOS or no platform     | two targets nothing places                                                                           | undetermined           | `cloud-simulator-test` "reads neither unclaimed app"                                                |
-| EAS session, no platform            | the one target nothing places, beside a target that is read                                          | undetermined           | `targetSelection-test` "reads no unclaimed target"                                                  |
-| EAS session, iOS or no platform     | any unclaimed target, when `simctl` gave no answer on macOS                                          | undetermined           | `targetSelection-test` "reads no Expo Go target"                                                    |
-| EAS session, Android or no platform | an Android-shaped unclaimed target, when `adb` gave no answer                                        | undetermined           | `targetSelection-test` "an Android session holds"; `targetInventory-test` "holds an Android-shaped" |
-| any                                 | the name of a booted simulator that only other worktrees bind                                        | skip as other-worktree | `runtime-preflight-test` "%s exits 1 with NO_APP_CONNECTED"                                         |
-| any                                 | simulator list unknown, and a name that only other worktrees' bindings hold                          | skip as other-worktree | `targetSelection-test` "skips a target with a foreign binding's name"                               |
-| any                                 | the name of a simulator this worktree binds or nobody binds, or a name no booted simulator has       | read by the other rows | `runtime-target-selection-test` "reads the right app beside"                                        |
-| bound simulator                     | its name                                                                                             | read                   | `runtime-bound-selection-test` "eval with"                                                          |
-| bound simulator                     | another name                                                                                         | skip as other-device   | `runtime-bound-selection-test` "eval with"                                                          |
-| bound Android device                | its model, which no other attached device has                                                        | read                   | `targetSelection-test` "classifyTargets on a bound phone"                                           |
-| bound Android device                | its model, shared with another attached device, and only the bound device reverses this port         | read                   | `runtime-bound-selection-test` "eval reads the bound emulator"                                      |
-| bound Android device                | its model, shared, and the reverse answer is another device, none or unknown                         | undetermined           | `runtime-bound-selection-test` "eval refusal"                                                       |
-| bound Android device                | any, when `adb` gave no answer                                                                       | undetermined           | `targetSelection-test` "classifyTargets on the Android device bound"                                |
-| bound Android device                | another model, or the bound device is not attached                                                   | skip as other-device   | `runtime-bound-selection-test` "eval refusal"                                                       |
+| #   | Scope                               | Target                                                                                       | Result                 | Test                                                                                                |
+| --- | ----------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- |
+| 1   | any                                 | the name of a booted simulator whose every udid only other worktrees bind                    | skip as other-worktree | `runtime-preflight-test` "%s exits 1 with NO_APP_CONNECTED"                                         |
+| 2   | any                                 | simulator list unknown, and a name that only other worktrees' bindings hold                  | skip as other-worktree | `targetSelection-test` "skips a target with a foreign binding's name"                               |
+| 3   | a platform                          | placed on the other platform                                                                 | skip as other-platform | `runtime-preflight-test` "reads the app it places"                                                  |
+| 4   | bound simulator                     | its name                                                                                     | read                   | `runtime-bound-selection-test` "eval with"                                                          |
+| 5   | bound simulator                     | another name                                                                                 | skip as other-device   | `runtime-bound-selection-test` "eval with"                                                          |
+| 6   | bound Android device                | any, when `adb` gave no answer or no model for the bound device                              | undetermined           | `targetSelection-test` "on the Android device bound"                                                |
+| 7   | bound Android device                | any, when the bound device is not attached; or another model                                 | skip as other-device   | `runtime-bound-selection-test` "eval refusal"                                                       |
+| 8   | bound Android device                | its model, which no other attached device has                                                | read                   | `targetSelection-test` "on a bound phone"                                                           |
+| 9   | bound Android device                | its model, shared with another attached device, and only the bound device reverses this port | read                   | `runtime-bound-selection-test` "eval reads the bound emulator"                                      |
+| 10  | bound Android device                | its model, shared, and the reverse answer is another device, none or unknown                 | undetermined           | `runtime-bound-selection-test` "eval refusal"                                                       |
+| 11  | EAS session                         | the name of a booted local simulator, or the model of an attached Android device             | skip as other-device   | `runtime-bound-selection-test` "eval with"                                                          |
+| 12  | EAS session, iOS or no platform     | any target, when `simctl` gave no answer on macOS                                            | undetermined           | `targetSelection-test` "reads no Expo Go target"                                                    |
+| 13  | EAS session, Android or no platform | an Android-shaped target, when `adb` gave no answer                                          | undetermined           | `targetSelection-test` "an Android session holds"; `targetInventory-test` "holds an Android-shaped" |
+| 14  | EAS session                         | placed                                                                                       | read                   | `cloud-simulator-test` "counts the app"; `targetInventory-test` "reads an Android session"          |
+| 15  | EAS session                         | unplaced                                                                                     | undetermined           | `cloud-simulator-test` "reads neither unclaimed app"                                                |
+| 16  | a platform flag only                | placed                                                                                       | read                   | `runtime-preflight-test` "reads the app it places"                                                  |
+| 17  | a platform flag only                | unplaced                                                                                     | undetermined           | `runtime-preflight-test` "does not read an app nothing places"                                      |
+| 18  | none                                | any                                                                                          | read                   | `runtime-reload-test` "checks the bundle on both platforms"                                         |
 
-An EAS session's app registers the cloud simulator's model as its device name, and no local tool reports that name. So a cloud scope reads no target that a local tool claims, and the one target that nothing claims is the session's app. A device tool that gave no answer cannot show that a target is off this machine, and only the tool of the scope's platform counts. An Android session's own target has React Native Android's name shape, so only an iOS or platform-less session reads an unplaced target. Known limit: an Android session's target whose model is the model of an attached local emulator is skipped as other-device.
+One rule then reads the whole list of an EAS session on iOS or with no platform. Its one undetermined target is read as the session's app when rows 12 and 13 did not decide it. With no platform flag, that target is read only when no other target is read. Two undetermined targets stay undetermined. Tests: `runtime-bound-selection-test` "eval with"; `targetInventory-test` "allows cloud attribution"; `targetSelection-test` "reads no unclaimed target"; `cloud-simulator-test` "reads neither unclaimed app".
 
-`--eas` with no platform flag is a cloud scope: the session names one device, so the rule places its app on either platform. When such a scope reads no app and some apps are unplaced, the refusal is `NO_APP_CONNECTED`, exit 1. It names the unplaced apps and says to close the apps that are not the session's. A platform flag only chooses which device tool has to answer; it does not choose between two unclaimed apps. Rejected: refusing `--eas` with no platform; the user would name a platform that the session already has. `smoke` reads its route at each placement, so the cloud rule also applies when a config's EAS device turns on `--eas` during the run.
+An EAS session's app registers the model of the session's device as its device name, and no local tool reports that name. So an EAS session scope reads no target that a local tool places, and the one target that nothing places is the session's app. A device tool that gave no answer cannot show that a target is off this machine. Only the tool of the scope's platform counts. An Android session's own target has React Native Android's name shape, so only an iOS or platform-less session reads an unplaced target.
 
-Three rules hold for every caller of the scope:
+`--eas` with no platform flag is an EAS session scope: the session names one device, so the rule places its app on either platform. When such a scope reads no app and some apps are unplaced, the refusal is `NO_APP_CONNECTED`, exit 1. It names the unplaced apps and says to close the apps that are not the session's. A platform flag only chooses which device tool has to answer. It does not choose between two unplaced apps. Rejected: refusing `--eas` with no platform; the user would name a platform that the session already has. `smoke` reads its route at each placement, so the EAS session rule also applies when a config's EAS device turns on `--eas` during the run.
 
-- A classification belongs to one target list and the device facts read for that list. A later list is classified again, even when it names the same target ids.
-- The bundle check builds for the scope's platform when the scope has one: a flag, the device the run opened, or the bound device. Else it builds for the platforms of the apps it reads: one platform, or both. When no app it reads is placed, it builds for `ios`, and the report says `bundlePlatformSource: "default"`. A broken bundle decides the run, whichever platform it was found on.
-- An attach wait keeps its device facts while the target list does not change, and reads them again for a changed list, within the wait's budget. A device tool of the scope's platform that gave no answer is asked again, at most once a second, because a simulator can boot during the wait. A read that loses a tool's answer keeps the facts that placed the last list. The read the wait starts from counts as the first.
+The bundle check builds for the scope's platform when the scope has one: a flag, the device the run opened, or the bound device. Else it builds for the platforms of the own apps: one platform, or both. When no own app is placed, it builds for `ios`, and the report says `bundlePlatformSource: "default"` (Risk 5). A broken bundle decides the run, whichever platform it was found on.
 
 Which Expo Go app id a command acts on belongs to §Stopping the app.
 
@@ -230,7 +224,7 @@ Which Expo Go app id a command acts on belongs to §Stopping the app.
 
 The dev server on a port takes a debugger connection from every app that loads its JavaScript from that port. A simulator that another worktree bound, and that is still booted, loads from the same port. A run must not read that app as this worktree's app.
 
-A debugger target names its device by name only. A booted simulator has a name and a udid, and a binding records both ([[0035-one-device-per-worktree]] §Records). So a target is matched to the booted simulators by name, and each simulator to the bindings by udid. While another worktree has a live iOS binding, a run that is not scoped to Android reads the simulator list for every connection, also when the first target list is empty. A simulator can be renamed, so the stored binding name does not decide whether the list is read.
+A debugger target names its device by name only. A booted simulator has a name and a udid, and a binding records both ([[0035-one-device-per-worktree]] §Records). So a target is matched to the booted simulators by name, and each simulator to the bindings by udid.
 
 Rules:
 
@@ -239,18 +233,14 @@ Rules:
 - Only a live binding is an owner: its lease has not expired, and its project root exists. A released binding keeps its file with an expired lease, so it is not an owner.
 - Another worktree's app is out of every scope, with a platform flag or without one. It does not take the one unplaced slot of an EAS session.
 - A read that skips an app says so on stderr in one sentence, `Skipped <n> app(s): …`, that names each device and the worktree that bound it.
-- When only other worktrees' apps are connected, a command that needs a debugger target refuses `NO_APP_CONNECTED`, exit 1, and names each device and worktree. Its How line opens the app on this worktree's device. The debugger client refuses the same way when the list changes after the preflight: an empty list is exit 22, and a list with no app in scope is exit 1.
+- When only other worktrees' apps are listed, a command that needs a debugger target refuses `NO_APP_CONNECTED`, exit 1, and names each device and worktree. Its How line opens the app on this worktree's device. The debugger client refuses the same way when the list changes after the preflight: an empty list is exit 22, and a list with no app in scope is exit 1.
 - `runtime:reload` lists the skipped apps in `skippedApps`, and its bundle check does not build for their platform. `runtime:reload` and `smoke` do not reload a skipped app (§How it reloads).
-- No observation of an app outside the read group proves this worktree's reload: not a fresh target, not `appsConnected`, not the relaunch id. When a listed app is outside the read group, command-socket churn proves nothing, because the churn can be that app's. The reload then needs a fresh own target or a bundle, and a failure says why the churn did not count.
-- A served bundle proves the reload only for a platform that no app outside the read group is on. An app that nothing places could fetch either bundle, so beside one, no bundle proves the reload.
-- Whether a fresh target can prove the reload depends on the mechanism that settled the run (§How it reloads). When nothing can prove it, nothing is watched, and the failure says so.
-- Only a run in a project reads the bindings. `navigate` reads no other worktree's binding; it scopes to the device it resolved. `dev:wait` reads no bindings. `smoke` skips the app as the runtime reads do, lists it in `skippedApps` in its JSON, names it on stderr when it reads its own app beside one, and appends the same sentence to the `app` phase's reason when no app is left.
+- An observation of a skipped app never proves this worktree's reload (§What proves a reload).
+- Only a run in a project reads the bindings. `dev:wait` reads no bindings. `smoke` skips the app as the runtime reads do and lists it in `skippedApps` in its JSON. When `smoke` reads its own app beside a skipped app, it names the skipped app on stderr. When no app is left, it appends the same sentence to the `app` phase's reason.
 
-A local device's app can stand beside this worktree's own EAS session on the same port, with the session app's app id ([[0035-one-device-per-worktree]] §Readers). Every cloud scope skips it by the EAS session rows of §Which app a run reads. With only such apps connected, a command that needs a debugger target refuses `NO_APP_CONNECTED`, exit 1, names each app and the session, and prints no scope line.
+A local device's app can stand beside this worktree's own EAS session on the same port, with the session app's app id ([[0035-one-device-per-worktree]] §Readers). Every EAS session scope skips it (§Which app a run reads, row 11). With only such apps listed, a command that needs a debugger target refuses `NO_APP_CONNECTED`, exit 1, names each app and the session, and prints no scope line.
 
-A lease lasts 60 minutes and is renewed by use ([[0035-one-device-per-worktree]] §Lease). A runtime read does not renew it. Rejected: renewing on a runtime read; a renewal takes the registry lock, and reads are the most frequent calls. Known limit: a worktree that runs only `runtime:*` reads for 60 minutes loses its live binding, and another worktree then reads that app.
-
-Known limit: a local Android binding records a serial only, and React Native Android names the device by its model, so a local Android app is never skipped as another worktree's. An EAS session's target carries the cloud device's model, so a cloud binding has no name to match.
+A lease lasts 60 minutes and is renewed by use ([[0035-one-device-per-worktree]] §Lease). A runtime read does not renew it. Rejected: renewing on a runtime read; a renewal takes the registry lock, and reads are the most frequent calls. See Risk 2.
 
 ## Reloading the app
 
@@ -278,21 +268,21 @@ The broadcast needs no platform tool, application id or device, and keeps state 
 | EAS relaunch                     | the same, with `--eas` (§Cloud simulator)                      | `device` / `device`          | none                        | yes          | last rung             | —                                     |
 | `expo.reloadAppAsync()`          | `runtime` only                                                 | `runtime` / `runtime`        | none                        | no           | never chosen          | exit 22 if called, else 20            |
 
-Rung 1 is decided on one observation after the bundle gate: a fresh target list and the device facts that place it. That observation serves dispatch, evidence, counts and the relaunch. When the read fails, or a device tool stops answering, the run keeps the preflight observation (in `smoke`, the last list its own reads placed) and sends no broadcast, because it cannot see which apps a broadcast reaches. `Page.reload` to the own targets still runs.
+Rung 1 is decided on one observation after the bundle gate: a fresh target list and the device facts that place it. That observation serves dispatch, evidence, counts and the relaunch. When the read fails, or a device tool stops answering, the run keeps the preflight observation (in `smoke`, the last list its own reads placed). It then sends no broadcast, because it cannot see which apps a broadcast reaches. `Page.reload` to the own targets still runs.
 
 `Page.reload` targets share one deadline: the remaining budget, at most 8 s. The broadcast watches its peers for at most 8 s. So an unproved rung 1 leaves the rest of `--timeout` to the relaunch.
 
-Beside an app outside the scope that is not skipped (another platform's, or an unplaced one), rung 1 stays the broadcast, and the churn may be that app's. The attempt is `ok: false, delivered: true`, says how many apps outside the scope it reached, and does not climb; a fresh own target or a bundle that may count decides. The failure text names no `--eas` and no tunnel on a local run.
+Beside an app outside the scope that is not skipped (another platform's, or an unplaced one), rung 1 stays the broadcast. The attempt is `ok: false, delivered: true`. It says how many apps outside the scope it reached, and it does not climb. §What proves a reload says which observation then decides. The failure text names no `--eas` and no tunnel on a local run.
 
 When no own target can keep the `Page.reload` marker, no `Page.reload` is sent. Under a pinned `--method dev-server` the failure says so and names `--method device`.
 
-`smoke` runs the same rung 1 and observations, and never relaunches: a gate does not take the caller's app away.
+`smoke` runs rung 1 only (§The app under test is the code on disk).
 
-Rung 2 costs the app's JavaScript state; when an app was connected, the attempt's reason says so and why rung 1 did not suffice. Off `--eas`, it is `simctl terminate` or `am force-stop`, then the deep link; a stop that finds the app not running is success. The application id comes from this run's `read` targets only, by the ladder in §Stopping the app. A link refused after the stop leaves the app named in `leftAppStopped`.
+Rung 2 costs the app's JavaScript state. When an app was attached, the attempt's reason says so and says why rung 1 did not suffice. Off `--eas`, rung 2 is `simctl terminate` or `am force-stop`, then the deep link. A stop that finds the app not running is success. The application id comes from the own targets only, by the ladder in §Stopping the app. A link refused after the stop leaves the app named in `leftAppStopped`.
 
 `--method runtime` calls `expo.reloadAppAsync()` at the target `runtime:eval` reads. An app whose `expo` global has no `reloadAppAsync` is reported as such.
 
-The entry-bundle check runs before any rung: a broken bundle is exit 20 with `attempts: []`, a check out of budget is exit 22, `unknown` passes, and `--no-bundle-check` skips it. The `bundle` object is the one `smoke` and `dev:wait` print. `appsConnected` on a refused run is the count of this run's apps that the preflight read, not `0`.
+The entry-bundle check runs before any rung: a broken bundle is exit 20 with `attempts: []`, a check out of budget is exit 22, `unknown` passes, and `--no-bundle-check` skips it. The `bundle` object is the one `smoke` and `dev:wait` print. `appsConnected` on a refused run is the count of own apps that the preflight read, not `0`.
 
 An attempt carries `delivered` beside `ok`: whether the action reached the app, not whether it worked.
 
@@ -302,33 +292,26 @@ Rejected: `--method runtime` in `auto`. On Expo Go the call closes the app, and 
 
 Rejected: a broadcast beside a skipped app. The dev server relays it to every app on the port.
 
-Known limit: the top-level `method` names the rung, so a `Page.reload` rung 1 reports `method: dev-server`; only the attempt says `page-reload`.
+The top-level `method` names the rung, so a `Page.reload` rung 1 reports `method: dev-server` (Risk 1).
 
 ### What proves a reload
 
-A broadcast has no reply. `reloaded: true` requires an observation, and `verifiedBy` names a signal only when its own evidence is in the payload and non-empty ([[0021-honest-reports]] §The rules).
+A broadcast has no reply. `verifiedBy` names a signal only when its own evidence is in the payload and non-empty ([[0021-honest-reports]] §The rules). `reloaded` is `true` exactly when `verifiedBy` names a signal: the app acted. Exit 0 needs more: an observation that the app came back.
 
 Four observations. The first three share one budget, and the first to answer ends the watches.
 
-1. **Message-socket peers.** The dev server never reuses a socket id. The wait counts client ids it had not listed before (`commandSocketChurn.reconnected`), not a changed list, because a client that left changes the list too. This proves the app acted. On its own it is `reloaded: true` at exit 22.
+1. **Message-socket peers.** The dev server never reuses a socket id. The wait counts client ids it had not listed before (`commandSocketChurn.reconnected`), not a changed list, because a client that left changes the list too. This proves that the app acted, not that it came back.
 2. **A fresh debugger target.** The dev server never reuses a page id, so a target it had not listed is an app that came back (`appsReconnected`).
 3. **A new `Bundled` line** in the dev server's captured output (`bundlesAfterReload`). It says the dev server served a bundle after this command acted, not which client asked. A relaunched app keeps its page id, so this is how a relaunch can exit 0.
 4. **A new JavaScript context on an own target after `Page.reload`.** One own target is enough, and nothing is watched after it.
 
-`Page.reload` keeps the page id, so its proof is a context replacement: set a per-check global on the target, send `Page.reload`, and read the global on the same target id until it is gone, every 250 ms. One debugger session owns marker, action, reads and cleanup, because a second debugger evicts the first; a session that closes reopens by target id. Cleanup removes the marker within the deadline, also after a stop.
-
-| Phase                 | Bound                                                                |
-| --------------------- | -------------------------------------------------------------------- |
-| Discovery and marking | 1 s                                                                  |
-| Action                | 5 s, or the request's shorter limit (`Page.reload` asks at most 4 s) |
-| Reads of the marker   | the caller's budget, with a fresh abort after an action that ran out |
-| The whole proof       | the caller's absolute deadline, cleanup included                     |
+`Page.reload` keeps the page id, so its proof is a context replacement. The CLI sets a per-check global on the target, sends `Page.reload`, and reads the global on the same target id until it is gone. The whole proof, cleanup of the marker included, ends at the caller's deadline.
 
 Each target keeps its outcome in the attempt's `outcomes`:
 
 | Outcome              | Trigger                                                                                                       | Test                                                                                     |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `unsupported`        | no `nativePageReloads` capability; nothing is sent                                                            | none                                                                                     |
+| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                         | none                                                                                     |
 | `unmarkable`         | the context did not keep the marker, or answered a CDP error (Expo Go for Android: `-32601`); nothing is sent | e2e runtime-target-selection-test "sends no Page.reload…"; contextReplacedTransport-test |
 | `not-delivered`      | the mark got no answer, the `Page.reload` answer was lost and no read proved it, or the action failed         | rungOneTargets-test "reports a mark…", "reports a Page.reload whose answer was lost…"    |
 | `delivered-unproved` | `Page.reload` answered and the marker stayed                                                                  | rungOneTargets-test "watches an own target…"                                             |
@@ -343,20 +326,30 @@ The known ids are read after the bundle gate, just before the action, so a save 
 
 A proved reload whose last target read was zero reads again within the 3 s reconnect window. A zero that survives keeps its meaning: an EAS session can list nothing while the app runs.
 
-`verifiedBy` names the mechanism's own label first, then `fresh-debugger-target`, then `dev-server-bundle`. `--method runtime` and the EAS relaunch have no label of their own. The exit code comes from the observations, not from the label.
+`verifiedBy` names the mechanism's own label first, then `fresh-debugger-target`, then `dev-server-bundle`. `--method runtime` and the EAS relaunch have no label of their own.
 
-The settled attempt is the last one that reloaded or reached the app. When it keeps the page id, the own app was listed before the run, and no bundle may count (§Target owner), nothing can prove the reload, and nothing is watched. A local relaunch is then exit 22 at once with `reloaded: true` and `verifiedBy: app-relaunch`; an EAS relaunch is exit 22 at once with nothing verified. A relaunch that nothing confirmed does not call the listed runtime the old one.
+Which observations may count:
 
-A project with no captured dev server log has no bundle observation, so a relaunch is exit 22 after `--timeout`. The failure names the fix: `npx @expo/agent-cli dev --detach`.
+- An observation of an app that is not an own app never proves this worktree's reload: not a fresh target, not `appsConnected`, not the relaunch id.
+- When the dev server lists an app that is not an own app, peer churn proves nothing, because the churn can be that app's. The failure then says why the churn did not count.
+- A served bundle counts only for a platform that no other app is on. An unplaced app could fetch either bundle, so beside one, no bundle counts.
+- The settled attempt is the last one that reloaded or reached the app. When it keeps the page id, the own app was listed before the run, and no bundle may count, nothing can prove the reload. Then nothing is watched, and the run ends at once. A relaunch that nothing confirmed does not call the listed runtime the old one.
 
-| Code | Meaning                                                                                                                                  |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | a mechanism ran and an observation showed the app back: a fresh own target, a `Bundled` line that may count, or a new JavaScript context |
-| `20` | the entry bundle does not compile, or no mechanism reached the app                                                                       |
-| `22` | a mechanism ran and nothing was observed before `--timeout` (peer churn alone, a relaunch alone), or the entry bundle was still building |
-| `1`  | not attempted: no dev server, a `--route` the project has not got, or a bad argument                                                     |
+A project with no captured dev server log has no bundle observation. The failure names the fix: `npx @expo/agent-cli dev --detach`.
 
-With nothing connected, `--method auto` starts the app and can exit 0; `--method dev-server` is exit 20.
+The exit code comes from the observations, not from the label. The first row that matches decides:
+
+| #   | Run                                                                                                                                            | `reloaded` | `verifiedBy`                             | Exit               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------- | ------------------ |
+| 1   | not attempted: no dev server, a `--route` the project has not got, or a bad argument                                                           | —          | —                                        | 1                  |
+| 2   | the entry bundle does not compile                                                                                                              | `false`    | `null`                                   | 20, `attempts: []` |
+| 3   | the entry bundle was still building when its check ran out of budget                                                                           | `false`    | `null`                                   | 22                 |
+| 4   | no mechanism reached the app                                                                                                                   | `false`    | `null`                                   | 20                 |
+| 5   | a mechanism ran, and a new context on an own target, a fresh own target, or a bundle that may count showed the app back                        | `true`     | the first label with evidence            | 0                  |
+| 6   | peer churn or a local relaunch, and nothing showed the app back                                                                                | `true`     | `message-socket-peers` or `app-relaunch` | 22                 |
+| 7   | any other mechanism ran (an EAS relaunch, `--method runtime`, a `Page.reload` that did not replace a context), and nothing showed the app back | `false`    | `null`                                   | 22                 |
+
+Rows 6 and 7 end when `--timeout` ends, or at once when nothing can be watched. With nothing attached, `--method auto` starts the app and can exit 0. A pinned `--method dev-server` is then row 4.
 
 ## Loading the app is not navigating it
 
@@ -365,21 +358,32 @@ With nothing connected, `--method auto` starts the app and can exit 0; `--method
 So `navigate` opens the launcher URL first when all four hold:
 
 1. The link targets a development build. Expo Go never fires the ladder: `exp://<host>/--/<route>` already carries the dev server.
-2. No app of the device's scope is attached (§Pointing an app at this dev server says which apps count).
+2. No app is attached on the device the run opens (§Which app a run reads).
 3. A launcher URL exists, which needs a dev server and a scheme.
 4. The run has an attach budget (`--attach-timeout`, default 45 s). `--no-wait-attach` gives none.
 
-The run opens the launcher URL, waits within the budget for the app, then opens the route link, also for `/`, because the launcher loads whatever the app last had. A refused launcher open does not fail the run. The route link keeps at least 2 s of attach wait. Both opens are reported: `launch` in `--json` (`url`, `command`, `exitCode`, `attached`, `waitedMs`) and a `Launch` line above `App`. `smoke` passes its attach budget, so it loads a cold development build the same way.
+The open runs these steps in order. A step whose condition does not hold is passed over.
+
+| #   | Step                                         | Runs when                                                  | Wait                                                               | Reports                                           |
+| --- | -------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------- |
+| 1   | open the launcher URL                        | the four conditions above hold                             | —                                                                  | `launch.url`, `launch.command`, `launch.exitCode` |
+| 2   | wait for the app                             | after step 1                                               | `--attach-timeout`                                                 | `launch.attached`, `launch.waitedMs`              |
+| 3   | open the route link, also for `/`            | always                                                     | —                                                                  | `command`, `exitCode`                             |
+| 4   | wait for the app                             | the device took the link, and the run has an attach budget | the rest of `--attach-timeout`; at least 2 s after a launcher open | `attached`                                        |
+| 5   | answer the open dialog                       | an EAS session, and nothing attached                       | step 4's budget again, after an accepted dialog                    | `attachAlert` (§Cloud simulator)                  |
+| 6   | stop the app once, open the route link again | Android, local or EAS, and nothing attached                | step 4's budget again, when the second open exits 0                | `attachRecovered`                                 |
+
+Step 3 opens the route link also for `/`, because the launcher loads whatever the app last had. A refused launcher open does not fail the run. The human output prints a `Launch` line above `App`. `smoke` passes its attach budget, so it loads a cold development build the same way.
+
+`attached` is `true` when an app attached (`App attached`), and `false` when none did, at exit 22. It is `null` under `--no-wait-attach` and when the device refused the link.
+
+Step 6 exists because Expo Go's error screen does not fetch again, so a second link alone changes nothing. iOS never runs it. The stopped app is `--app-id`, else the app config's id, else Expo Go. A link that targets Expo Go stops Expo Go. An app that another device runs on the same dev server is never stopped. `attachRecovered` is `false` when the stop failed (the link does not open again) and when `pidof` saw no process (the link opens again, and the reason says the app was not running). It is `true` in every other case: when `pidof` saw the process, when `pidof` could not run, and on an EAS session (Risk 14).
 
 On local Android the launcher URL goes to `<app id>/.MainActivity` by component (`am start -f 0x20000000 -n <app id>/.MainActivity -d <url>`), as `expo start --dev-client --android` does. A BROWSABLE `ACTION_VIEW` intent into a stopped development build leaves an error activity while `am start` exits 0. The app id is `--app-id`, else the app config's; without one, and on an EAS session, the URL goes as an ordinary link.
 
-`navigate` then waits for an app of its device scope to register a debugger target. An attached app prints `App attached`. None within the budget is exit 22 with `attached: false`. `--no-wait-attach`, and a link the device refused, report `attached: null`.
-
-On Android, local or EAS, a run where nothing attached stops the app once, opens the link again, and waits again. Expo Go's error screen does not fetch again, so a second link alone changes nothing. The stopped app is `--app-id`, else the app config's id, else Expo Go; a link that targets Expo Go stops Expo Go. An app that another device runs on the same dev server is never stopped. When `pidof` sees no process, the link still opens again, `attachRecovered` is false, and the reason says the app was not running; otherwise `attachRecovered` is true. iOS never runs this recovery; the EAS iOS dialog is §Cloud simulator.
-
 With the launcher on screen the dev server lists no debugger target, so `smoke`'s reading phases count zero and never read the launcher.
 
-`smoke` labels its picture from the open's own report, in the `screenshot` phase's reason: the project's screen when an app of the project is connected; the dev launcher's screen when the device took the launcher URL and nothing attached; the device's screen otherwise. A refused launcher open is never labelled the launcher's screen.
+`smoke` labels its picture from the open's own report, in the `screenshot` phase's reason. The label is the project's screen when an own app is attached. It is the dev launcher's screen when the device took the launcher URL and nothing attached. Else it is the device's screen. A refused launcher open is never labelled the launcher's screen.
 
 ## The smoke gate
 
@@ -393,13 +397,13 @@ The run has 13 phases, in this order. A conditional phase is in the report only 
 | 2   | `dev-server`       | Is a dev server answering?                                 | no                | an 800 ms look, again after a start                                                                                       | none: `failed`                                                                         |
 | 3   | `bundler-ready`    | Is the bundler ready, and does it serve this project?      | no                | 3 min on a dev server this run started, else `--timeout`                                                                  | another project: `failed`; expired: `inconclusive`                                     |
 | 4   | `bundle`           | Does this project's entry bundle compile for the platform? | no                | as `bundler-ready`                                                                                                        | broken: `failed`; expired or no answer: `inconclusive`                                 |
-| 5   | `start-session`    | Is an EAS Simulator session up for this run?               | yes, `--eas` only | 15 min                                                                                                                    | no session: `failed`                                                                   |
+| 5   | `start-session`    | Is an EAS session up for this run?                         | yes, `--eas` only | 15 min                                                                                                                    | no session: `failed`                                                                   |
 | 6   | `boot-device`      | Did this run boot a simulator or an emulator?              | yes               | 2 min on iOS, 4 min on Android                                                                                            | no device: `failed`                                                                    |
 | 7   | `install-app`      | Did this run put the app on the device?                    | yes               | 30 min                                                                                                                    | failed: `failed`                                                                       |
-| 8   | `app`              | Is an app attached, or does one attach when opened?        | no                | a 2 s look; then one budget for the open and the attach wait: 2 min on a cold environment this run made, else `--timeout` | link refused: `failed`; nothing attached: `inconclusive`; app mismatch: never `passed` |
-| 9   | `reload`           | Is the app running the code on disk?                       | no                | 10 s, out of `--timeout`                                                                                                  | `unproved`: never `passed`                                                             |
+| 8   | `app`              | Is an app attached, or does one attach when opened?        | no                | a 2 s look; then one budget for the open and the attach wait: 2 min on a cold environment this run made, else `--timeout` | link refused: `failed`; nothing attached: `inconclusive`; app mismatch: `inconclusive` |
+| 9   | `reload`           | Is the app running the code on disk?                       | no                | 10 s, out of `--timeout`                                                                                                  | `unproved`: `inconclusive`                                                             |
 | 10  | `route`            | Did the named route open?                                  | no                | as the `app` open                                                                                                         | link refused: `failed`                                                                 |
-| 11  | `runtime`          | Does the runtime evaluate `1`?                             | no                | one read; up to 15 s for an app this run opened or reloaded                                                               | no answer: never `passed`                                                              |
+| 11  | `runtime`          | Does the runtime evaluate `1`?                             | no                | one read; up to 15 s for an app this run opened or reloaded                                                               | no answer: `inconclusive`                                                              |
 | 12  | `errors`           | Did the app report an error in the window?                 | no                | `--window`, default 3 s                                                                                                   | an error: `failed`, over every other row                                               |
 | 13  | `screenshot`       | Is there a picture of the screen?                          | no                | 20 s local, 2 min on EAS                                                                                                  | none                                                                                   |
 
@@ -416,7 +420,7 @@ When no dev server answers, `smoke` runs `dev --<platform> --detach --wait-ready
 | `22` | `inconclusive` | a wait expired, no app attached, no device to open one on, an unreadable runtime, an `unproved` reload, or an app that cannot run this project    |
 | `1`  |                | a bad flag, or a route the project has not got (§Verifying the route)                                                                             |
 
-`passed` requires the runtime to evaluate `1`. After a `-32601`, an empty error window proves nothing. So `smoke --android` against Expo Go exits 22 on a working app (§Android, §A reloading runtime answers like one with no debugger).
+Each row is `ok`, `failed`, `inconclusive` or `skipped`. A phase before `runtime` that gets `failed` or `inconclusive` in the last column ends the run with that outcome. An app mismatch and an `unproved` reload do not end the run: the reads still run. A run that reaches the reads is `failed` on an error in the window. Else it is `passed` when the runtime evaluated `1`, the error window was read, the reload is not `unproved` and the app fits the project. Else it is `inconclusive` (§Android).
 
 `smoke --platform web` is `BAD_ARGS`, exit 1, with `suggestedCommand` set to `typecheck`. The later phases read the inspector's list of React Native runtimes, and a browser never registers in it. Rejected: exit 22 for web, because looking again never makes a browser answer.
 
@@ -456,7 +460,7 @@ A row written without running a phase prints no line: a `route` the `app` phase 
 
 ### The app under test is the code on disk
 
-`runtime`, `errors` and `screenshot` read the running app. An app that was attached before the run runs the bundle it last loaded, which after an edit is the old code. The error window belongs to the app's session, and the session outlives the fix (§Reloading the app). So the `reload` phase puts an attached app back on the bundle the dev server serves.
+`runtime`, `errors` and `screenshot` read the running app. An app that was attached before the run runs the bundle it last loaded, which after an edit is the old code, and its error window outlives the fix (§Reloading the app). So the `reload` phase puts an attached app back on the bundle the dev server serves.
 
 The phase is the first rung of `runtime:reload` only, in the same process (§How it reloads). Rejected: the higher rungs, which stop and start the app. A gate does not take the caller's app away to answer a question about it.
 
@@ -466,12 +470,12 @@ The phase is the first rung of `runtime:reload` only, in the same process (§How
 | ------------- | ----------------------------------------------------------- | -------------- | --------------------- |
 | `not-needed`  | this run opened the app, so it loaded the served bundle     | `skipped`      | none                  |
 | `reloaded`    | the app was attached, and the reload was proved             | `ok`           | none                  |
-| `unproved`    | the reload was sent, and nothing showed that it took effect | `inconclusive` | never `passed`        |
+| `unproved`    | the reload was sent, and nothing showed that it took effect | `inconclusive` | `inconclusive`        |
 | `declined`    | `--no-reload`                                               | `skipped`      | none; the row says so |
 
-`unproved` is not `failed`: nothing shows a fault in the app, only that the session read is unknown ([[0021-honest-reports]] §The rules). An error in the window still makes the run `failed`.
+`unproved` is not `failed`: nothing shows a fault in the app, only that the session read is unknown ([[0021-honest-reports]] §The rules).
 
-`reload.verifiedBy` follows §What proves a reload: a label only when its evidence is in the payload and not empty. The gate never relaunches, so it is never `app-relaunch`. `reload` also carries `knownTargetIds`, `freshTargets`, `commandSocketReconnected`, `targetOutcomes` and `bundleServed`.
+`reload.verifiedBy` follows §What proves a reload, and it is never `app-relaunch`. `reload` also carries `knownTargetIds`, `freshTargets`, `commandSocketReconnected`, `targetOutcomes` and `bundleServed`.
 
 `reload` runs before `route`, because a reload sends the app back to its initial route. A proved reload owes the settle and the runtime poll of a fresh launch (§The device that can open the app). An unproved reload owes neither.
 
@@ -493,19 +497,15 @@ The open picks Expo Go or a development build. The first row that matches decide
 
 Rows 1 to 3 observe what will open the link, so they rank above facts about the project. Only `unbundled-native-module` and `config-plugin` rule Expo Go out. `unknown-sdk` (a fresh clone with no `node_modules`), `unknown-app-config` and `custom-native-code` do not decide. Rejected: the two-valued `compatible` field, which is `false` for all five reasons.
 
-An Expo Go can already be attached, for example after `expo start --ios`. So the `app` phase also asks whether an attached Expo Go, placed on this run's platform (§Which app a run reads), can run this project. A mismatch sets `appMismatch` and `appMismatchKind` in `--json`, makes the `app` row `inconclusive`, and blocks `passed`. It is never `failed`, because nothing is wrong with the code. The later phases still read the app and take the picture (§Android). An error in the window still makes the run `failed`.
-
-The follow-ups pick the next command from `appMismatchKind`, never from the sentence. `expo-go-incompatible` leads with `dev --<platform>`, not a re-run of the gate. The other kinds are in §Two mismatches, two next actions.
+An Expo Go can already be attached, for example after `expo start --ios`. So the `app` phase also asks whether an attached Expo Go, placed on this run's platform (§Which app a run reads), can run this project. A mismatch makes the `app` row `inconclusive`. It is never `failed`, because nothing is wrong with the code. The later phases still read the app and take the picture. The mismatch values and their follow-ups are in §Two mismatches, two next actions.
 
 ### Putting Expo Go on a simulator that has not got it
 
 A run that may bring its own environment installs Expo Go on a device that has not got it. Rejected: a refusal that names `npx expo start --ios`, which an agent cannot take without leaving its loop.
 
-Expo Go is installed only on the plan's `expo-go` rule ([[0004-smart-start-and-project-state]] §Decision table). Every other rule installs a development build (§The gate installs the app, whichever app it is). `--no-start` installs nothing.
+Expo Go is installed only on the plan's `expo-go` rule ([[0004-smart-start-and-project-state]] §Decision table). When the phase installs is the decision table of §The gate installs the app, whichever app it is. The row says `installed <version> on <device>`, with `, replacing <version>` and `, and left it there` where they apply.
 
-`install-app` is a conditional phase and is not charged to `--timeout`. It registers no cleanup, so the app stays for the next run (§The run brings its own environment). The row says `installed <version> on <device>`, with `, replacing <version>` and `, and left it there` where they apply.
-
-The phase reads the device the run settled on, whether or not this run booted it. Rejected: an install tied to the boot, which misses a running simulator without Expo Go. The run installs when Expo Go is absent, or present at a version this SDK does not ship (§The Expo Go on the device is not the Expo Go the SDK wants). A device read that could not run installs nothing. An EAS session's device is never read, so nothing is installed there.
+The phase reads the device the run settled on, whether or not this run booted it. Rejected: an install tied to the boot, which misses a running simulator without Expo Go.
 
 Two subprocesses do the work, with no `@expo/cli` code. `npx --yes expo-go download <platform> <sdk> --json` (`latest` when the SDK is unknown) runs in a temporary directory, because it writes into its working directory. It answers `{"path": …}` or `{"error": …}` and gets 5 min. The installer gets 2 min:
 
@@ -548,7 +548,7 @@ The comparison is **exact equality** of `major.minor.patch`; older, newer and an
 | `mismatch` | any other version                                                     | installs the release this SDK ships; the row names the version it replaced | the phase is `inconclusive`, so the run cannot pass; `appMismatchKind: expo-go-version` | for an Expo Go target, the version finding is appended to the wait's reason; `appMismatchKind: expo-go-version` |
 | `unknown`  | offline, no `expo-go`, no SDK version, or a version nothing can parse | installs nothing                                                           | says nothing                                                                            | says nothing                                                                                                    |
 
-`unknown` changes nothing and says nothing: a check that could not run must not become an install, a refusal, or a sentence. The `install-app` row says "replacing <version>" when it replaced an Expo Go.
+`unknown` changes nothing and says nothing: a check that could not run must not become an install, a refusal, or a sentence.
 
 A stale Expo Go registers no debugger target, so the attach wait expires with only a symptom. On that path the run asks the **device**, not the dev server, and only after the wait failed, so the healthy path pays nothing. The `app` row keeps both facts: nothing attached, and why. The device first answers whether it has the app at all (§A refused link is a device without the app). Which app is the target is §Expo Go is only a target for a project that fits in it.
 
@@ -566,22 +566,34 @@ The second follow-up of each is `status`. The `smoke` follow-ups drop `--no-star
 
 ### The gate installs the app, whichever app it is
 
-`smoke` installs the app under test when the device has not got it, whichever kind of app it is: an agent cannot leave the loop to run another command first. The plan's `expo-go` rule installs Expo Go; every other rule installs a native build.
+`smoke` installs the app under test when the device has not got it, whichever kind of app it is: an agent cannot leave the loop to run another command first. The plan's `expo-go` rule installs Expo Go. Every other rule installs a development build.
 
-| kind           | what runs                                                                                         | budget |
-| -------------- | ------------------------------------------------------------------------------------------------- | ------ |
-| `expo-go`      | `npx --yes expo-go download <platform> <sdk> --json`, then `simctl install` / `adb install -r -d` | 30 min |
-| `native-build` | `npx expo run:<platform> --no-bundler --device <id>`                                              | 30 min |
+| kind           | what runs                                                                             |
+| -------------- | ------------------------------------------------------------------------------------- |
+| `expo-go`      | the download and the installer of §Putting Expo Go on a simulator that has not got it |
+| `native-build` | `npx expo run:<platform> --no-bundler --device <id>`                                  |
 
-- `--no-bundler`: the run already has a dev server, and a second Metro would be a second answer to "which bundle is the app under test running".
+- `--no-bundler`: the run already has a dev server, and a second dev server would be a second answer to "which bundle is the app under test running".
 - `--device`: the app lands on the device the rest of the run reads. iOS gets the bound simulator's udid; Android gets the bound `adb` serial (SDK 58, the floor, matches a serial).
 - Rejected: `@expo/agent-cli dev` as the installer. It plans and starts a dev server, which this run has already done.
 
-The `install-app` phase has the build budget for both kinds, because the larger of the two is a native compile. It is a conditional phase and registers no cleanup (§The run brings its own environment). It runs only on a run without `--no-start`, and only after the start phase has finished. It runs when the boot made a new device, or when the device answers that it has not got the app, or when the Expo Go version is `mismatch`. A device that could not be asked gets no install. A failed install stops the run as `failed`, and nothing is opened.
+The `install-app` phase gets 30 min for both kinds, because a development build compiles. The Expo Go download and installer bounds fall inside it. The phase is conditional, is not charged to `--timeout`, and registers no cleanup, so the app stays for the next run (§The run brings its own environment). It runs after the start, session and boot phases. The first row that matches decides whether it installs:
 
-**The device judges a native build, not the exit code.** `expo run:ios` activates the Simulator window through AppleScript after it installs, and that throws on a Mac with no Automation grant. `smoke` does not need the window. After a non-zero exit, the run asks the device whether the app is there: yes is `ok`. When the device cannot be asked, the exit code decides.
+| #   | Condition                                                                        | Install |
+| --- | -------------------------------------------------------------------------------- | ------- |
+| 1   | `--no-start`                                                                     | no      |
+| 2   | the run has no device                                                            | no      |
+| 3   | this run's boot created the device                                               | yes     |
+| 4   | no app id, and the kind is `native-build`                                        | yes     |
+| 5   | no app id, and the kind is `expo-go`                                             | no      |
+| 6   | the device could not be asked: the read failed, or it is an EAS session's device | no      |
+| 7   | the device has not got the app                                                   | yes     |
+| 8   | the Expo Go on the device is `mismatch`, for either kind (Risk 9)                | yes     |
+| 9   | any other case                                                                   | no      |
 
-Under `--no-start`, nothing is installed. A device without the app is reported with the run that would install it: `smoke --<platform>`, not `dev` (§Two mismatches, two next actions).
+A failed install stops the run as `failed`, and nothing is opened.
+
+**The device judges a development build, not the exit code.** `expo run:ios` activates the Simulator window through AppleScript after it installs, and that throws on a Mac with no Automation grant. `smoke` does not need the window. After a non-zero exit, the run asks the device whether the app is there: yes is `ok`. When the device cannot be asked, the exit code decides.
 
 #### Android needs an application id the app config does not have
 
@@ -589,9 +601,9 @@ The install check needs the app's id. On iOS it is `ios.bundleIdentifier`; on An
 
 #### An app that cannot be named still has to be installed
 
-No app id is not "no app". For a native build, a missing id is the normal state of a project that was never prebuilt for the platform: `expo prebuild` writes both `android.package` and `android/app/build.gradle`. The id is needed only to ask "is it already there". `expo run:<platform>` needs none, because it resolves the id from the config it writes. So a native-build run that cannot name its app installs it. After that first build the id is declared, and later runs check normally.
+No app id is not "no app" (row 4). For a development build, a missing id is the normal state of a project that was never prebuilt for the platform: `expo prebuild` writes both `android.package` and `android/app/build.gradle`. The id is needed only to ask "is it already there". `expo run:<platform>` needs none, because it resolves the id from the config it writes. After that first build the id is declared, and later runs check normally.
 
-Expo Go is excluded. Its ids are constants, so an Expo Go run with no id has a plan nothing could read, and a download on that basis would be a guess.
+Expo Go is excluded (row 5). Its ids are constants, so an Expo Go run with no id has a plan nothing could read, and a download on that basis would be a guess.
 
 #### A build changes the project it was read from
 
@@ -599,7 +611,7 @@ A start phase that compiles rewrites the app config: `expo prebuild` writes unde
 
 #### A refused link is a device without the app
 
-When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`, and the run asks the local device whether it has the app this project runs. This applies to every app with a known id, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The same question is asked when an opened link attached nothing. The follow-ups branch on the value (§Two mismatches, two next actions). They never lead with `navigate`, which the device refuses in the same way every time. When the device cannot say, or has the app, the refusal is reported alone.
+When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs. This applies to every app with a known id, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The same question is asked when an opened link attached nothing. The follow-ups branch on the value (§Two mismatches, two next actions). They never lead with `navigate`, which the device refuses in the same way every time. When the device cannot say, or has the app, the refusal is reported alone.
 
 ### A link nobody can approve is a link that never opens
 
@@ -623,7 +635,7 @@ Four phases are acts, not questions: `start-dev-server`, `start-session`, `boot-
 
 The dev-server cleanup is registered before the start, so a start that got halfway is still stopped. A session or a booted device is registered once it is up. A device that the started dev server bound is released when that dev server stops ([[0035-one-device-per-worktree]] §Lifecycle smoke). `install-app` registers no cleanup: an installed app is given, not held, and the next run needs it.
 
-Cleanup runs newest-first, on every exit path. The dev server starts before the device boots, and an app left talking to a stopped bundler is a worse state than the reverse. A failed cleanup never changes the outcome. It is reported in `environment.cleanup`, as a `left behind` line in the human output, and in `leftBehind` on `cli:smoke`.
+Cleanup runs newest-first, on every exit path. The dev server starts before the device boots, and an app left talking to a stopped dev server is a worse state than the reverse. A failed cleanup never changes the outcome. It is reported in `environment.cleanup`, as a `left behind` line in the human output, and in `leftBehind` on `cli:smoke`.
 
 ### It builds what the app needs, and says so first
 
@@ -639,22 +651,20 @@ When no dev server answered after a start that built, the first follow-up is `np
 
 #### A refused connection is not an answer
 
-The readiness wait asks the dev server's `/status` until the budget ends, as long as nothing is listening. A native build publishes the dev-server lock at the start of its step, and the port opens only when the compile ends ([[0004-smart-start-and-project-state]] §Daemonization). One request would end the wait in milliseconds.
+The readiness wait asks the dev server's `/status` until the budget ends, as long as nothing is listening. A development build's start publishes the dev-server lock at the start of its step, and the port opens only when the compile ends ([[0004-smart-start-and-project-state]] §Daemonization). One request would end the wait in milliseconds.
 
-- **Only a connection failure retries.** The retried codes are `ECONNREFUSED`, `ECONNRESET`, `EHOSTUNREACH`, `ENETUNREACH` and `UND_ERR_SOCKET`, read from the error's `cause` (and from each entry of an `AggregateError`, which `localhost` gives). The first retry is after 100 ms, and the gap doubles to 1 s.
+- **Only a connection failure retries.** A refused, reset or unreachable connection is asked again, with a growing gap of at most 1 s.
 - **An answer ends the wait.** A non-2xx status, a body that is not `packager-status:running`, a TLS failure: each is returned at once. `ENOTFOUND` is not retried, so a mistyped host does not become a 30-minute hang.
-- **The timeout names what happened.** A budget that ends with no answer at all reports `nothing was listening on <url> for <N>ms …, so no dev server had finished starting`. A budget that ends while the server was answering reports that the bundler was still working ([[0021-honest-reports]] §The rules).
+- **The timeout names what happened.** A budget that ends with no answer at all reports `nothing was listening on <url> for <N>ms …, so no dev server had finished starting`. A budget that ends while the server was answering reports that the dev server was still working ([[0021-honest-reports]] §The rules).
 - **The caller's abort ends the loop at once**, and is not called a timeout.
 
 ### The device that can open the app
 
-When no app is attached and no device is up, the run boots the device that this worktree binds, on both platforms: a simulator the registry reuses or creates, or an emulator instance it spawns ([[0035-one-device-per-worktree]] §Choice; [[0035-one-device-per-worktree]] §Android boot). A created or spawned device has no app, so `install-app` puts the app there. Boot budgets: 120 s for iOS, 240 s for Android, outside `--timeout`. The run boots nothing when an app is already attached, when a device is already up, or with `--eas`, which starts or reuses a session instead ([[0027-everything-on-eas]] §smoke).
+When no app is attached and no device is up, the run boots the device that this worktree binds, on both platforms. That is a simulator the registry reuses or creates, or an emulator instance it spawns ([[0035-one-device-per-worktree]] §Choice; [[0035-one-device-per-worktree]] §Android boot). A created or spawned device has no app, so `install-app` puts the app there. Boot budgets: 120 s for iOS, 240 s for Android, outside `--timeout`. The run boots nothing when an app is already attached, when a device is already up, or with `--eas`, which starts or reuses a session instead ([[0027-everything-on-eas]] §smoke).
 
-An attached app is not yet a readable app: its target goes away and comes back when the JS runtime starts, and a read in that gap answers `No target found`. So for an app this run opened or reloaded, the run first waits, at most 4 s, for two reads of the target list that name the same ids. Then the `runtime` phase asks `Runtime.evaluate('1')` every 500 ms until it answers, inside the runtime-ready budget (§The smoke gate). After the first `-32601`, the run asks for 5 s more (§A reloading runtime answers like one with no debugger). An app that nothing moved is asked once. A wait that ends with no answer reports the runtime's own reason.
+An attached app is not yet a readable app: its target goes away and comes back when the JS runtime starts, and a read in that gap answers `No target found`. So for an app this run opened or reloaded, the run first waits, at most 4 s, for two reads of the target list that name the same ids. Then the `runtime` phase asks `Runtime.evaluate('1')` every 500 ms until it answers, inside the runtime-ready budget (§The smoke gate). After the first `-32601`, the run asks again (§A reloading runtime answers like one with no debugger). A wait that ends with no answer reports the runtime's own reason.
 
 A development-build open that still shows the launcher lists no debugger target on this dev server. The `app` phase is `inconclusive`, and the reading phases are `skipped`. The picture's label comes from the open's own report (§Loading the app is not navigating it).
-
-The `errors` phase has no dev-server-log fallback; `runtime:errors` has one (§runtime:errors). On Expo Go for Android the `errors` phase is `inconclusive` with an empty window, and the `runtime` phase is `inconclusive`, so the run ends 22. On a development build both phases measure ([[0022-live-tier]] §live-devclient).
 
 ## Android
 
@@ -667,9 +677,9 @@ On such a runtime:
 - `runtime:eval`, `runtime:tree`, `runtime:tap` and `runtime:type` exit 1 with `RUNTIME_EVALUATE_UNSUPPORTED`. The How line names `runtime:errors --android`.
 - `runtime:errors` falls back to the dev server's log (§runtime:errors).
 - A reload is still proved without the debugger (§How it reloads).
-- `smoke --android` ends 22 on a working app (§The device that can open the app).
+- `smoke --android` ends 22 on a working app, because `passed` needs the runtime to evaluate `1` (Risk 7).
 
-The default target selector skips a target only on transport failure. A target that answers `-32601` is kept, ranked behind every target that answered. The error collector passes the caller's platform scope to the selector, so `runtime:errors --android` never reads the iOS runtime.
+A target is dropped only when its transport fails. A target that answers `-32601` is kept, ranked behind every target that answered. `runtime:errors --android` never reads the iOS runtime.
 
 `/json/list` names no platform. Which evidence places a target, and which targets a run reads, is §Which app a run reads. An app id that names the other platform's Expo Go is dropped from the id ladder (§Stopping the app).
 
@@ -683,17 +693,15 @@ Whether a device has an app has three answers: installed, not installed, and cou
 
 A development build on Android also answers `Runtime.evaluate` with `-32601` for a short time after a reload, on the same target id, until its new runtime exists. The target list does not change, so the settle wait does not cover the gap. So for an app this run opened or reloaded, `smoke` asks again for 5 s after the first `-32601`, inside the runtime-ready budget, and only then reports a runtime with no debugger. An app that nothing moved is asked once.
 
-Known limit: Expo Go for Android pays the full 5 s on almost every `smoke --android`, because a reload is the default and every opened or reloaded app is moved.
-
 Rejected: ending the wait on the `Log.entryAdded` announcement that the engine "does not support debugging". The `runtime` phase does not read the log window, and a second source for one verdict costs more than 5 s per run.
 
 ## Cloud simulator
 
-Device resolution has a third backend: an EAS Simulator session. `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take `--eas`. `navigate` and `smoke` fall back to this worktree's session when no local device answers. `runtime:stop` and `runtime:reload` reach a session only with `--eas`, so a session never bills a run that a local device could serve. The order is [[0035-one-device-per-worktree]] §Readers. The developer config does not move `navigate` or the `runtime:*` commands; `smoke` reads `deviceBackend` only when it starts its own dev server ([[0015-backend-selection-and-config]] §The device backend).
+Device resolution has a third backend: an EAS session. `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take `--eas`. `navigate` and `smoke` fall back to this worktree's session when no local device answers. `runtime:stop` and `runtime:reload` reach a session only with `--eas`, so a session never bills a run that a local device could serve. The order is [[0035-one-device-per-worktree]] §Readers. The developer config does not move `navigate` or the `runtime:*` commands; `smoke` reads `deviceBackend` only when it starts its own dev server ([[0015-backend-selection-and-config]] §The device backend).
 
 `--json` reports `deviceBackend`: `local-ios`, `local-android` or `cloud`. A session runs iOS too, so `platform` does not say where the device is. The session id is on the `Device` line, in `deviceId`, and on the `cli:navigate` event. `--eas --ios` names the platform the session must be; a session on the other platform is `CLOUD_SIMULATOR_PLATFORM_MISMATCH`. `navigate --eas --print-url` is `BAD_ARGS`: one flag asks for a device and the other for none.
 
-Device verbs run as `eas simulator:exec npx agent-device@latest …` ([[0001-agentic-cli-on-expo-cli]] §Constraints, constraint 4; the guard is [[0035-one-device-per-worktree]] §Session guard). A cloud device is a session that `eas simulator:list` shows as live, not a file on disk ([[0035-one-device-per-worktree]] §Session discovery, §Session binding). `navigate` and `smoke` ask the service. `status` and the `start` and `dev` banners read this worktree's cloud bindings with no network call. Rejected: direct GraphQL to `api.expo.dev`, which reads another CLI's credential store.
+Device verbs run as `eas simulator:exec npx agent-device@latest …` ([[0001-agentic-cli-on-expo-cli]] §Constraints, constraint 4; the guard is [[0035-one-device-per-worktree]] §Session guard). The session's device is live when `eas simulator:list` shows the session as live, not a file on disk ([[0035-one-device-per-worktree]] §Session discovery, §Session binding). `navigate` and `smoke` ask the service. `status` and the `start` and `dev` banners read this worktree's EAS session bindings with no network call. Rejected: direct GraphQL to `api.expo.dev`, which reads another CLI's credential store.
 
 A `localhost` or `lan` URL is refused before anything opens; no `adb reverse` reaches an EAS session (§Where a device reaches the dev server).
 
@@ -717,7 +725,7 @@ A `localhost` or `lan` URL is refused before anything opens; no `adb reverse` re
 
 **The iOS open dialog.** An `exp://` URL on an iOS session raises "Open in 'Expo Go'?", and nobody is at the screen. `navigate` answers it under four gates: the device is an EAS session; this run's own open exited 0; nothing attached inside the attach budget; and `alert get` names the app the URL was for. Any other alert is reported and left. An empty `alert get` is exit 1, `alert not found`, so a read is safe. `--json` reports `attachAlert` (`checked`, `found`, `accepted`).
 
-**smoke.** `smoke --eas` resolves one device and uses it from the `route` phase to the `screenshot` phase. The cloud screenshot gets 120 s (local: 20 s), for `npx`, the network and the download. Which commands stop a session is [[0035-one-device-per-worktree]] §Session cleanup.
+**smoke.** `smoke --eas` resolves one device and uses it from the `route` phase to the `screenshot` phase. The screenshot on an EAS session gets 120 s (local: 20 s), for `npx`, the network and the download. Which commands stop a session is [[0035-one-device-per-worktree]] §Session cleanup.
 
 ## Stopping the app
 
@@ -744,7 +752,7 @@ A debug build carries its fingerprint in a file that `expo-constants` writes at 
 
 ### How the file is read
 
-**Android.** `adb shell pm path <appId>` names the APK. The reader fetches the zip tail, the central directory and the one entry with ranged `dd` reads over `adb exec-out`, not the whole APK. It reads stored and deflated entries and refuses ZIP64. When a ranged read fails (no `dd` or `stat`), it pulls the APK. A zip it cannot parse is an error, not a reason to pull.
+**Android.** `adb shell pm path <app id>` names the APK. The reader reads the one entry, not the whole APK. When a ranged read fails, it pulls the APK. A zip it cannot parse is an error, not a reason to pull.
 
 **iOS simulator.** `xcrun simctl get_app_container <udid> <appId>` names the bundle. The reader tries `EXConstants.bundle/app.fingerprint` (static linking), then `Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` (`use_frameworks!`). Only a booted simulator can be read.
 
@@ -772,25 +780,26 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 
 1. A `Page.reload` rung 1 reports the top-level `method: dev-server`, also under a pinned `--method dev-server`; only the attempt says `page-reload` (§How it reloads).
 2. A runtime read does not renew the binding lease. A worktree that runs only `runtime:*` reads for 60 minutes loses its live binding, and another worktree then reads that app (§Target owner).
-3. A local Android app is never skipped as another worktree's app, and a cloud binding has no device name to match (§Target owner).
+3. A local Android binding records a serial only, and React Native Android names the device by its model. So a local Android app is never skipped as another worktree's app. An EAS session's target carries the model of the session's device, so an EAS binding has no name to match either (§Target owner).
 4. An EAS Android session's app is skipped beside an attached local emulator of the same model (§Which app a run reads).
 5. With no platform in scope and no placed app, the bundle check builds for `ios` only, so an Android-only break is not found; the report says `bundlePlatformSource: "default"` (§Which app a run reads).
 6. `hostType` is `tunnel` for any host name that is not loopback and not an IP literal, for example `mymac.local`. Such a URL passes the EAS refusal. A tunnel whose transport has died is still advertised (§Where a device reaches the dev server).
-7. Expo Go for Android cannot pass `smoke`: the run ends 22 on a working app, and pays the 5 s `-32601` grace on almost every run (§Android, §A reloading runtime answers like one with no debugger).
+7. Expo Go for Android cannot pass `smoke`: the run ends 22 on a working app. It also pays the 5 s `-32601` grace on almost every run, because a reload is the default and every opened or reloaded app counts as moved (§Android, §A reloading runtime answers like one with no debugger).
 8. The Expo Go version check runs only on a local device, and `unknown` says nothing. Offline, a stale Expo Go is not named, and on Android "no Expo Go" and "`adb` could not run" both read as `unknown` (§The Expo Go on the device is not the Expo Go the SDK wants).
-9. For a `native-build` target whose app is on the device, the install decision still compares the device's Expo Go version, so a stale Expo Go beside a current development build can start a needless native build (§The gate installs the app, whichever app it is).
+9. For a `native-build` target whose app is on the device, the install decision still compares the device's Expo Go version, so a stale Expo Go beside a current development build can start a needless development build (§The gate installs the app, whichever app it is).
 10. `smoke --help` says "Nine phases", and its list of JSON keys leaves out `appMismatch` and `appMismatchKind` (§The smoke gate).
 11. The three app-mismatch follow-ups drop the run's `--eas` and `--port`, unlike the other `smoke` follow-ups (§Two mismatches, two next actions).
 12. `NO_CLOUD_SIMULATOR_SESSION` names `dev --ios --eas`, also to a caller who asked for Android (§Cloud simulator).
 13. The deferred `dev:wait` follow-ups print `navigate / --cloud`, a flag the CLI refuses, and a bare `npx eas simulator:stop` with no `--id`.
-14. `attachRecovered` is true, and the reason says the app was stopped, when `pidof` could not run. Each attach recovery starts a full `--attach-timeout` again, so one `navigate` can wait up to three budgets (§Loading the app is not navigating it).
+14. `attachRecovered` is true, and the reason says the app was stopped, when `pidof` could not run and on an EAS session. Steps 5 and 6 of the open each wait step 4's budget again, so one `navigate` can wait up to three budgets (§Loading the app is not navigating it).
+15. On `--eas`, row 4 of the install table decides before the session's device is excluded, so `smoke --eas` on a project that was never prebuilt asks for a development build install onto the session (§The gate installs the app, whichever app it is).
 
 ## Open questions
 
 - Should a runtime read renew the binding lease (Risk 2)?
 - Should the attach recoveries share the one `--attach-timeout` budget (Risk 14)?
 - Should the Expo Go version check also run on an EAS session?
-- Should `navigate` answer the iOS open dialog on a fallback EAS session that the caller did not name with `--eas`? It does today (§Cloud simulator).
+- Should `navigate` answer the iOS open dialog on a fallback EAS session that the caller did not name with `--eas`? `navigate` answers it on any EAS session that the run resolved (§Cloud simulator).
 
 ## Testing
 
