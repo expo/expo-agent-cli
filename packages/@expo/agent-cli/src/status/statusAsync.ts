@@ -235,7 +235,9 @@ function readOrphanSessions(
     platform: device.platform,
     id: device.id,
     projectRoot: root,
-    command: ownRun ? cloudStopCommand(device.id) : `${PROGRAM_PREFIX} dev:stop`,
+    // Under the flag `dev:stop` runs no reap, so only `simulator:stop` reaches the session.
+    command:
+      ownRun || devicesDisabled() ? cloudStopCommand(device.id) : `${PROGRAM_PREFIX} dev:stop`,
   }));
 }
 
