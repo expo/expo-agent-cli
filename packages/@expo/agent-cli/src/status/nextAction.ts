@@ -281,7 +281,7 @@ function startedSession(cloud: BindingSummary[], platform: PlanPlatform): Bindin
  * `dev:stop --eas` for a dev server a killed `dev --eas` left beside its session
  * (`DevServerStatus.ownerEnded`); null otherwise.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Status
  */
 function endedRunNext(
   devServer: DevServerStatus | null,

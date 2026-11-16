@@ -392,7 +392,7 @@ describe('@expo/agent-cli dev', () => {
       });
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
     // F121, end to end and in the order it bit: build, install, launch failure, then the next
     // plan. `expo run:*` is one subprocess doing all three, and the fifteen minutes it spends are
     // the compiler's — so a plan that runs it a second time because the *launch* failed is the
@@ -1161,7 +1161,7 @@ describe('@expo/agent-cli dev', () => {
       expect(invocationArgs(projectRoot)).toEqual([['start', '--go', ...PORT_ARGS]]);
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
     it('publishes the dev server it started on the project lock', async () => {
       // The dev-server step of a plan is the same wrapper `@expo/agent-cli start` uses, so it takes the
       // same lock — a `dev` run has to be findable exactly like a `start` run.
