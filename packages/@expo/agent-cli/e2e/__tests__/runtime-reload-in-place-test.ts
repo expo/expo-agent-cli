@@ -98,6 +98,56 @@ describe('runtime:reload on an iOS EAS session', () => {
   );
 });
 
+describe('runtime:reload on an iOS EAS session with apps it cannot place', () => {
+  // Two listed apps no rule places: no relist can make one this session's, so rung 1 does not wait
+  // its window for an own app, and the relaunch starts at once.
+  it('does not wait for an own app, and says the listed apps could not be placed', async () => {
+    const { root } = await onIosSessionAsync();
+    const unplaced = { deviceName: 'iPhone 17', appId: 'dev.example.app' };
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [runtimeTarget('session-a', unplaced), runtimeTarget('session-b', unplaced)],
+      messageSocket: 'no-churn',
+    });
+    try {
+      const started = Date.now();
+      let relaunchedAfterMs: number | null = null;
+      const run = executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--eas',
+          '--app-id',
+          unplaced.appId,
+          '--dev-server-url',
+          server.url,
+          ...FLAGS,
+        ],
+        { reject: false }
+      );
+      let done = false;
+      void run.finally(() => (done = true));
+      while (!done && relaunchedAfterMs == null) {
+        if (stubEasArgs(root).some((argv) => argv[0] === 'simulator:exec')) {
+          relaunchedAfterMs = Date.now() - started;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const result = await run;
+      const report = JSON.parse(result.stdout);
+      expect(report.attempts[0].reason, result.all).toContain(
+        '2 listed apps could not be placed on this session'
+      );
+      expect(relaunchedAfterMs).not.toBeNull();
+      expect(relaunchedAfterMs).toBeLessThan(6000);
+      expect(server.broadcasts()).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 describe('runtime:reload on an iOS EAS session, after a Page.reload that proved nothing', () => {
   it.each([
     { pageReload: 'keeps-context' as const, nativePageReloads: true },
