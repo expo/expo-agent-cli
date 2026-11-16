@@ -59,8 +59,7 @@ export async function reloadOverRuntimeAsync(
   own: CdpTarget[],
   budgetMs: number
 ): Promise<TargetProofAttempt> {
-  // Target selection probes over the debugger, so it spends from the same window.
-  const deadline = Date.now() + Math.min(Math.max(0, budgetMs), PROOF_MS);
+  const started = Date.now();
   if (own.length === 0) {
     return targetProofAttempt(
       'runtime',
@@ -73,6 +72,9 @@ export async function reloadOverRuntimeAsync(
     return targetProofAttempt('runtime', [], 'no app of this worktree answered over the debugger');
   }
 
+  // After the target probe, which can take seconds on targets that do not answer: the window is
+  // the proof's own, and `budgetMs` still bounds it.
+  const deadline = Date.now() + Math.min(Math.max(0, budgetMs - (Date.now() - started)), PROOF_MS);
   const outcome = await reloadTargetAsync(devServerUrl, target, RUNTIME_RELOAD, { deadline });
   return targetProofAttempt('runtime', [outcome], describeOutcome(outcome));
 }

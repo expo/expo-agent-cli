@@ -868,6 +868,23 @@ describe('runtime:reload --method runtime', () => {
     }
   );
 
+  it('keeps the whole proof window when the target probe is slow', async () => {
+    // Three own targets that never answer the probe cost the selector about 6 s.
+    const stale = [0, 1, 2].map((each) =>
+      runtimeTarget(`stale${each}`, { deviceName: SIMULATOR_NAME, appId: 'dev.example.app' })
+    );
+    const { result, report } = await reloadAsync('ios', {
+      targets: [
+        ...stale,
+        runtimeTarget('ios', { deviceName: SIMULATOR_NAME, appId: 'dev.example.app' }),
+      ],
+      inspectorEvaluate: (expression, device) =>
+        device.startsWith('stale') ? NO_ANSWER : RELOAD_CALL.test(expression) ? 'sent' : undefined,
+    });
+    expect(result.exitCode, result.all).toBe(0);
+    expect(report.verifiedBy).toBe('debugger-context-replaced');
+  });
+
   it('fails at once for an app with no expo global', async () => {
     const { result, report, elapsedMs } = await reloadAsync('ios', {
       inspectorEvaluate: (expression) =>
@@ -908,7 +925,7 @@ describe('runtime:reload --method runtime', () => {
         { reject: false, env }
       );
       expect(result.exitCode, result.all).toBe(20);
-      expect(result.all).toContain('did not take expo.reloadAppAsync');
+      expect(result.all).toContain('--method runtime did not reload it');
       expect(result.all).not.toContain('the broadcast');
     } finally {
       await stub.close();
