@@ -7,6 +7,7 @@ import { WebSocket } from 'ws';
 
 import { formatCdpExceptionDetails, stringifyCdpValue } from './cdpFormat';
 import { debugEvent } from './events';
+import { createInspectorWebSocket } from './inspectorSocket';
 import {
   buildPromisePollExpression,
   buildPromiseReleaseExpression,
@@ -23,22 +24,6 @@ import {
   type ClassifiedTargets,
   type TargetSelection,
 } from './targetSelection';
-
-/**
- * Metro's inspector proxy rejects WebSocket handshakes without a same-origin `Origin`
- * header (HTTP 401), so every connection must present the dev server's own origin.
- * Derive it from the `ws://`/`wss://` debugger URL.
- */
-export function deriveInspectorOrigin(webSocketDebuggerUrl: string): string {
-  const url = new URL(webSocketDebuggerUrl);
-  return `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}`;
-}
-
-export function createInspectorWebSocket(webSocketDebuggerUrl: string): WebSocket {
-  return new WebSocket(webSocketDebuggerUrl, {
-    headers: { origin: deriveInspectorOrigin(webSocketDebuggerUrl) },
-  });
-}
 
 /** JSON-RPC code for a method the peer does not implement. */
 export const RPC_METHOD_NOT_FOUND = -32601;
