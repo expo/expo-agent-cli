@@ -8,7 +8,8 @@ import {
   makeTarget,
   makeTargetSelection,
 } from '../../__tests__/targetSelectionFixtures';
-import { prepareRungOne, rungOneDeadline, runRungOneAsync } from '../rungOne';
+import { proofDeadline } from '../inPlace';
+import { prepareRungOne, runRungOneAsync } from '../rungOne';
 
 const BUDGET_MS = 3000;
 
@@ -76,7 +77,7 @@ async function runRungOneBesideForeignAsync(
     const outcome = await runRungOneAsync(`http://127.0.0.1:${port}`, {
       prepared: prepareRungOne(targets, targetSelection, deviceInventory, { method: 'auto' }),
       budgetMs,
-      deadline: rungOneDeadline(budgetMs),
+      deadline: proofDeadline('page-reload', budgetMs),
     });
     return { outcome, elapsed: Date.now() - started, actions, globals };
   } finally {

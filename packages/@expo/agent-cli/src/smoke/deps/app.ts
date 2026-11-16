@@ -4,16 +4,9 @@ import { PROGRAM_PREFIX } from '../../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../../project/expoGo';
 import { CdpClient, isMethodNotFoundError } from '../../runtime/cdpClient';
 import { probeDevServerAsync } from '../../runtime/devServer';
-import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../../runtime/reload/evidence';
 import { isInPlaceAttempt } from '../../runtime/reload/attempt';
-import {
-  prepareOwnListedAsync,
-  prepareRungOneAsync,
-  runRungOneAsync,
-  rungOneDeadline,
-  settleRungOne,
-} from '../../runtime/reload/rungOne';
+import { firstStepAsync, settleRungOne } from '../../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { symbolicateRuntimeErrorsAsync } from '../../runtime/symbolicate';
 import { waitForAppConnectionAsync } from '../../runtime/waitReady';
@@ -184,19 +177,14 @@ async function reloadApp(
   const { projectRoot } = ctx;
   const deadline = Date.now() + timeoutMs;
   const remainingMs = () => Math.max(0, deadline - Date.now());
-  const first = await prepareRungOneAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
-    budgetMs: remainingMs(),
+  const step = await firstStepAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
     preflight: ctx.lastObservation(),
     method: 'auto',
+    remainingMs,
   });
-  const rungOneEnd = rungOneDeadline(remainingMs());
-  const prepared = await prepareOwnListedAsync(devServerUrl, projectRoot, first, rungOneEnd);
-  const bundleMark = markBundleSignalSync(projectRoot);
-  const rungOne = await runRungOneAsync(devServerUrl, {
-    prepared,
-    budgetMs: remainingMs(),
-    deadline: rungOneEnd,
-  });
+  const { prepared, bundleMark } = step;
+  // `auto` always runs rung 1.
+  const rungOne = step.outcome!;
   const result = {
     knownTargetIds: prepared.targets.map((target) => target.id),
     commandSocketReconnected: rungOne.churn.reconnected > 0,

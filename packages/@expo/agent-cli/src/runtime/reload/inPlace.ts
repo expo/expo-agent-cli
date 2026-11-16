@@ -1,7 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
 // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload
 //
-// The two reloads that keep the app's process: CDP `Page.reload` (rung 1 while the scope skips an
+// The two rung 1 mechanisms that act on each own target: CDP `Page.reload` (while the scope skips an
 // app or is an iOS EAS session) and `expo.reloadAppAsync(reason)` (a pinned `--method runtime`).
 // Both are proved the same way, on the target they were sent to: a marker global that the new
 // JavaScript context does not have (`../contextReplaced.ts`).
@@ -9,18 +9,11 @@
 import { firstLine } from '../../utils/text';
 import type { CdpTarget } from '../cdpClient';
 import { jsContextReplacedAsync, type ContextReplaced } from '../contextReplaced';
-import {
-  RELOAD_REASON,
-  type InPlaceAttempt,
-  type Settled,
-  type TargetReloadOutcome,
-} from './attempt';
+import { RELOAD_REASON, type TargetReloadOutcome } from './attempt';
 import { debugEvent } from './events';
+import type { CommandSocketChurn, RungOneOutcome } from './rungOne';
 
 export type InPlaceMechanism = 'page-reload' | 'runtime';
-
-/** How long `--method runtime` has to prove itself, so the bundle observation keeps the rest. */
-const RUNTIME_RELOAD_PROOF_MS = 5000;
 
 const RUNTIME_RELOAD_EXPRESSION = `(function () {
   var e = globalThis.expo;
@@ -37,7 +30,9 @@ const CANNOT_RELOAD: Record<string, string> = {
 };
 
 /**
- * What differs per mechanism. `answerMs` bounds one target's answer: `expo.reloadAppAsync` answers
+ * What differs per mechanism. `proofMs` bounds rung 1's window: it is separate from `--timeout`, so
+ * a proof that does not come leaves the rest of the budget to the relaunch or, for `runtime`, to the
+ * bundle observation. `answerMs` bounds one target's answer: `expo.reloadAppAsync` answers
  * at once or never (its context goes), so its bound is short and the marker reads keep most of the
  * window. `unproved` maps a check that saw no new context to the target's outcome. `unlisted` is the
  * clause when no own target is listed.
@@ -45,6 +40,7 @@ const CANNOT_RELOAD: Record<string, string> = {
 const MECHANISMS = {
   'page-reload': {
     label: 'Page.reload',
+    proofMs: 8000,
     answerMs: 4000,
     event: 'page_reload_sent',
     unlisted: 'no app of this worktree is listed on the dev server',
@@ -57,6 +53,7 @@ const MECHANISMS = {
   },
   runtime: {
     label: 'expo.reloadAppAsync',
+    proofMs: 5000,
     answerMs: 1500,
     event: 'runtime_reload_sent',
     unlisted:
@@ -72,6 +69,7 @@ const MECHANISMS = {
   InPlaceMechanism,
   {
     label: string;
+    proofMs: number;
     answerMs: number;
     event: 'page_reload_sent' | 'runtime_reload_sent';
     unlisted: string;
@@ -84,35 +82,9 @@ export function inPlaceLabel(mechanism: InPlaceMechanism): string {
   return MECHANISMS[mechanism].label;
 }
 
-export interface InPlaceReload {
-  kind: 'proved' | 'delivered' | 'unprovable' | 'not-delivered';
-  attempt: InPlaceAttempt;
-  /** What happened, as the opening clause of whatever the run does next. */
-  clause: string;
-}
-
-/**
- * A pinned `--method runtime`: ask each own target to reload itself with
- * `expo.reloadAppAsync(reason)`, prove it on that target, and say what the run does next. A pinned
- * method never relaunches, so a call that ran leaves the shared observations to decide.
- */
-export async function reloadOverRuntimeAsync(
-  devServerUrl: string,
-  own: CdpTarget[],
-  budgetMs: number
-): Promise<{ attempt: InPlaceAttempt; settled: Settled }> {
-  const call = await reloadInPlaceAsync(devServerUrl, {
-    mechanism: 'runtime',
-    own,
-    deadline: Date.now() + Math.min(Math.max(0, budgetMs), RUNTIME_RELOAD_PROOF_MS),
-  });
-  const settled: Settled =
-    call.kind === 'proved'
-      ? { kind: 'proved', method: 'runtime', proof: 'debugger-context-replaced' }
-      : call.kind === 'delivered'
-        ? { kind: 'observe', method: 'runtime' }
-        : { kind: 'relaunch', method: null, why: call.clause };
-  return { attempt: call.attempt, settled };
+/** The end of rung 1's window for `mechanism`, which every own target and the relist share. */
+export function proofDeadline(mechanism: InPlaceMechanism, budgetMs: number): number {
+  return Date.now() + Math.min(Math.max(0, budgetMs), MECHANISMS[mechanism].proofMs);
 }
 
 /**
@@ -124,6 +96,7 @@ export async function reloadOverRuntimeAsync(
  * proved is enough: it stops the other checks.
  *
  * @param why the sentence the attempt's reason ends with, or null.
+ * @param churn what the run reports for the command socket, which this rung does not ask.
  */
 export async function reloadInPlaceAsync(
   devServerUrl: string,
@@ -132,8 +105,15 @@ export async function reloadInPlaceAsync(
     own,
     deadline,
     why = null,
-  }: { mechanism: InPlaceMechanism; own: CdpTarget[]; deadline: number; why?: string | null }
-): Promise<InPlaceReload> {
+    churn,
+  }: {
+    mechanism: InPlaceMechanism;
+    own: CdpTarget[];
+    deadline: number;
+    why?: string | null;
+    churn: CommandSocketChurn;
+  }
+): Promise<RungOneOutcome> {
   const provedOne = new AbortController();
   const outcomes = await Promise.all(
     own.map((target) => reloadTargetAsync(devServerUrl, mechanism, target, deadline, provedOne))
@@ -150,7 +130,7 @@ export async function reloadInPlaceAsync(
     targets: reloadable.length,
     answered: answered.length,
   });
-  const kind: InPlaceReload['kind'] =
+  const kind =
     proved.length > 0
       ? 'proved'
       : answered.length > 0
@@ -173,18 +153,23 @@ export async function reloadInPlaceAsync(
           ? `no app of this worktree takes ${label}`
           : `no app of this worktree answered ${label}`,
   }[kind];
-  return {
-    kind,
-    clause,
-    attempt: {
-      method: mechanism,
-      ok: kind === 'proved',
-      delivered: kind === 'proved' || kind === 'delivered',
-      outcomes,
-      reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}${why ? `. ${why}` : ''}`,
-      leftAppStopped: null,
-    },
+  const attempt = {
+    method: mechanism,
+    ok: kind === 'proved',
+    delivered: kind === 'proved' || kind === 'delivered',
+    outcomes,
+    reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}${why ? `. ${why}` : ''}`,
+    leftAppStopped: null,
   };
+  return kind === 'proved'
+    ? { kind, proof: 'debugger-context-replaced', attempt, churn }
+    : {
+        kind,
+        attempt,
+        churn,
+        // Only `auto` relaunches, and only after `Page.reload`: a pinned method never does.
+        relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,
+      };
 }
 
 async function reloadTargetAsync(

@@ -71,81 +71,94 @@ describe('what rung 1 does, and which bundle proves it', () => {
     targetSelection: TargetSelection;
     unread?: string;
     method?: ReloadMethod;
-    mechanism?: RungOnePolicy['mechanism'];
-    bundlePlatforms: RungOnePolicy['bundlePlatforms'];
+    policy: RungOnePolicy;
   }>([
     {
       name: 'broadcasts, and any bundle proves, when no app is skipped',
       targets: [ownIos, ownAndroid],
       targetSelection: ANY,
-      mechanism: 'broadcast',
-      bundlePlatforms: 'any',
+      policy: { mechanism: 'broadcast', reachedOutside: 0, bundlePlatforms: 'any' },
     },
     {
       name: "broadcasts, and only the scope's platform proves, when no app is skipped",
       targets: [ownIos],
       targetSelection: BOUND_SIMULATOR,
-      mechanism: 'broadcast',
-      bundlePlatforms: ['ios'],
+      policy: { mechanism: 'broadcast', reachedOutside: 0, bundlePlatforms: ['ios'] },
     },
     {
       name: "broadcasts beside Expo Go on the other platform, and the scope's bundle proves",
       targets: [expoGoAndroid, expoGoIos],
       targetSelection: FLAG_ANDROID,
-      mechanism: 'broadcast',
-      bundlePlatforms: ['android'],
+      policy: { mechanism: 'broadcast', reachedOutside: 1, bundlePlatforms: ['android'] },
     },
     {
       name: 'a broadcast beside an app nothing places: no bundle proves it',
       targets: [ownIos, elsewhere],
       targetSelection: FLAG_IOS,
-      mechanism: 'broadcast',
-      bundlePlatforms: [],
+      policy: { mechanism: 'broadcast', reachedOutside: 1, bundlePlatforms: [] },
+    },
+    {
+      // `--method device` sends nothing on rung 1; its bundle rule is the broadcast's.
+      name: 'a pinned --method device beside an app nothing places: no bundle proves it',
+      targets: [ownIos, elsewhere],
+      targetSelection: FLAG_IOS,
+      method: 'device',
+      policy: { mechanism: 'broadcast', reachedOutside: 1, bundlePlatforms: [] },
     },
     {
       name: 'an Android bundle proves, with own iOS and Android apps beside a skipped iOS app',
       targets: [ownIos, ownAndroid, onClone],
       targetSelection: ANY,
-      mechanism: 'page-reload',
-      bundlePlatforms: ['android'],
+      policy: { mechanism: 'page-reload', trigger: 'skipped-app', bundlePlatforms: ['android'] },
     },
     {
       name: 'no bundle proves beside a skipped app whose platform is unknown',
       targets: [ownIos, elsewhere],
       targetSelection: BOUND_SIMULATOR,
-      mechanism: 'page-reload',
-      bundlePlatforms: [],
+      policy: { mechanism: 'page-reload', trigger: 'skipped-app', bundlePlatforms: [] },
     },
     {
       name: 'sends nothing when the fresh read failed and no app is skipped',
       targets: [ownIos],
       targetSelection: BOUND_SIMULATOR,
       unread: 'the target list could not be read again',
-      mechanism: 'none',
-      bundlePlatforms: ['ios'],
+      policy: {
+        mechanism: 'none',
+        unread: 'the target list could not be read again',
+        bundlePlatforms: ['ios'],
+      },
+    },
+    {
+      // The older observation may miss an app a broadcast would reach, so none counts.
+      name: 'sends nothing beside an app nothing places when the fresh read failed: no bundle proves',
+      targets: [ownIos, elsewhere],
+      targetSelection: FLAG_IOS,
+      unread: 'the target list could not be read again',
+      policy: {
+        mechanism: 'none',
+        unread: 'the target list could not be read again',
+        bundlePlatforms: [],
+      },
     },
     {
       name: 'keeps Page.reload beside a skipped app when the fresh read failed',
       targets: [ownIos, onClone],
       targetSelection: ANY,
       unread: 'the target list could not be read again',
-      mechanism: 'page-reload',
-      bundlePlatforms: ['android'],
+      policy: { mechanism: 'page-reload', trigger: 'skipped-app', bundlePlatforms: ['android'] },
     },
     // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — an iOS EAS session.
     {
       name: 'sends Page.reload, not the broadcast, on an iOS EAS session',
       targets: [onCloudIos],
       targetSelection: CLOUD_IOS,
-      mechanism: 'page-reload',
-      bundlePlatforms: ['ios'],
+      policy: { mechanism: 'page-reload', trigger: 'ios-eas-session', bundlePlatforms: ['ios'] },
     },
     {
       name: 'broadcasts on an Android EAS session',
       targets: [onCloudAndroid],
       targetSelection: CLOUD_ANDROID,
-      mechanism: 'broadcast',
-      bundlePlatforms: ['android'],
+      policy: { mechanism: 'broadcast', reachedOutside: 0, bundlePlatforms: ['android'] },
     },
     {
       // `--method runtime` reloads only `read`: an app nothing places cannot fetch for it.
@@ -153,22 +166,19 @@ describe('what rung 1 does, and which bundle proves it', () => {
       targets: [ownIos, elsewhere],
       targetSelection: FLAG_IOS,
       method: 'runtime',
-      bundlePlatforms: ['ios'],
+      unread: 'the target list could not be read again',
+      policy: { mechanism: 'runtime', bundlePlatforms: ['ios'] },
     },
-  ])(
-    '$name',
-    ({ targets, targetSelection, unread = null, method = 'auto', mechanism, bundlePlatforms }) => {
-      const policy = rungOnePolicy(
+  ])('$name', ({ targets, targetSelection, unread = null, method = 'auto', policy }) => {
+    expect(
+      rungOnePolicy(
         classifyTargets(targets, targetSelection, deviceInventory),
         targetSelection,
         deviceInventory,
         { method, unread }
-      );
-
-      // Rung 1 does not run under `--method runtime`, so its row names no mechanism.
-      expect(policy).toMatchObject({ bundlePlatforms, ...(mechanism ? { mechanism } : {}) });
-    }
-  );
+      )
+    ).toEqual(policy);
+  });
 });
 
 describe('what rung 1 leaves for the rest of the run', () => {
@@ -188,6 +198,15 @@ describe('what rung 1 leaves for the rest of the run', () => {
       settled: { kind: 'relaunch', method: 'dev-server', why: 'why' },
     },
     {
+      outcome: {
+        ...base,
+        attempt: { method: 'runtime', ok: false, reason: 'x', leftAppStopped: null, outcomes: [] },
+        kind: 'delivered',
+        relaunchWhy: 'why',
+      },
+      settled: { kind: 'relaunch', method: 'runtime', why: 'why' },
+    },
+    {
       outcome: { ...base, kind: 'not-delivered', relaunchWhy: 'why' },
       settled: { kind: 'relaunch', method: null, why: 'why' },
     },
@@ -195,7 +214,7 @@ describe('what rung 1 leaves for the rest of the run', () => {
       outcome: { ...base, kind: 'unprovable', relaunchWhy: 'why' },
       settled: { kind: 'relaunch', method: null, why: 'why' },
     },
-  ])('$outcome.kind', ({ outcome, settled }) => {
+  ])('$outcome.kind by $outcome.attempt.method', ({ outcome, settled }) => {
     expect(settleRungOne(outcome)).toEqual(settled);
   });
 });

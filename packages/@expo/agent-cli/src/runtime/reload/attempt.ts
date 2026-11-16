@@ -35,22 +35,20 @@ export function isInPlaceAttempt(attempt: ReloadAttempt): attempt is InPlaceAtte
   return attempt.method === 'page-reload' || attempt.method === 'runtime';
 }
 
-/** The method a reload that keeps the app's process reports: rung 1's, or a pinned `--method runtime`. */
-export type InPlaceMethod = 'dev-server' | 'runtime';
-
 /**
- * What a reload that keeps the app's process leaves for the rest of the run. `proved`: done.
- * `observe`: a mechanism ran, and the shared observations (a fresh target, a bundle) decide; nothing
- * relaunches. `relaunch`: in `auto`, the relaunch follows, opened by `why`.
+ * What rung 1 leaves for the rest of the run. `proved`: done. `observe`: a mechanism ran, and the
+ * shared observations (a fresh target, a bundle) decide; nothing relaunches. `relaunch`: in `auto`,
+ * the relaunch follows, opened by `why`. Under a pinned method the relaunch runs nothing, so a
+ * `relaunch` with a method leaves the shared observations to decide, and one with none is a failure.
  */
 export type Settled =
   | {
       kind: 'proved';
-      method: InPlaceMethod;
+      method: 'dev-server' | 'runtime';
       proof: 'message-socket-peers' | 'debugger-context-replaced';
     }
-  | { kind: 'observe'; method: InPlaceMethod }
-  | { kind: 'relaunch'; method: InPlaceMethod | null; why: string };
+  | { kind: 'observe'; method: 'dev-server' | 'runtime' }
+  | { kind: 'relaunch'; method: 'dev-server' | 'runtime' | null; why: string };
 
 interface AttemptOutcome {
   /** The app was reloaded by this method. */
