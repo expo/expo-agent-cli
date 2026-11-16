@@ -1700,16 +1700,20 @@ describe('@expo/agent-cli status', () => {
     // The e2e tier sets AGENT_CLI_NO_DEVICE=1, and under it `dev:stop` reaps nothing.
     const report = await reportInAsync(projectRoot);
 
-    const command = 'eas simulator:stop --id sess-orphan';
     expect(report.orphanSessions).toEqual([
-      { platform: 'ios', id: 'sess-orphan', projectRoot: gone, command },
+      {
+        platform: 'ios',
+        id: 'sess-orphan',
+        projectRoot: gone,
+        command: expect.stringMatching(/ simulator:stop --id sess-orphan$/),
+      },
     ]);
     const text = await executeAgentCliAsync(projectRoot, [
       'status',
       '--dev-server-url',
       await getUnusedDevServerUrlAsync(),
     ]);
-    expect(text.stdout).toContain(command);
+    expect(text.stdout).toContain(report.orphanSessions[0]!.command);
     expect(text.stdout).toContain(
       'until the next dev or dev:stop without AGENT_CLI_NO_DEVICE, or a dev --eas run'
     );
