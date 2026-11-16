@@ -20,7 +20,6 @@ export {
   DEFAULT_DEV_SERVER_PORT,
   PORT_WATCH_INTERVAL_MS,
   PORT_WATCH_TIMEOUT_MS,
-  readLastLoggedDevServerPort,
   readPortArg,
   resolveDevServerPortAsync,
 } from './port';

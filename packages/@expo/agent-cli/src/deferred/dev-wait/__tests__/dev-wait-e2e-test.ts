@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import {
   executeAgentCliAsync,
+  holdLockForAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   type StubDevServer,
@@ -571,21 +572,18 @@ describe('@expo/agent-cli dev:wait', () => {
   it('finds the project dev server on its own when no URL is named', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const server = await startStubAsync({ projectRoot, targets: [{ id: '1' }] });
-    // The port the project's own `start.log` recorded is step 1 of discovery, and it is the step
-    // an ephemeral test port can exercise without holding a lock.
-    const logPath = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
-    await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.promises.writeFile(
-      logPath,
-      `${JSON.stringify({ _e: 'metro:instantiate', port: server.port })}\n`
-    );
+    // The project's dev-server lock is step 0 of discovery, and it names the ephemeral test port.
+    const release = await holdLockForAsync(projectRoot, server);
+    try {
+      const result = await executeAgentCliAsync(projectRoot, ['dev:wait', '--json']);
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev:wait', '--json']);
-
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      ok: true,
-      devServerUrl: server.url,
-      source: 'log',
-    });
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ok: true,
+        devServerUrl: server.url,
+        source: 'lock',
+      });
+    } finally {
+      release();
+    }
   });
 });

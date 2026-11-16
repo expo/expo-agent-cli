@@ -6,12 +6,9 @@
 // either of them and owns the family's one refusal, so a failure names the missing piece instead of
 // the socket error it caused, in the same words whichever command asked.
 
-import { readLastLoggedDevServerPort } from '../devLock';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import type { CdpTarget } from './cdpClient';
-
-export { readLastLoggedDevServerPort };
 
 /** Where `npx expo start` listens by default. */
 export const DEFAULT_DEV_SERVER_URL = 'http://127.0.0.1:8081';
@@ -143,8 +140,6 @@ export type DevServerSource =
   | 'flag'
   /** The project's dev-server lock, held by an `@expo/agent-cli`-started dev server. */
   | 'lock'
-  /** The port the project's own `start.log` last recorded. */
-  | 'log'
   /** Metro's default port, 8081. Also the reported source when nothing answered anywhere. */
   | 'default'
   /** One of the fallback ports `expo start` walks to, found by scanning. */

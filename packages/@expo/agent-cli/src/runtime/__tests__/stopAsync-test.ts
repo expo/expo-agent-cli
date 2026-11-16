@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { vol } from 'memfs';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
-import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
+import { readDevServerLockAsync } from '../../devLock';
 import type { RuntimeStopOptions } from '../resolveStopOptions';
 import { buildStopFollowUps, runtimeStopAsync, type RuntimeStopResultJson } from '../stopAsync';
 import { mockSpawnQueue, type SpawnAnswer } from '../../utils/__tests__/fakeSpawn';
@@ -12,7 +12,6 @@ import { mockDevServer } from './fakeDevServer';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
-  readLastLoggedDevServerPort: vi.fn(() => null),
 }));
 
 const projectRoot = '/project';
@@ -52,7 +51,6 @@ let originalFetch: typeof fetch | undefined;
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
-  vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
   mockPlatform('darwin');
   seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});

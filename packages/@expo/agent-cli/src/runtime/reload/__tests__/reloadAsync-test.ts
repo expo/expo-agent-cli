@@ -10,7 +10,7 @@ import { bindingPathFor } from '../../../deviceBinding/registry';
 import path from 'path';
 
 import { detachedLogPath } from '../../../dev/logFile';
-import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../../devLock';
+import { readDevServerLockAsync } from '../../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../../exitCodes';
 import { resetPackageRunnerCache } from '../../../utils/packageRunner';
 import { connectMessageSocketAsync, type MessageSocketPeers } from '../../messageSocket';
@@ -37,7 +37,6 @@ vi.mock('ws', async (importOriginal) => {
 
 vi.mock('../../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
-  readLastLoggedDevServerPort: vi.fn(() => null),
 }));
 vi.mock('../../messageSocket', async () => ({
   ...(await vi.importActual('../../messageSocket')),
@@ -171,7 +170,6 @@ let originalFetch: typeof fetch | undefined;
 beforeEach(() => {
   originalFetch = globalThis.fetch;
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
-  vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
   mockPlatform('darwin');
   seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});

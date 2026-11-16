@@ -531,29 +531,6 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledTimes(1);
     });
 
-    // The port watch stops before a long `run:*` build reaches Metro, so the step's port source is
-    // `arg`; the log the dev server wrote after the spawn is what says it bound its port.
-    it(`should not retry a run:* step whose dev server logged its port after the spawn`, async () => {
-      mockStaleDevClientState();
-      vi.mocked(runDevServerAsync).mockImplementation(async () => {
-        vol.fromJSON({
-          '/project/.expo/dev/logs/start.log': JSON.stringify({
-            _e: 'metro:instantiate',
-            _t: Date.now(),
-            port: 8081,
-          }),
-        });
-        return devServerRun({
-          stdout: 'Error: listen EADDRINUSE: address already in use :::8081',
-          port: { port: 8081, source: 'arg' },
-        });
-      });
-
-      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
-
-      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
-    });
-
     it(`should fail the plan when the retry skipped its dev server too`, async () => {
       mockStaleDevClientState();
       vi.mocked(runDevServerAsync).mockImplementation(async (_root, args) => {
