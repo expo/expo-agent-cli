@@ -2,11 +2,10 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload
 //
 // The two reloads that keep the app's process: CDP `Page.reload` (rung 1 while the scope skips an
-// app or is an iOS EAS session) and `expo.reloadAppAsync(reason)` (rung 2, and `--method runtime`).
+// app or is an iOS EAS session) and `expo.reloadAppAsync(reason)` (`--method runtime`).
 // Both are proved the same way, on the target they were sent to: a marker global that the new
 // JavaScript context does not have (`../contextReplaced.ts`).
 
-import { isExpoGoAppId } from '../../navigate/target';
 import { firstLine } from '../../utils/text';
 import type { CdpTarget } from '../cdpClient';
 import { jsContextReplacedAsync, type ContextReplaced } from '../contextReplaced';
@@ -15,7 +14,7 @@ import { debugEvent } from './events';
 
 export type InPlaceMechanism = 'page-reload' | 'runtime';
 
-/** How long rung 2 has to prove itself, so the bundle observation or the relaunch keeps the rest. */
+/** How long `--method runtime` has to prove itself, so the bundle observation keeps the rest. */
 const RUNTIME_RELOAD_PROOF_MS = 5000;
 
 const RUNTIME_RELOAD_EXPRESSION = `(function () {
@@ -78,7 +77,7 @@ export function inPlaceLabel(mechanism: InPlaceMechanism): string {
 export interface InPlaceReload {
   /**
    * `in-flight`: an `expo.reloadAppAsync` call went out and its answer was lost, so the reload may
-   * still be on its way. Nothing should relaunch under it.
+   * still be on its way.
    */
   kind: 'proved' | 'in-flight' | 'delivered' | 'unprovable' | 'not-delivered';
   attempt: Extract<ReloadAttempt, { outcomes: TargetReloadOutcome[] }>;
@@ -86,14 +85,9 @@ export interface InPlaceReload {
   clause: string;
 }
 
-/** The own targets rung 2 may ask in `auto` and `smoke`: on Expo Go the call can close the app. */
-export function askableInPlace(own: CdpTarget[]): CdpTarget[] {
-  return own.filter((target) => !isExpoGoAppId(target.appId));
-}
-
 /**
  * Ask each own target to reload itself with `expo.reloadAppAsync(reason)`, and prove it on that
- * target. Rung 2 of `auto` and `smoke`, and all of `--method runtime`.
+ * target. All of `--method runtime`.
  */
 export async function reloadOverRuntimeAsync(
   devServerUrl: string,

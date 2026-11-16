@@ -20,7 +20,7 @@ import { resolveDevicePlatform } from '../devicePlatform';
  *   second rather than about twelve.
  * - **`runtime`** — `expo.reloadAppAsync(reason)` over the debugger, on each own target. An app can
  *   be in `/json/list` and ignore the broadcast or have no client on the command socket; this
- *   reaches it and keeps its process (llp/0005 §How it reloads, rung 2).
+ *   reaches it and keeps its process. `auto` never picks it (llp/0005 §How it reloads).
  * - **`device`** — a force-stop and a relaunch. It is the only one that can *start* an app, and the
  *   only one that stops a running one, so `auto` reaches it only when no app is connected at all.
  */

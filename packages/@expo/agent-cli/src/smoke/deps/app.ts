@@ -161,10 +161,10 @@ async function checkAppFitsProject(
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
 //
-// `runtime:reload`'s rungs 1 and 2, and their proofs, through the same functions — the whole
+// `runtime:reload`'s rung 1, and its proofs, through the same functions — the whole
 // point of this command being one process (llp/0005 §The smoke gate). Deliberately **never** the
 // relaunch: it stops the app and starts it again, and a gate is not allowed to take the caller's
-// app away in order to answer a question about it. An app neither rung reloads is a fact this
+// app away in order to answer a question about it. An app rung 1 does not reload is a fact this
 // phase reports, not a licence to relaunch.
 //
 // The bundle mark is taken *before* the broadcast because that is what makes the log a proof:
@@ -186,7 +186,7 @@ async function reloadApp(
   const { prepared, attempts, churn, settled } = await runInPlaceRungsAsync(
     devServerUrl,
     projectRoot,
-    { prepared: first, rungs: 'auto', remainingMs }
+    { prepared: first, runtime: false, remainingMs }
   );
   const ran = settled.method != null;
   const last = attempts[attempts.length - 1]!;

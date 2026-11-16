@@ -596,7 +596,7 @@ async function pageReloadAsync(
   return kind === 'proved'
     ? { kind, proof: 'debugger-context-replaced', attempt, churn }
     : {
-        // A lost `Page.reload` answer is not delivered, so only rung 2 is ever in flight.
+        // A lost `Page.reload` answer is not delivered, so only `--method runtime` is ever in flight.
         kind: kind === 'in-flight' ? 'delivered' : kind,
         attempt,
         churn,

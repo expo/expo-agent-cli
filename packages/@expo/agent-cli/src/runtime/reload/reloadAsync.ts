@@ -501,21 +501,16 @@ async function climbLadderAsync(
   // bundle would otherwise be evidence for the reload it was gating.
   const bundleMark = markBundleSignalSync(projectRoot);
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. **Rungs one and two keep the app's
-  // process**: the broadcast or `Page.reload`, then, on an iOS EAS session, the app reloading
-  // itself (`./inPlaceRungs.ts`). A pinned `--method device` skips them, as a pinned method always
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. **Rung one keeps the app's
+  // process**: the broadcast or `Page.reload`, or under a pinned `--method runtime` the app
+  // reloading itself (`./inPlaceRungs.ts`). A pinned `--method device` skips them, as a pinned method always
   // has. Their settle says what follows: done, the shared observations (F97), or the relaunch.
   const inPlace =
     options.method === 'device'
       ? null
       : await runInPlaceRungsAsync(devServerUrl, projectRoot, {
           prepared: first,
-          rungs:
-            options.method === 'runtime'
-              ? 'runtime'
-              : options.method === 'dev-server'
-                ? 'rung-one'
-                : 'auto',
+          runtime: options.method === 'runtime',
           remainingMs,
         });
   const prepared = inPlace?.prepared ?? first;
@@ -539,11 +534,11 @@ async function climbLadderAsync(
   let cloudUrl: string | null = null;
   const rungOne = inPlace?.rungOne ?? null;
 
-  // **Rung three: the relaunch, on the device backend in play.** `--eas` names *which* backend may
+  // **Rung two: the relaunch, on the device backend in play.** `--eas` names *which* backend may
   // act: the session's controller (`./cloudReload.ts`, wave 19's two verbs) or a device booted on
   // this machine.
   //
-  // Reached whenever rungs 1 and 2 settled `relaunch`, and the second state is F99
+  // Reached whenever rung 1 settled `relaunch`, and the second state is F99
   // — the ladder climbing rather than stopping:
   //
   //  1. the reload reached no app: the socket had no client, or no own target took `Page.reload`;

@@ -1,10 +1,11 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
 //
-// Rungs 1 and 2, the reloads that keep the app's process, as one decision that `runtime:reload`
-// and `smoke` both take. Only `runtime:reload` in `auto` goes on to the relaunch.
+// The reload that keeps the app's process, as one decision that `runtime:reload` and `smoke` both
+// take: rung 1, or a pinned `--method runtime`. Only `runtime:reload` in `auto` goes on to the
+// relaunch.
 
 import { type ReloadAttempt } from './attempt';
-import { askableInPlace, reloadOverRuntimeAsync } from './inPlace';
+import { reloadOverRuntimeAsync } from './inPlace';
 import {
   CHURN_NOT_ASKED,
   PAGE_RELOAD_PROOF_MS,
@@ -29,86 +30,56 @@ export interface InPlaceRungs {
   settled: Settled;
 }
 
-/**
- * `auto` (and `smoke`): rung 1, then rung 2 where it applies. `rung-one`: a pinned
- * `--method dev-server`. `runtime`: a pinned `--method runtime`, rung 2 alone on every own target.
- */
-export type InPlaceRungChoice = 'auto' | 'rung-one' | 'runtime';
-
 export async function runInPlaceRungsAsync(
   devServerUrl: string,
   projectRoot: string,
   {
     prepared: first,
-    rungs,
+    runtime,
     remainingMs,
-  }: { prepared: PreparedRungOne; rungs: InPlaceRungChoice; remainingMs: () => number }
+  }: {
+    prepared: PreparedRungOne;
+    /** A pinned `--method runtime`: `expo.reloadAppAsync` on every own target, instead of rung 1. */
+    runtime: boolean;
+    remainingMs: () => number;
+  }
 ): Promise<InPlaceRungs> {
-  if (rungs === 'runtime') {
-    const rungTwo = await reloadOverRuntimeAsync(
+  if (runtime) {
+    const call = await reloadOverRuntimeAsync(
       devServerUrl,
       first.classifiedTargets.read,
       remainingMs()
     );
     return {
       prepared: first,
-      attempts: [rungTwo.attempt],
+      attempts: [call.attempt],
       rungOne: null,
       churn: CHURN_NOT_ASKED,
-      settled: settleRungTwo(rungTwo, null),
+      settled: settleRuntime(call),
     };
   }
   const prepared = await untilOwnListedAsync(devServerUrl, projectRoot, first, remainingMs);
   const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
-  const attempts: ReloadAttempt[] = [rungOne.attempt];
-  const settled = settleRungOne(rungOne);
-  // Rung 2 is measured live only on an iOS EAS session, after a `Page.reload` that proved nothing:
-  // one that reached the app, or none while an own target is listed. It needs no
-  // `nativePageReloads`. Never on Expo Go, where the call can close the app.
-  const askable =
-    rungs === 'auto' &&
-    prepared.policy.trigger === 'ios-eas-session' &&
-    (rungOne.kind === 'delivered' || rungOne.kind === 'not-delivered')
-      ? askableInPlace(prepared.classifiedTargets.read)
-      : [];
-  if (askable.length === 0) {
-    return { prepared, attempts, rungOne, churn: rungOne.churn, settled };
-  }
-  const rungTwo = await reloadOverRuntimeAsync(devServerUrl, askable, remainingMs());
-  attempts.push(rungTwo.attempt);
   return {
     prepared,
-    attempts,
+    attempts: [rungOne.attempt],
     rungOne,
     churn: rungOne.churn,
-    settled: settleRungTwo(rungTwo, settled.method),
+    settled: settleRungOne(rungOne),
   };
 }
 
-function settleRungTwo(
-  rungTwo: Awaited<ReturnType<typeof reloadOverRuntimeAsync>>,
-  before: Settled['method']
-): Settled {
-  switch (rungTwo.kind) {
+function settleRuntime(call: Awaited<ReturnType<typeof reloadOverRuntimeAsync>>): Settled {
+  switch (call.kind) {
     case 'proved':
       return { kind: 'proved', method: 'runtime', proof: 'debugger-context-replaced' };
     case 'in-flight':
-      // The call went and its context did not answer: the reload may be on its way, and a relaunch
-      // now would stop the app inside it. The bundle decides.
-      return { kind: 'observe', method: 'runtime' };
     case 'delivered':
-      return {
-        kind: 'relaunch',
-        method: before ?? 'runtime',
-        why: `${rungTwo.clause}, so the app was relaunched on this worktree's device instead`,
-      };
+      // The call ran: the shared observations decide. A pinned method never climbs.
+      return { kind: 'observe', method: 'runtime' };
     case 'unprovable':
     case 'not-delivered':
-      return {
-        kind: 'relaunch',
-        method: before,
-        why: `${rungTwo.clause}, so the app was relaunched on this worktree's device instead`,
-      };
+      return { kind: 'relaunch', method: null, why: call.clause };
   }
 }
 

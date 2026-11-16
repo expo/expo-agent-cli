@@ -24,7 +24,7 @@ export type ReloadAttempt =
   /**
    * A reload that keeps the app's process, proved on each own target: CDP `Page.reload` (rung 1
    * while the scope skips an app or is an iOS EAS session) or `expo.reloadAppAsync(reason)`
-   * (rung 2, and `--method runtime`). llp/0005 §How it reloads.
+   * (`--method runtime`). llp/0005 §How it reloads.
    */
   | (AttemptOutcome & {
       method: 'page-reload' | 'runtime';
