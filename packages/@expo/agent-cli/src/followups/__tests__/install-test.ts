@@ -37,63 +37,67 @@ describe(buildInstallFollowUps, () => {
     expect(followups[0]!.command).toBe(
       `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
     );
-    expect(followups[0]!.why).toContain('react-native-fancy');
-    expect(followups[0]!.why).toContain('development build');
   });
 
   // The rebuild sentence names what each package ships, in the words of its own report. A config
-  // plugin adds no native code of its own: it changes the native project at prebuild.
+  // plugin adds no native code of its own: it changes the native project when prebuild runs, which
+  // a bare project with checked-in native directories does not do.
+  const camera = { packageName: 'expo-camera', impact: 'native-module' as const };
+  const haptics = { packageName: 'expo-haptics', impact: 'native-module' as const };
+  const properties = { packageName: 'expo-build-properties', impact: 'config-plugin' as const };
+  const fonts = { packageName: 'expo-font', impact: 'config-plugin' as const };
+  const tail = ': this plans and makes a new development build.';
   it.each([
     {
       name: 'a native module',
-      reports: [report({ packageName: 'expo-camera', impact: 'native-module' })],
-      why: 'expo-camera ships native code that the app running now does not have',
+      action: 'prebuild-and-build' as const,
+      packages: [camera],
+      why: `expo-camera ships native code that the app running now does not have${tail}`,
     },
     {
       name: 'a config plugin',
-      reports: [report({ packageName: 'expo-build-properties', impact: 'config-plugin' })],
-      why: 'expo-build-properties ships a config plugin that changes the native project at prebuild',
+      action: 'prebuild-and-build' as const,
+      packages: [properties],
+      why: `expo-build-properties ships a config plugin that changes the native project at prebuild${tail}`,
+    },
+    {
+      name: 'two config plugins',
+      action: 'prebuild-and-build' as const,
+      packages: [properties, fonts],
+      why: `expo-build-properties, expo-font ship config plugins that change the native project at prebuild${tail}`,
     },
     {
       name: 'both kinds',
-      reports: [
-        report({ packageName: 'expo-camera', impact: 'native-module' }),
-        report({ packageName: 'expo-haptics', impact: 'native-module' }),
-        report({ packageName: 'expo-build-properties', impact: 'config-plugin' }),
-      ],
-      why: 'expo-camera, expo-haptics ship native code that the app running now does not have, and expo-build-properties ships a config plugin',
+      action: 'prebuild-and-build' as const,
+      packages: [camera, haptics, properties],
+      why: `expo-camera, expo-haptics ship native code that the app running now does not have, and expo-build-properties ships a config plugin that changes the native project at prebuild${tail}`,
     },
-  ])(`should say what $name adds when it needs a build`, ({ reports, why }) => {
+    {
+      name: 'a native module in a bare project',
+      action: 'native-sync' as const,
+      packages: [camera],
+      why: `expo-camera ships native code that the app running now does not have${tail}`,
+    },
+    {
+      name: 'a config plugin in a bare project',
+      action: 'native-sync' as const,
+      packages: [properties],
+      why: `expo-build-properties ships a config plugin, which changes the checked-in native project only when prebuild runs${tail}`,
+    },
+    {
+      name: 'two config plugins in a bare project',
+      action: 'native-sync' as const,
+      packages: [properties, fonts],
+      why: `expo-build-properties, expo-font ship config plugins, which change the checked-in native project only when prebuild runs${tail}`,
+    },
+  ])(`should say what $name adds when it needs a build`, ({ action, packages, why }) => {
     const followups = buildInstallFollowUps({
-      reports: reports.map((entry) => ({ ...entry, action: 'prebuild-and-build' as const })),
-      packagesWithSkills: [],
-    });
-
-    expect(followups[0]!.id).toBe('dev');
-    expect(followups[0]!.why).toContain(why);
-    expect(followups[0]!.why).not.toContain('native surface');
-  });
-
-  it(`should warn for a bare project, whose native directories need a sync instead`, () => {
-    const followups = buildInstallFollowUps({
-      reports: [report({ impact: 'native-module', action: 'native-sync' })],
+      reports: packages.map((entry) => report({ ...entry, action })),
       packagesWithSkills: [],
     });
 
     expect(ids(followups)).toEqual(['dev', 'typecheck']);
-  });
-
-  it(`should name every package that needs a new build`, () => {
-    const followups = buildInstallFollowUps({
-      reports: [
-        report({ packageName: 'a-module', impact: 'native-module', action: 'prebuild-and-build' }),
-        report({ packageName: 'b-plugin', impact: 'config-plugin', action: 'prebuild-and-build' }),
-      ],
-      packagesWithSkills: [],
-    });
-
-    expect(followups[0]!.why).toContain('a-module');
-    expect(followups[0]!.why).toContain('b-plugin');
+    expect(followups[0]!.why).toBe(why);
   });
 
   it(`should say a reload is enough for a JavaScript only install`, () => {

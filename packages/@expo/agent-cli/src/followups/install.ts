@@ -39,7 +39,7 @@ export function buildInstallFollowUps({
     followups.push({
       id: 'dev',
       command: devCommand(hostPlatform()),
-      why: `${rebuildReason(rebuild)}: this plans and makes the development build that has it.`,
+      why: `${rebuildReason(rebuild)}: this plans and makes a new development build.`,
     });
   } else {
     // The command named here used to be `runtime:errors`, which reloads nothing — so the sentence
@@ -109,19 +109,24 @@ function reloadReason(reports: InstallImpactReport[]): string {
 /**
  * Why a build is owed, in the words of what each package's own report found. A native module adds
  * code the running app lacks; a config plugin adds none of its own and changes the native project
- * at prebuild. A set that has both names each kind once.
+ * at prebuild. A bare project (`native-sync`) keeps its native directories, and `dev` does not
+ * prebuild them, so its plugin clause says the change waits for prebuild.
  */
 function rebuildReason(rebuild: InstallImpactReport[]): string {
   const of = (impact: InstallImpactReport['impact']) =>
     rebuild.filter((report) => report.impact === impact).map((report) => report.packageName);
-  const ships = (names: string[]) => `${names.join(', ')} ${names.length === 1 ? 'ships' : 'ship'}`;
   const native = of('native-module');
   const plugins = of('config-plugin');
+  const one = plugins.length === 1;
+  const bare = rebuild.every((report) => report.action === 'native-sync');
+  const ships = (names: string[]) => `${names.join(', ')} ${names.length === 1 ? 'ships' : 'ship'}`;
+  const pluginNoun = one ? 'a config plugin' : 'config plugins';
+  const pluginClause = bare
+    ? `, which ${one ? 'changes' : 'change'} the checked-in native project only when prebuild runs`
+    : ` that ${one ? 'changes' : 'change'} the native project at prebuild`;
   return [
     native.length ? `${ships(native)} native code that the app running now does not have` : null,
-    plugins.length
-      ? `${ships(plugins)} a config plugin that changes the native project at prebuild`
-      : null,
+    plugins.length ? `${ships(plugins)} ${pluginNoun}${pluginClause}` : null,
   ]
     .filter(Boolean)
     .join(', and ');
