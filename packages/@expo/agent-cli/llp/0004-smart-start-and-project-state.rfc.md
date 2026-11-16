@@ -115,7 +115,7 @@ A step's `reason` describes the step, not the goal: it is what a driving agent r
 
 ## Status
 
-`@expo/agent-cli status` is a `git status` for the project: one fast, read-only command that answers "where is this project now, and what happens next". Text sections by default; `--json` for the machine shape, with the raw probe under `probe`. It exits 0, because it reports and does not judge; argument errors exit 1, and `--assert` turns it into a gate ([[0011-impact-and-freshness]]). It starts nothing. Its device reads share one deadline (§Reported by status), and its dev-server probes and EAS calls have their own. The probe's fingerprint run and the `expo config` of the OTA verdict have none (§Open questions).
+`@expo/agent-cli status` is a `git status` for the project: one fast, read-only command that answers "where is this project now, and what happens next". Text sections by default; `--json` for the machine shape, with the raw probe under `probe`. It exits 0, because it reports and does not judge; argument errors exit 1, and `--assert` turns it into a gate ([[0011-impact-and-freshness]]). It starts nothing. Its device reads share one deadline (§Reported by status), and its dev-server probes and EAS calls have their own. The probe's fingerprint run and the `expo config` of the OTA verdict have none (§Risks).
 
 | Section    | Says                                                                                                                                                                               |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -161,6 +161,7 @@ Every command that needs the dev server finds it by one ladder. Every step probe
 
 - Steps 1 to 4 read the project root that `/status` names, by the rule in §A busy port. A server of another project is skipped; a lock whose port another project answers is a miss, and the ladder goes on.
 - A `/status` that does not answer within 3 s proves nothing and is not accepted; a socket error gets one retry.
+- The lock proves a live server of this project, so the probe of its URL gets the same 3 s. The port steps probe with 800 ms by default.
 - The scan prefers a server with listed debugger targets, then port order. A server with no targets is still a running server.
 - No step is skipped for speed: an `expo start` run by hand holds no lock, and a cleaned `.expo` names no port. `default` is also the source when nothing answered, because the error still needs a URL.
 - An explicit URL gets no timeout of its own, because a tunnel may be slow; the caller's signal stops it.
@@ -348,14 +349,13 @@ The verdict is the `installed` section of `status`: one row per platform, the st
 3. A later run can write over an orphan's run record; that server then needs `dev:stop --force` (§Daemonization).
 4. A port can be taken between the bind test and Metro's bind twice in a row; the run then stops with `PORT_TAKEN_AFTER_RETRY`.
 5. An event log this process cannot read back gives no port report, so the lock confirms its port only after 20 s.
+6. The How of `DEV_DETACH_STILL_BUILDING` says the same command follows the run. That holds for an EAS run; a local re-run stops with `DEV_SERVER_RUNNING`.
+7. Beside a lock that is `starting`, `status` reads the lock's `serving` and can name a `dev --port <n>`. That `dev` stops and names `status`.
+8. In `status`, the probe's fingerprint run and the `expo config` of the OTA verdict have no deadline, so a hung one hangs `status`.
 
 ## Open questions
 
-1. Should the installed-app verdict become a gate? Extending `--assert` is the shape to use.
-2. Should the local plan consult the EAS build cache, as the EAS device path does?
-3. Should a local `dev --detach` re-run follow a `building` run? The How of `DEV_DETACH_STILL_BUILDING` says the same command follows the run, and a local re-run stops with `DEV_SERVER_RUNNING`.
-4. `status` can name a `dev --port <n>` beside a lock that is `starting`, and that `dev` stops and names `status`. Which command should end the loop?
-5. Should the probe's fingerprint run and the `expo config` of the OTA verdict get a deadline in `status`? Today a hung one hangs `status`.
+None. The installed-app verdict stays a report (§Reported by status), and the local plan stays on the last-build record (Risk 1).
 
 ## Testing
 
@@ -371,7 +371,7 @@ The decision table is pure, so it is unit-tested with no model and no device (ti
 | §Plan contract                           | `src/plan/__tests__/decide-test.ts`, `resolveDevice-test.ts`                                                                                                                                                                                                                                                                                                                                                                               |
 | §Sub-features                            | `src/project/__tests__/expoGo-test.ts`, `expoGoModules-test.ts`, `impact-test.ts`; `src/install/__tests__/impactReport-test.ts`                                                                                                                                                                                                                                                                                                            |
 | §Status                                  | `e2e/__tests__/status-test.ts`, `dev-eas-test.ts` ("after a SIGKILL, status names dev:stop --eas"); `src/status/__tests__/sections-test.ts`, `nextAction-test.ts`, `statusAsync-test.ts`; `src/dev/__tests__/advertisedUrl-test.ts`                                                                                                                                                                                                        |
-| §Discovery ladder                        | `src/runtime/__tests__/devServerDiscovery-test.ts`, `devServerLockDiscovery-test.ts`; `src/status/__tests__/statusAsync-test.ts`                                                                                                                                                                                                                                                                                                           |
+| §Discovery ladder                        | `src/runtime/__tests__/devServerDiscovery-test.ts`, `devServerLockDiscovery-test.ts`; `src/status/__tests__/statusAsync-test.ts`; `e2e/__tests__/runtime-reload-test.ts` (the lock's budget)                                                                                                                                                                                                                                               |
 | §Dev-server lock                         | `src/devLock/__tests__/runState-test.ts` (one case per cell of the transition table), `runLock-test.ts`, `lock-test.ts`, `address-test.ts`, `port-test.ts`, `publishPort-test.ts`; `src/dev/__tests__/stopAsync-test.ts`; `e2e/__tests__/wrapper-test.ts` ("answers with the port the dev server reported"), `dev-eas-test.ts`, `dev-detach-test.ts`, `dev-test.ts` (`building` through `expo run:*` on iOS and Android), `status-test.ts` |
 | §Daemonization                           | `e2e/__tests__/dev-detach-test.ts`, `dev-eas-test.ts`, `dev-logs-test.ts`, `stop-test.ts` ("after a SIGKILL of a foreground dev"), `dev-test.ts` (signal exits); `src/dev/__tests__/detach-test.ts`, `detachAsync-test.ts`, `detachRunningServer-test.ts`, `childVerdict-test.ts`, `untrackedDevServer-test.ts`; `src/devLock/__tests__/lock-test.ts`, `publishPort-test.ts` (the run record)                                              |
 | §A busy port                             | `src/dev/__tests__/runningDevServer-test.ts`, `portCollision-test.ts`, `devAsync-test.ts`, `detachAsync-test.ts`; `src/runtime/__tests__/waitReady-test.ts` (the root rule); `e2e/__tests__/dev-test.ts`, `dev-detach-test.ts`, `stop-test.ts`                                                                                                                                                                                             |
