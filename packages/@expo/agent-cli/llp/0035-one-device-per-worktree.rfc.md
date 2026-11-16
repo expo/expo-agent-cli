@@ -83,18 +83,18 @@ The inventory is read before the lock and may be seconds stale. iOS acquisition 
 
 ## Contracts every verb honors
 
-| #   | Rule                                                                                                                                                                                         | Test                                                                                       |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| 1   | Only `dev` (with its EAS open) and `smoke` write a device into a binding. A read verb changes only `expiresAt`.                                                                              | `src/deviceBinding/__tests__/inspect-test.ts`, `cloudRung-test.ts`                         |
-| 2   | A read verb reads its binding and never lists devices to choose one; it spawns one device-tool subprocess per binding it inspects, plus `ps` for the instance check of a `spawned` instance. | `src/deviceBinding/__tests__/inspect-test.ts`                                              |
-| 3   | No code outside `src/deviceBinding/` lists devices to select one. `status --device` lists to filter and binds nothing.                                                                       | the filter: `src/installedApp/__tests__/android-test.ts`; the rest: none (Open question 3) |
-| 4   | Every binding write runs under the lock.                                                                                                                                                     | `src/deviceBinding/__tests__/registry-test.ts`, `acquire-test.ts`                          |
-| 5   | A `created` simulator is never deleted while a binding names it. A simulator no binding names is never touched.                                                                              | `src/deviceBinding/__tests__/reap-test.ts`, `explicit-test.ts`                             |
-| 6   | A recorded emulator pid is killed only after its file is removed, and only while the instance check holds. Never `emu kill` by serial.                                                       | `src/deviceBinding/__tests__/android-test.ts`, `reap-test.ts`                              |
-| 7   | `explicit` devices are booted at most, never shut down or deleted.                                                                                                                           | `src/deviceBinding/__tests__/explicit-test.ts`, `lifecycle-test.ts`                        |
-| 8   | Every process that runs Metro or a build step on a bound device renews the lease, and on a lost lease writes nothing for that binding.                                                       | `src/deviceBinding/__tests__/lifecycle-test.ts`                                            |
-| 9   | The EAS probe considers only sessions this worktree bound and the dotenv session.                                                                                                            | `src/device/__tests__/cloudSimulator-test.ts`                                              |
-| 10  | `src/deviceBinding/` imports nothing from `navigate`, `smoke`, `dev` or `installedApp`.                                                                                                      | `src/deviceBinding/__tests__/boundary-test.ts`                                             |
+| #   | Rule                                                                                                                                                                                         | Test                                                                            |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 1   | Only `dev` (with its EAS open) and `smoke` write a device into a binding. A read verb changes only `expiresAt`.                                                                              | `src/deviceBinding/__tests__/inspect-test.ts`, `cloudRung-test.ts`              |
+| 2   | A read verb reads its binding and never lists devices to choose one; it spawns one device-tool subprocess per binding it inspects, plus `ps` for the instance check of a `spawned` instance. | `src/deviceBinding/__tests__/inspect-test.ts`                                   |
+| 3   | No code outside `src/deviceBinding/` lists devices to select one. `status --device` lists to filter and binds nothing.                                                                       | the filter: `src/installedApp/__tests__/android-test.ts`; the rest: code review |
+| 4   | Every binding write runs under the lock.                                                                                                                                                     | `src/deviceBinding/__tests__/registry-test.ts`, `acquire-test.ts`               |
+| 5   | A `created` simulator is never deleted while a binding names it. A simulator no binding names is never touched.                                                                              | `src/deviceBinding/__tests__/reap-test.ts`, `explicit-test.ts`                  |
+| 6   | A recorded emulator pid is killed only after its file is removed, and only while the instance check holds. Never `emu kill` by serial.                                                       | `src/deviceBinding/__tests__/android-test.ts`, `reap-test.ts`                   |
+| 7   | `explicit` devices are booted at most, never shut down or deleted.                                                                                                                           | `src/deviceBinding/__tests__/explicit-test.ts`, `lifecycle-test.ts`             |
+| 8   | Every process that runs Metro or a build step on a bound device renews the lease, and on a lost lease writes nothing for that binding.                                                       | `src/deviceBinding/__tests__/lifecycle-test.ts`                                 |
+| 9   | The EAS probe considers only sessions this worktree bound and the dotenv session.                                                                                                            | `src/device/__tests__/cloudSimulator-test.ts`                                   |
+| 10  | `src/deviceBinding/` imports nothing from `navigate`, `smoke`, `dev` or `installedApp`.                                                                                                      | `src/deviceBinding/__tests__/boundary-test.ts`                                  |
 
 ## Records
 
@@ -350,8 +350,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 
 1. Where does the idle check run on the service, and what counts as activity?
 2. Should `--device <session-id>` with `--eas`, refused as `BAD_ARGS` today, bind a session another tool started?
-3. Should a lint or boundary test enforce Contract 3: no listing of devices to select one outside `src/deviceBinding/`, and `status --device` binds nothing?
-4. Should each start pass `--tag agent-cli:<digest>`, with a selection rung for a live session of that tag recorded as `started`, so a lost registry does not leave a session unbound? Today `dev:stop --eas` and the dotenv id still reach it.
+3. Should each start pass `--tag agent-cli:<digest>`, with a selection rung for a live session of that tag recorded as `started`, so a lost registry does not leave a session unbound? Today `dev:stop --eas` and the dotenv id still reach it.
 
 ## Testing
 
