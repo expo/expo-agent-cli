@@ -976,7 +976,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   it.skipIf(process.platform === 'win32')(
     'after a SIGKILL, status names dev:stop --eas, which stops the dev server and the session',
     async () => {

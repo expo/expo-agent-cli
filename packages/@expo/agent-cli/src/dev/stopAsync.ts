@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 // Stop this project's dev server.
 //

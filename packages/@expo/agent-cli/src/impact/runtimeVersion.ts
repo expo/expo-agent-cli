@@ -18,9 +18,10 @@ const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersio
  * Resolve the project's `runtimeVersion`, preferring the config the app itself would see.
  *
  * `expo config --json --type public` evaluates a dynamic `app.config.js` with its environment,
- * which is the only way to learn the runtimeVersion of a project whose config is code. This closes
- * the follow-up llp/0004 §Implemented in v1 as, item 7 recorded: config was read from static files
- * only, so a dynamic config yielded no answer at all.
+ * which is the only way to learn the runtimeVersion of a project whose config is code, or whose
+ * config plugins set it. It is one of the readers that spawn `expo config`.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Implemented in v1
  *
  * Reports `source: null` when the subprocess fails, which is not "no runtimeVersion" and is never
  * read as one. The static file is not a fallback: its plugins, or a dynamic config, can change the

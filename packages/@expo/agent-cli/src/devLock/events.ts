@@ -7,7 +7,7 @@ declare module '2g' {
      * The dev server of this project is published at `address`: connecting to it answers with
      * `url`. Emitted once the dev server has reported the port it actually listens on.
      *
-     * @see llp/0004-smart-start-and-project-state.rfc.md §Status
+     * @see llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
      */
     'cli:dev_lock_acquired': {
       address: string;

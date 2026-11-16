@@ -1171,7 +1171,7 @@ describe(applyOpenUrls, () => {
     ]);
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a tunnel the log names
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — a tunnel the log names
   // and the dev server did not confirm: no link at all, not one built on the LAN address.
   it(`builds no link for a tunnel nobody confirmed`, () => {
     const devServer = { ...tunnelled, tunnelUrl: null };

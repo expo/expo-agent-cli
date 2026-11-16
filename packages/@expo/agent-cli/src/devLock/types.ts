@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 
 /**
  * What the dev-server lock answers with: where the dev server of this project listens, and who

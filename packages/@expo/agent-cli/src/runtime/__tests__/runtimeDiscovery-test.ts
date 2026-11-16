@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
 // Which dev server a runtime command talks to. The commands used to assume 8081 whenever
 // `--dev-server-url` was absent, which missed every dev server that had to walk to another port.
 //

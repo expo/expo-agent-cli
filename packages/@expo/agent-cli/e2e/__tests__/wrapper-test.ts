@@ -318,7 +318,7 @@ describe('@expo/agent-cli start', () => {
     expect(result.exitCode).toBe(7);
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
   // While the dev server runs, the wrapper holds a socket that answers where it listens. The test
   // connects to it from the outside, like another `@expo/agent-cli` command would.
   describe('the dev server lock', () => {

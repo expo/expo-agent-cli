@@ -3540,7 +3540,7 @@ describe('@expo/agent-cli status', () => {
       }
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
     // With no `--dev-server-url`, discovery asks the project's dev-server lock before it scans
     // ports. The lock is held by this test, standing in for a running `@expo/agent-cli start`.
     it('finds the dev server the project lock names, with no URL given', async () => {

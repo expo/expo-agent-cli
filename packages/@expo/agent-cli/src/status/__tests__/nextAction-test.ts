@@ -269,7 +269,7 @@ describe(chooseNextAction, () => {
       command: `${PROGRAM_PREFIX} smoke --android --eas`,
       why: expect.stringContaining('an EAS Simulator session is on record'),
     },
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
     {
       name: 'names dev:stop --eas for the server a killed run left beside its started session',
       facts: {

@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 // Which port the lock publishes. The dev server picks it, not the wrapper, so the wrapper reads
 // it back out of the dev server's report. `start.log` is the `@expo/cli` 57 report, which discovery
 // still reads, and must not give the previous run's answer.
