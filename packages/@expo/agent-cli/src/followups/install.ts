@@ -36,11 +36,10 @@ export function buildInstallFollowUps({
   const rebuild = reports.filter((report) => REBUILD_ACTIONS.includes(report.action));
 
   if (rebuild.length) {
-    const names = rebuild.map((report) => report.packageName).join(', ');
     followups.push({
       id: 'dev',
       command: devCommand(hostPlatform()),
-      why: `The app that is running now cannot load ${names}, which changed the native surface: this plans and makes the development build that can.`,
+      why: rebuildReason(rebuild),
     });
   } else {
     // The command named here used to be `runtime:errors`, which reloads nothing — so the sentence
@@ -105,4 +104,36 @@ function reloadReason(reports: InstallImpactReport[]): string {
   return bundled.length === reports.length
     ? `${carried}: reloading the app is enough to pick it up. A project that builds its own runtime would need a new build.`
     : `${carried}, and the rest changed JavaScript only: reloading the app is enough to pick the packages up.`;
+}
+
+/**
+ * Why a build is owed, in the words of what each package's own report found. A native module adds
+ * code the running app lacks; a config plugin adds none of its own and changes the native project
+ * at prebuild. A bare project (`native-sync`) keeps its native directories, and `dev` does not
+ * prebuild them, so its plugin clause says the change waits for prebuild.
+ */
+function rebuildReason(rebuild: InstallImpactReport[]): string {
+  const namesOf = (impact: InstallImpactReport['impact']) =>
+    rebuild.filter((report) => report.impact === impact).map((report) => report.packageName);
+  const native = namesOf('native-module');
+  const plugins = namesOf('config-plugin');
+  const bare = rebuild.every((report) => report.action === 'native-sync');
+
+  const clauses: string[] = [];
+  if (native.length) {
+    const ships = native.length === 1 ? 'ships' : 'ship';
+    clauses.push(
+      `${native.join(', ')} ${ships} native code that the app running now does not have`
+    );
+  }
+  if (plugins.length) {
+    const ships = plugins.length === 1 ? 'ships a config plugin' : 'ship config plugins';
+    const changes = plugins.length === 1 ? 'changes' : 'change';
+    clauses.push(
+      bare
+        ? `${plugins.join(', ')} ${ships}, which ${changes} the checked-in native project only when prebuild runs`
+        : `${plugins.join(', ')} ${ships} that ${changes} the native project at prebuild`
+    );
+  }
+  return `${clauses.join(', and ')}: this plans and makes a new development build.`;
 }
