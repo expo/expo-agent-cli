@@ -221,11 +221,23 @@ describe('runtime:reload on an iOS EAS session under a pinned method', () => {
 
 describe('runtime:reload --method runtime', () => {
   it.each([
-    { answer: 'sent', exitCode: 0, reason: 'answered from a new JavaScript context' },
-    { answer: 'no-expo-global', exitCode: 20, reason: 'no "expo" global' },
+    {
+      answer: 'sent',
+      exitCode: 0,
+      method: 'runtime',
+      verifiedBy: 'debugger-context-replaced',
+      reason: 'answered from a new JavaScript context',
+    },
+    {
+      answer: 'no-expo-global',
+      exitCode: 20,
+      method: null,
+      verifiedBy: null,
+      reason: 'no "expo" global',
+    },
   ])(
     'passes the reason SDK 58 requires, and an app that cannot reload says so at once ($answer)',
-    async ({ answer, exitCode, reason }) => {
+    async ({ answer, exitCode, method, verifiedBy, reason }) => {
       const { root, target } = await onIosSessionAsync();
       const evaluated: string[] = [];
       const server = await startStubDevServerAsync({
@@ -254,7 +266,7 @@ describe('runtime:reload --method runtime', () => {
         );
         expect(result.exitCode, result.all).toBe(exitCode);
         const report = JSON.parse(result.stdout);
-        expect(report).toMatchObject({ method: exitCode === 0 ? 'runtime' : null });
+        expect(report).toMatchObject({ method, verifiedBy });
         expect(report.attempts).toEqual([
           expect.objectContaining({ method: 'runtime', reason: expect.stringContaining(reason) }),
         ]);
@@ -349,11 +361,19 @@ describe('runtime:reload --method runtime', () => {
 
 describe('smoke on an iOS EAS session', () => {
   it.each([
-    { pageReload: 'replaces-context' as const, reload: 'ok' },
-    { pageReload: 'keeps-context' as const, reload: 'inconclusive' },
+    {
+      pageReload: 'replaces-context' as const,
+      reload: 'ok',
+      reloadJson: { disposition: 'reloaded', verifiedBy: 'debugger-context-replaced' },
+    },
+    {
+      pageReload: 'keeps-context' as const,
+      reload: 'inconclusive',
+      reloadJson: { disposition: 'unproved', verifiedBy: null },
+    },
   ])(
     'smoke reloads the session app with Page.reload and never broadcasts ($pageReload)',
-    async ({ pageReload, reload }) => {
+    async ({ pageReload, reload, reloadJson }) => {
       const { root, target } = await onIosSessionAsync();
       const server = await startStubDevServerAsync({
         projectRoot: root,
@@ -383,9 +403,7 @@ describe('smoke on an iOS EAS session', () => {
         const phase = report.phases.find((each: { id: string }) => each.id === 'reload');
         expect(phase.status, result.all).toBe(reload);
         expect(server.broadcasts()).toBe(0);
-        if (reload === 'ok') {
-          expect(report.reload).toMatchObject({ verifiedBy: 'debugger-context-replaced' });
-        }
+        expect(report.reload).toMatchObject(reloadJson);
       } finally {
         await server.close();
       }
