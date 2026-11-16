@@ -1710,7 +1710,9 @@ describe('@expo/agent-cli status', () => {
       await getUnusedDevServerUrlAsync(),
     ]);
     expect(text.stdout).toContain(command);
-    expect(text.stdout).toContain('until the next dev or dev:stop without AGENT_CLI_NO_DEVICE');
+    expect(text.stdout).toContain(
+      'until the next dev or dev:stop without AGENT_CLI_NO_DEVICE, or a dev --eas run'
+    );
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup

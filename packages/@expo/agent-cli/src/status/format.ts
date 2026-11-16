@@ -765,7 +765,7 @@ function orphanSessionLines(report: StatusReport): string[] {
   );
   // `simulator:stop` leaves the binding file, so the next reap still names the session.
   const record = sessions.some((session) => session.command.includes('simulator:stop'))
-    ? ` The record stays until the next dev or dev:stop${devicesDisabled() ? ' without AGENT_CLI_NO_DEVICE' : ''}.`
+    ? ` The record stays until the next dev or dev:stop${devicesDisabled() ? ' without AGENT_CLI_NO_DEVICE, or a dev --eas run' : ''}.`
     : '';
   const text = `${sessions.length} EAS ${one ? 'session of a deleted worktree is' : 'sessions of deleted worktrees are'} recorded, not checked: ${listed}. ${one ? 'It' : 'They'} may still bill. ${command} ${one ? 'stops it' : 'stops them'}.${record}`;
   return [`${chalk.dim('billing'.padEnd(LABEL_WIDTH))}${chalk.yellow(text)}`];
