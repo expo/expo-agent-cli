@@ -349,8 +349,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 ## Open questions
 
 1. Where does the idle check run on the service, and what counts as activity?
-2. Should `--device <session-id>` with `--eas`, refused as `BAD_ARGS` today, bind a session another tool started?
-3. Should each start pass `--tag agent-cli:<digest>`, with a selection rung for a live session of that tag recorded as `started`, so a lost registry does not leave a session unbound? Today `dev:stop --eas` and the dotenv id still reach it.
+2. Should each start pass `--tag agent-cli:<digest>`, with a selection rung for a live session of that tag recorded as `started`, so a lost registry does not leave a session unbound? Today `dev:stop --eas` and the dotenv id still reach it.
 
 ## Testing
 
