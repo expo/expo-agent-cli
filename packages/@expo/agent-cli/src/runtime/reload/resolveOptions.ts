@@ -18,7 +18,7 @@ import { resolveDevicePlatform } from '../devicePlatform';
  * - **`dev-server`** — a broadcast on the dev server's own client command socket. Needs no platform
  *   tools, no application id and no knowledge of which device the app is on, and takes under a
  *   second rather than about twelve.
- * - **`runtime`** — `expo.reloadAppAsync()` over the debugger, at the same target `runtime:eval`
+ * - **`runtime`** — `expo.reloadAppAsync(reason)` over the debugger, at the same target `runtime:eval`
  *   reads. It is here because the two lists disagree: an app can be in `/json/list` and have no
  *   client on the command socket, which is what a cloud app over a tunnel was (llp/0005 §What proves a reload,
  *   one question). Also non-destructive, and the only mechanism that reaches such an app.

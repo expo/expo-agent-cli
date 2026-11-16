@@ -17,13 +17,13 @@ export interface TargetReloadOutcome {
 
 /** One way of reloading, and what it did. */
 export type ReloadAttempt =
-  | (AttemptOutcome & { method: 'dev-server' | 'runtime' | 'device' })
+  | (AttemptOutcome & { method: 'dev-server' | 'device' })
   /**
-   * Rung 1 while the scope skips an app: CDP `Page.reload` to each of this worktree's targets, and
-   * no broadcast (llp/0005 §Target owner).
+   * The mechanisms proved on the target they act on: rung 1's CDP `Page.reload` while the scope
+   * skips an app (llp/0005 §Target owner), and a pinned `--method runtime`.
    */
   | (AttemptOutcome & {
-      method: 'page-reload';
+      method: 'page-reload' | 'runtime';
       outcomes: TargetReloadOutcome[];
     });
 
@@ -68,7 +68,7 @@ const KEEPS_PAGE_ID: Record<ReloadAttempt['method'], string | null> = {
   'page-reload': 'the app answered Page.reload, which keeps its page id',
   device: 'a relaunched app registers again under the page id it had',
   'dev-server': null,
-  runtime: null,
+  runtime: 'the app reloaded itself, which keeps its page id',
 };
 
 /** {@link KEEPS_PAGE_ID} for the attempt the run settled on. */
@@ -80,7 +80,7 @@ export function keepsPageId(attempts: readonly ReloadAttempt[]): string | null {
 /** The witnesses behind the aggregate context-replaced label and human report. */
 export function contextReplacedTargets(attempts: readonly ReloadAttempt[]): TargetReloadOutcome[] {
   return attempts.flatMap((attempt) =>
-    attempt.method === 'page-reload'
+    attempt.method === 'page-reload' || attempt.method === 'runtime'
       ? attempt.outcomes.filter((each) => each.outcome === 'context-replaced')
       : []
   );

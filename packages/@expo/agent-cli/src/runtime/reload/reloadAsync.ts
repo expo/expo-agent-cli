@@ -555,12 +555,18 @@ async function climbLadderAsync(
   // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
   // a less predictable one.
   if (method == null && options.method === 'runtime') {
-    const attempt = await reloadOverRuntimeAsync(actionConnection, observedApps);
+    const attempt = await reloadOverRuntimeAsync(
+      devServerUrl,
+      prepared.classifiedTargets.read,
+      remainingMs()
+    );
     attempts.push(attempt);
-    if (attempt.ok) {
-      // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
-      // made" and the proof is the wait below.
+    // A call that ran and proved nothing still ran: the wait below watches for a bundle.
+    if (attempt.delivered) {
       method = 'runtime';
+    }
+    if (attempt.ok) {
+      mechanismProof = 'debugger-context-replaced';
     }
   }
 

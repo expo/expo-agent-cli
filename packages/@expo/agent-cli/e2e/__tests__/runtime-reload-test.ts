@@ -18,10 +18,13 @@ import {
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
+import { runtimeTarget } from '../runtimeTargetFixtures';
 import {
   appStartedMarkerPath,
   BOOTED_SIMULATOR,
+  installStubAdbAsync,
   installStubXcrunAsync,
+  SIMULATOR_NAME,
   SIMULATOR_UDID,
 } from './installedAppStubs';
 
@@ -29,7 +32,12 @@ import {
 type ReloadReport = {
   reloaded: boolean;
   method: 'dev-server' | 'runtime' | 'device' | null;
-  verifiedBy: 'message-socket-peers' | 'fresh-debugger-target' | 'app-relaunch' | null;
+  verifiedBy:
+    | 'message-socket-peers'
+    | 'fresh-debugger-target'
+    | 'app-relaunch'
+    | 'debugger-context-replaced'
+    | null;
   devServerUrl: string;
   devServerSource: string;
   appsConnected: number;
@@ -56,7 +64,7 @@ type ReloadReport = {
   url: string | null;
   platform: string | null;
   deviceId: string | null;
-  attempts: { method: string; ok: boolean; reason: string }[];
+  attempts: { method: string; ok: boolean; delivered?: boolean | null; reason: string }[];
   waitedMs: number;
   followups: { id: string; command: string; why: string }[];
 };
@@ -672,54 +680,6 @@ describe('an app the command socket cannot see', () => {
     reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'device-1' },
   };
 
-  /** The reload the runtime method sends, which is the only expression this stub answers. */
-  function reloadResponder(): (expression: string) => unknown {
-    return (expression) => {
-      if (!expression.includes('reloadAppAsync')) {
-        return undefined;
-      }
-      // The probe carries its own diagnostic strings; the call does not.
-      return expression.includes('no-expo-global') ? 'ready' : 'sent';
-    };
-  }
-
-  it('reloads the app the debugger target list names, when --method runtime asks', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({
-      projectRoot,
-      // The app is connected: this is the list every other reading command in this CLI uses.
-      targets: [CDP_TARGET],
-      // And it is invisible on the command socket, which is what a cloud app over a tunnel was.
-      messagePeers: {},
-      inspectorEvaluate: reloadResponder(),
-      reloadTargets: 'reconnect',
-    });
-    const releaseLock = await holdLockForAsync(projectRoot, stub);
-    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
-      simulators: [BOOTED_SIMULATOR],
-    });
-
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:reload', '--method', 'runtime', '--json'],
-        { env: stubExpoEnv(projectRoot) }
-      );
-
-      expect(result.exitCode).toBe(0);
-      const report: ReloadReport = JSON.parse(result.stdout);
-      expect(report.reloaded).toBe(true);
-      expect(report.method).toBe('runtime');
-      expect(report.verifiedBy).toBe('fresh-debugger-target');
-      expect(report.appsReconnected).toBeGreaterThan(0);
-      // And nothing went near a simulator.
-      expect(readXcrun()).toEqual([]);
-    } finally {
-      releaseLock();
-      await stub.close();
-    }
-  });
-
   // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — wave 21.
   //
   // The K2 shape at the process boundary: the app is in `/json/list` and holds no client on the
@@ -818,32 +778,119 @@ describe('an app the command socket cannot see', () => {
       await stub.close();
     }
   });
+});
 
-  it('takes --method runtime on its own', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
+// @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — `--method runtime`.
+//
+// The stub app reloads only on `expo.reloadAppAsync(reason)`, as SDK 58 does, and keeps its page id
+// (`stale`), so the only proof is a new JavaScript context on the same target.
+describe('runtime:reload --method runtime', () => {
+  const RELOAD_CALL = /reloadAppAsync\(/;
+
+  async function onPlatformAsync(platform: 'ios' | 'android') {
+    const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+    if (platform === 'ios') {
+      await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+      return {
+        root,
+        env: { AGENT_CLI_NO_DEVICE: '0' },
+        target: runtimeTarget('ios', { deviceName: SIMULATOR_NAME, appId: 'dev.example.app' }),
+      };
+    }
+    await installStubXcrunAsync(root, { simulators: [] });
+    const adb = await installStubAdbAsync(root, 'dev.example.app');
+    return {
+      root,
+      env: { ...adb.env, AGENT_CLI_NO_DEVICE: '0' },
+      target: runtimeTarget('android', {
+        deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+        appId: 'dev.example.app',
+      }),
+    };
+  }
+
+  async function reloadAsync(
+    platform: 'ios' | 'android',
+    stubOptions: Parameters<typeof startStubDevServerAsync>[0] = {}
+  ) {
+    const { root, env, target } = await onPlatformAsync(platform);
+    const evaluated: string[] = [];
     const stub = await startStubDevServerAsync({
-      projectRoot,
-      targets: [CDP_TARGET],
+      projectRoot: root,
+      targets: [target],
       messagePeers: {},
-      inspectorEvaluate: reloadResponder(),
-      reloadTargets: 'reconnect',
+      reloadTargets: 'stale',
+      inspectorEvaluate: (expression) => {
+        evaluated.push(expression);
+        return RELOAD_CALL.test(expression) ? 'sent' : undefined;
+      },
+      ...stubOptions,
     });
-    const releaseLock = await holdLockForAsync(projectRoot, stub);
-
     try {
+      const started = Date.now();
       const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:reload', '--method', 'runtime', '--json'],
-        { env: stubExpoEnv(projectRoot) }
+        root,
+        [
+          'runtime:reload',
+          `--${platform}`,
+          '--method',
+          'runtime',
+          '--dev-server-url',
+          stub.url,
+          '--timeout',
+          '10s',
+          '--json',
+          '--no-followups',
+        ],
+        { reject: false, env }
       );
-
-      const report: ReloadReport = JSON.parse(result.stdout);
-      expect(report.method).toBe('runtime');
-      // Only the one method was tried, because the caller pinned it.
-      expect(report.attempts.map((attempt) => attempt.method)).toEqual(['runtime']);
+      return {
+        result,
+        report: JSON.parse(result.stdout) as ReloadReport,
+        elapsedMs: Date.now() - started,
+        reloadCall: evaluated.find((expression) => RELOAD_CALL.test(expression)),
+      };
     } finally {
-      releaseLock();
       await stub.close();
     }
+  }
+
+  it.each(['ios', 'android'] as const)(
+    'passes the reason SDK 58 requires and proves the reload on the same page id (%s)',
+    async (platform) => {
+      const { result, report, reloadCall } = await reloadAsync(platform);
+      expect(result.exitCode, result.all).toBe(0);
+      expect(report).toMatchObject({
+        reloaded: true,
+        method: 'runtime',
+        verifiedBy: 'debugger-context-replaced',
+      });
+      expect(report.attempts.map((attempt) => attempt.method)).toEqual(['runtime']);
+      expect(reloadCall).toMatch(/reloadAppAsync\((['"])@expo\/agent-cli/);
+    }
+  );
+
+  it('fails at once for an app with no expo global', async () => {
+    const { result, report, elapsedMs } = await reloadAsync('ios', {
+      inspectorEvaluate: (expression) =>
+        RELOAD_CALL.test(expression) ? 'no-expo-global' : undefined,
+    });
+    expect(result.exitCode, result.all).toBe(20);
+    expect(report.method).toBeNull();
+    expect(report.attempts).toEqual([
+      expect.objectContaining({ method: 'runtime', ok: false, delivered: false }),
+    ]);
+    expect(report.attempts[0]!.reason).toContain('no "expo" global');
+    // Not the 5 s proof window: an app with nothing to call is known after one answer.
+    expect(elapsedMs).toBeLessThan(5000);
+  });
+
+  it('reports a lost answer as delivered, waits for a bundle, and never relaunches', async () => {
+    const { result, report } = await reloadAsync('ios', { reloadAppAsyncAnswer: 'lost' });
+    expect(result.exitCode, result.all).toBe(22);
+    expect(report.method).toBe('runtime');
+    expect(report.attempts).toEqual([
+      expect.objectContaining({ method: 'runtime', ok: false, delivered: true }),
+    ]);
   });
 });

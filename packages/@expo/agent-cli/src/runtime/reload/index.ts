@@ -77,7 +77,7 @@ export const runtimeReloadHelp: CommandHelp = {
     `The command socket picks the rung. dev-server broadcasts a reload where that socket holds a`,
     `client; where it does not, device relaunches, which costs the app's JavaScript state.`,
     `The rung is the socket, not the location: --eas only names the device backend.`,
-    `--method runtime asks the app to reload itself with expo.reloadAppAsync(), which auto never`,
+    `--method runtime asks the app to reload itself with expo.reloadAppAsync(reason), which auto never`,
     `picks: on Expo Go that same call closes the app instead [observed — SDK 57, iOS simulator].`,
     `The entry bundle is checked first, so a reload never lands on one that does not compile.`,
     `A reload is reported only when it was observed — a new debugger target, or a new Bundled`,
