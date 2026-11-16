@@ -1,4 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
 //
 // The project states the fixture matrix does not have. Every other e2e file copies one of six
 // fixtures into a temporary directory that looks the same every time; this one asks what happens
