@@ -328,6 +328,31 @@ describe('@expo/agent-cli runtime:reload', () => {
     }
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder — the lock proves the
+  // server is this project's and alive, so its first answer gets the `/status` budget, not the
+  // port scan's 800 ms [observed — Windows CI, 2026-11-12: NO_DEV_SERVER for a held lock whose
+  // stub "did not answer (no answer within 800ms)"].
+  it('waits past the port-scan budget for the dev server its lock names', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [EXPO_GO_TARGET],
+      targetsDelayMs: 1200,
+    });
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
+
+    try {
+      const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
+        env: stubExpoEnv(projectRoot),
+      });
+
+      expect(JSON.parse(result.stdout)).toMatchObject({ reloaded: true });
+    } finally {
+      releaseLock();
+      await stub.close();
+    }
+  });
+
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — friction run 4, F45.
   // Peer churn proves the app acted on the broadcast. It does not prove the app came back, and
   // this is the case where it did not: the two facts have to be read separately or the command
@@ -348,7 +373,7 @@ describe('@expo/agent-cli runtime:reload', () => {
         { env: stubExpoEnv(projectRoot), reject: false }
       );
 
-      expect(result.exitCode).toBe(22);
+      expect(result.exitCode, result.all).toBe(22);
       const report: ReloadReport = JSON.parse(result.stdout);
       expect(report.reloaded).toBe(true);
       expect(report.appsConnected).toBe(0);
