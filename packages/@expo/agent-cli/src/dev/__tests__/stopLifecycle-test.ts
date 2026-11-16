@@ -291,6 +291,19 @@ it.each([
     `How: run "${PROGRAM_PREFIX} dev:stop --release" again.`,
     'Some devices could not be released',
   ],
+  [
+    'the kill step when an Android release kill failed',
+    () =>
+      vi
+        .mocked(releaseWorktreeDevicesAsync)
+        .mockImplementation(async (_root, options) =>
+          options?.platform === 'android'
+            ? [{ ...device, released: false, reason: 'kill EPERM\nHow: run "kill 77".' }]
+            : []
+        ),
+    'How: run "kill 77".',
+    'Some devices could not be released',
+  ],
 ])(
   'dev:stop --release ends stderr with one How line, %s',
   async (_case, arrange, expectedHow, sentence) => {

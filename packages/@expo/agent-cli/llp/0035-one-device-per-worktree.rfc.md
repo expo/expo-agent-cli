@@ -239,7 +239,7 @@ A reap reports device cleanup only (`devServerCleanup: 'not-checked'`). A delete
 
 ## Release
 
-- **Release** lets go of the own local bindings, or one platform's. Under the lock it acts only when the file still holds the binding it read: the same root, `boundAt` and device, and for a `spawned` instance the same AVD, port and pid. A renewed `expiresAt` is the same binding. So stale inventory, an earlier cleanup or a replacement binding never loses its file or its device. Release never reaps.
+- **Release** lets go of the own local bindings, or one platform's. Under the lock it acts only when the file still holds the binding it read: the same root, `boundAt` and device, and for a `spawned` instance the same AVD, port and pid. A renewed `expiresAt` is the same binding. So stale inventory, an earlier cleanup or a replacement binding never loses its file or its device. Release never reaps. A failed Android kill of a `spawned` instance that still runs leaves its `reason` ending with the manual step `kill <pid>`, and `dev:stop` shows that step in `deviceError`, as the reap does (§Reap).
 - A plain `dev:stop` (Decision 8) reports the devices as kept. Every `dev:stop`, with or without `--release`, runs the reap once, whatever the stop outcome; release itself never reaps. Under `AGENT_CLI_NO_DEVICE=1`, no `dev:stop` releases, reports a local binding or reaps; `dev:stop --eas` still stops the sessions.
 - `dev:stop --release` lets go of the local bindings only when this worktree's own server stopped or is absent. It checks the own dev-server lock again first: a remaining or replacement server keeps the devices, and so does a dev server that answers on `--port` but holds no lock of this worktree, because a missing lock proves nothing. A listener on `--port` that is not an Expo dev server does not keep them. A `finishing` lock ([[0004-smart-start-and-project-state]]) counts as no server.
 - A refused stop reports the listener's measured state; what it cannot identify is `null`.
@@ -342,7 +342,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 12. Without a cap, each living worktree keeps one parked simulator with its build on disk until the worktree is removed.
 13. A worktree created at a deleted worktree's path inherits its bindings, devices and session. The bindings of an unmounted volume are stale, so its simulator is deleted and its emulator killed.
 14. The newest iOS runtime may list only a device no app renders on [observed — iOS 27.1 lists only iPhone Duo, 2026-10-08]; the choice prefers a mainstream iPhone across runtimes.
-15. A device whose delete, kill or stop failed after another binding took its file keeps running with no file. The failure names the device and nothing retries; a failed Android release kill does not print the `kill <pid>` step.
+15. A device whose delete, kill or stop failed after another binding took its file keeps running with no file. The failure names the device and nothing retries.
 16. Two EAS opens at once on two platforms can each bind a session. The guard drives only the one the dotenv names; the other bills until `dev:stop --eas`, which stops every cloud binding of the worktree, or until its idle timeout.
 17. Under `AGENT_CLI_NO_DEVICE=1` no renewal timer runs, but `dev --eas` still binds its session, so that binding expires 60 min after the bind or a verb's last renewal while Metro runs, and another worktree's reap can then stop the `started` session.
 

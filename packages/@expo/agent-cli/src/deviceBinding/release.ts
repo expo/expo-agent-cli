@@ -4,6 +4,7 @@
 
 import { killEmulatorIfOurs } from './android';
 import { clearInspectCache } from './inspect';
+import { killStep, withHow } from './manualStep';
 import { listSimulatorAsync, shutdownSimulatorAsync } from './ios';
 import {
   bindingPathFor,
@@ -151,7 +152,9 @@ async function releaseAndroidAsync(
     name: origin.kind === 'spawned' ? `${origin.avd} on ${serial}` : serial,
     released: !stillRunning,
     shutDown: killed?.killed ?? false,
-    reason: killed?.reason ?? null,
+    reason: stillRunning
+      ? withHow(killed?.reason ?? 'the kill failed', killStep(origin.emulatorPid))
+      : (killed?.reason ?? null),
   };
 }
 
