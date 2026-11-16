@@ -5,8 +5,8 @@
 // The dev server relays a broadcast to every app that loads from its port. While the run's scope
 // skips an app (another worktree's, or one beside the bound device), a broadcast would reload that
 // app too. Then rung 1 sends CDP `Page.reload` to this worktree's own targets instead, and proves it
-// on those targets. An iOS EAS session takes `Page.reload` too: its development build ignores the
-// broadcast. Everything that follows from that choice is decided here, once.
+// on those targets. An iOS EAS session takes `Page.reload` too: no broadcast reaches its app through
+// the tunnel. Everything that follows from that choice is decided here, once.
 
 import type { NativePlatform } from '../../plan/types';
 import { probeDevServerAsync } from '../devServer';
@@ -260,7 +260,8 @@ export const CHURN_NOT_ASKED: CommandSocketChurn = {
 
 /**
  * `skipped-app`: a broadcast would reload an app this run skips. `ios-eas-session`: the SDK 58 iOS
- * development build on an EAS session ignores the broadcast (llp/0005 §How it reloads).
+ * app's command socket on an EAS session cannot reach the dev server through the tunnel, so no broadcast
+ * arrives (llp/0005 §How it reloads).
  */
 export type InPlaceTrigger = 'skipped-app' | 'ios-eas-session';
 
@@ -564,9 +565,12 @@ async function broadcastAsync(
       };
 }
 
+const IOS_SESSION_CLAUSE =
+  "on an iOS Expo simulator session the app's command socket cannot reach the dev server through the tunnel";
+
 /**
  * Rung 1 as `Page.reload` to the own targets. The scope skips an app, or it is an iOS EAS session
- * whose development build ignores the broadcast ({@link rungOnePolicy}); the reason names which.
+ * whose app no broadcast reaches ({@link rungOnePolicy}); the reason names which.
  */
 async function pageReloadAsync(
   devServerUrl: string,
@@ -576,7 +580,7 @@ async function pageReloadAsync(
   const skippedApp = policy.trigger === 'skipped-app';
   const why = skippedApp
     ? `No broadcast was sent, because the dev server relays it to every app, and this run skips ${skips} of them (\`skippedApps\`).`
-    : 'No broadcast was sent: the app on an iOS Expo simulator session ignores it.';
+    : `No broadcast was sent: ${IOS_SESSION_CLAUSE}.`;
   const { kind, attempt, clause } = await reloadInPlaceAsync(devServerUrl, {
     mechanism: 'page-reload',
     own,
@@ -587,7 +591,7 @@ async function pageReloadAsync(
     ...CHURN_NOT_ASKED,
     reason: skippedApp
       ? "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app"
-      : "the dev server's command socket was not asked: the app on an iOS Expo simulator session ignores the broadcast",
+      : `the dev server's command socket was not asked: ${IOS_SESSION_CLAUSE}`,
   };
   return kind === 'proved'
     ? { kind, proof: 'debugger-context-replaced', attempt, churn }
