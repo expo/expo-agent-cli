@@ -215,6 +215,7 @@ it.each([
     targets: ['cloud', 'ended'],
     silent: ['cloud', 'ended'],
     read: null,
+    restart: true,
   },
   {
     name: 'the other app closes its socket',
@@ -234,6 +235,7 @@ it.each([
     targets: ['cloud', 'phone'],
     silent: ['cloud'],
     read: null,
+    restart: true,
   },
 ] satisfies {
   name: string;
@@ -242,9 +244,11 @@ it.each([
   silent: AppId[];
   closing?: AppId[];
   read: AppId | null;
+  /** The refusal says to restart the dev server, not to close apps. */
+  restart?: boolean;
 }[])(
   'eval with ios-cloud beside an app that no local device claims: $name',
-  async ({ flag, targets, silent, closing = [], read }) => {
+  async ({ flag, targets, silent, closing = [], read, restart = false }) => {
     const { root, env } = await setupBoundAsync('ios-cloud');
     const evaluated: string[] = [];
     const server = await startStubDevServerAsync({
@@ -278,7 +282,11 @@ it.each([
         expect(scopeLines).toEqual([sessionLine]);
       } else {
         expect(result.exitCode, result.all).toBe(1);
-        expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
+        const { code, message } = JSON.parse(result.stdout).error;
+        expect(code).toBe('NO_APP_CONNECTED');
+        expect(message).toContain(
+          restart ? 'dev:stop" keeps the session' : 'close the apps on this dev server'
+        );
         expect(scopeLines).toEqual([]);
       }
       expect(evaluated).toEqual(read ? [read] : []);
