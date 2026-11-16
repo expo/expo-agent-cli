@@ -19,7 +19,7 @@ const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersio
  *
  * `expo config --json --type public` evaluates a dynamic `app.config.js` with its environment,
  * which is the only way to learn the runtimeVersion of a project whose config is code, or whose
- * config plugins set it. It is the exception to the one app-config reader.
+ * config plugins set it. It is one of the readers that spawn `expo config`.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Implemented in v1
  *
