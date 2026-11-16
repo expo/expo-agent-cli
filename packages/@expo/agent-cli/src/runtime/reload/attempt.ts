@@ -19,17 +19,38 @@ export interface TargetReloadOutcome {
 }
 
 /** One way of reloading, and what it did. */
-export type ReloadAttempt =
-  | (AttemptOutcome & { method: 'dev-server' | 'device' })
-  /**
-   * A reload that keeps the app's process, proved on each own target: CDP `Page.reload` (rung 1
-   * while the scope skips an app or is an iOS EAS session) or `expo.reloadAppAsync(reason)`
-   * (`--method runtime`). llp/0005 §How it reloads.
-   */
-  | (AttemptOutcome & {
-      method: 'page-reload' | 'runtime';
-      outcomes: TargetReloadOutcome[];
-    });
+export type ReloadAttempt = (AttemptOutcome & { method: 'dev-server' | 'device' }) | InPlaceAttempt;
+
+/**
+ * A reload that keeps the app's process, proved on each own target: CDP `Page.reload` (rung 1
+ * while the scope skips an app or is an iOS EAS session) or `expo.reloadAppAsync(reason)` (a pinned
+ * `--method runtime`). llp/0005 §How it reloads.
+ */
+export type InPlaceAttempt = AttemptOutcome & {
+  method: 'page-reload' | 'runtime';
+  outcomes: TargetReloadOutcome[];
+};
+
+export function isInPlaceAttempt(attempt: ReloadAttempt): attempt is InPlaceAttempt {
+  return attempt.method === 'page-reload' || attempt.method === 'runtime';
+}
+
+/** The method a reload that keeps the app's process reports: rung 1's, or a pinned `--method runtime`. */
+export type InPlaceMethod = 'dev-server' | 'runtime';
+
+/**
+ * What a reload that keeps the app's process leaves for the rest of the run. `proved`: done.
+ * `observe`: a mechanism ran, and the shared observations (a fresh target, a bundle) decide; nothing
+ * relaunches. `relaunch`: in `auto`, the relaunch follows, opened by `why`.
+ */
+export type Settled =
+  | {
+      kind: 'proved';
+      method: InPlaceMethod;
+      proof: 'message-socket-peers' | 'debugger-context-replaced';
+    }
+  | { kind: 'observe'; method: InPlaceMethod }
+  | { kind: 'relaunch'; method: InPlaceMethod | null; why: string };
 
 interface AttemptOutcome {
   /** The app was reloaded by this method. */
@@ -84,7 +105,7 @@ export function keepsPageId(attempts: readonly ReloadAttempt[]): string | null {
 /** The witnesses behind the aggregate context-replaced label and human report. */
 export function contextReplacedTargets(attempts: readonly ReloadAttempt[]): TargetReloadOutcome[] {
   return attempts.flatMap((attempt) =>
-    'outcomes' in attempt
+    isInPlaceAttempt(attempt)
       ? attempt.outcomes.filter((each) => each.outcome === 'context-replaced')
       : []
   );

@@ -2,7 +2,14 @@
 import type { CdpTarget } from '../../cdpClient';
 import { classifyTargets, READ_EVERY_TARGET, type TargetSelection } from '../../targetSelection';
 import { makeDeviceInventory } from '../../__tests__/targetSelectionFixtures';
-import { CHURN_NOT_ASKED, rungOnePolicy, settleRungOne, type RungOneOutcome } from '../rungOne';
+import type { ReloadMethod } from '../resolveOptions';
+import {
+  CHURN_NOT_ASKED,
+  rungOnePolicy,
+  settleRungOne,
+  type RungOneOutcome,
+  type RungOnePolicy,
+} from '../rungOne';
 
 const CLONE = 'agent-cli c4ed0a60';
 const deviceInventory = makeDeviceInventory({
@@ -58,7 +65,15 @@ const FLAG_ANDROID: TargetSelection = {
 };
 
 describe('what rung 1 does, and which bundle proves it', () => {
-  it.each([
+  it.each<{
+    name: string;
+    targets: CdpTarget[];
+    targetSelection: TargetSelection;
+    unread?: string;
+    method?: ReloadMethod;
+    mechanism?: RungOnePolicy['mechanism'];
+    bundlePlatforms: RungOnePolicy['bundlePlatforms'];
+  }>([
     {
       name: 'broadcasts, and any bundle proves, when no app is skipped',
       targets: [ownIos, ownAndroid],
@@ -126,33 +141,34 @@ describe('what rung 1 does, and which bundle proves it', () => {
       bundlePlatforms: ['ios'],
     },
     {
-      name: 'keeps Page.reload on an iOS EAS session when the fresh read failed',
-      targets: [onCloudIos],
-      targetSelection: CLOUD_IOS,
-      unread: 'the target list could not be read again',
-      mechanism: 'page-reload',
-      bundlePlatforms: ['ios'],
-    },
-    {
       name: 'broadcasts on an Android EAS session',
       targets: [onCloudAndroid],
       targetSelection: CLOUD_ANDROID,
       mechanism: 'broadcast',
       bundlePlatforms: ['android'],
     },
-  ])('$name', ({ targets, targetSelection, unread = null, mechanism, bundlePlatforms }) => {
-    const policy = rungOnePolicy(
-      classifyTargets(targets, targetSelection, deviceInventory),
-      targetSelection,
-      deviceInventory,
-      unread
-    );
+    {
+      // `--method runtime` reloads only `read`: an app nothing places cannot fetch for it.
+      name: 'a pinned --method runtime beside an app nothing places: its own bundle proves',
+      targets: [ownIos, elsewhere],
+      targetSelection: FLAG_IOS,
+      method: 'runtime',
+      bundlePlatforms: ['ios'],
+    },
+  ])(
+    '$name',
+    ({ targets, targetSelection, unread = null, method = 'auto', mechanism, bundlePlatforms }) => {
+      const policy = rungOnePolicy(
+        classifyTargets(targets, targetSelection, deviceInventory),
+        targetSelection,
+        deviceInventory,
+        { method, unread }
+      );
 
-    expect({ mechanism: policy.mechanism, bundlePlatforms: policy.bundlePlatforms }).toEqual({
-      mechanism,
-      bundlePlatforms,
-    });
-  });
+      // Rung 1 does not run under `--method runtime`, so its row names no mechanism.
+      expect(policy).toMatchObject({ bundlePlatforms, ...(mechanism ? { mechanism } : {}) });
+    }
+  );
 });
 
 describe('what rung 1 leaves for the rest of the run', () => {

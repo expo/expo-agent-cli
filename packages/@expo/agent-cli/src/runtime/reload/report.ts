@@ -299,7 +299,7 @@ function relaunchCommand(report: ReloadResultJson, options: ReloadOptions): stri
   return `${PROGRAM_PREFIX} runtime:reload${eas ? ' --eas' : ''} --method device`;
 }
 
-/** The in-place mechanisms this run sent, in the words of what they are. */
+/** The mechanisms this run delivered, in the words of what they are. */
 function triedMechanisms(report: ReloadResultJson): string {
   const tried = report.attempts.flatMap((attempt) => {
     if (attempt.method === 'device') return [];
@@ -308,12 +308,7 @@ function triedMechanisms(report: ReloadResultJson): string {
       // socket was never reached.
       return attempt.delivered == null ? [] : ['the broadcast'];
     }
-    const sent =
-      'outcomes' in attempt &&
-      attempt.outcomes.some(
-        (each) => each.outcome !== 'unsupported' && each.outcome !== 'unmarkable'
-      );
-    return sent ? [inPlaceLabel(attempt.method)] : [];
+    return attempt.delivered ? [inPlaceLabel(attempt.method)] : [];
   });
   return tried.length > 0 ? tried.join(' and ') : 'this run';
 }

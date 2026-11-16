@@ -29,9 +29,10 @@ import {
   type SkippedApp,
 } from '../targetSelection';
 import { platformOfTarget } from '../targetPlatform';
-import type { ReloadAttempt } from './attempt';
+import type { ReloadAttempt, Settled } from './attempt';
 import { debugEvent } from './events';
 import { reloadInPlaceAsync } from './inPlace';
+import type { ReloadMethod } from './resolveOptions';
 
 /**
  * How long the app's message socket has to come back before the broadcast is judged to have done
@@ -44,11 +45,14 @@ import { reloadInPlaceAsync } from './inPlace';
 const PEER_CHURN_TIMEOUT_MS = 8000;
 
 /**
- * How long `Page.reload` has to prove itself on the own targets, cleanup included. Like the churn
- * window, it is separate from `--timeout`: a proof that does not come leaves the rest of the budget
- * to the relaunch.
+ * How long `Page.reload` has to prove itself on the own targets, cleanup included, and the relist
+ * before it. Like the churn window, it is separate from `--timeout`: a proof that does not come
+ * leaves the rest of the budget to the relaunch.
  */
-export const PAGE_RELOAD_PROOF_MS = 8000;
+const PAGE_RELOAD_PROOF_MS = 8000;
+
+/** How often an unlisted session app is looked for again. */
+const RELIST_INTERVAL_MS = 500;
 
 /** How often the peers are read while waiting for the app to reconnect. */
 const PEER_POLL_INTERVAL_MS = 250;
@@ -263,7 +267,7 @@ export const CHURN_NOT_ASKED: CommandSocketChurn = {
  * app's command socket on an EAS session cannot reach the dev server through the tunnel, so no broadcast
  * arrives (llp/0005 §How it reloads).
  */
-export type InPlaceTrigger = 'skipped-app' | 'ios-eas-session';
+type InPlaceTrigger = 'skipped-app' | 'ios-eas-session';
 
 /** What rung 1 does on this run, and which evidence may prove it. */
 export type RungOnePolicy = {
@@ -285,9 +289,14 @@ export type RungOnePolicy = {
     | { mechanism: 'none'; unread: string }
   );
 
-/** `iosEasInPlace: false` is a pinned `--method dev-server`: it broadcasts, as it names. */
-export interface RungOneChoice {
-  iosEasInPlace?: boolean;
+/**
+ * The run's input to rung 1. `method` is the run's `--method`: a pinned `dev-server` broadcasts, as
+ * it names, also on an iOS EAS session, and a pinned `runtime` reloads only `read` targets. `smoke`
+ * passes `auto`. `unread` says why the fresh read failed, so this is an older observation.
+ */
+export interface RungOneInput {
+  method: ReloadMethod;
+  unread?: string | null;
 }
 
 /**
@@ -302,21 +311,22 @@ export function rungOnePolicy(
   classifiedTargets: ClassifiedTargets,
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
-  unread: string | null = null,
-  { iosEasInPlace = true }: RungOneChoice = {}
+  { method, unread = null }: RungOneInput
 ): RungOnePolicy {
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
   const trigger: InPlaceTrigger | null =
     classifiedTargets.skipped.length > 0
       ? 'skipped-app'
-      : iosEasInPlace &&
+      : method !== 'dev-server' &&
           targetSelection.device?.backend === 'cloud' &&
           targetSelection.platform?.value === 'ios'
         ? 'ios-eas-session'
         : null;
   const broadcast = trigger == null;
-  const outside = broadcast
+  // A broadcast reaches every listed app. `Page.reload` and `--method runtime` reach only `read`.
+  const reachesAll = broadcast && method !== 'runtime';
+  const outside = reachesAll
     ? [
         ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
         ...classifiedTargets.undetermined.map(() => null),
@@ -331,8 +341,8 @@ export function rungOnePolicy(
       : unread == null
         ? { mechanism: 'broadcast' }
         : { mechanism: 'none', unread }),
-    skippedApps: broadcast ? [] : skippedAppsOf(classifiedTargets),
-    reachedOutside: broadcast ? outside.length : 0,
+    skippedApps: reachesAll ? [] : skippedAppsOf(classifiedTargets),
+    reachedOutside: reachesAll ? outside.length : 0,
     bundlePlatforms:
       outside.length === 0 && scoped === 'any'
         ? 'any'
@@ -352,8 +362,7 @@ export function prepareRungOne(
   targets: CdpTarget[],
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
-  unread: string | null = null,
-  choice: RungOneChoice = {}
+  input: RungOneInput
 ) {
   const classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
   return {
@@ -361,8 +370,9 @@ export function prepareRungOne(
     targetSelection,
     deviceInventory,
     classifiedTargets,
-    choice,
-    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory, unread, choice),
+    /** The relist prepares again with the same method. */
+    method: input.method,
+    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory, input),
   };
 }
 export type PreparedRungOne = ReturnType<typeof prepareRungOne>;
@@ -381,8 +391,8 @@ export async function prepareRungOneAsync(
   {
     budgetMs,
     preflight,
-    choice = {},
-  }: { budgetMs: number; preflight: RungOneObservation | null; choice?: RungOneChoice }
+    method,
+  }: { budgetMs: number; preflight: RungOneObservation | null; method: ReloadMethod }
 ): Promise<PreparedRungOne> {
   const deadline = Date.now() + Math.max(1, budgetMs);
   const left = () => Math.max(1, deadline - Date.now());
@@ -391,7 +401,7 @@ export async function prepareRungOneAsync(
       targets: [],
       deviceInventory: EMPTY_DEVICE_INVENTORY,
     };
-    return prepareRungOne(targets, targetSelection, deviceInventory, unread, choice);
+    return prepareRungOne(targets, targetSelection, deviceInventory, { method, unread });
   };
   const probe = await probeDevServerAsync(devServerUrl, { signal: AbortSignal.timeout(left()) });
   if (!probe.reachable) {
@@ -410,12 +420,42 @@ export async function prepareRungOneAsync(
   ) {
     return keep('the device tools did not answer again');
   }
-  return prepareRungOne(probe.targets, targetSelection, deviceInventory, null, choice);
+  return prepareRungOne(probe.targets, targetSelection, deviceInventory, { method });
+}
+
+/** The end of rung 1's window: the relist and `Page.reload` share it. */
+export function rungOneDeadline(budgetMs: number): number {
+  return Date.now() + Math.min(Math.max(0, budgetMs), PAGE_RELOAD_PROOF_MS);
+}
+
+/**
+ * Right after `dev`, an iOS EAS session's app may not be listed yet. Read the list again until an
+ * own target shows, inside rung 1's window, so `Page.reload` gets what is left of it.
+ */
+export async function prepareOwnListedAsync(
+  devServerUrl: string,
+  projectRoot: string,
+  prepared: PreparedRungOne,
+  deadline: number
+): Promise<PreparedRungOne> {
+  if (prepared.policy.trigger !== 'ios-eas-session') {
+    return prepared;
+  }
+  let current = prepared;
+  while (current.classifiedTargets.read.length === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, RELIST_INTERVAL_MS));
+    current = await prepareRungOneAsync(devServerUrl, projectRoot, prepared.targetSelection, {
+      budgetMs: Math.max(1, deadline - Date.now()),
+      preflight: current,
+      method: prepared.method,
+    });
+  }
+  return current;
 }
 
 /** What rung 1 came to. `proved` and `acted` keep `auto` on this rung; the rest relaunch. */
 export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn } & (
-  | { kind: 'proved'; proof: 'message-socket-peers' | 'debugger-context-replaced' }
+  | { kind: 'proved'; proof: Extract<Settled, { kind: 'proved' }>['proof'] }
   /**
    * The peers churned beside a listed app outside `read`: the churn may be that app's, so a fresh
    * own target or a bundle decides.
@@ -433,24 +473,7 @@ export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn
     }
 );
 
-/** The rungs that keep the app's process, and the method each one reports. */
-export type InPlaceMethod = 'dev-server' | 'runtime';
-
-/**
- * What the in-place rungs leave for the rest of the run. `proved`: done. `observe`: a mechanism
- * ran, and the shared observations (a fresh target, a bundle) decide; nothing relaunches.
- * `relaunch`: in `auto`, the relaunch follows, opened by `why`.
- */
-export type Settled =
-  | {
-      kind: 'proved';
-      method: InPlaceMethod;
-      proof: Extract<RungOneOutcome, { kind: 'proved' }>['proof'];
-    }
-  | { kind: 'observe'; method: InPlaceMethod }
-  | { kind: 'relaunch'; method: InPlaceMethod | null; why: string };
-
-/** {@link Settled} for rung 1 alone. */
+/** {@link Settled} for rung 1. */
 export function settleRungOne(outcome: RungOneOutcome): Settled {
   switch (outcome.kind) {
     case 'proved':
@@ -469,14 +492,18 @@ export function settleRungOne(outcome: RungOneOutcome): Settled {
  * Run rung 1: the broadcast, or `Page.reload` to the own targets while the scope skips an app or
  * is an iOS EAS session.
  *
- * @param budgetMs the caller's budget. The rung's own proof is watched for no longer (F95), and
- * each mechanism has its own window inside it: a targeted reload shares one absolute deadline of
- * at most {@link PAGE_RELOAD_PROOF_MS} across every target and all proof phases. The broadcast
- * retains its minimum peer observation window.
+ * @param budgetMs the caller's budget. The broadcast's peer churn is watched for no longer (F95),
+ * and keeps its minimum observation window.
+ * @param deadline the end of rung 1's window ({@link rungOneDeadline}), which `Page.reload` shares
+ * across every target and all proof phases.
  */
 export async function runRungOneAsync(
   devServerUrl: string,
-  { prepared, budgetMs }: { prepared: PreparedRungOne; budgetMs: number }
+  {
+    prepared,
+    budgetMs,
+    deadline,
+  }: { prepared: PreparedRungOne; budgetMs: number; deadline: number }
 ): Promise<RungOneOutcome> {
   const { policy, classifiedTargets, targets } = prepared;
   switch (policy.mechanism) {
@@ -496,7 +523,7 @@ export async function runRungOneAsync(
       return await pageReloadAsync(devServerUrl, {
         policy,
         own: classifiedTargets.read,
-        deadline: Date.now() + Math.min(Math.max(0, budgetMs), PAGE_RELOAD_PROOF_MS),
+        deadline,
       });
     case 'broadcast':
       return await broadcastAsync(devServerUrl, {
@@ -596,8 +623,7 @@ async function pageReloadAsync(
   return kind === 'proved'
     ? { kind, proof: 'debugger-context-replaced', attempt, churn }
     : {
-        // A lost `Page.reload` answer is not delivered, so only `--method runtime` is ever in flight.
-        kind: kind === 'in-flight' ? 'delivered' : kind,
+        kind,
         attempt,
         churn,
         relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,

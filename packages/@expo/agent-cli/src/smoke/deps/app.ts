@@ -6,8 +6,14 @@ import { CdpClient, isMethodNotFoundError } from '../../runtime/cdpClient';
 import { probeDevServerAsync } from '../../runtime/devServer';
 import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
 import { observeReloadAsync } from '../../runtime/reload/evidence';
-import { runInPlaceRungsAsync } from '../../runtime/reload/inPlaceRungs';
-import { prepareRungOneAsync } from '../../runtime/reload/rungOne';
+import { isInPlaceAttempt } from '../../runtime/reload/attempt';
+import {
+  prepareOwnListedAsync,
+  prepareRungOneAsync,
+  runRungOneAsync,
+  rungOneDeadline,
+  settleRungOne,
+} from '../../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../../runtime/runtimeErrorCollector';
 import { symbolicateRuntimeErrorsAsync } from '../../runtime/symbolicate';
 import { waitForAppConnectionAsync } from '../../runtime/waitReady';
@@ -167,9 +173,9 @@ async function checkAppFitsProject(
 // app away in order to answer a question about it. An app rung 1 does not reload is a fact this
 // phase reports, not a licence to relaunch.
 //
-// The bundle mark is taken *before* the broadcast because that is what makes the log a proof:
+// The bundle mark is taken *before* rung 1 because that is what makes the log a proof:
 // `dev-server-bundle` says a bundle was served after this run acted, which is only readable
-// against a count from before it.
+// against a count from before it. It is taken after the relist, so a first load is not counted.
 async function reloadApp(
   ctx: SmokeDepsContext,
   devServerUrl: string,
@@ -181,35 +187,37 @@ async function reloadApp(
   const first = await prepareRungOneAsync(devServerUrl, projectRoot, await ctx.scopeAsync(), {
     budgetMs: remainingMs(),
     preflight: ctx.lastObservation(),
+    method: 'auto',
   });
+  const rungOneEnd = rungOneDeadline(remainingMs());
+  const prepared = await prepareOwnListedAsync(devServerUrl, projectRoot, first, rungOneEnd);
   const bundleMark = markBundleSignalSync(projectRoot);
-  const { prepared, attempts, churn, settled } = await runInPlaceRungsAsync(
-    devServerUrl,
-    projectRoot,
-    { prepared: first, runtime: false, remainingMs }
-  );
-  const ran = settled.method != null;
-  const last = attempts[attempts.length - 1]!;
+  const rungOne = await runRungOneAsync(devServerUrl, {
+    prepared,
+    budgetMs: remainingMs(),
+    deadline: rungOneEnd,
+  });
   const result = {
     knownTargetIds: prepared.targets.map((target) => target.id),
-    commandSocketReconnected: churn.reconnected > 0,
-    targetOutcomes: attempts.flatMap((attempt) => ('outcomes' in attempt ? attempt.outcomes : [])),
+    commandSocketReconnected: rungOne.churn.reconnected > 0,
+    targetOutcomes: isInPlaceAttempt(rungOne.attempt) ? rungOne.attempt.outcomes : [],
   };
-  if (!ran) {
+  const settled = settleRungOne(rungOne);
+  if (settled.method == null) {
     return {
       ...result,
       ok: false,
       verifiedBy: null,
       freshTargets: 0,
       bundleServed: false,
-      reason: last.reason,
+      reason: rungOne.attempt.reason,
     };
   }
   const { verifiedBy, evidence } = await observeReloadAsync(devServerUrl, projectRoot, {
     prepared,
     mechanismProof: settled.kind === 'proved' ? settled.proof : null,
-    churn,
-    attempts,
+    churn: rungOne.churn,
+    attempts: [rungOne.attempt],
     bundleMark,
     timeoutMs: remainingMs(),
   });
@@ -219,7 +227,7 @@ async function reloadApp(
     verifiedBy,
     freshTargets: evidence?.freshTargets ?? 0,
     bundleServed: evidence?.bundle.observed ?? false,
-    reason: verifiedBy == null ? last.reason : (attempts.find((each) => each.ok)?.reason ?? null),
+    reason: verifiedBy == null ? rungOne.attempt.reason : null,
   };
 }
 

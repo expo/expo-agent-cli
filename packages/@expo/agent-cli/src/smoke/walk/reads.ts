@@ -66,7 +66,7 @@ export async function reloadStep(walk: PhaseWalk): Promise<void> {
           reloadJson.verifiedBy = result.verifiedBy;
           return {
             status: 'ok' as const,
-            reason: `${result.reason ?? 'the app was reloaded'} (${result.verifiedBy})`,
+            reason: `the app was reloaded (${result.verifiedBy})`,
             value: result,
           };
         }

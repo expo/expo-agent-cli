@@ -29,12 +29,15 @@ const deviceInventory = makeDeviceInventory({
   ],
 });
 /** Rung 1 is `Page.reload`, and no bundle may count. */
-const besideClone = prepareRungOne([own, clone], targetSelection, deviceInventory);
+const besideClone = prepareRungOne([own, clone], targetSelection, deviceInventory, {
+  method: 'auto',
+});
 /** Rung 1 is the broadcast, and no bundle may count. */
 const besideUnplaced = prepareRungOne(
   [own, elsewhere],
   makeTargetSelection({ platform: { value: 'ios', by: 'flag' } }),
-  deviceInventory
+  deviceInventory,
+  { method: 'auto' }
 );
 it('places both runs where no bundle may count', () => {
   expect([besideClone.policy, besideUnplaced.policy]).toMatchObject([
