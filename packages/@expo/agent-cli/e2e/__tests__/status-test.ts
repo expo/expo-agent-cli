@@ -286,6 +286,8 @@ async function getUnusedDevServerUrlAsync(): Promise<string> {
  * Every call points the dev-server probe at a port nothing listens on, so the report never
  * depends on a Metro instance the developer happens to be running.
  */
+const DEVICES_ON = { AGENT_CLI_NO_DEVICE: '0' };
+
 async function reportInAsync(
   projectRoot: string,
   args: string[] = [],
@@ -1690,12 +1692,40 @@ describe('@expo/agent-cli status', () => {
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
-  it('names the EAS session of a deleted worktree, and the command that stops it', async () => {
+  it('names `eas simulator:stop` for a deleted worktree session when devices are off', async () => {
     const projectRoot = await setupAsync('go-app');
     const gone = `${fs.realpathSync(projectRoot)}-deleted`;
     await writeCloudBindingAsync(expoHomeOf(projectRoot), gone, { id: 'sess-orphan' });
 
+    // The e2e tier sets AGENT_CLI_NO_DEVICE=1, and under it `dev:stop` reaps nothing.
     const report = await reportInAsync(projectRoot);
+
+    expect(report.orphanSessions).toEqual([
+      {
+        platform: 'ios',
+        id: 'sess-orphan',
+        projectRoot: gone,
+        command: expect.stringMatching(/ simulator:stop --id sess-orphan$/),
+      },
+    ]);
+    const text = await executeAgentCliAsync(projectRoot, [
+      'status',
+      '--dev-server-url',
+      await getUnusedDevServerUrlAsync(),
+    ]);
+    expect(text.stdout).toContain(report.orphanSessions[0]!.command);
+    expect(text.stdout).toContain(
+      'until the next dev or dev:stop without AGENT_CLI_NO_DEVICE, or a dev --eas run'
+    );
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
+  it('names the EAS session of a deleted worktree, and the command that stops it, with devices on', async () => {
+    const projectRoot = await setupAsync('go-app');
+    const gone = `${fs.realpathSync(projectRoot)}-deleted`;
+    await writeCloudBindingAsync(expoHomeOf(projectRoot), gone, { id: 'sess-orphan' });
+
+    const report = await reportInAsync(projectRoot, [], DEVICES_ON);
 
     const command = 'npx @expo/agent-cli dev:stop';
     expect(report.orphanSessions).toEqual([
@@ -1718,7 +1748,7 @@ describe('@expo/agent-cli status', () => {
       projectRoot,
     });
     try {
-      const withServer = await reportInAsync(projectRoot);
+      const withServer = await reportInAsync(projectRoot, [], DEVICES_ON);
       expect(withServer.orphanSessions[0]!.command).toMatch(/ simulator:stop --id sess-orphan$/);
     } finally {
       releaseLock();
@@ -1736,7 +1766,7 @@ describe('@expo/agent-cli status', () => {
         phase,
       });
       try {
-        const withRun = await reportInAsync(projectRoot);
+        const withRun = await reportInAsync(projectRoot, [], DEVICES_ON);
         expect(withRun.orphanSessions[0]!.command).toMatch(/ simulator:stop --id sess-orphan$/);
       } finally {
         releaseRunLock();

@@ -25,7 +25,10 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-08T10:00:00Z'));
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 it('reusing a started session preserves origin and the session-cap clock', async () => {
   const tools = fakeTools();
   const first = await acquireCloudBindingAsync(root, {
@@ -85,6 +88,17 @@ it.each([true, false])(
     else expect(reports[0]!.error).toContain('simulator:stop --id A');
   }
 );
+
+it('a cloud bind stops the session of a deleted worktree under AGENT_CLI_NO_DEVICE', async () => {
+  vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
+  const tools = fakeTools();
+  await acquireCloudBindingAsync(other, { platform: 'ios', id: 'A', origin: 'started', tools });
+  fs.rmSync(other, { recursive: true });
+  tools.stopCloud = vi.fn(async () => ({ ok: true, reason: null }));
+  await acquireCloudBindingAsync(root, { platform: 'ios', id: 'B', origin: 'started', tools });
+  expect(tools.stopCloud).toHaveBeenCalledWith(root, 'A');
+  expect(readBindingFile(file(other))).toEqual({ kind: 'none' });
+});
 
 it('a dotenv binding is removed, never stopped by reap', async () => {
   const tools = fakeTools();

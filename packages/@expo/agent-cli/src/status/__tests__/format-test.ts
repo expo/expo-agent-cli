@@ -1,4 +1,5 @@
 import { stripVTControlCharacters } from 'node:util';
+import { afterEach, vi } from 'vitest';
 
 import type { PlanBuildLocation } from '../../toolchain/types';
 import { formatStatusReport } from '../format';
@@ -1506,7 +1507,18 @@ describe('the EAS sessions of deleted worktrees', () => {
     expect(rendered).not.toContain('The record stays');
   });
 
-  it('names each stop by id once for two sessions', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ['', 'The record stays until the next dev or dev:stop.'],
+    [
+      '1',
+      'The record stays until the next dev or dev:stop without AGENT_CLI_NO_DEVICE, or a dev --eas run.',
+    ],
+  ])('names each stop by id once for two sessions (AGENT_CLI_NO_DEVICE=%j)', (flag, record) => {
+    vi.stubEnv('AGENT_CLI_NO_DEVICE', flag);
     const rendered = report(
       mockReport({
         orphanSessions: [
@@ -1516,7 +1528,7 @@ describe('the EAS sessions of deleted worktrees', () => {
       })
     );
     expect(rendered).toContain(
-      '2 EAS sessions of deleted worktrees are recorded, not checked: A (/gone/a), B (/gone/b). They may still bill. npx --yes eas-cli simulator:stop --id A && npx --yes eas-cli simulator:stop --id B stops them. The record stays until the next dev or dev:stop.'
+      `2 EAS sessions of deleted worktrees are recorded, not checked: A (/gone/a), B (/gone/b). They may still bill. npx --yes eas-cli simulator:stop --id A && npx --yes eas-cli simulator:stop --id B stops them. ${record}`
     );
   });
 
