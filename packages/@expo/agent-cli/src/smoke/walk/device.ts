@@ -164,12 +164,13 @@ async function bootStep(
 // The next value is whether the install replaced the app (@see DeviceReady.appReplaced).
 async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Step<boolean>> {
   const { deps, environment } = walk;
-  const device = await walk.deps.probeDevice();
-  if (!(await deps.installNeededOnDevice(device.deviceId, device.backend, createdByBoot))) {
+  const { deviceId, backend } = await walk.deps.probeDevice();
+  // Row 2 of the install table: no device, nothing to install onto, and no plan to read.
+  if (deviceId == null || !(await deps.installNeededOnDevice(deviceId, backend, createdByBoot))) {
     return { next: false };
   }
   const releasedAfterRun =
-    environment.boundDevice?.id === device.deviceId && environment.boundDevice.released !== null;
+    environment.boundDevice?.id === deviceId && environment.boundDevice.released !== null;
   // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
   //
   // The build budget rather than an install budget, because this phase now covers both and the
@@ -180,12 +181,12 @@ async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Ste
   const { value: installed } = await walk.record(
     'install-app',
     async () => {
-      const result = await deps.installApp(device.deviceId!);
+      const result = await deps.installApp(deviceId);
       return result.ok
         ? {
             status: 'ok' as const,
             reason: [
-              `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
+              `installed ${result.version ?? 'the app'} on ${deviceId}`,
               result.replaced ? `, replacing ${result.replaced}` : '',
               releasedAfterRun ? '' : `, and left it there`,
             ].join(''),
@@ -217,8 +218,8 @@ async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Ste
   walk.skipRest('app', 'the app could not be installed, so there was nothing to open');
   return {
     stop: walk.done('failed', {
-      deviceId: device.deviceId,
-      deviceBackend: device.backend,
+      deviceId: deviceId,
+      deviceBackend: backend,
       screenshot: noScreenshot(
         'the app could not be installed, so there was nothing to photograph it running'
       ),

@@ -53,10 +53,6 @@ vi.mock('../../device/cloudSimulator', async (importOriginal) => ({
   probeCloudSessionAsync: vi.fn(),
 }));
 vi.mock('../../plan/easBuildLookup', () => ({ lookUpEasSimulatorBuildAsync: vi.fn() }));
-vi.mock('../../plan/resolveAsync', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../plan/resolveAsync')>();
-  return { ...actual, resolveStartPlanAsync: vi.fn(actual.resolveStartPlanAsync) };
-});
 vi.mock('../../dev/advertisedUrl', () => ({ fetchAdvertisedUrlAsync: vi.fn() }));
 vi.mock('../../utils/easCli', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../utils/easCli')>()),

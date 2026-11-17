@@ -13,7 +13,6 @@ const facts = (overrides: Partial<InstallFacts> = {}): InstallFacts => ({
 describe(decideInstall, () => {
   // Each row also carries facts of a later row, so the first match is what the row proves.
   it.each<[number, Partial<InstallFacts>, InstallDecision]>([
-    [2, { deviceId: null, kind: null, createdByBoot: true }, { install: false }],
     [3, { kind: null, createdByBoot: true }, { install: false }],
     [4, { createdByBoot: true, backend: 'cloud', appId: null }, { install: true }],
     [5, { backend: 'cloud', appId: null, kind: 'native-build' }, { install: false }],

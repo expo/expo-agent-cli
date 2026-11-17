@@ -157,7 +157,7 @@ async function bootDevice(
 // to install (@ref src/device/hasApp §hasAppOnDeviceAsync).
 async function installNeededOnDevice(
   ctx: SmokeDepsContext,
-  deviceId: string | null,
+  deviceId: string,
   backend: DeviceBackend | null,
   createdByBoot: boolean
 ): ReturnType<SmokeDeps['installNeededOnDevice']> {

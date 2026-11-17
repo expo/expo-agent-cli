@@ -8,7 +8,7 @@ import type { SmokeTarget } from './target';
  * could not answer".
  */
 export interface InstallFacts {
-  deviceId: string | null;
+  deviceId: string;
   createdByBoot: boolean;
   backend: DeviceBackend | null;
   /** The plan's install kind. `null` is a plan that could not be read. */
@@ -26,12 +26,11 @@ export type InstallDecision =
 /**
  * The install table of llp/0005 §The gate installs the app, whichever app it is. The first row that
  * matches decides; the comments carry the row numbers of the table.
- * Row 1, `--no-start`, is the walk's: it never reaches the install step.
+ * Rows 1 and 2, `--no-start` and no device, are the walk's: it never asks without a device.
  *
  * Pure: a row that needs a device read answers `{ ask }`, and the caller reads it and asks again.
  */
 export function decideInstall(facts: InstallFacts): InstallDecision {
-  if (facts.deviceId == null) return { install: false }; // 2
   if (facts.kind == null) return { install: false }; // 3
   if (facts.createdByBoot) return { install: true }; // 4
   if (facts.backend !== 'local-ios' && facts.backend !== 'local-android') {

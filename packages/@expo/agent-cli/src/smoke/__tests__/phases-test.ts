@@ -2745,6 +2745,24 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
     expect(run.phases.some((phase) => phase.id === 'install-app')).toBe(false);
   });
 
+  // Row 2 is the walk's: with no device the install question is not asked, so no plan is read.
+  it(`asks nothing about an install when there is no device`, async () => {
+    const installNeededOnDevice = vi.fn(async () => true);
+    const installApp = vi.fn();
+    const run = await runSmokePhasesAsync(
+      deps({
+        probeDevice: async () => ({ deviceId: null, backend: null, reason: 'no booted device' }),
+        installNeededOnDevice,
+        installApp,
+      }),
+      options({ bootstrap: true })
+    );
+
+    expect(installNeededOnDevice).not.toHaveBeenCalled();
+    expect(installApp).not.toHaveBeenCalled();
+    expect(run.phases.some((phase) => phase.id === 'install-app')).toBe(false);
+  });
+
   it(`does not install when the device already has the app`, async () => {
     const installApp = vi.fn(async () => ({ ok: true, version: null, reason: null }));
     await runSmokePhasesAsync(deps({ ...needsBoot(), installApp }), options({ bootstrap: true }));

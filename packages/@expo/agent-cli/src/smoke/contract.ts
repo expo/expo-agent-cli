@@ -248,15 +248,16 @@ export interface SmokeDeps {
    * Whether this run has an app to put on that device before it can open anything.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
-   * The whole install table is decided here, so the walk stays a walk over phases rather than a
-   * second opinion about which apps may be installed. `createdByBoot` is whether this run's boot
+   * The install table from row 3 is decided here, so the walk stays a walk over phases rather than a
+   * second opinion about which apps may be installed. Rows 1 and 2, `--no-start` and no device, are
+   * the walk's. `createdByBoot` is whether this run's boot
    * created or spawned the device (`SmokeBootResult.bound.action`).
    *
    * Asked of the device this run settled on, however it got there — **not** only of one this run
    * booted. A simulator someone left running without Expo Go is the ordinary case.
    */
   installNeededOnDevice(
-    deviceId: string | null,
+    deviceId: string,
     backend: DeviceBackend | null,
     createdByBoot: boolean
   ): Promise<boolean>;
