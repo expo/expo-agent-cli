@@ -91,7 +91,7 @@ describe(runtimeStopAsync, () => {
 
     await expect(runtimeStopAsync(projectRoot, options())).resolves.toBe(1);
     const report = JSON.parse(printed());
-    expect(report).toMatchObject({ stopped: false, wasRunning: false });
+    expect(report).toMatchObject({ stopped: false, wasRunning: null });
     expect(report.reason).toBe('Invalid device: NOPE');
     expect(printed(console.error)).toContain('--app-id');
   });

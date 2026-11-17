@@ -79,33 +79,19 @@ export interface StopAppResult {
   command: string;
   ok: boolean;
   /**
-   * Whether the tool's answer is about **this application id**.
+   * Whether the app was running before the stop, or null when the verb cannot say.
    *
-   * True on iOS, where `simctl terminate` names a process and its exit code is about that process.
-   * False for a cloud session, where `agent-device close` answers about the controller's session
-   * whatever id it is given [observed — live, 2026-08-26].
+   * @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app — F102.
+   * `simctl terminate` names a process, so iOS reads it off the tool's refusal. `am force-stop`
+   * exits 0 and prints nothing whether the app was running or not, so Android reads it off a
+   * `pidof` asked before the stop, and a `pidof` that gave no usable answer makes this null. On a
+   * cloud session `agent-device close` answers about the controller's session whatever id it is
+   * given [observed — live, 2026-08-26], so this is null there. A failed stop is null too.
    *
-   * On Android it depends on a second round trip, and that is F102. `am force-stop` exits 0 and
-   * prints nothing whether the app was running or not, so its exit code establishes nothing about
-   * the id — yet this used to be `true` there, which made `runtime:stop --android` report
-   * `wasRunning: true` on every run, including one whose application id was not installed on the
-   * device at all. So Android asks `pidof` **before** the stop: an answer makes this `true` and is
-   * what {@link wasAlreadyStopped} is read from, and a `pidof` that could not run makes it `false`.
-   *
-   * It exists so `wasRunning` can be *absent* rather than wrong: a run that cannot know must not
-   * report `wasRunning: true`, which would tell a caller its app had been stopped when the verb
-   * established nothing of the kind.
+   * Null is the honest third state: a caller must not read it as `true` ("the app was stopped") or
+   * as `false` ("there was nothing to stop").
    */
-  verified: boolean;
-  /**
-   * The app was not running to begin with, so nothing was stopped.
-   *
-   * Reported separately from {@link ok} because the two answer different questions. Both commands
-   * that call this wanted the app *not running*, and it is not running — but only one of them did
-   * that. `runtime:stop` prints the difference, and `runtime:reload` ignores it, because a
-   * relaunch that follows works either way.
-   */
-  wasAlreadyStopped: boolean;
+  wasRunning: boolean | null;
   /** Why the app was not stopped, or null when it was. */
   reason: string | null;
 }
@@ -135,8 +121,7 @@ export async function stopAppOnDeviceAsync(params: StopAppParams): Promise<StopA
     return {
       command: display,
       ok: false,
-      verified: true,
-      wasAlreadyStopped: false,
+      wasRunning: null,
       reason:
         params.platform === 'android'
           ? `could not run "${bin}": ${spawnError.message}. Set ANDROID_HOME to the Android SDK root, or put its platform-tools on PATH.`
@@ -151,28 +136,17 @@ export async function stopAppOnDeviceAsync(params: StopAppParams): Promise<StopA
     return {
       command: display,
       ok: false,
-      verified: true,
-      wasAlreadyStopped: false,
+      wasRunning: null,
       reason: stderr.trim() || stdout.trim() || `exit code ${exitCode}`,
     };
   }
   // `adb shell am force-stop` exits 0 whether or not the app was running and prints nothing either
   // way, so on Android the answer comes from the `pidof` above and from nowhere else (F102). iOS
   // reads it off the tool's own refusal, which does name the process.
-  if (params.platform === 'android') {
-    return {
-      command: display,
-      ok: true,
-      verified: running !== null,
-      wasAlreadyStopped: running === false,
-      reason: null,
-    };
-  }
   return {
     command: display,
     ok: true,
-    verified: true,
-    wasAlreadyStopped: exitCode !== 0 && notRunning,
+    wasRunning: params.platform === 'android' ? running : exitCode === 0,
     reason: null,
   };
 }
@@ -228,7 +202,7 @@ async function probeAndroidProcessAsync(
  * blank simulator exits 0 with `{"success":true,"data":{"session":"default","message":"Closed:
  * default"}}` — the same answer as closing an app that really is there [observed — live session
  * `01a03d80`, 2026-08-26]. So the verb's success is evidence that the controller closed its
- * session's app and no evidence about the id, and {@link StopAppResult.verified} is `false` for
+ * session's app and no evidence about the id, and {@link StopAppResult.wasRunning} is `null` for
  * this backend so that no caller can report otherwise. `simctl terminate` and `am force-stop` name
  * a process and fail when there is none, which is what makes `wasRunning` knowable there and not
  * here (llp/0005 §Cloud simulator).
@@ -239,8 +213,7 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
     return {
       command: display,
       ok: false,
-      verified: false,
-      wasAlreadyStopped: false,
+      wasRunning: null,
       reason:
         'a cloud simulator stop was asked for and no project was named to find the session in, which is a bug in this CLI',
     };
@@ -263,8 +236,7 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
     return {
       command: display,
       ok: false,
-      verified: false,
-      wasAlreadyStopped: false,
+      wasRunning: null,
       reason: `could not run "${result.command}": ${result.spawnError}; ${EAS_RUNNER_RECOVERY}`,
     };
   }
@@ -275,16 +247,13 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
     return {
       command: display,
       ok: false,
-      verified: false,
-      wasAlreadyStopped: false,
+      wasRunning: null,
       reason: controller
         ? `the session's controller answered ${controller.code}: ${controller.message}`
         : result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`,
     };
   }
-  // `wasAlreadyStopped: false` and `verified: false` together say the honest thing: the verb ran,
-  // and whether this id was running beforehand was never established.
-  return { command: display, ok: true, verified: false, wasAlreadyStopped: false, reason: null };
+  return { command: display, ok: true, wasRunning: null, reason: null };
 }
 
 /** Whether the controller's close only ran out of time waiting for the app to go. */
