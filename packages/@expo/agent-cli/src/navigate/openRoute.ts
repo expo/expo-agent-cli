@@ -162,7 +162,7 @@ export const ATTACH_RECOVERY_TEXT: Record<AttachRecovery, { reason: string; why:
   },
   'reopen-failed': {
     reason: ', and opening the link again after the stop failed',
-    why: ' The app was stopped, and opening the link again failed, so the link was opened only once.',
+    why: ' The stop ran, and opening the link again failed, so the link was opened only once.',
   },
 };
 
