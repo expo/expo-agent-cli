@@ -178,11 +178,14 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
 export interface ReloadFailureState {
   unwatched: Unwatched | null;
   rungOne: RungOneOutcome | null;
-  /** The apps whose bundle fetch cannot be told from this run's. */
-  bundleBlockers: RungOnePolicy['bundleBlockers'];
+  /** The apps whose bundle fetch cannot be told from this run's; null when no mechanism was prepared. */
+  bundleBlockers: RungOnePolicy['bundleBlockers'] | null;
 }
 
-function describeBundleBlockers({ skipped, undetermined }: ReloadFailureState['bundleBlockers']) {
+function describeBundleBlockers({
+  skipped,
+  undetermined,
+}: NonNullable<ReloadFailureState['bundleBlockers']>) {
   return [
     skipped.length > 0 ? describeSkippedApps(skipped) : null,
     undetermined > 0
@@ -245,15 +248,16 @@ export function explainReloadFailure(
   // A mechanism that keeps the page id leaves the old target listed, so that list proves nothing.
   if (report.method != null && (report.verifiedBy == null || keeps != null)) {
     const outside = state.rungOne?.kind === 'acted' ? state.rungOne.reachedOutside : 0;
-    const why = unprovable
-      ? `Why: ${unprovable}, and no bundle may count here (${describeBundleBlockers(state.bundleBlockers)}), so nothing could prove the reload and nothing was watched.`
-      : [
-          outside > 0
-            ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`
-            : `Why: two observations were watched for ${options.timeoutMs}ms and neither happened.`,
-          `The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected})${options.cloud ? ', which a cloud simulator often never does — an app has run this project on one with that list empty throughout' : ''}.`,
-          `And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
-        ].join(' ');
+    const why =
+      unprovable && state.bundleBlockers
+        ? `Why: ${unprovable}, and no bundle may count here (${describeBundleBlockers(state.bundleBlockers)}), so nothing could prove the reload and nothing was watched.`
+        : [
+            outside > 0
+              ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`
+              : `Why: two observations were watched for ${options.timeoutMs}ms and neither happened.`,
+            `The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected})${options.cloud ? ', which a cloud simulator often never does — an app has run this project on one with that list empty throughout' : ''}.`,
+            `And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
+          ].join(' ');
     return [
       chalk.red(
         `The app was ${relaunched ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`

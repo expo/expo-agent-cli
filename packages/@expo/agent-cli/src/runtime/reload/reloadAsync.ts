@@ -347,10 +347,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       explainReloadFailure(report, options, {
         unwatched: observation.unwatched,
         rungOne: ladder.rungOne,
-        bundleBlockers:
-          ladder.kind === 'climbed'
-            ? ladder.prepared.policy.bundleBlockers
-            : { skipped: [], undetermined: 0 },
+        bundleBlockers: ladder.kind === 'climbed' ? ladder.prepared.policy.bundleBlockers : null,
       })
     );
   }
@@ -737,7 +734,7 @@ function exitCodeOf(
 function buildReport({
   options,
   preflight: { devServer, devServerUrl, routeCheck, bundles, bundle, bundlePlatformSource },
-  ladder: { method, rungOne, attempts, actionConnection },
+  ladder,
   observation: { connection, unwatched, verifiedBy, appsConnected },
   device,
   url,
@@ -753,6 +750,7 @@ function buildReport({
   followups: FollowUp[];
   startedAt: number;
 }): ReloadResultJson {
+  const { method, rungOne, attempts } = ladder;
   const bundleObservation = connection.bundle;
   return {
     // An **observed** reload, and nothing weaker. `method != null` says a mechanism ran, which on a
@@ -794,7 +792,10 @@ function buildReport({
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
-    skippedApps: skippedAppsOf(actionConnection.classifiedTargets),
+    skippedApps:
+      ladder.kind === 'climbed'
+        ? ladder.prepared.policy.bundleBlockers.skipped
+        : skippedAppsOf(ladder.actionConnection.classifiedTargets),
     scope: scopeJson(devServer.targetSelection),
     route: options.route,
     routeCheck,
