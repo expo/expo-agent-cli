@@ -214,13 +214,16 @@ function unprovedHowLine({
   const screenCheck = `look at the screen — "${smokeBase} --no-route-check" photographs it`;
   // An EAS session ends with the foreground dev server that started it, so no restart is advised there.
   const restartAdvised = bundleLogMissing && !cloud;
+  const restartCommands = (statedPlatform ? [statedPlatform] : (['ios', 'android'] as const))
+    .map((platform) => `"${PROGRAM_PREFIX} dev --detach --${platform}"`)
+    .join(' or ');
   return [
     bundleLogMissing
       ? `How: ${screenCheck}.`
       : `How: ${screenCheck} — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`,
     ...(restartAdvised
       ? [
-          `This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${statedPlatform ?? 'ios|android'}" so its output is recorded.`,
+          `This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with ${restartCommands} so its output is recorded.`,
         ]
       : []),
     ...(cloud

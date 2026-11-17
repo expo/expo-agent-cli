@@ -778,7 +778,7 @@ describe(explainReloadFailure, () => {
 
   // `dev` requires a platform, and a restart on a guessed one starts the wrong plan.
   it.each([
-    [undefined, 'dev --detach --ios|android"'],
+    [undefined, 'dev --detach --ios" or "npx @expo/agent-cli dev --detach --android"'],
     ['android' as const, 'dev --detach --android"'],
   ])(`names the restart platform only when the reload knows it: --%s`, (platform, expected) => {
     const report = {
@@ -794,6 +794,7 @@ describe(explainReloadFailure, () => {
     });
 
     expect(explained).toContain(expected);
+    expect(explained).not.toContain('ios|android');
   });
 
   it(`says nothing about a stopped app when the fallback never stopped one`, () => {
