@@ -687,6 +687,9 @@ export async function waitForDevLockAsync(
   }
 }
 
+/** An `inspectorEvaluate` answer that sends no reply, as an app whose answer is lost. */
+export const NO_ANSWER = Symbol('no answer');
+
 /** How a stub dev server should answer, per {@link startStubDevServerAsync}. */
 export type StubDevServerOptions = {
   /**
@@ -783,7 +786,8 @@ export type StubDevServerOptions = {
    * The expression arrives as the CLI sent it, wrapper and all (`src/runtime/promiseSettling.ts`),
    * so a responder recognises the call it cares about by a marker in the source. Returning
    * `undefined` answers `{type: "undefined"}`, which is what an expression whose value is nothing
-   * comes back as — and is what the target selector's own probe expects.
+   * comes back as — and is what the target selector's own probe expects. Returning
+   * {@link NO_ANSWER} sends no reply at all.
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
@@ -796,8 +800,8 @@ export type StubDevServerOptions = {
   /**
    * What `GET /json/list` reports after a reload has been asked for.
    *
-   * Either mechanism asks: a `reload` broadcast on a `v2` socket, or the
-   * `expo.reloadAppAsync()` evaluate `runtime:reload`'s debugger method sends.
+   * Either mechanism asks: a `reload` broadcast on a `v2` socket, or an
+   * `expo.reloadAppAsync(reason)` evaluate over the debugger.
    *
    * The peer churn and the debugger target list are two independent facts, and friction run 4
    * found `runtime:reload` believing the first about the second. The three values are the three
@@ -1055,7 +1059,7 @@ export async function startStubDevServerAsync({
    * The app's JavaScript runtime re-registers separately from its command-socket connection, and
    * later: the two are different connections, and believing the first about the second is friction
    * run 4's F39 and F45. Shared by the two mechanisms that ask — the `reload` broadcast and the
-   * `expo.reloadAppAsync()` evaluate — because the app does the same thing either way.
+   * `expo.reloadAppAsync(reason)` evaluate — because the app does the same thing either way.
    */
   const applyReloadTargets = (): void => {
     if (bundleLogPath != null) {
@@ -1183,11 +1187,15 @@ export async function startStubDevServerAsync({
             : removeMarker
               ? globals.delete(removeMarker[1]!)
               : inspectorEvaluate!(expression, device);
-        // The reload asked for over the debugger, which `runtime:reload --method runtime` sends.
-        // Its probe half carries the diagnostic string below and the call does not, which is the
-        // only thing that tells them apart: every expression this CLI sends is wrapped, and the
-        // wrapper's own source is in both.
-        if (expression.includes('reloadAppAsync') && !expression.includes('no-expo-global')) {
+        if (value === NO_ANSWER) {
+          return;
+        }
+        // The reload call over the debugger reloads only with a reason: the SDK 58 native function
+        // takes one string, and called with none it rejects and reloads nothing [observed — SDK 58
+        // development build, Expo simulator iOS session, 2026-11-12: "Received 0 arguments, but 1
+        // was expected"]. A new context has no marker.
+        if (value === 'sent' && /reloadAppAsync\(\s*(["'])[^"']+\1\s*\)/.test(expression)) {
+          markers.delete(device);
           applyReloadTargets();
         }
         reply({

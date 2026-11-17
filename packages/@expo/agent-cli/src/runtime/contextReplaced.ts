@@ -7,6 +7,7 @@ import {
   CdpClient,
   CdpRequestError,
   CdpTimeoutError,
+  isMethodNotFoundError,
   runtimeEvaluateAsync,
   type CdpSession,
   type CdpTarget,
@@ -21,6 +22,12 @@ const ACT_MS = 5000;
 
 /** How often the marker is read again after the action. */
 const POLL_MS = 250;
+
+const NO_DEBUGGER =
+  'the app\'s runtime has no debugger to ask: it answered "method not found" to Runtime.evaluate, which is what Expo Go for Android does';
+
+/** The app answered the action and did not take it. An answer, so never a lost one. */
+export class ActionRefusedError extends Error {}
 
 export type ContextReplaced =
   /** An evaluate answered on the same target, and the marker was gone. */
@@ -51,6 +58,7 @@ async function markAsync(
     if (read.value === true) return { kind: 'marked', session: open };
     return { kind: 'unmarkable', reason: read.exceptionText ?? 'the app did not keep the marker' };
   } catch (error: unknown) {
+    if (isMethodNotFoundError(error)) return { kind: 'unmarkable', reason: NO_DEBUGGER };
     if (error instanceof CdpRequestError) return { kind: 'unmarkable', reason: describe(error) };
     throw error;
   }
@@ -132,6 +140,7 @@ export async function jsContextReplacedAsync(
     const lost = await act(marked.session).then(
       () => null,
       (error: unknown) => {
+        if (error instanceof ActionRefusedError) throw error;
         if (error instanceof CdpTimeoutError || marked.session.closed || clock.signal().aborted) {
           return describe(error);
         }

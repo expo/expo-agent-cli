@@ -8,10 +8,8 @@
 // on those targets. Everything that follows from that choice is decided here, once.
 
 import type { NativePlatform } from '../../plan/types';
-import { firstLine } from '../../utils/text';
 import { probeDevServerAsync } from '../devServer';
 import type { CdpTarget } from '../cdpClient';
-import { jsContextReplacedAsync, type ContextReplaced } from '../contextReplaced';
 import {
   connectMessageSocketAsync,
   peersChanged,
@@ -30,8 +28,15 @@ import {
   type SkippedApp,
 } from '../targetSelection';
 import { platformOfTarget } from '../targetPlatform';
-import type { ReloadAttempt, TargetReloadOutcome } from './attempt';
+import {
+  contextReplacedClause,
+  summarizeTargetOutcomes,
+  targetProofAttempt,
+  type ReloadAttempt,
+  type TargetReloadOutcome,
+} from './attempt';
 import { debugEvent } from './events';
+import { reloadTargetAsync, type TargetAction } from './targetProof';
 
 /**
  * How long the app's message socket has to come back before the broadcast is judged to have done
@@ -543,6 +548,7 @@ async function reloadOwnTargetsAsync(
   const outcomes = await Promise.all(
     own.map((target) => reloadOwnTargetAsync(devServerUrl, target, deadline, provedOne))
   );
+  const kind = summarizeTargetOutcomes(outcomes);
   const proved = outcomes.filter((each) => each.outcome === 'context-replaced');
   const answered = outcomes.filter(
     (each) => each.outcome === 'context-replaced' || each.outcome === 'delivered-unproved'
@@ -552,19 +558,11 @@ async function reloadOwnTargetsAsync(
     .map((each) => `"${each.deviceName}": ${each.reason}`);
   const reloadable = outcomes.filter((each) => each.outcome !== 'unsupported');
   debugEvent('page_reload_sent', { targets: reloadable.length, answered: answered.length });
-  const kind =
-    proved.length > 0
-      ? 'proved'
-      : answered.length > 0
-        ? 'delivered'
-        : reloadable.length > 0 && reloadable.every((each) => each.outcome === 'unmarkable')
-          ? 'unprovable'
-          : 'not-delivered';
   const names = (kind === 'proved' ? proved : answered)
     .map((each) => `"${each.deviceName}"`)
     .join(', ');
   const clause = {
-    proved: `${names} answered from a new JavaScript context after Page.reload`,
+    proved: contextReplacedClause(names, 'page-reload'),
     delivered: `${names} answered Page.reload over the debugger, and no new JavaScript context was seen`,
     unprovable:
       'no app of this worktree could carry the marker that proves a Page.reload, so none was sent',
@@ -573,14 +571,11 @@ async function reloadOwnTargetsAsync(
         ? 'no app of this worktree takes Page.reload'
         : 'no app of this worktree answered Page.reload',
   }[kind];
-  const attempt: ReloadAttempt = {
-    method: 'page-reload',
-    ok: kind === 'proved',
-    delivered: kind === 'proved' || kind === 'delivered',
+  const attempt = targetProofAttempt(
+    'page-reload',
     outcomes,
-    reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app, and this run skips ${policy.skippedApps.length} of them (\`skippedApps\`).`,
-    leftAppStopped: null,
-  };
+    `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app, and this run skips ${policy.skippedApps.length} of them (\`skippedApps\`).`
+  );
   const churn = {
     ...CHURN_NOT_ASKED,
     reason:
@@ -603,57 +598,32 @@ async function reloadOwnTargetAsync(
   deadline: number,
   provedOne: AbortController
 ): Promise<TargetReloadOutcome> {
-  const identity = { targetId: target.id, deviceName: target.deviceName };
   if (target.reactNative?.capabilities?.nativePageReloads !== true) {
     return {
-      ...identity,
+      targetId: target.id,
+      deviceName: target.deviceName,
       outcome: 'unsupported',
       reason: 'the target does not support Page.reload',
     };
   }
-  try {
-    const seen = await jsContextReplacedAsync(devServerUrl, target, {
-      act: async (session) =>
-        await session.sendAsync(
-          'Page.reload',
-          {},
-          Math.max(1, Math.min(PAGE_RELOAD_ANSWER_MS, deadline - Date.now()))
-        ),
-      timeoutMs: Math.max(0, deadline - Date.now()),
-      deadline,
-      signal: provedOne.signal,
-    });
-    if (seen.kind === 'replaced') {
-      provedOne.abort();
-      return { ...identity, outcome: 'context-replaced', reason: null };
-    }
-    if (provedOne.signal.aborted) {
-      return { ...identity, outcome: 'stopped', reason: STOPPED };
-    }
-    return {
-      ...identity,
-      outcome: UNPROVED[seen.kind],
-      reason: seen.reason,
-    };
-  } catch (error: unknown) {
-    return provedOne.signal.aborted
-      ? { ...identity, outcome: 'stopped', reason: STOPPED }
-      : {
-          ...identity,
-          outcome: 'not-delivered',
-          reason: firstLine(error instanceof Error ? error.message : String(error)),
-        };
-  }
+  const outcome = await reloadTargetAsync(devServerUrl, target, PAGE_RELOAD, {
+    deadline,
+    stop: { signal: provedOne.signal, reason: STOPPED },
+  });
+  if (outcome.outcome === 'context-replaced') provedOne.abort();
+  return outcome;
 }
 
-/** Nothing shows that an action whose answer was lost reached the app, so it is not counted as answered. */
-const UNPROVED = {
-  'not-replaced': 'delivered-unproved',
-  'answer-lost': 'not-delivered',
-  unmarkable: 'unmarkable',
-} as const satisfies Record<
-  Exclude<ContextReplaced['kind'], 'replaced'>,
-  TargetReloadOutcome['outcome']
->;
+const PAGE_RELOAD: TargetAction = {
+  act: async (session, deadline) => {
+    await session.sendAsync(
+      'Page.reload',
+      {},
+      Math.max(1, Math.min(PAGE_RELOAD_ANSWER_MS, deadline - Date.now()))
+    );
+  },
+  // Nothing shows that a `Page.reload` whose answer was lost reached the app.
+  answerLost: 'not-delivered',
+};
 
 const STOPPED = 'another app of this worktree proved the reload first, so this check stopped';

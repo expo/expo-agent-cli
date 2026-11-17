@@ -485,7 +485,7 @@ function withDeadline<T>(
 
 /** Send one `Runtime.evaluate` and read the answer. */
 export async function runtimeEvaluateAsync(
-  session: CdpSession,
+  session: Pick<CdpSession, 'sendAsync'>,
   expression: string,
   { returnByValue, timeoutMs }: { returnByValue: boolean; timeoutMs: number }
 ): Promise<CdpEvaluateResult> {

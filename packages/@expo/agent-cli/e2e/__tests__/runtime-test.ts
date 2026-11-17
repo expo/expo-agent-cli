@@ -301,7 +301,7 @@ describe('the runtime group at the process boundary', () => {
 //
 // The runtime an expression lands in is Hermes, and finding that out cost a dogfooding session:
 // there is no `require` and no `import()`, so every "reload it by hand" recipe written for Node or
-// for a browser is unreachable, and the one door — `expo.reloadAppAsync()` — was findable only by
+// for a browser is unreachable, and the one door — `expo.reloadAppAsync(reason)` — was findable only by
 // dumping `Object.keys(expo)`.
 describe('what runtime:eval says about the runtime it evaluates in', () => {
   it('documents the Hermes idioms, so the expo global is not a discovery', async () => {
@@ -312,7 +312,7 @@ describe('what runtime:eval says about the runtime it evaluates in', () => {
     expect(result.stdout).toContain('Hermes');
     expect(result.stdout).toMatch(/no require/i);
     expect(result.stdout).toContain('Object.keys(expo)');
-    expect(result.stdout).toContain('expo.reloadAppAsync()');
+    expect(result.stdout).toContain('expo.reloadAppAsync(reason)');
     // And the command that makes the manual call unnecessary.
     expect(result.stdout).toContain('npx @expo/agent-cli runtime:reload');
   });
@@ -323,7 +323,7 @@ describe('what runtime:eval says about the runtime it evaluates in', () => {
     const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--help']);
 
     expect(result.stdout).toContain('auto (default), dev-server, runtime, or device');
-    expect(result.stdout).toContain('expo.reloadAppAsync()');
+    expect(result.stdout).toContain('expo.reloadAppAsync(reason)');
     // What picks the rung, in the help rather than only in a failure (wave 21): the command socket,
     // and never `--eas`, which names the device backend that may relaunch.
     expect(result.stdout).toMatch(/the command socket picks the rung/i);

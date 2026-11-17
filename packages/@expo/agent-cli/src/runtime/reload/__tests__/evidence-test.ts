@@ -4,7 +4,12 @@ import {
   makeTarget,
   makeTargetSelection,
 } from '../../__tests__/targetSelectionFixtures';
-import type { ReloadAttempt } from '../attempt';
+import {
+  targetProofAttempt,
+  type ReloadAttempt,
+  type TargetProofMethod,
+  type TargetReloadOutcome,
+} from '../attempt';
 import { markBundleSignalSync } from '../bundleSignal';
 import { observeReloadAsync } from '../evidence';
 import { CHURN_NOT_ASKED, prepareRungOne } from '../rungOne';
@@ -43,15 +48,18 @@ it('places both runs where no bundle may count', () => {
   ]);
 });
 
-const attempt = (method: ReloadAttempt['method'], ok: boolean, delivered?: boolean) =>
-  ({
+const attempt = (
+  method: Exclude<ReloadAttempt['method'], TargetProofMethod>,
+  ok: boolean,
+  delivered?: boolean
+): ReloadAttempt => ({ method, ok, delivered, reason: 'x', leftAppStopped: null });
+
+const proofAttempt = (method: TargetProofMethod, outcome: TargetReloadOutcome['outcome']) =>
+  targetProofAttempt(
     method,
-    ok,
-    delivered,
-    reason: 'x',
-    leftAppStopped: null,
-    ...(method === 'page-reload' ? { outcomes: [] } : {}),
-  }) as ReloadAttempt;
+    [{ targetId: 'page-1', deviceName: 'iPhone 17', outcome, reason: 'x' }],
+    'x'
+  );
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -63,7 +71,7 @@ describe('whether the shared observations are watched after the mechanism that s
     {
       name: 'pinned --method dev-server beside a skipped app: Page.reload answered',
       prepared: besideClone,
-      attempts: [attempt('page-reload', false, true)],
+      attempts: [proofAttempt('page-reload', 'delivered-unproved')],
       unwatched: 'nothing-can-prove',
     },
     {
@@ -81,14 +89,14 @@ describe('whether the shared observations are watched after the mechanism that s
     {
       name: 'Page.reload, then a local relaunch',
       prepared: besideClone,
-      attempts: [attempt('page-reload', false, false), attempt('device', true)],
+      attempts: [proofAttempt('page-reload', 'not-delivered'), attempt('device', true)],
       mechanismProof: 'app-relaunch' as const,
       unwatched: 'nothing-can-prove',
     },
     {
       name: 'Page.reload, then a cloud relaunch',
       prepared: besideClone,
-      attempts: [attempt('page-reload', false, false), attempt('device', true)],
+      attempts: [proofAttempt('page-reload', 'not-delivered'), attempt('device', true)],
       unwatched: 'nothing-can-prove',
     },
     {
@@ -104,10 +112,10 @@ describe('whether the shared observations are watched after the mechanism that s
       unwatched: 'nothing-can-prove',
     },
     {
-      name: '--method runtime',
+      name: '--method runtime, delivered and unproved',
       prepared: besideClone,
-      attempts: [attempt('runtime', true)],
-      unwatched: null,
+      attempts: [proofAttempt('runtime', 'delivered-unproved')],
+      unwatched: 'nothing-can-prove',
     },
   ])('$name', async ({ prepared, attempts, mechanismProof = null, unwatched }) => {
     globalThis.fetch = (async () =>

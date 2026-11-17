@@ -1,5 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload
-import { jsContextReplacedAsync } from '../contextReplaced';
+import { type CdpSession } from '../cdpClient';
+import { ActionRefusedError, jsContextReplacedAsync } from '../contextReplaced';
 import { serveInspectorApp } from './fakeInspectorApp';
 
 vi.mock('ws', async (importOriginal) => {
@@ -114,6 +115,20 @@ describe('the proof of a Page.reload', () => {
 
     await expect(outcome).rejects.toThrow('Page.reload was never sent');
     expect(served.reloaded()).toHaveLength(0);
+  });
+
+  it('throws a refusal even when the session closed with it', async () => {
+    serveInspectorApp();
+
+    const outcome = jsContextReplacedAsync('http://127.0.0.1:8081', TARGET, {
+      act: async (session) => {
+        (session as CdpSession).close();
+        throw new ActionRefusedError('the app has no "expo" global');
+      },
+      timeoutMs: 1500,
+    });
+
+    await expect(outcome).rejects.toBeInstanceOf(ActionRefusedError);
   });
 
   it('does not mistake another concurrent check for a replaced context', async () => {

@@ -5,7 +5,7 @@ import { type PlanPlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import { describeSkippedApps } from '../targetSelection';
-import { keepsPageId, settledAttempt } from './attempt';
+import { hasTargetOutcomes, keepsPageId, settledAttempt, summarizeTargetOutcomes } from './attempt';
 import { describeEvidence, type Unwatched } from './evidence';
 import { type ReloadOptions } from './resolveOptions';
 import { type RungOneOutcome } from './rungOne';
@@ -252,6 +252,7 @@ export function explainReloadFailure(
     ].join('\n');
   }
   if (!report.reloaded) {
+    const proofAttempt = report.attempts.filter(hasTargetOutcomes).at(-1);
     return [
       chalk.red(`The app was not reloaded.`),
       `Why: ${report.attempts.map((attempt) => `${attempt.method} — ${attempt.reason}`).join('; ') || 'no method was tried'}.`,
@@ -261,11 +262,13 @@ export function explainReloadFailure(
       // text described only the second: "open the app first" is advice for a caller whose app is
       // *not* running, and printing it for a connected app is how a reader was sent to start a
       // second copy of an app this command could see all along.
-      state.rungOne?.kind === 'unprovable'
-        ? `How: no app of this worktree could keep the marker that proves a Page.reload, so none was sent. Run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch.`
-        : report.appsConnected > 0
-          ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${report.attempts.some((attempt) => attempt.method === 'page-reload') ? 'Page.reload' : 'the broadcast'} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
-          : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
+      proofAttempt != null && summarizeTargetOutcomes(proofAttempt.outcomes) === 'unprovable'
+        ? `How: no app of this worktree could keep the marker that proves ${proofAttempt.method === 'page-reload' ? 'a Page.reload' : 'a reload by expo.reloadAppAsync'}, so none was sent. Run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch.`
+        : proofAttempt?.method === 'runtime' && report.appsConnected > 0
+          ? `How: the app is connected, and --method runtime did not reload it. Run "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
+          : report.appsConnected > 0
+            ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${report.attempts.some((attempt) => attempt.method === 'page-reload') ? 'Page.reload' : 'the broadcast'} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
+            : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
     ].join('\n');
   }
   // Two shapes of "not back", and they are told apart by what the target list says. An empty list

@@ -53,7 +53,7 @@ import {
   type BundleSignalObservation,
 } from './bundleSignal';
 import { reloadOnCloudSimulatorAsync } from './cloudReload';
-import { keepsPageId, type ReloadAttempt } from './attempt';
+import { keepsPageId, settleTargetProof, type ReloadAttempt } from './attempt';
 import { observeReloadAsync, type ReloadEvidence, type Unwatched } from './evidence';
 import { debugEvent, event } from './events';
 import { type ReloadOptions } from './resolveOptions';
@@ -92,8 +92,8 @@ export interface ReloadResultJson {
    * had never used. `dev-server-bundle` — nor did it, and the proof is the weaker one
    * {@link bundlesAfterReload} carries: the dev server served a bundle after this command acted,
    * which says something fetched it and not *which* client did. `debugger-context-replaced` —
-   * rung 1 sent `Page.reload` to this worktree's target, and the same target then answered from a
-   * new JavaScript context (llp/0005 §Target owner).
+   * rung 1's `Page.reload` or `--method runtime`'s `expo.reloadAppAsync` acted on this worktree's
+   * target, and the same target then answered from a new JavaScript context (llp/0005 §Target owner).
    *
    * The mechanism's own observation wins the label when it has one, because it is the stronger fact;
    * the exit code is decided by the observations rather than by the label (llp/0005 §How it reloads).
@@ -102,8 +102,8 @@ export interface ReloadResultJson {
    * band): this may name only a signal whose **own** evidence is in this payload and non-empty —
    * `commandSocketChurn.reconnected` for `message-socket-peers`, {@link appsReconnected} for
    * `fresh-debugger-target`, `bundlesAfterReload.count` for `dev-server-bundle`, and an `attempts`
-   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` attempt that
-   * worked for `debugger-context-replaced`. A label with nothing to show for
+   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` or `runtime`
+   * attempt that worked for `debugger-context-replaced`. A label with nothing to show for
    * itself is `null`, which makes `reloaded` false — the band, rather than a claim.
    */
   verifiedBy:
@@ -510,7 +510,7 @@ async function climbLadderAsync(
   // What the mechanism that ran observed *by itself*, apart from the app coming back. Peer churn
   // and a relaunch on a local device are observations already — the dev server's socket ids never
   // repeat, and `simctl terminate` names a process and fails when there is none. A cloud relaunch
-  // and a debugger call are not (llp/0005 §Cloud simulator).
+  // is not (llp/0005 §Cloud simulator); a debugger call is proved on its target or not at all.
   let mechanismProof: ReloadResultJson['verifiedBy'] = null;
   const attempts: ReloadAttempt[] = [];
   let method: ReloadResultJson['method'] = null;
@@ -555,13 +555,15 @@ async function climbLadderAsync(
   // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
   // a less predictable one.
   if (method == null && options.method === 'runtime') {
-    const attempt = await reloadOverRuntimeAsync(actionConnection, observedApps);
+    const attempt = await reloadOverRuntimeAsync(
+      devServerUrl,
+      prepared.classifiedTargets.read,
+      remainingMs()
+    );
     attempts.push(attempt);
-    if (attempt.ok) {
-      // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
-      // made" and the proof is the wait below.
-      method = 'runtime';
-    }
+    const settled = settleTargetProof(attempt);
+    method = settled.ran ? 'runtime' : null;
+    mechanismProof = settled.proof;
   }
 
   // **Rung two: the relaunch, on the device backend in play.** `--eas` names *which* backend may
