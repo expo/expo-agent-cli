@@ -900,6 +900,15 @@ describe('runtime:reload --method runtime', () => {
     expect(elapsedMs).toBeLessThan(5000);
   });
 
+  it('names a runtime with no debugger, as Expo Go for Android has, and calls nothing', async () => {
+    const { result, report } = await reloadAsync('android', { inspectorSocket: 'no-debugger' });
+    expect(result.exitCode, result.all).toBe(20);
+    expect(report.attempts).toEqual([
+      expect.objectContaining({ method: 'runtime', ok: false, delivered: false }),
+    ]);
+    expect(report.attempts[0]!.reason).toContain('"method not found" to Runtime.evaluate');
+  });
+
   it('tells a person to relaunch, not to broadcast, when the app has no expo global', async () => {
     const { root, env, target } = await onPlatformAsync('ios');
     const stub = await startStubDevServerAsync({
