@@ -135,7 +135,9 @@ async function bootDevice(
       deviceId: deviceIdOf(acquired.device),
       backend: localBackendOf(platform),
       choice: choiceOf(acquired.device),
-      installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
+      installNeeded:
+        (acquired.action === 'created' || acquired.action === 'spawned') &&
+        (await ctx.targetAsync()).installWithKind != null,
       reason: null,
       bound: { name: deviceNameOf(acquired.device), action: acquired.action },
     };
@@ -161,7 +163,15 @@ async function installNeededOnDevice(
   deviceId: string,
   backend: DeviceBackend | null
 ): ReturnType<SmokeDeps['installNeededOnDevice']> {
+  // Local devices only: this CLI installs nothing onto an EAS session's device
+  // (llp/0005 §Cloud simulator).
+  if (backend !== 'local-ios' && backend !== 'local-android') {
+    return false;
+  }
   const target = await ctx.targetAsync();
+  if (target.installWithKind == null) {
+    return false;
+  }
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
   //
@@ -177,15 +187,13 @@ async function installNeededOnDevice(
   // whether the app is installed installs it — and after that first build the package *is*
   // declared, so every later run resolves it and checks properly. One build, then normal.
   //
-  // Expo Go is excluded because its ids are constants: an Expo Go run that cannot name its app
-  // has a plan this could not read, and downloading 423 MB on that basis would be a guess.
+  // Expo Go is excluded because its ids are constants, so an Expo Go target always has one and
+  // this is a guard.
   if (target.appId == null) {
     return target.installWithKind === 'native-build';
   }
-  // @ref src/device/hasApp §hasAppOnDeviceAsync. Local devices only — a cloud session's device is
-  // not this machine's, and there is nothing this CLI can install on somebody else's session
-  // (llp/0005 §Cloud simulator) — and `null` for a lookup that did not happen, which is never
-  // a licence to install.
+  // @ref src/device/hasApp §hasAppOnDeviceAsync. `null` for a lookup that did not happen, which
+  // is never a licence to install.
   const has = await hasAppOnDeviceAsync(deviceId, backend, target.appId);
   if (has == null) {
     return false;

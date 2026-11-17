@@ -20,6 +20,7 @@ import { fetchAdvertisedUrlAsync } from '../../dev/advertisedUrl';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
+import { resolveStartPlanAsync } from '../../plan/resolveAsync';
 import { PROGRAM_PREFIX } from '../../programName';
 import { makeDeviceInventory, makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
 import {
@@ -53,6 +54,10 @@ vi.mock('../../device/cloudSimulator', async (importOriginal) => ({
   probeCloudSessionAsync: vi.fn(),
 }));
 vi.mock('../../plan/easBuildLookup', () => ({ lookUpEasSimulatorBuildAsync: vi.fn() }));
+vi.mock('../../plan/resolveAsync', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../plan/resolveAsync')>();
+  return { ...actual, resolveStartPlanAsync: vi.fn(actual.resolveStartPlanAsync) };
+});
 vi.mock('../../dev/advertisedUrl', () => ({ fetchAdvertisedUrlAsync: vi.fn() }));
 vi.mock('../../utils/easCli', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../utils/easCli')>()),
@@ -186,6 +191,26 @@ describe('bootDevice', () => {
       delete process.env.AGENT_CLI_NO_DEVICE;
     }
   });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+it('installs nothing when the plan cannot be read, on a created or an existing simulator', async () => {
+  vi.mocked(resolveStartPlanAsync).mockRejectedValue(new Error('unreadable'));
+  vi.mocked(acquireDeviceAsync).mockResolvedValue({
+    device: {
+      backend: 'local-ios',
+      platform: 'ios',
+      udid: 'SIM-1',
+      name: 'agent-cli 0000',
+      origin: 'created',
+    },
+    justBooted: true,
+    action: 'created',
+  });
+  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
+
+  expect(await deps.bootDevice()).toMatchObject({ ok: true, installNeeded: false });
+  expect(await deps.installNeededOnDevice('SIM-1', 'local-ios')).toBe(false);
 });
 
 it('smoke releases only its acquired platform and binding', async () => {
