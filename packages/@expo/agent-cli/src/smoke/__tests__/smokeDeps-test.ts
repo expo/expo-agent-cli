@@ -20,7 +20,6 @@ import { fetchAdvertisedUrlAsync } from '../../dev/advertisedUrl';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
-import { resolveStartPlanAsync } from '../../plan/resolveAsync';
 import { PROGRAM_PREFIX } from '../../programName';
 import { makeDeviceInventory, makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
 import {
@@ -104,7 +103,6 @@ describe('bootDevice', () => {
       deviceId: 'SIM-1',
       backend: 'local-ios',
       choice: 'agent-cli 0000',
-      installNeeded: true,
       reason: null,
       bound: { name: 'agent-cli 0000', action: 'created' },
     });
@@ -132,7 +130,6 @@ describe('bootDevice', () => {
       ok: true,
       deviceId: 'emulator-5556',
       backend: 'local-android',
-      installNeeded: true,
     });
   });
 
@@ -191,26 +188,6 @@ describe('bootDevice', () => {
       delete process.env.AGENT_CLI_NO_DEVICE;
     }
   });
-});
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
-it('installs nothing when the plan cannot be read, on a created or an existing simulator', async () => {
-  vi.mocked(resolveStartPlanAsync).mockRejectedValue(new Error('unreadable'));
-  vi.mocked(acquireDeviceAsync).mockResolvedValue({
-    device: {
-      backend: 'local-ios',
-      platform: 'ios',
-      udid: 'SIM-1',
-      name: 'agent-cli 0000',
-      origin: 'created',
-    },
-    justBooted: true,
-    action: 'created',
-  });
-  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
-
-  expect(await deps.bootDevice()).toMatchObject({ ok: true, installNeeded: false });
-  expect(await deps.installNeededOnDevice('SIM-1', 'local-ios')).toBe(false);
 });
 
 it('smoke releases only its acquired platform and binding', async () => {

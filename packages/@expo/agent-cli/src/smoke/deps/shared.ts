@@ -19,8 +19,11 @@ export interface SmokeDepsContext extends SmokeTargetSelection {
   readonly options: SmokeOptions;
   /** The run's cloud route, shared with the walk. Read `current` at call time. */
   readonly cloudRoute: CloudRouteCell;
-  /** The plan's install kind, once anything has asked for the target. Read at call time by `progress`. */
-  readonly installKind: SmokeTarget['installWithKind'] | null;
+  /**
+   * The plan's install kind once anything has asked for the target; `undefined` before that, and
+   * `null` for a plan that could not be read. Read at call time by `progress`.
+   */
+  readonly installKind: SmokeTarget['installWithKind'] | undefined;
   /**
    * Built once and shared by every phase that reads a target, so no two phases can disagree about
    * which app this run is about (F51). Built lazily: a run that fails at the dev-server phase never
@@ -47,7 +50,7 @@ export function createSmokeDepsContext(
   cloudRoute: CloudRouteCell
 ): SmokeDepsContext {
   let target: Promise<SmokeTarget> | null = null;
-  let installKind: SmokeTarget['installWithKind'] | null = null;
+  let installKind: SmokeTarget['installWithKind'] | undefined;
   const ctx: SmokeDepsContext = {
     ...buildSmokeTargetSelection(projectRoot, options, () => cloudRoute.current),
     projectRoot,

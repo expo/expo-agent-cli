@@ -1117,8 +1117,8 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
   // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
   it(`installs nothing onto the session for a project with no app id`, async () => {
     const projectRoot = await fs.promises.realpath(await setupFixtureAsync('dev-client-fresh-app'));
-    const runnerLog = path.join(projectRoot, '.runner-calls.jsonl');
-    await installStubEasAsync(projectRoot, { logFile: runnerLog });
+    const npxLog = path.join(projectRoot, '.runner-calls.jsonl');
+    await installStubEasAsync(projectRoot, { logFile: npxLog });
     await writeSessionFileAsync(projectRoot, 'sess-e2e');
     const stub = await startStubDevServerAsync({
       targets: [],
@@ -1142,12 +1142,12 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
       const report = JSON.parse(result.stdout);
       expect(report.deviceBackend).toBe('cloud');
       expect(report.phases.some((entry: { id: string }) => entry.id === 'install-app')).toBe(false);
-      const runnerArgs = fs
-        .readFileSync(runnerLog, 'utf8')
+      const npxCalls = fs
+        .readFileSync(npxLog, 'utf8')
         .split('\n')
         .filter(Boolean)
         .map((line) => JSON.parse(line).args as string[]);
-      expect(runnerArgs.some((args) => args.includes('expo'))).toBe(false);
+      expect(npxCalls.some((args) => args[0] === 'expo')).toBe(false);
     } finally {
       await releaseLock();
       await stub.close();

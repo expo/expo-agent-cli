@@ -78,7 +78,7 @@ async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
  */
 async function bootStep(
   walk: PhaseWalk
-): Promise<Step<{ firstConnection: AppConnectionResult; bootInstallNeeded: boolean }>> {
+): Promise<Step<{ firstConnection: AppConnectionResult; createdByBoot: boolean }>> {
   const { deps, environment, cleanups } = walk;
   // The **app** is asked about first, and the device only if nothing answers. Two reasons, and
   // they point the same way. An app attached to this dev server is the app under test whatever
@@ -91,7 +91,7 @@ async function bootStep(
     Math.min(walk.remaining(), APP_PROBE_MS)
   );
   if (firstConnection.appsConnected !== 0 || (await walk.deps.probeDevice()).deviceId != null) {
-    return { next: { firstConnection, bootInstallNeeded: false } };
+    return { next: { firstConnection, createdByBoot: false } };
   }
   const { value: boot } = await walk.record(
     'boot-device',
@@ -128,7 +128,12 @@ async function bootStep(
     environment.boundDevice = boot.bound
       ? { id: boot.deviceId, ...boot.bound, released: false, shutDown: false }
       : null;
-    return { next: { firstConnection, bootInstallNeeded: boot.installNeeded === true } };
+    return {
+      next: {
+        firstConnection,
+        createdByBoot: boot.bound?.action === 'created' || boot.bound?.action === 'spawned',
+      },
+    };
   }
   environment.device = 'failed';
   walk.skipRest(
@@ -158,13 +163,10 @@ async function bootStep(
 // environment — `--no-start` says read what is there, and installing an app is not reading.
 //
 // The next value is whether the install replaced the app (@see DeviceReady.appReplaced).
-async function installStep(walk: PhaseWalk, bootInstallNeeded: boolean): Promise<Step<boolean>> {
+async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Step<boolean>> {
   const { deps, environment } = walk;
   const device = await walk.deps.probeDevice();
-  if (
-    device.deviceId == null ||
-    !(bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))
-  ) {
+  if (!(await deps.installNeededOnDevice(device.deviceId, device.backend, createdByBoot))) {
     return { next: false };
   }
   const releasedAfterRun =
@@ -235,7 +237,7 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
     return { next: { firstConnection: null, appReplaced: false } };
   }
   let firstConnection: AppConnectionResult | null = null;
-  let bootInstallNeeded = false;
+  let createdByBoot = false;
   if (walk.deps.cloudRoute.current === 'required') {
     const session = await startSessionStep(walk);
     if ('stop' in session) return session;
@@ -245,9 +247,9 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
     // (llp/0005 §Cloud simulator).
     const booted = await bootStep(walk);
     if ('stop' in booted) return booted;
-    ({ firstConnection, bootInstallNeeded } = booted.next);
+    ({ firstConnection, createdByBoot } = booted.next);
   }
-  const installed = await installStep(walk, bootInstallNeeded);
+  const installed = await installStep(walk, createdByBoot);
   if ('stop' in installed) return installed;
   return {
     next: installed.next

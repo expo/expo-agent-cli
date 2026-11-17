@@ -631,7 +631,7 @@ The `install-app` budget (§The smoke gate) is the same for both kinds, because 
 | 10  | the kind is `expo-go`, and the Expo Go on the device is `mismatch` | yes     |
 | 11  | any other case                                                     | no      |
 
-Tests: `src/smoke/__tests__/smokeDeps-test.ts` "installs nothing when the plan cannot be read" (row 3); `e2e/__tests__/cloud-simulator-test.ts` "installs nothing onto the session for a project with no app id" (row 5); `e2e/__tests__/smoke-test.ts` "a stale Expo Go beside an installed development build" (row 11).
+Tests: `src/smoke/__tests__/decideInstall-test.ts`, one case per row; `e2e/__tests__/cloud-simulator-test.ts` "installs nothing onto the session for a project with no app id" (row 5); `e2e/__tests__/smoke-test.ts` "a stale Expo Go beside an installed development build" (row 11).
 
 A failed install stops the run as `failed`, and nothing is opened.
 
