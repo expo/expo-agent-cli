@@ -133,6 +133,8 @@ export interface OpenRouteResult extends ResolvedRoute {
 }
 
 /** Whether the app was seen to connect to the dev server after the link was opened. */
+export type AttachRecovery = 'none' | 'stopped' | 'reopened-not-running' | 'reopened-unknown';
+
 export interface AttachCheck {
   /** Whether this run looked at all. False when the caller asked for no wait. */
   checked: boolean;
@@ -147,10 +149,12 @@ export interface AttachCheck {
   waitedMs: number;
   /** How many debugger targets this platform had when the wait ended. */
   targets: number;
-  /** Whether a running app was stopped and the link opened a second time. */
-  recovered: boolean;
-  /** Whether the link was opened a second time, after a stop of an app that was not running. */
-  reopenedWithoutStop: boolean;
+  /**
+   * What the recovery did when no app attached: nothing, stopped a running app and opened the link
+   * again, opened it again after a stop of an app that was not running, or opened it again after a
+   * stop whose effect could not be checked.
+   */
+  recovery: AttachRecovery;
   /**
    * What the system dialog on a cloud session turned out to be, or null when none was looked for.
    *
@@ -611,8 +615,7 @@ async function confirmAttachAsync({
   const startedAt = Date.now();
 
   let targets = await waitAsync(startedAt + budgetMs);
-  let recovered = false;
-  let reopenedWithoutStop = false;
+  let recovery: AttachRecovery = 'none';
   let alert: AlertCheck | null = null;
 
   // The cloud recovery, before the Android one: a modal that is never answered blocks whatever the
@@ -657,8 +660,12 @@ async function confirmAttachAsync({
     });
     debugEvent('attach_recovery', { appId, stopped: stopped.ok });
     if (stopped.ok) {
-      recovered = !stopped.wasAlreadyStopped;
-      reopenedWithoutStop = stopped.wasAlreadyStopped;
+      recovery =
+        stopped.wasRunning === true
+          ? 'stopped'
+          : stopped.wasRunning === false
+            ? 'reopened-not-running'
+            : 'reopened-unknown';
       const again = await openUrlOnDeviceAsync({
         platform: device.platform,
         deviceId: device.deviceId,
@@ -680,20 +687,27 @@ async function confirmAttachAsync({
     confirmed: targets > 0,
     waitedMs,
     targets,
-    recovered,
-    reopenedWithoutStop,
+    recovery,
     alert,
     reason:
       targets > 0
         ? null
-        : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${
-            recovered
-              ? ', including after the app was stopped and the link opened again'
-              : reopenedWithoutStop
-                ? ', including after the link was opened again with the app not running'
-                : ''
-          }${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
+        : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${attachRecoveryReason(recovery)}${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
   };
+}
+
+/** The clause of the attach reason that says what the recovery did. */
+function attachRecoveryReason(recovery: AttachRecovery): string {
+  switch (recovery) {
+    case 'none':
+      return '';
+    case 'stopped':
+      return ', including after the app was stopped and the link opened again';
+    case 'reopened-not-running':
+      return ', including after the link was opened again with the app not running';
+    case 'reopened-unknown':
+      return ', including after the link was opened again after a stop whose effect could not be checked';
+  }
 }
 
 /** An attach check that did not look, and why. */
@@ -703,8 +717,7 @@ function uncheckedAttach(reason: string): AttachCheck {
     confirmed: null,
     waitedMs: 0,
     targets: 0,
-    recovered: false,
-    reopenedWithoutStop: false,
+    recovery: 'none',
     alert: null,
     reason,
   };

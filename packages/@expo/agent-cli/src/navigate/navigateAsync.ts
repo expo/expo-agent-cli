@@ -21,7 +21,12 @@ import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import type { DevServerSource } from '../runtime/devServer';
 import { openInPhrase } from './connectUrl';
-import { openRouteAsync, type AlertCheck, type OpenRouteResult } from './openRoute';
+import {
+  openRouteAsync,
+  type AlertCheck,
+  type AttachRecovery,
+  type OpenRouteResult,
+} from './openRoute';
 import type { NavigateOptions } from './resolveOptions';
 import type { RouteCheckJson } from './routeCheck';
 import { resolveRouteUrlAsync } from './routeResolution';
@@ -266,7 +271,7 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
     reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
     attached: opened.attach.confirmed,
     attachWaitedMs: opened.attach.waitedMs,
-    attachRecovered: opened.attach.recovered,
+    attachRecovered: opened.attach.recovery === 'stopped',
     attachAlert: opened.attach.alert,
     followups,
   };
@@ -323,7 +328,7 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
             ` · ${opened.attach.targets} ${opened.platform} debugger ${
               opened.attach.targets === 1 ? 'target' : 'targets'
             } after ${opened.attach.waitedMs}ms${
-              opened.attach.recovered ? ', after a restart' : ''
+              opened.attach.recovery === 'stopped' ? ', after a restart' : ''
             }`
           )
         : opened.attach.confirmed === false
@@ -533,13 +538,20 @@ function attachNotConfirmed(opened: OpenRouteResult): string {
     chalk.red(
       `The link was opened on the device, and no ${opened.platform} app connected to ${opened.devServerUrl} within ${opened.attach.waitedMs}ms.`
     ),
-    `Why: "${opened.command}" exited 0, which says the device accepted the intent and nothing more — an app that fails to load its bundle sits on an error screen having accepted one.${reverseClause}${
-      opened.attach.recovered
-        ? ' The app was stopped and the link opened a second time, and that did not attach either.'
-        : opened.attach.reopenedWithoutStop
-          ? ' The app was not running, so nothing was stopped; the link opened a second time, and that did not attach either.'
-          : ''
-    }${alertClause}`,
+    `Why: "${opened.command}" exited 0, which says the device accepted the intent and nothing more — an app that fails to load its bundle sits on an error screen having accepted one.${reverseClause}${recoveryWhy(opened.attach.recovery)}${alertClause}`,
     `How: look at what the dev server was asked for with "${PROGRAM_PREFIX} dev:logs", and at the screen with "${look}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s. Pass --no-wait-attach to report only what the device tool said, which is what this command used to do.${alertHow}`,
   ].join('\n');
+}
+
+function recoveryWhy(recovery: AttachRecovery): string {
+  switch (recovery) {
+    case 'none':
+      return '';
+    case 'stopped':
+      return ' The app was stopped and the link opened a second time, and that did not attach either.';
+    case 'reopened-not-running':
+      return ' The app was not running, so nothing was stopped; the link opened a second time, and that did not attach either.';
+    case 'reopened-unknown':
+      return ' The link was opened again after a stop whose effect could not be checked, and that did not attach either.';
+  }
 }

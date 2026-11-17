@@ -42,6 +42,8 @@ type Scenario = {
   neverAttaches?: boolean;
   /** The app is not running when the recovery asks `pidof`, so the run stops nothing. */
   appNotRunning?: boolean;
+  /** `pidof` cannot run on the device, so the recovery cannot tell whether the app was running. */
+  pidofBroken?: boolean;
   /** The app attaches only once this run has stopped it and opened the link again. */
   attachesAfterStop?: boolean;
   /** An Android app of another model is attached too, which this run must not stop or count. */
@@ -150,6 +152,21 @@ const scenarios: Scenario[] = [
     initial: 'empty',
     neverAttaches: true,
     appNotRunning: true,
+  },
+  {
+    name: 'no flag, bound Android emulator, pidof cannot run when the recovery asks',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
+    pidofBroken: true,
+  },
+  {
+    name: 'no flag, Android session, never attaches',
+    backend: 'cloud',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
   },
   {
     name: 'no flag, bound Android emulator, the app attaches after the recovery stops it and opens the link again',
@@ -315,7 +332,11 @@ it.each(scenarios)('$name', async (scenario) => {
         env: {
           ...device.env,
           ...twinEnv,
-          ...(scenario.appNotRunning ? {} : { STUB_ADB_PIDOF: '4242' }),
+          ...(scenario.pidofBroken
+            ? { STUB_ADB_PIDOF_BROKEN: '1' }
+            : scenario.appNotRunning
+              ? {}
+              : { STUB_ADB_PIDOF: '4242' }),
         },
       }
     );
@@ -329,17 +350,31 @@ it.each(scenarios)('$name', async (scenario) => {
     });
     // An app that cannot be placed on this device neither counts as attached nor holds the launcher.
     const ownAttached = scenario.initial === 'own' && scenario.twin !== 'both';
-    const stuck = scenario.neverAttaches || scenario.attachesAfterStop;
-    const recovers = stuck && scenario.backend === 'local-android';
+    const stuck = !!(scenario.neverAttaches || scenario.attachesAfterStop);
+    const recovers = stuck && scenario.platform === 'android' && scenario.backend !== 'local-ios';
+    const stopVerified = scenario.backend === 'local-android' && !scenario.pidofBroken;
     // A launcher missing here with the recovery run is a stub run that failed: its exit code is in
     // the report's `launch`, and a stub that threw left its stack in `failures()`.
     expect(device.opens(), `${result.all}\n${device.failures?.() ?? ''}`).toEqual(
       ownAttached ? [ROUTE] : recovers ? [launcher, ROUTE, ROUTE] : [launcher, ROUTE]
     );
     if (!recovers) expect(device.forceStops?.() ?? []).toEqual([]);
-    expect(report.attachRecovered).toBe(!!recovers && !scenario.appNotRunning);
+    expect(report.attachRecovered).toBe(recovers && stopVerified && !scenario.appNotRunning);
     if (ownAttached) expect(report.launch).toBeNull();
     else expect(report.launch).toMatchObject({ url: launcher, attached: !stuck });
+    if (scenario.neverAttaches && scenario.platform === 'android') {
+      expect(result.stderr).toContain('no android app connected');
+      expect(result.stderr).toContain('accepted the intent and nothing more');
+      expect(result.stderr).toContain(
+        !stopVerified && recovers
+          ? 'link was opened again after a stop whose effect could not be checked'
+          : scenario.appNotRunning
+            ? 'The app was not running, so nothing was stopped; the link opened a second time'
+            : 'The app was stopped and the link opened a second time, and that did not attach either.'
+      );
+      if (scenario.appNotRunning || (recovers && !stopVerified))
+        expect(result.stderr).not.toContain('The app was stopped');
+    }
     if (device.calls) {
       const calls = device.calls();
       const startOf = (url: string) =>
@@ -365,14 +400,6 @@ it.each(scenarios)('$name', async (scenario) => {
         const stops = device.forceStops!();
         expect(stops.length).toBeGreaterThan(0);
         for (const args of stops) expect(args.at(-1)!.replace(/^'|'$/g, '')).toBe(APP_ID);
-        expect(result.stderr).toContain('no android app connected');
-        expect(result.stderr).toContain('accepted the intent and nothing more');
-        expect(result.stderr).toContain(
-          scenario.appNotRunning
-            ? 'The app was not running, so nothing was stopped; the link opened a second time'
-            : 'The app was stopped and the link opened a second time, and that did not attach either.'
-        );
-        if (scenario.appNotRunning) expect(result.stderr).not.toContain('The app was stopped');
       }
     }
   } finally {

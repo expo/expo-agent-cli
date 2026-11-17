@@ -53,15 +53,13 @@ describe(stopAppOnDeviceAsync, () => {
 // F102 — MAJOR, found live on 2026-08-27 against Expo Go on `tuft-pixel`.
 //
 // What it was: `adb shell am force-stop` exits 0 and prints nothing whether the app was running or
-// not — this file's own comment said so — and the result was still returned as `verified: true`
-// with `wasAlreadyStopped: false`, which `runtime:stop` renders as **`wasRunning: true`**. So every
+// not — this file's own comment said so — and the result was still returned as `wasRunning: true`, which `runtime:stop` renders as **`wasRunning: true`**. So every
 // Android stop claimed the app had been running, on no evidence at all. Live it claimed it for an
 // application id that is not even installed on Android (F101): `stopped: true, wasRunning: true`
 // while `adb shell pidof host.exp.exponent` still answered `3933`.
 //
 // The fix is an observation rather than a downgrade: `pidof` is one more `adb` round trip and it
-// answers the question the exit code cannot. When `pidof` itself cannot run, `verified` is false and
-// `wasRunning` goes null — llp/0021's rule that a report may be silent and may not be wrong.
+// answers the question the exit code cannot. When `pidof` itself cannot run, `wasRunning` is null — llp/0021's rule that a report may be silent and may not be wrong.
 describe('what an Android stop can establish about the app it stopped', () => {
   const android = {
     platform: 'android' as const,
@@ -74,8 +72,7 @@ describe('what an Android stop can establish about the app it stopped', () => {
 
     await expect(stopAppOnDeviceAsync(android)).resolves.toMatchObject({
       ok: true,
-      verified: true,
-      wasAlreadyStopped: false,
+      wasRunning: true,
     });
     expect(calls[0]).toEqual({
       command: process.platform === 'win32' ? 'adb.exe' : 'adb',
@@ -92,8 +89,7 @@ describe('what an Android stop can establish about the app it stopped', () => {
 
     await expect(stopAppOnDeviceAsync(android)).resolves.toMatchObject({
       ok: true,
-      verified: true,
-      wasAlreadyStopped: true,
+      wasRunning: false,
     });
   });
 
@@ -103,10 +99,10 @@ describe('what an Android stop can establish about the app it stopped', () => {
       { exitCode: 0 },
     ]);
 
-    // Not `wasAlreadyStopped: false` — that is a claim too. The stop still ran and still succeeded.
+    // Not `wasRunning: false` — that is a claim too. The stop still ran and still succeeded.
     await expect(stopAppOnDeviceAsync(android)).resolves.toMatchObject({
       ok: true,
-      verified: false,
+      wasRunning: null,
     });
   });
 });
@@ -167,7 +163,7 @@ describe('stopping the app on a cloud simulator session', () => {
 
   // The live finding this whole branch exists for: `close <anything>` exits 0 with
   // `Closed: default` whether or not the id is installed [observed — session 01a03d80, 2026-08-26].
-  // So the answer is never about the id, and `verified: false` is what stops a caller reporting it
+  // So the answer is never about the id, and `wasRunning: null` is what stops a caller reporting it
   // as one.
   it(`never claims the answer was about this application id`, async () => {
     cloudProject();
@@ -177,8 +173,7 @@ describe('stopping the app on a cloud simulator session', () => {
 
     const result = await stopAppOnDeviceAsync(cloudParams);
 
-    expect(result.verified).toBe(false);
-    expect(result.wasAlreadyStopped).toBe(false);
+    expect(result.wasRunning).toBeNull();
   });
 
   // A `simulator:exec` that failed is not the device answering about the app, so it is a failure
@@ -190,7 +185,7 @@ describe('stopping the app on a cloud simulator session', () => {
 
     await expect(stopAppOnDeviceAsync(cloudParams)).resolves.toMatchObject({
       ok: false,
-      verified: false,
+      wasRunning: null,
       reason: 'Remote daemon is unavailable',
     });
   });
@@ -258,7 +253,7 @@ describe('stopping the app on a cloud simulator session', () => {
       stopAppOnDeviceAsync({ ...cloudParams, projectRoot: undefined })
     ).resolves.toMatchObject({
       ok: false,
-      verified: false,
+      wasRunning: null,
       reason: expect.stringContaining('bug in this CLI'),
     });
   });

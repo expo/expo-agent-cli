@@ -191,7 +191,7 @@ export async function killBoundEmulatorsAsync(home: string): Promise<void> {
  * archive, e.g. one whose `app.fingerprint` is not the JSON `expo-constants` writes. `STUB_ADB_NO_DD=1` fails `stat`, the way a device
  * without the tools does, and `pull` then copies the fixture to the path asked for.
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
- * `shell pidof` answers that no app is running, or prints the pid in `STUB_ADB_PIDOF`; `shell am force-stop` exits 0.
+ * `shell pidof` answers that no app is running, or prints the pid in `STUB_ADB_PIDOF`, or with `STUB_ADB_PIDOF_BROKEN` writes to stderr and exits 127; `shell am force-stop` exits 0.
  * `STUB_ADB_REVERSE={"<serial>": <port>}` makes `-s <serial> reverse --list` list that port, in the
  * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture. A
  * `reverse tcp:<port> tcp:<port>` the stub accepts is listed from then on, as on a device.
@@ -286,6 +286,7 @@ export async function installStubAdbAsync(
       `  process.exit(serials.includes(args[1]) ? 0 : 1);`,
       `}`,
       `if (args[2] === 'shell' && args[3] === 'pidof') {`,
+      `  if (process.env.STUB_ADB_PIDOF_BROKEN) { process.stderr.write('/system/bin/sh: pidof: inaccessible or not found\\n'); process.exit(127); }`,
       `  if (process.env.STUB_ADB_PIDOF) { process.stdout.write(process.env.STUB_ADB_PIDOF + '\\n'); process.exit(0); }`,
       `  process.exit(1);`,
       `}`,

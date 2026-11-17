@@ -151,20 +151,19 @@ export async function runtimeStopAsync(
   // is not a guess of ours to defend), the device found nothing under it, and the dev server is
   // reporting some other app that is running right now. Each on its own is ordinary — a device
   // runs more than one app, and stopping an app twice must stay a success.
-  // `result.verified` leads: the mismatch is "the device found no process under this id", and a
+  // `wasRunning === false` is the mismatch: "the device found no process under this id". A
   // backend whose answer is not about the id has not found that. On a cloud session the check is
   // simply never reached, which is the honest answer rather than a quiet false.
   const appIdMismatch =
-    result.verified &&
     resolved.source === 'flag' &&
     result.ok &&
-    result.wasAlreadyStopped &&
+    result.wasRunning === false &&
     connectedAppIds.length > 0 &&
     !connectedAppIds.includes(resolved.appId);
 
   const report: RuntimeStopResultJson = {
     stopped: result.ok,
-    wasRunning: result.verified ? result.ok && !result.wasAlreadyStopped : null,
+    wasRunning: result.wasRunning,
     platform: device.platform,
     deviceBackend: device.backend,
     deviceId: device.deviceId,
