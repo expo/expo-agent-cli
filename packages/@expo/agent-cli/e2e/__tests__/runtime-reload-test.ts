@@ -718,8 +718,9 @@ describe('an app the command socket cannot see', () => {
       const report: ReloadReport = JSON.parse(result.stdout);
       expect(report.method).toBe('device');
 
-      // @ref llp/0005 §Risks 17. No captured log: the How line names the command that captures one.
-      expect(result.stderr).toContain('dev --detach');
+      // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload. No captured log: the How line
+      // names the command that captures one.
+      expect(result.stderr).toContain('npx @expo/agent-cli dev --detach --ios');
       expect(result.stderr).not.toContain('dev:logs');
 
       // The dev-server rung says the two lists disagreed rather than that nothing is connected.

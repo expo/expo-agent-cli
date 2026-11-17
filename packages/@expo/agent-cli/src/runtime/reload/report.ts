@@ -268,7 +268,7 @@ export function explainReloadFailure(
       unprovable
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
         : state.bundleLogMissing
-          ? `How: look at the screen — "${smokeBase} --no-route-check" photographs it. This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.${options.cloud ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.' : ''}`
+          ? `How: look at the screen — "${smokeBase} --no-route-check" photographs it. This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''} --${smokePlatform}" so its output is recorded.${options.cloud ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.' : ''}`
           : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".${options.cloud ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.' : ''}`,
     ].join('\n');
   }
