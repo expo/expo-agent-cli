@@ -105,7 +105,7 @@ export async function resolveDeviceAsync(
   // The platform the printed start command names; a caller that named none gets `--ios`.
   const startPlatform = platform ?? 'ios';
   if (context.cloud === 'required') {
-    return await resolveCloudDeviceAsync(platform, startPlatform, context);
+    return await resolveCloudDeviceAsync(platform, context);
   }
 
   const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });
@@ -196,9 +196,9 @@ async function cloudFallbackAsync(
  */
 async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
-  startPlatform: NavigatePlatform,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
+  const startPlatform = platform ?? 'ios';
   const rung = deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'required'));
   if (rung.kind === 'device') {
     return rung.device;
