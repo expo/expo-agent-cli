@@ -154,9 +154,8 @@ async function bootStep(
 // Conditional and an *act*, like the start and the boot: only a run that installed something
 // reports a row, because a machine that already had the app never had an install to do.
 //
-// Driven off the **device**, not off the boot. Hanging it on the boot was the first version and
-// it missed the ordinary case: a simulator somebody left running without Expo Go, where this run
-// boots nothing and the deep link comes back `115` [observed — iOS 26.5, 2026-09-03].
+// Driven off the **device**, not off the boot: a simulator somebody left running without Expo Go
+// has no boot of this run, and the deep link to it comes back `115`.
 //
 // Bootstrap, like the boot: a 423 MB download is cold this run caused, and charging it to
 // `--timeout` would leave the error window with nothing. Only for a run allowed to bring its own

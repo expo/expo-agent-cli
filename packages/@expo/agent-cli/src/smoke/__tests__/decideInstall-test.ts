@@ -1,7 +1,6 @@
 import { decideInstall, type InstallDecision, type InstallFacts } from '../deps/decideInstall';
 
 const facts = (overrides: Partial<InstallFacts> = {}): InstallFacts => ({
-  noStart: false,
   deviceId: 'SIM-1',
   createdByBoot: false,
   backend: 'local-ios',
@@ -14,7 +13,6 @@ const facts = (overrides: Partial<InstallFacts> = {}): InstallFacts => ({
 describe(decideInstall, () => {
   // Each row also carries facts of a later row, so the first match is what the row proves.
   it.each<[number, Partial<InstallFacts>, InstallDecision]>([
-    [1, { noStart: true, deviceId: null, createdByBoot: true }, { install: false }],
     [2, { deviceId: null, kind: null, createdByBoot: true }, { install: false }],
     [3, { kind: null, createdByBoot: true }, { install: false }],
     [4, { createdByBoot: true, backend: 'cloud', appId: null }, { install: true }],
@@ -32,8 +30,8 @@ describe(decideInstall, () => {
   });
 
   it.each<[Partial<InstallFacts>, InstallDecision]>([
-    [{}, { ask: 'hasApp' }],
-    [{ hasApp: true }, { ask: 'expoGoVerdict' }],
+    [{}, { ask: 'hasApp', deviceId: 'SIM-1', appId: 'host.exp.Exponent' }],
+    [{ hasApp: true }, { ask: 'expoGoVerdict', deviceId: 'SIM-1' }],
     [{ hasApp: true, kind: 'native-build' }, { install: false }],
   ])('asks for a device read only when a row needs it: %j', (overrides, expected) => {
     expect(decideInstall(facts(overrides))).toEqual(expected);

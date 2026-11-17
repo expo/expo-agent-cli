@@ -163,7 +163,6 @@ async function installNeededOnDevice(
 ): ReturnType<SmokeDeps['installNeededOnDevice']> {
   const target = await ctx.targetAsync();
   const facts: InstallFacts = {
-    noStart: !ctx.options.bootstrap,
     deviceId,
     createdByBoot,
     backend,
@@ -174,17 +173,16 @@ async function installNeededOnDevice(
     const decision = decideInstall(facts);
     if ('install' in decision) return decision.install;
     if (decision.ask === 'hasApp') {
-      facts.hasApp = await hasAppOnDeviceAsync(deviceId!, backend, target.appId!);
+      facts.hasApp = await hasAppOnDeviceAsync(decision.deviceId, backend, decision.appId);
     } else {
-      facts.expoGoVerdict = (await checkExpoGoVersion(ctx, deviceId!)).verdict;
+      facts.expoGoVerdict = (await checkExpoGoVersion(ctx, decision.deviceId)).verdict;
     }
   }
 }
 
-// `expo-go download` for the binary and `simctl install` for the device, both as subprocesses.
-// Only reached for a boot that came up without the app, and only when the plan's rule is Expo
-// Go — so the SDK version is the one the project reports, and the release is the one that SDK
-// ships rather than whatever is newest.
+// Runs after `installNeededOnDevice` answered yes. For Expo Go: `expo-go download` for the binary
+// and `simctl install` for the device, both as subprocesses, at the SDK version the project
+// reports. For a native build: this project's own artefact.
 // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
 //
 // Two installs, because they put two different apps on the device: a published binary to

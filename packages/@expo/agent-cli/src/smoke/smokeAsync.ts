@@ -174,7 +174,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     waitForStableTargets,
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
-    progress: buildSmokeProgress(options, { installKind: () => ctx.installKind ?? null }),
+    progress: buildSmokeProgress(options, { installKind: () => ctx.installKind }),
 
     now: () => Date.now(),
   };

@@ -253,8 +253,7 @@ export interface SmokeDeps {
    * created or spawned the device (`SmokeBootResult.bound.action`).
    *
    * Asked of the device this run settled on, however it got there — **not** only of one this run
-   * booted. A simulator someone left running without Expo Go is the ordinary case, and the first
-   * version of this phase missed it by hanging the question off the boot [observed, 2026-09-03].
+   * booted. A simulator someone left running without Expo Go is the ordinary case.
    */
   installNeededOnDevice(
     deviceId: string | null,
