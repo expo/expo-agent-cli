@@ -245,7 +245,7 @@ Rules:
 
 A local device's app can stand beside this worktree's own EAS session on the same port, with the session app's app id ([[0035-one-device-per-worktree]] §Readers). Every EAS session scope skips it (§Which app a run reads, row 11). With only such apps listed, a command that needs a debugger target refuses `NO_APP_CONNECTED`, exit 1, names each app and the session, and prints no scope line.
 
-A lease lasts 60 minutes and is renewed by use ([[0035-one-device-per-worktree]] §Lease). A runtime read does not renew it, because a renewal takes the registry lock and reads are the most frequent calls (Risk 2).
+A lease lasts 60 minutes ([[0035-one-device-per-worktree]] §Lease). A dev server that the CLI started renews it every 5 minutes, and `navigate` renews it. A runtime read does not renew it: a renewal takes the registry lock, and reads are the most frequent calls (Risk 2).
 
 ## Reloading the app
 
@@ -385,6 +385,8 @@ The open runs these steps in order. A step whose condition does not hold is pass
 | 4   | wait for the app                             | the device took the link, and the run has an attach budget | the rest of `--attach-timeout`; at least 2 s after a launcher open | `attached`                                                                                       |
 | 5   | answer the open dialog                       | an EAS session, and nothing attached                       | step 4's budget again, after an accepted dialog                    | `attachAlert` (§Cloud simulator)                                                                 |
 | 6   | stop the app once, open the route link again | Android, local or EAS, and nothing attached                | step 4's budget again, when the second open exits 0                | `attachRecovered`: `false` when the stop failed or `pidof` saw no process, else `true` (Risk 14) |
+
+`--attach-timeout` bounds each wait, not the whole open. A recovery starts only after step 4 used its whole budget, so steps 5 and 6 each wait step 4's budget again. One `navigate` waits up to two budgets on local Android and on an EAS iOS session, and up to three on an EAS Android session.
 
 Step 3 opens the route link also for `/`, because the launcher loads whatever the app last had. A refused launcher open does not fail the run. The human output prints a `Launch` line above `App`. `smoke` passes its attach budget, so it loads a cold development build the same way.
 
@@ -533,7 +535,7 @@ An install replaces the running app, so the `app` phase drops its earlier look a
 
 ### The Expo Go on the device is not the Expo Go the SDK wants
 
-Expo Go's native runtime is versioned with the SDK. A copy from another SDK takes the deep link but cannot load this project's bundle. So `smoke` compares the Expo Go on a **local** device with the release this project's SDK ships. The `app` phase never compares a development build or an EAS session's device. The install decision does compare the device's Expo Go for a development build (Risk 9).
+Expo Go's native runtime is versioned with the SDK. A copy from another SDK takes the deep link but cannot load this project's bundle. So `smoke` compares the Expo Go on a **local** device with the release this project's SDK ships. The `app` phase never compares a development build or an EAS session's device. The install decision does compare the device's Expo Go for a development build (Risk 9). An EAS session that the CLI starts needs no check: the CLI passes `--expo-go` to `eas simulator`, and the service installs the Expo Go of the project's SDK.
 
 Two questions, two sources. Neither is `@expo/cli`'s ([[0001-agentic-cli-on-expo-cli]] §Constraints, constraint 5).
 
@@ -753,7 +755,7 @@ A `localhost` or `lan` URL is refused before anything opens; no `adb reverse` re
 
 **Reload.** On `--eas`, rung 1 runs first, as on a local run. The broadcast does not reach a session: the tunnel carries the bundle, not the command socket. So when rung 1 climbs, the EAS relaunch restarts the app and then opens the link (§How it reloads). The tunnel check runs before the first verb.
 
-**The iOS open dialog.** An `exp://` URL on an iOS session raises "Open in 'Expo Go'?", and nobody is at the screen. `navigate` answers it under four gates: the device is an EAS session; this run's own open exited 0; nothing attached inside the attach budget; and `alert get` names the app the URL was for. Any other alert is reported and left. An empty `alert get` is exit 1, `alert not found`, so a read is safe. `--json` reports `attachAlert` (`checked`, `found`, `accepted`).
+**The iOS open dialog.** An `exp://` URL on an iOS session raises "Open in 'Expo Go'?", and nobody is at the screen. `navigate` answers it under four gates: the device is an EAS session; this run's own open exited 0; nothing attached inside the attach budget; and `alert get` names the app the URL was for. Any other alert is reported and left. The gate holds also when the run reached the session by the fallback, without `--eas`: the fallback takes only this worktree's own session, so the answer finishes the caller's own open. An empty `alert get` is exit 1, `alert not found`, so a read is safe. `--json` reports `attachAlert` (`checked`, `found`, `accepted`).
 
 **smoke.** The screenshot on an EAS session gets a longer budget (§The smoke gate), for `npx`, the network and the download. Which commands stop a session is [[0035-one-device-per-worktree]] §Session cleanup.
 
@@ -809,19 +811,19 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 ## Risks
 
 1. A `Page.reload` rung 1 reports the top-level `method: dev-server`, also under a pinned `--method dev-server`; only the attempt says `page-reload` (§How it reloads).
-2. A runtime read does not renew the binding lease. A worktree that runs only `runtime:*` reads for 60 minutes loses its live binding, and another worktree then reads that app (§Target owner).
+2. A runtime read does not renew the binding lease. When the app uses a dev server that the CLI did not start, and the worktree runs only `runtime:*` reads for 60 minutes, the binding expires, and another worktree then reads that app (§Target owner).
 3. A local Android binding records a serial only, and React Native Android names the device by its model. So a local Android app is never skipped as another worktree's app. An EAS session's target carries the model of the session's device, so an EAS binding has no name to match either (§Target owner).
 4. An EAS Android session's app is skipped beside an attached local emulator of the same model (§Which app a run reads).
 5. With no platform in scope and no placed app, the bundle check builds for `ios` only, so an Android-only break is not found; the report says `bundlePlatformSource: "default"` (§Which app a run reads).
 6. `hostType` is `tunnel` for any host name that is not loopback and not an IP literal, for example `mymac.local`. Such a URL passes the EAS refusal. A tunnel whose transport has died is still advertised (§Where a device reaches the dev server).
 7. Expo Go for Android cannot pass `smoke`: the run ends 22 on a working app. It also pays the 5 s `-32601` grace on almost every run, because a reload is the default and every opened or reloaded app counts as moved (§Android, §A reloading runtime answers like one with no debugger).
-8. The Expo Go version check runs only on a local device, and `unknown` says nothing. Offline, a stale Expo Go is not named, and on Android "no Expo Go" and "`adb` could not run" both read as `unknown` (§The Expo Go on the device is not the Expo Go the SDK wants).
+8. The Expo Go version check runs only on a local device, and `unknown` says nothing. An EAS session that the CLI did not start, or one kept across an SDK change, can hold another SDK's Expo Go, and the run does not name it. Offline, a stale Expo Go is not named, and on Android "no Expo Go" and "`adb` could not run" both read as `unknown` (§The Expo Go on the device is not the Expo Go the SDK wants).
 9. For a `native-build` target whose app is on the device, the install decision still compares the device's Expo Go version, so a stale Expo Go beside a current development build can start a needless development build (§The gate installs the app, whichever app it is).
 10. `smoke --help` says "Nine phases", while the run has 13 phases (4 of them conditional). Its list of JSON keys leaves out `appMismatch` and `appMismatchKind` (§The smoke gate).
 11. The three app-mismatch follow-ups drop the run's `--eas` and `--port`, unlike the other `smoke` follow-ups (§Two mismatches, two next actions).
 12. `NO_CLOUD_SIMULATOR_SESSION` names `dev --ios --eas`, also to a caller who asked for Android (§Cloud simulator).
 13. `dev:wait` is deferred and not shipped. Its follow-ups print `navigate / --cloud`, a flag the CLI refuses, and name a bare `npx eas simulator:stop` with no `--id`, which works only when `.env.eas-simulator` names the session.
-14. `attachRecovered` is true, and the reason says the app was stopped, when `pidof` could not run and on an EAS session. Steps 5 and 6 of the open each wait step 4's budget again, so one `navigate` can wait up to three budgets (§Loading the app is not navigating it).
+14. `attachRecovered` is true, and the reason says the app was stopped, when `pidof` could not run and on an EAS session. `navigate --help` does not say that each recovery waits the attach budget again (§Loading the app is not navigating it).
 15. On `--eas`, row 4 of the install table decides before the session's device is excluded, so `smoke --eas` on a project that was never prebuilt asks for a development build install onto the session (§The gate installs the app, whichever app it is).
 16. A plan that cannot be read installs a development build: row 4 starts `expo run:<platform>` for a project whose kind is unknown, which can be an Expo Go project. A code comment in the smoke target reader says that nothing is installed (§An app that cannot be named still has to be installed).
 17. With `--route`, a local relaunch opens the route link as the relaunch and again after the app is back. The first open comes before the observation (§Reloading the app).
@@ -830,13 +832,6 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 20. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
 21. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
 22. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
-
-## Open questions
-
-- Should a runtime read renew the binding lease (Risk 2)?
-- Should the attach recoveries share the one `--attach-timeout` budget (Risk 14)?
-- Should the Expo Go version check also run on an EAS session?
-- Should `navigate` answer the iOS open dialog on a fallback EAS session that the caller did not name with `--eas`? `navigate` answers it on any EAS session that the run resolved (§Cloud simulator).
 
 ## Testing
 
