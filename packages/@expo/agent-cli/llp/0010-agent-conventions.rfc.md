@@ -23,10 +23,10 @@ A driving agent reads the exit code before it reads the output. The code answers
 | `7`     | The tool worked. A person must finish the step                                  | Hand the printed URL or instruction to the human |
 | `20`    | The tool worked. The operation failed                                           | Read the payload. Act on the subject's failure   |
 | `21`    | The tool worked. The operation was canceled. Reserved, emitted by no v1 command | Nothing branches on it in this release           |
-| `22`    | The tool worked. The operation timed out (inconclusive)                         | Wait longer, or look again                       |
+| `22`    | The tool worked. It could not conclude: timed out, or nothing could measure     | Look again, or read why it could not measure     |
 | `23-29` | Reserved for further outcome classes                                            |                                                  |
 
-The codes sit in bands. `20-29` is one band an agent can test with a range, so a command that grows a new outcome class does not break a caller that knew only the old ones. `1` is the whole "the tool did not work" band. `7` sits away from both: a step only a person can complete (signing in through a browser, approving a device, finishing a launch in a web page) is its own class, because a retry of the same command cannot finish it. Timeout sits apart from failure: retrying is the next action after `22` and a waste of minutes after `20`. Nothing is above `125`, which POSIX shells and `npx` use for their own conditions.
+The codes sit in bands. `20-29` is one band an agent can test with a range, so a command that grows a new outcome class does not break a caller that knew only the old ones. `1` is the whole "the tool did not work" band. `7` sits away from both: a step only a person can complete (signing in through a browser, approving a device, finishing a launch in a web page) is its own class, because a retry of the same command cannot finish it. Inconclusive sits apart from failure: looking again can help after `22` and is a waste of minutes after `20`. No code this CLI assigns is above `125`, which POSIX shells and `npx` use for their own conditions. A forwarded code is the subprocess's own.
 
 `21` is reserved. The constant stays defined so the number keeps its meaning for the command that brings it back. A unit test fails when loadable source starts to use it. `dev --plan` runs nothing on purpose and exits `0`: that is a success, not a cancellation.
 
@@ -36,7 +36,7 @@ A tool error is an error object that may carry its own code. The CLI prints it a
 
 `1` promises that the same line run again changes nothing. After a reload, the debugger target list is empty for about half a second while the runtime comes back.
 
-The wait belongs to the question. Every command that needs a debugger target waits out the reconnect grace of [[0005-runtime-loop-tools]]. Commands that can work without a runtime skip it. An empty list after the wait is `22`: the tool worked and could not conclude.
+So a command that needs a debugger target waits first, and an empty list after the wait is `22`: the tool worked and could not conclude. The wait and the scope are [[0005-runtime-loop-tools]] §One preflight for the runtime family.
 
 No dev server, and a target list with no app in the run's scope (another platform, worktree, or session), stay `1`. Neither changes within a second. The fix for the first is to start a dev server, and the fix for the second is to open the app in scope or change the flag. "Fix the call" is what `1` says.
 
@@ -46,17 +46,17 @@ No dev server, and a target list with no app in the run's scope (another platfor
 
 A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's plain install (`npm install`, `bun install`, `pnpm install` or `yarn install`) in the directory `@expo/package-manager` resolves (the project's workspace root, or the project), and exits with its code. An unrelated parent's lockfile never runs. The install is not frozen: `npm ci` deletes a workspace root's `node_modules` for every member, and a runnable clone is worth a lockfile update. A manager that is not installed stops with `PACKAGE_MANAGER_NOT_FOUND`. An install that exits 0 and leaves `expo` unresolved stops with `DEPENDENCIES_NOT_INSTALLED` and names the command that ran. Every other form of `install` runs `expo install`, which cannot read the SDK yet, so in that state it stops with `DEPENDENCIES_NOT_INSTALLED` and `Try:` the bare `install`.
 
-The exception is a command that adds a verdict. `doctor` is `0` when every check passed, `20` when any failed, and `1` only when the run produced no verdict ([[0016-v1-scope]] §Doctor's exit code). expo-doctor's own code stays on the `--json` `exitCode` field.
+The exception is a command that adds a verdict: `doctor` ([[0016-v1-scope]] §Doctor's exit code).
 
 ### The fourth: `typecheck`
 
 `typecheck` is in the outcome band. The other gates parse and watch for throws. This one type-checks, with the project's own compiler.
 
-| Code | The project                                                                  |
-| ---- | ---------------------------------------------------------------------------- |
-| `0`  | type-checks, has no TypeScript, or has no `tsconfig.json` (`checked: false`) |
-| `20` | does not type-check. The diagnostics are the payload                         |
-| `1`  | a TypeScript project with no compiler, or one that failed saying nothing     |
+| Code | The project                                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------------ |
+| `0`  | type-checks, has no TypeScript, or has a compiler but no `tsconfig.json` (`checked: false`)            |
+| `20` | does not type-check. The diagnostics are the payload                                                   |
+| `1`  | a TypeScript project with no compiler, a compiler that cannot start, or one that failed saying nothing |
 
 A project with no TypeScript exits `0` with `checked: false`. `reason` is present exactly when `checked` is false. The follow-up says so as a command as well as a field, so "nothing was checked" cannot read as "everything passed". Either `tsconfig.json` or `.ts`/`.tsx` sources make a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
 
@@ -92,12 +92,12 @@ Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)
 
 The block replaces the `Try:` line, because line two already is the command.
 
-The registry is a data table of scenarios. Two rows, `expo-prompt` and `eas-prompt`, are generic and sort last. A row with no signature is never matched against output: only a caller that names it raises it. Callers never match strings themselves.
+The registry is a data table of scenarios. Two rows, `expo-prompt` and `eas-prompt`, are generic and sort last. A row with no signature is never matched against output: only a caller that names it raises it. No v1 caller raises one. Callers never match strings themselves.
 
 Four layers, in priority order:
 
 1. Preflight. Before a command that needs an account starts, ask who is signed in, with a short deadline, and cache the answer for the process. The answer comes from `eas whoami`, then the project's own `expo whoami`, then `EXPO_TOKEN`. A rung that cannot answer passes to the next one: no binary, an `eas` that would have to be downloaded, a run past the deadline, or a binary under that name that is not the CLI. When no rung answers, `loggedIn` is `null`, never `false`. On `false` the command stops with `eas-login`, exit `7`, before it spends anything. On `null` it runs, and layer 3 recognises a real failure.
-2. Nobody can answer. Every captured subprocess is told that nothing can answer it, and stdin is never attached. For `eas` that is `--non-interactive`, or `--json`, which implies it. For `expo` it is `CI=1` in the child environment, because the Expo CLI rejects `--non-interactive` and names the variable instead. The exception is the captured run that starts a dev server (`expo start`, `expo run:ios`, `expo run:android`): `CI` also turns Metro's file watcher off, so that child inherits the caller's environment. Nothing is set, not `CI=0`: a machine whose own environment says `CI` is a machine where a frozen bundler is right. The child's stdout is a pipe, never a TTY, so the Expo CLI still knows that nobody can answer.
+2. Nobody can answer. A captured subprocess never gets stdin, and its stdout is a pipe, never a TTY. An `eas` command that can prompt also gets `--non-interactive`, or `--json`, which implies it. For `expo` it is `CI=1` in the child environment, because the Expo CLI rejects `--non-interactive` and names the variable instead. The exception is the captured run that starts a dev server (`expo start`, `expo run:ios`, `expo run:android`): `CI` also turns Metro's file watcher off, so that child inherits the caller's environment. Nothing is set, not `CI=0`: a machine whose own environment says `CI` is a machine where a frozen bundler is right. The pipe still tells the Expo CLI that nobody can answer.
 3. Stderr classify. Match the captured output against the registry. The load-bearing patterns: eas-cli's `Either log in with … EXPO_TOKEN`, `@expo/cli`'s `is in non-interactive mode`, and the `in non-interactive mode` fragment that eas-cli's prompt sites share.
 4. Generic prompt fallback. Only for a captured child, and only when the caller opts in. If the child writes nothing for `AGENT_CLI_PROMPT_TIMEOUT_MS` (default 20 s) _and_ its last non-empty line is prompt-shaped, it is killed and the line is quoted as untrusted text. Never in `inherit` mode.
 
@@ -239,7 +239,7 @@ The constants and the resolution rules have unit tests. The envelope, the needs-
 | §An empty target list is inconclusive | `src/runtime/__tests__/preflight-test.ts`; `e2e/__tests__/runtime-preflight-test.ts`                                                                                                                                                                                                                                                                                                                                                                |
 | §Forwarded codes, and the exception   | `e2e/__tests__/wrapper-test.ts`, `install-bootstrap-test.ts`, `doctor-test.ts`                                                                                                                                                                                                                                                                                                                                                                      |
 | §The fourth: `typecheck`              | `src/typecheck/__tests__/checkAsync-test.ts`, `parseTscOutput-test.ts`, `typecheckAsync-test.ts`; `e2e/__tests__/typecheck-test.ts`                                                                                                                                                                                                                                                                                                                 |
-| §Other gates, in brief                | `src/status/__tests__/assert-test.ts`; `src/runtime/__tests__/bundleCheck-test.ts`, `stopAsync-test.ts`; `e2e/__tests__/runtime-test.ts`, `status-test.ts`, `stop-test.ts`; `src/dev/__tests__/stopAsync-test.ts`                                                                                                                                                                                                                                   |
+| §Other gates, in brief                | `src/status/__tests__/assert-test.ts`; `src/runtime/__tests__/bundleCheck-test.ts`, `stopAsync-test.ts`; `e2e/__tests__/runtime-test.ts`, `status-test.ts`, `stop-test.ts`; `src/dev/__tests__/stopAsync-test.ts`; `e2e/__tests__/runtime-reload-test.ts`, `smoke-test.ts`                                                                                                                                                                          |
 | §Needs-human protocol                 | `src/needsHuman/__tests__/registry-test.ts`, `detect-test.ts`, `preflight-test.ts`, `promptShape-test.ts`; `src/utils/__tests__/subprocess-test.ts`, `expoCli-test.ts`, `wrapperCrash-test.ts`, `errors-test.ts`; `src/dev/__tests__/portCollision-test.ts`; `e2e/__tests__/dev-test.ts`; `src/dev/__tests__/detachAsync-test.ts`; `e2e/__tests__/deploy-test.ts`, `dev-detach-test.ts`; `src/deferred/build-wait/__tests__/build-wait-e2e-test.ts` |
 | §The `--json` error envelope          | `src/utils/__tests__/errors-test.ts`, `jsonMode-test.ts`, `unknownOption-test.ts`, `args-test.ts`; `e2e/__tests__/dev-test.ts`, `typecheck-test.ts`                                                                                                                                                                                                                                                                                                 |
 | §Registry rules                       | `src/__tests__/commandRegistry-test.ts`; `src/utils/__tests__/args-test.ts`; `e2e/__tests__/help-test.ts`, `wrapper-test.ts`                                                                                                                                                                                                                                                                                                                        |

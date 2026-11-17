@@ -884,7 +884,7 @@ describeLive('live-project', gate)(
         expect(result.stdout).toBe('');
       });
 
-      // llp/0010 §Registry rules, rule 2: a group named after a forwarded command owns its colon
+      // llp/0010 §Registry rules, rule (b): a group named after a forwarded command owns its colon
       // forms and nothing else, so the space form is two arguments for `expo config`.
       it('forwards the space form rather than resolving it as a group action', async () => {
         const result = await runLiveAsync(run, projectRoot, ['config', 'doctor'], {
