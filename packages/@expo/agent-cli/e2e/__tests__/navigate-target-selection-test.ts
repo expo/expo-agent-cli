@@ -397,7 +397,10 @@ it.each(scenarios)('$name', async (scenario) => {
         expect(result.stderr).not.toContain(
           'The app was stopped and the link opened a second time'
         );
-      if (scenario.reopenFails) expect(result.stderr).not.toContain('opened a second time');
+      if (scenario.reopenFails) {
+        expect(result.stderr).not.toContain('opened a second time');
+        expect(result.stderr).toContain('an app the stop closed stays closed');
+      }
     }
     if (device.calls) {
       const calls = device.calls();

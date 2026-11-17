@@ -168,7 +168,7 @@ export const ATTACH_RECOVERY_TEXT: Record<
   },
   'reopen-failed': {
     reason: ', and after the stop ran, opening the link again failed',
-    why: ' The stop ran, and opening the link again failed, so the link was opened only once.',
+    why: ' The stop ran, and opening the link again failed, so the link was opened only once, and an app the stop closed stays closed.',
     success: '',
   },
 };
