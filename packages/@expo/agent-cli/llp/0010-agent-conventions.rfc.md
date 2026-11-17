@@ -26,7 +26,7 @@ A driving agent reads the exit code before it reads the output. The code answers
 | `22`    | The tool worked. It could not conclude: timed out, or nothing could measure     | Look again, or read why it could not measure     |
 | `23-29` | Reserved for further outcome classes                                            |                                                  |
 
-The codes sit in bands. `20-29` is one band an agent can test with a range, so a command that grows a new outcome class does not break a caller that knew only the old ones. `1` is the whole "the tool did not work" band. `7` sits away from both: a step only a person can complete (signing in through a browser, approving a device, finishing a launch in a web page) is its own class, because a retry of the same command cannot finish it. Inconclusive sits apart from failure: looking again can help after `22` and is a waste of minutes after `20`. No code this CLI assigns is above `125`, which POSIX shells and `npx` use for their own conditions. The exception follows the shell's own convention: a signal that stops `dev` exits `128` plus the signal number (`DEV_INTERRUPTED`). A forwarded code is the subprocess's own.
+The codes sit in bands. `20-29` is one band an agent can test with a range, so a command that grows a new outcome class does not break a caller that knew only the old ones. `1` is the whole "the tool did not work" band. `7` sits away from both: a step only a person can complete (signing in through a browser, approving a device, finishing a launch in a web page) is its own class, because a retry of the same command cannot finish it. Inconclusive sits apart from failure: looking again can help after `22` and is a waste of minutes after `20`. No code this CLI assigns is above `125`, which POSIX shells and `npx` use for their own conditions. The exception follows the shell's own convention: a signal that reaches `dev` before or between steps, or during a step that is not the dev server, exits `128` plus the signal number (`DEV_INTERRUPTED`). A signal that ends the dev-server step is the stop the caller asked for: exit `0`. A forwarded code is the subprocess's own.
 
 `21` is reserved. The constant stays defined so the number keeps its meaning for the command that brings it back. A unit test fails when loadable source starts to use it. `dev --plan` runs nothing on purpose and exits `0`: that is a success, not a cancellation.
 
@@ -42,7 +42,7 @@ No dev server, and a target list with no app in the run's scope (another platfor
 
 ### Forwarded codes, and the exception
 
-`install`, `start`, `dev`, and the `expo` passthrough hand back the subprocess's exit code unchanged. A child that a signal ended has no code: `SIGINT` and `SIGTERM` give `0`, any other signal `1`. A wrapper's own failures use the table.
+`install`, `start`, `dev`, and the `expo` passthrough hand back the subprocess's exit code unchanged. An `expo` child that a signal ended has no code: `SIGINT` and `SIGTERM` give `0`, any other signal `1`. The bare install's package manager gives `1` for any signal. A wrapper's own failures use the table.
 
 A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's own plain install command in the directory `@expo/package-manager` resolves (the project's workspace root, or the project), and exits with its code. An unrelated parent's lockfile never runs. The install is not frozen: `npm ci` deletes a workspace root's `node_modules` for every member, and a runnable clone is worth a lockfile update. A manager that is not installed stops with `PACKAGE_MANAGER_NOT_FOUND`. An install that exits 0 and leaves `expo` unresolved stops with `DEPENDENCIES_NOT_INSTALLED` and names the command that ran. Every other form of `install` runs `expo install`, which cannot read the SDK yet, so in that state it stops with `DEPENDENCIES_NOT_INSTALLED` and `Try:` the bare `install`.
 
@@ -82,7 +82,7 @@ The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `r
 
 Exit `7` comes from one error class, one event, one registry, and four layers.
 
-The needs-human error is a tool error with exit code `7` and a record: `scenario`, `need`, `command`, `url`, `unattendedEnv`, `resumable`, `detectedBy`. A reclassified failure keeps the error code its site already shipped. A `dev --detach` parent relays the stop that its child classified, with `detectedBy: "detached-child-log"`, so the reader knows it was relayed and not seen. The CLI emits `cli:error` with `needsHuman: true`, then `cli:needs_human` with the whole record, then prints:
+The needs-human error is a tool error with exit code `7` and a record: `scenario`, `need`, `command`, `url`, `unattendedEnv`, `resumable`, `detectedBy`. A reclassified failure keeps the error code its site already shipped, except a `dev` plan step, which takes the row's code. A `dev --detach` parent relays the stop that its child classified, with `detectedBy: "detached-child-log"`, so the reader knows it was relayed and not seen. The CLI emits `cli:error` with `needsHuman: true`, then `cli:needs_human` with the whole record, then prints:
 
 ```
 Needs a human   eas-login
@@ -105,7 +105,7 @@ A busy port is a `PORT_IN_USE` failure (exit `20` when the caller named `--port`
 
 A failure counts as "not the CLI" only when its output holds nothing that looks like that CLI's _and_ the process died the way a wrapper dies: exit `101`, `126`, `127`, `134`, `139`, or a panic signature. That preflight rung then gives no answer instead of "signed out".
 
-A failed `dev` plan step raises. The plan object prints only when every step worked. A stop that layer 3 or 4 recognises raises that row's needs-human error, with the row's own code (such as `EXPO_NEEDS_INPUT`). Any other failure is `PLAN_STEP_FAILED`, with the tail of what the step printed and the step's own exit code, and `error.needsHuman` is `null`. That holds even for a step that exited `7`, such as Node leaving with `7` after an unhandled rejection: a coincidence is not a stop. `dev` captures its steps whenever nobody watches a terminal (`--json`, or a non-TTY run) and inherits the terminal when somebody does. Forwarded passthrough commands inherit the terminal and are not classified.
+A failed `dev` plan step raises. The plan object prints only when every step worked. A stop that layer 3 recognises raises that row's needs-human error, with the row's own code (such as `EXPO_NEEDS_INPUT`). Any other failure is `PLAN_STEP_FAILED` with the step's own exit code, and `error.needsHuman` is `null`. Under `--json` the error also holds the tail of what the step printed; a run without `--json` already showed that output. That holds even for a step that exited `7`, such as Node leaving with `7` after an unhandled rejection: a coincidence is not a stop. `dev` captures its steps whenever nobody watches a terminal (`--json`, or a non-TTY run) and inherits the terminal when somebody does. Forwarded passthrough commands inherit the terminal and are not classified.
 
 ## The `--json` error envelope
 
@@ -211,6 +211,10 @@ Gaps found while building the tool layer. Per [[0001-agentic-cli-on-expo-cli]] c
 - `expo cache:clear`.
 - Do not print the app's deep-link scheme as the dev server's URL. With the v2 tunnel the advertised URL picks up the scheme. Worked around by keeping the host of the printed URL and replacing a non-HTTP scheme with `https` for a tunnel host, `http` otherwise.
 - Emit `devserver:url` in a released SDK. Until then the tunnel host is parsed from `Waiting on <url>`.
+
+`@expo/fingerprint`:
+
+- `fingerprint:diff` that reads two fingerprints from stdin or from two revisions, not only from two files. Worked around with temporary files.
 
 `create-expo`:
 
