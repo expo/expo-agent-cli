@@ -17,66 +17,65 @@ import type { SkippedApp } from '../runtime/targetSelection';
 import type { SmokeAppMismatchKind } from './contract';
 
 /**
- * The phases of a smoke run, in the order they happen.
+ * The phases that every smoke run reports, in the order they happen.
  *
  * A closed set, and reported as one: an agent branching on "which step of the gate failed" must
  * not have to match English. Each is the question of one existing command, asked without leaving
- * this process (llp/0005 §The smoke gate).
+ * this process (llp/0005 §The smoke gate). The order of the whole run is `PHASE_ORDER` in
+ * `walk/walk.ts`.
+ *
+ * - `dev-server`: is there a dev server, and is it this project's to talk to?
+ * - `bundler-ready`: has its bundler finished, and does it serve this project?
+ * - `bundle`: does this project's own entry bundle compile?
+ * - `app`: is an app attached to the device, and if not, can one be opened?
+ * - `reload`: is the app that answers the rest of this run the code that is on disk?
+ *   @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+ *   The phase that makes the four after it mean something. An app this run opened fetched the
+ *   served bundle on its way up, so it is `skipped` there and the reason says so. An app that was
+ *   *already* attached is running whatever it last loaded, which after an edit is the code the
+ *   caller has already replaced — so it is reloaded, and the reload has to be proved rather than
+ *   assumed (llp/0005 §What proves a reload).
+ * - `route`: did the route the caller named open?
+ * - `runtime`: can the runtime be read at all?
+ * - `errors`: what did the app report while it was watched?
+ * - `screenshot`: is there a picture of the screen?
  */
+export const SMOKE_ALWAYS_PHASE_IDS = [
+  'dev-server',
+  'bundler-ready',
+  'bundle',
+  'app',
+  'reload',
+  'route',
+  'runtime',
+  'errors',
+  'screenshot',
+] as const;
+
+/**
+ * The phases that only a run that performed them reports.
+ *
+ * **Conditional**: a run that found a dev server, a device or the app has not skipped a start, a
+ * boot or an install, it never had one to do, and a `skipped` row there would read as a step that
+ * was owed (llp/0005 §The run brings its own environment). Installing is an *act*.
+ *
+ * - `start-dev-server`: was a dev server started for this run?
+ * - `start-session`: was an EAS Simulator session started for this run? Only on `--eas`, and only
+ *   when the run may bring its own environment (@ref llp/0027-everything-on-eas.rfc.md §smoke).
+ * - `boot-device`: was a simulator or an emulator booted for this run?
+ * - `install-app`: was the app put on that device for this run?
+ *   @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+ */
+export const SMOKE_CONDITIONAL_PHASE_IDS = [
+  'start-dev-server',
+  'start-session',
+  'boot-device',
+  'install-app',
+] as const;
+
 export type SmokePhaseId =
-  /**
-   * Was a dev server started for this run?
-   *
-   * **Conditional**: it is in the list only on a run that performed it. A run that found one has
-   * not skipped a start, it never had one to do, and a `skipped` row there would read as a step
-   * that was owed (llp/0005 §The run brings its own environment).
-   */
-  | 'start-dev-server'
-  /** Is there a dev server, and is it this project's to talk to? */
-  | 'dev-server'
-  /** Has its bundler finished, and does it serve this project? */
-  | 'bundler-ready'
-  /** Does this project's own entry bundle compile? */
-  | 'bundle'
-  /**
-   * Was an EAS Simulator session started for this run? Conditional, like `start-dev-server`.
-   *
-   * @ref llp/0027-everything-on-eas.rfc.md §smoke
-   * Only on `--eas`, and only when the run may bring its own environment: the session is the
-   * device, and a run that found one up has not skipped a start.
-   */
-  | 'start-session'
-  /** Was a simulator or an emulator booted for this run? Conditional, like `start-dev-server`. */
-  | 'boot-device'
-  /**
-   * Was the app put on that device for this run?
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-   * **Conditional**, and for the same reason the two above it are: installing is an *act*. A
-   * machine that already had the app did not skip an install, it never had one to do.
-   */
-  | 'install-app'
-  /** Is an app attached to it, and if not, can one be opened? */
-  | 'app'
-  /**
-   * Is the app that answers the rest of this run the code that is on disk?
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
-   * The phase that makes the four after it mean something. An app this run opened fetched the
-   * served bundle on its way up, so it is `skipped` there and the reason says so. An app that was
-   * *already* attached is running whatever it last loaded, which after an edit is the code the
-   * caller has already replaced — so it is reloaded, and the reload has to be proved rather than
-   * assumed (llp/0005 §What proves a reload).
-   */
-  | 'reload'
-  /** Did the route the caller named open? */
-  | 'route'
-  /** Can the runtime be read at all? */
-  | 'runtime'
-  /** What did the app report while it was watched? */
-  | 'errors'
-  /** Is there a picture of the screen? */
-  | 'screenshot';
+  | (typeof SMOKE_ALWAYS_PHASE_IDS)[number]
+  | (typeof SMOKE_CONDITIONAL_PHASE_IDS)[number];
 
 /**
  * What one phase did.

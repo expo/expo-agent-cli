@@ -36,6 +36,7 @@
 
 ### 🐛 Bug fixes
 
+- `NO_CLOUD_SIMULATOR_SESSION` names the caller's platform in its How line and `suggestedCommand` (`dev --android --eas` for an Android caller). ([#359](https://github.com/expo/expo-agent-cli/pull/359) by [@vonovak](https://github.com/vonovak))
 - `navigate` reports `attachRecovered: true` only when the Android recovery saw the app running and stopped it. When the stop's effect cannot be checked (an `adb shell pidof` with no usable answer, or an EAS session), `attachRecovered` is `false` and the reason does not say the app was stopped. A second open that failed after the stop also gives `attachRecovered: false`, and the Why line says an app the stop closed stays closed. `runtime:stop` reports `wasRunning: null`, not `false`, for a stop that failed. ([#358](https://github.com/expo/expo-agent-cli/pull/358) by [@vonovak](https://github.com/vonovak))
 - `navigate --print-url` prints its URL when the worktree's binding file cannot be read and the dev server lists no app. It still refuses with `NO_BOUND_DEVICE` once an app is listed, because the binding decides which app counts.
 - `navigate` says the app was stopped, and reports `attachRecovered: true`, only when the app was running. When nothing was running it still opens the link a second time, and says nothing was stopped.

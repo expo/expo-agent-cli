@@ -102,6 +102,8 @@ export async function resolveDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
+  // The platform the printed start command names; a caller that named none gets `--ios`.
+  const startPlatform = platform ?? 'ios';
   if (context.cloud === 'required') {
     return await resolveCloudDeviceAsync(platform, context);
   }
@@ -123,7 +125,7 @@ export async function resolveDeviceAsync(
   if (found.toolError) {
     throw found.toolError;
   }
-  throw withOtherDoors(found.refusal, context, cloud?.probe ?? null);
+  throw withOtherDoors(found.refusal, context, cloud?.probe ?? null, startPlatform);
 }
 
 /** How much of the ladder a caller wants: whether the cloud backend is on it, and how. */
@@ -196,6 +198,7 @@ async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
+  const startPlatform = platform ?? 'ios';
   const rung = deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'required'));
   if (rung.kind === 'device') {
     return rung.device;
@@ -203,7 +206,7 @@ async function resolveCloudDeviceAsync(
   if (rung.probe.state === 'unknown') {
     throw cloudSessionUnknownError(rung.probe);
   }
-  throw cloudSessionUnavailableError(rung.probe);
+  throw cloudSessionUnavailableError(rung.probe, startPlatform);
 }
 
 /**
@@ -221,7 +224,8 @@ async function resolveCloudDeviceAsync(
 function withOtherDoors(
   refusal: CommandError,
   context: ResolveDeviceContext,
-  cloudProbe: CloudSessionProbe | null
+  cloudProbe: CloudSessionProbe | null,
+  platform: NavigatePlatform
 ): CommandError {
   const lines = refusal.message.split('\n');
   // The How line stays last (llp/0035 §Output and errors), so the doors go in above it.
@@ -237,7 +241,7 @@ function withOtherDoors(
   // URL: it is a device this CLI *can* drive, and the reader is one command away from it. Only when
   // there is one — a project that has never started a session gets no advertisement for a paid
   // feature it may not have.
-  const cloudLine = cloudSessionLine(cloudProbe);
+  const cloudLine = cloudSessionLine(cloudProbe, platform);
   if (cloudLine) {
     lines.push(cloudLine);
   }
@@ -251,7 +255,10 @@ function withOtherDoors(
 }
 
 /** The `Or:` line for a cloud session this project has on record and this run could not use. */
-function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
+function cloudSessionLine(
+  probe: CloudSessionProbe | null,
+  platform: NavigatePlatform
+): string | null {
   if (probe == null) {
     return null;
   }
@@ -274,17 +281,17 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
     const lines = [];
     if (probe.wrongTypeCount > 0)
       lines.push(
-        `Or: this project has ${countOf(probe.wrongTypeCount, 'running EAS Simulator session')} this CLI cannot drive — none of them is an agent-device session. Start one it can with "${cloudSessionStartCommand()}" and pass --eas.`
+        `Or: this project has ${countOf(probe.wrongTypeCount, 'running EAS Simulator session')} this CLI cannot drive — none of them is an agent-device session. Start one it can with "${cloudSessionStartCommand(platform)}" and pass --eas.`
       );
     if (probe.unboundCount > 0)
       lines.push(
-        `Or: this project has ${countOf(probe.unboundCount, 'live or pending EAS Simulator session')} that this worktree did not start, so none is selected. Start one for this worktree with "${cloudSessionStartCommand()}" and pass --eas.`
+        `Or: this project has ${countOf(probe.unboundCount, 'live or pending EAS Simulator session')} that this worktree did not start, so none is selected. Start one for this worktree with "${cloudSessionStartCommand(platform)}" and pass --eas.`
       );
     return lines.length ? lines.join('\n') : null;
   }
   // An account without the feature has no session on record to name.
   if (probe.state === 'unavailable') return null;
-  return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason}. Start a new one with "${cloudSessionStartCommand()}" and pass --eas.`;
+  return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason}. Start a new one with "${cloudSessionStartCommand(platform)}" and pass --eas.`;
 }
 
 function countOf(count: number, noun: string): string {

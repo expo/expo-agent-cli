@@ -2,6 +2,7 @@ import type { SmokeDeps, SmokeRun, SmokeRunContext } from '../contract';
 import { coldWaitMs, type SmokeOptions } from '../resolveOptions';
 import { noReload, noScreenshot } from '../results';
 import { APP_ATTACH_TIMEOUT_MS } from '../timeouts';
+import { SMOKE_CONDITIONAL_PHASE_IDS } from '../types';
 import type { SmokeOutcome, SmokePhase, SmokePhaseId, SmokePhaseStatus } from '../types';
 import { AppSession } from './appSession';
 
@@ -28,7 +29,7 @@ export interface RecordOptions {
 export type SmokeRunReport = Omit<SmokeRun, 'outcome' | 'durationMs' | 'cloudRoute'>;
 
 /** Every phase, in the order they are reported. */
-const PHASE_ORDER: SmokePhaseId[] = [
+const PHASE_ORDER = [
   'start-dev-server',
   'dev-server',
   'bundler-ready',
@@ -49,7 +50,13 @@ const PHASE_ORDER: SmokePhaseId[] = [
   'runtime',
   'errors',
   'screenshot',
-];
+] as const satisfies readonly SmokePhaseId[];
+
+// Fails to compile when `PHASE_ORDER` lacks a `SmokePhaseId`.
+const _everyPhaseIsOrdered: [Exclude<SmokePhaseId, (typeof PHASE_ORDER)[number]>] extends [never]
+  ? true
+  : never = true;
+void _everyPhaseIsOrdered;
 
 /**
  * The phases that are reported only by a run that performed them.
@@ -61,12 +68,7 @@ const PHASE_ORDER: SmokePhaseId[] = [
  * `skipped start dev server` on a healthy run reads as work that was owed and not done. The same
  * holds for the install: a machine that already had the app never had one to do.
  */
-const CONDITIONAL_PHASES = new Set<SmokePhaseId>([
-  'start-dev-server',
-  'start-session',
-  'boot-device',
-  'install-app',
-]);
+const CONDITIONAL_PHASES = new Set<SmokePhaseId>(SMOKE_CONDITIONAL_PHASE_IDS);
 
 /** The state every step shares: the phase list, the report, the budget, and the run's context. */
 export interface PhaseWalk extends SmokeRunContext {

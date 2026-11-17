@@ -138,6 +138,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     // for an Expo Go run it means `--no-start` forbade the install this gate would have done. Both
     // lead with the command that puts the app there, and neither leads with `navigate` — which is
     // what this used to suggest, and which is refused in exactly the same way every time (llp/0009).
+    // These two kinds come only from a local device, so the re-run drops `--eas` and `same` is not used.
     if (input.appMismatchKind === 'app-not-installed') {
       return capFollowUps([
         {
@@ -148,7 +149,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
           // `expo run:<platform>` for a development build. So a run that reached this was told to
           // change nothing, and the fix is the run without that flag rather than a separate `dev`.
           id: 'smoke-installs-it',
-          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}${onPort}`,
           why: '--no-start told this run to change nothing, so it could not put the app on the device. A run without it installs what is missing — Expo Go by download, a development build by building it — and then reads the app.',
         },
         {
@@ -165,7 +166,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
           id: 'smoke-install-expo-go',
           // Deliberately without `--no-start`, whether or not the caller passed it: the point of
           // the suggestion is the install, and `--no-start` is what forbids it.
-          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}${onPort}`,
           why: 'The Expo Go on the device is built from another SDK, so it is not the app this project runs. A run allowed to bring its own environment installs the release this SDK ships and reads that instead.',
         },
         {
@@ -178,7 +179,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     return capFollowUps([
       {
         id: 'dev-build',
-        command: `${PROGRAM_PREFIX} dev --${input.platform}`,
+        command: `${PROGRAM_PREFIX} dev --${input.platform}${onCloud}`,
         why: 'This project needs a development build to run at all, and that is the command that makes one and starts the dev server for it. Expo Go cannot load its native code, so no reading taken through Expo Go is about this project.',
       },
       {

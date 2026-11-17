@@ -31,9 +31,10 @@ import {
  * reader knows the file on disk is stale rather than wrong.
  */
 export function cloudSessionUnavailableError(
-  probe: Extract<CloudSessionProbe, { state: 'inactive' | 'none' | 'unavailable' }>
+  probe: Extract<CloudSessionProbe, { state: 'inactive' | 'none' | 'unavailable' }>,
+  platform: CloudPlatform
 ): CommandError {
-  const start = cloudSessionStartCommand();
+  const start = cloudSessionStartCommand(platform);
 
   if (probe.state === 'unavailable') {
     const error = new CommandError(

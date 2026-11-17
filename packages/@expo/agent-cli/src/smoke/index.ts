@@ -3,6 +3,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs, DURATION_HELP_NOTE, DURATION_METAVAR } from '../utils/args';
+import { SMOKE_ALWAYS_PHASE_IDS, SMOKE_CONDITIONAL_PHASE_IDS } from './types';
 
 export const smokeHelp: CommandHelp = {
   command: 'smoke',
@@ -63,6 +64,8 @@ export const smokeHelp: CommandHelp = {
       'deviceBackend',
       'runtimeSupported',
       'reload',
+      'appMismatch',
+      'appMismatchKind',
       'errors',
       'screenshot',
       'durationMs',
@@ -71,11 +74,10 @@ export const smokeHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Nine phases: find the dev server, wait for its bundler, build the entry bundle, get an app`,
-    `connected, reload it onto the code on disk, open the route, evaluate 1, collect errors,`,
-    `photograph. 0 passed · 20 failed · 22 inconclusive · 1 the command itself was wrong.`,
-    `An app already running is reloaded onto the code on disk; an unproved reload is 22.`,
-    `An Expo Go that is not the release this SDK ships is replaced with the one that is.`,
+    `Phases: ${SMOKE_ALWAYS_PHASE_IDS.join(', ')},`,
+    `and ${SMOKE_CONDITIONAL_PHASE_IDS.join(', ')} when this run did them.`,
+    `0 passed · 20 failed · 22 inconclusive · 1 the command itself was wrong.`,
+    `A running app is reloaded onto the code on disk (unproved: 22). A wrong Expo Go is replaced.`,
     `This run stops exactly what it started, and brings its own environment: it starts a dev`,
     `server and boots a device when there is none. A cold start it caused is not --timeout's.`,
     `It builds the development build when the project has none, and says so before it waits.`,

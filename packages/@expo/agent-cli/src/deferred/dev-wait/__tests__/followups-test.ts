@@ -187,7 +187,7 @@ describe(buildDevWaitFollowUps, () => {
     );
     const openApp = followups.find((followup) => followup.id === 'dev-wait-open-app');
 
-    expect(openApp?.command).toBe('npx @expo/agent-cli navigate / --cloud');
+    expect(openApp?.command).toBe('npx @expo/agent-cli navigate / --eas');
     expect(openApp?.why).toContain('EAS Simulator session');
     expect(openApp?.why).toContain('bills until');
   });

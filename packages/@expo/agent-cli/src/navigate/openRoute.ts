@@ -442,10 +442,10 @@ const ATTACH_POLL_MS = 500;
 /**
  * The least this run waits for the **route link** after a launcher open spent the whole budget.
  *
- * Not a second budget: the caller's `--attach-timeout` is what bounds the run, and this is only the
- * floor under whatever is left of it. Without one, a launcher open that used every millisecond
- * would leave the route link reported as `checked: false` — "this run did not wait" — for a run that
- * had waited a minute and a half.
+ * Not a second budget: this is only the floor under whatever is left of `--attach-timeout` after
+ * the launcher open. Each attach recovery then waits the route wait's budget again. Without a
+ * floor, a launcher open that used every millisecond would leave the route link reported as
+ * `checked: false` — "this run did not wait" — for a run that had waited a minute and a half.
  */
 const ROUTE_ATTACH_FLOOR_MS = 2_000;
 

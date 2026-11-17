@@ -42,6 +42,7 @@ describe('hints prefer supported agent-cli commands', () => {
   });
 
   it('starts a usable cloud app through dev', () => {
-    expect(cloudSessionStartCommand()).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(cloudSessionStartCommand('ios')).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(cloudSessionStartCommand('android')).toBe('npx @expo/agent-cli dev --android --eas');
   });
 });

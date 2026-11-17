@@ -1040,7 +1040,7 @@ describe(cloudSessionUnavailableError, () => {
   } as const;
 
   it(`names the command that starts a session, and says it bills until stopped`, () => {
-    const error = cloudSessionUnavailableError(probe);
+    const error = cloudSessionUnavailableError(probe, 'ios');
 
     expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
@@ -1051,13 +1051,16 @@ describe(cloudSessionUnavailableError, () => {
 
   // The probe treats a pending session as live, so the advice lists the pending statuses too.
   it(`advises the listing the probe runs, and ends each sentence once`, () => {
-    const error = cloudSessionUnavailableError({
-      state: 'none',
-      wrongTypeCount: 0,
-      unboundCount: 1,
-      reason:
-        'the live or pending EAS sessions of this project belong to other worktrees, so none is selected',
-    });
+    const error = cloudSessionUnavailableError(
+      {
+        state: 'none',
+        wrongTypeCount: 0,
+        unboundCount: 1,
+        reason:
+          'the live or pending EAS sessions of this project belong to other worktrees, so none is selected',
+      },
+      'ios'
+    );
 
     expect(error.message).toContain(
       'simulator:list --status in-progress --status new --status queued --status starting"'
@@ -1067,11 +1070,14 @@ describe(cloudSessionUnavailableError, () => {
 
   // An account that cannot have the feature must never be told to start a session.
   it(`offers the local device and --print-url when the account has no access`, () => {
-    const error = cloudSessionUnavailableError({
-      state: 'unavailable',
-      waitlistUrl: CLOUD_SIMULATOR_WAITLIST_URL,
-      reason: 'EAS Simulator is not enabled on this account',
-    });
+    const error = cloudSessionUnavailableError(
+      {
+        state: 'unavailable',
+        waitlistUrl: CLOUD_SIMULATOR_WAITLIST_URL,
+        reason: 'EAS Simulator is not enabled on this account',
+      },
+      'ios'
+    );
 
     expect(error.code).toBe('CLOUD_SIMULATOR_UNAVAILABLE');
     expect(error.message).not.toContain('simulator:start');

@@ -450,6 +450,19 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
   });
 
+  it(`names the caller's platform in the start command`, async () => {
+    mockPlatform('linux');
+    cloudProject('sess-1');
+    mockSpawnQueue(noSessions);
+
+    const error = await resolveDeviceAsync('android', { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.message).toContain('npx @expo/agent-cli dev --android --eas');
+    expect(error.message).not.toContain('dev --ios --eas');
+  });
+
   it(`opens on a bound session when the dotenv names none`, async () => {
     mockPlatform('linux');
     cloudProject(null);
@@ -576,6 +589,18 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(spawn).toHaveBeenCalled();
     expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
+  });
+
+  it(`names the caller's platform in the start command and suggestedCommand`, async () => {
+    cloudProject(null);
+    mockSpawnQueue(noSessions);
+
+    const error = await resolveDeviceAsync('android', { cloud: 'required', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.message).toContain('npx @expo/agent-cli dev --android --eas');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --android --eas');
   });
 
   // A tool that did not answer has said nothing, and "start a session" would start a second one.
