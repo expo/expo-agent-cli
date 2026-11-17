@@ -323,8 +323,8 @@ describeDevClient('live-devclient: the loop on a real Android development build'
 
   // @ref llp/0022-live-tier.plan.md §live-android — the row this
   // overturns most directly. There it is asserted to be **22 on a working app**, because the
-  // `runtime` phase cannot measure and llp/0010 §Other gates, in brief
-  // passing. Here it can measure, so it passes, and the gate means what it says on Android.
+  // `runtime` phase cannot measure and llp/0005 §Android does not let a gate that cannot measure
+  // pass. Here it can measure, so it passes, and the gate means what it says on Android.
   it('smoke --android passes on a development build, phase by phase', async () => {
     const result = await runLiveAsync(run, projectRoot, ['smoke', '--android', '--json'], {
       label: 'smoke',

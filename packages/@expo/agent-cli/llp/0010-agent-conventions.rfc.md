@@ -10,7 +10,7 @@
 
 ## Summary
 
-The conventions every `@expo/agent-cli` command shares: what the exit code means, how a failure says what to do next, and how one argv resolves to one command. [[0006-agent-native-cli-surface]] owns the shape of the surface. This document owns the rules that hold across all of it. The last section lists the gaps in the Expo CLI family that the tool layer works around.
+The conventions every `@expo/agent-cli` command shares: what the exit code means, how a failure says what to do next, and how one argv resolves to one command. [[0006-agent-native-cli-surface]] owns the shape of the surface. This document owns the rules that hold across all of it. §Upstream asks lists the gaps in the Expo CLI family that the tool layer works around.
 
 ## Exit codes
 
@@ -38,7 +38,7 @@ A tool error is an error object that may carry its own code. The CLI prints it a
 
 The wait belongs to the question. Every command that needs a debugger target waits out the reconnect grace of [[0005-runtime-loop-tools]]. Commands that can work without a runtime skip it. An empty list after the wait is `22`: the tool worked and could not conclude.
 
-No dev server and wrong platform stay `1`. Neither changes within a second. The fix for the first is to start a dev server, and the fix for the second is to change the flag. "Fix the call" is what `1` says.
+No dev server, and a target list with no app in the run's scope (another platform, worktree, or session), stay `1`. Neither changes within a second. The fix for the first is to start a dev server, and the fix for the second is to open the app in scope or change the flag. "Fix the call" is what `1` says.
 
 ### Forwarded codes, and the exception
 
@@ -52,11 +52,11 @@ The exception is a command that adds a verdict. `doctor` is `0` when every check
 
 `typecheck` is in the outcome band. The other gates parse and watch for throws. This one type-checks, with the project's own compiler.
 
-| Code | The project                                                              |
-| ---- | ------------------------------------------------------------------------ |
-| `0`  | type-checks, or has no TypeScript in it at all                           |
-| `20` | does not type-check. The diagnostics are the payload                     |
-| `1`  | a TypeScript project with no compiler, or one that failed saying nothing |
+| Code | The project                                                                  |
+| ---- | ---------------------------------------------------------------------------- |
+| `0`  | type-checks, has no TypeScript, or has no `tsconfig.json` (`checked: false`) |
+| `20` | does not type-check. The diagnostics are the payload                         |
+| `1`  | a TypeScript project with no compiler, or one that failed saying nothing     |
 
 A project with no TypeScript exits `0` with `checked: false`. `reason` is present exactly when `checked` is false. The follow-up says so as a command as well as a field, so "nothing was checked" cannot read as "everything passed". Either `tsconfig.json` or `.ts`/`.tsx` sources make a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
 
@@ -70,20 +70,17 @@ A compiler that failed and printed nothing readable is `1`: reported as an outco
 
 A command that reports on the app does not gate on what it reported. `runtime:errors` exits `0` whatever it collects. With `--fail-on-error` it exits `20` on a non-empty window and `22` on a runtime that cannot answer ([[0005-runtime-loop-tools]]).
 
-`runtime:reload` uses the whole band: `0` observed, `20` did not happen, `22` a mechanism ran and nothing was seen, `1` not attempted ([[0005-runtime-loop-tools]] §Reloading the app).
+`runtime:reload` uses both outcome codes: `0` observed, `20` did not happen, `22` a mechanism ran and nothing was seen, `1` not attempted ([[0005-runtime-loop-tools]] §Reloading the app).
 
 `status --assert <class>` exits `20` when the real class is stronger than the one named, and `22` when nothing could be classified. Without the flag it exits `0`. Every `--assert` or `--fail-on-*` flag answers a measured failure with `20` and an unmeasurable state with `22`.
 
-Stopping: a target already in the asked-for state is success, exit `0`, and `reason: "not-running"` keeps the fact readable.
-
-- `runtime:stop` exits `1` when the device tool refused. It exits `20` when `--app-id` names an app that is not running while the dev server shows another app.
-- `dev:stop` exits `20` when anything it was asked to stop is still running: a foreign dev server, an EAS session that did not stop, or a device error. It exits `22` while an EAS session is still starting.
+Stopping: a target already in the asked-for state is success, exit `0`. The report fields and the other `20` cases are [[0005-runtime-loop-tools]] §Stopping the app. Beyond those, `runtime:stop` exits `1` when the device tool refused, and `dev:stop` exits `20` when an EAS session did not stop or a device tool failed, and `22` while an EAS session is still starting.
 
 The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `runtime:tap` and `runtime:type`. A broken bundle is `20`. A cold first build that does not finish inside `--timeout` is `22`. `unknown` is not `broken`: `bundle.checked` is exactly `bundle.ok != null`. The check sends its HEAD to the dev server it was given ([[0005-runtime-loop-tools]] §Where a device reaches the dev server) with the path and query that the manifest or web page names, never their host, and `bundle.url` is that URL. The reason: a HEAD of the bundle through the Expo tunnel closes every websocket on that tunnel, the app's debugger socket too, and a GET cancelled after its headers does the same.
 
 ## Needs-human protocol
 
-Exit `7` comes from one error class, one event, one registry, and four ways of noticing.
+Exit `7` comes from one error class, one event, one registry, and four layers.
 
 The needs-human error is a tool error with exit code `7` and a record: `scenario`, `need`, `command`, `url`, `unattendedEnv`, `resumable`, `detectedBy`. A reclassified failure keeps the error code its site already shipped. A `dev --detach` parent relays the stop that its child classified, with `detectedBy: "detached-child-log"`, so the reader knows it was relayed and not seen. The CLI emits `cli:error` with `needsHuman: true`, then `cli:needs_human` with the whole record, then prints:
 
@@ -99,8 +96,8 @@ The registry is a data table of scenarios. Two rows, `expo-prompt` and `eas-prom
 
 Four layers, in priority order:
 
-1. Preflight. Before anything runs, ask who is signed in, with a short deadline, and cache the answer for the process. The answer comes from `eas whoami`, then the project's own `expo whoami`, then `EXPO_TOKEN`. A rung that cannot answer passes to the next one: no binary, an `eas` that would have to be downloaded, a run past the deadline, or a binary under that name that is not the CLI. When no rung answers, `loggedIn` is `null`, never `false`.
-2. By construction. Every captured subprocess is told that nothing can answer it, and stdin is never attached. For `eas` that is `--non-interactive`, or `--json`, which implies it. For `expo` it is `CI=1` in the child environment, because the Expo CLI rejects `--non-interactive` and names the variable instead. The exception is the captured run that starts a dev server (`expo start`, `expo run:ios`, `expo run:android`): `CI` also turns Metro's file watcher off, so that child inherits the caller's environment. Nothing is set, not `CI=0`: a machine whose own environment says `CI` is a machine where a frozen bundler is right. The child's stdout is a pipe, never a TTY, so the Expo CLI still knows that nobody can answer.
+1. Preflight. Before a command that needs an account starts, ask who is signed in, with a short deadline, and cache the answer for the process. The answer comes from `eas whoami`, then the project's own `expo whoami`, then `EXPO_TOKEN`. A rung that cannot answer passes to the next one: no binary, an `eas` that would have to be downloaded, a run past the deadline, or a binary under that name that is not the CLI. When no rung answers, `loggedIn` is `null`, never `false`. On `false` the command stops with `eas-login`, exit `7`, before it spends anything. On `null` it runs, and layer 3 recognises a real failure.
+2. Nobody can answer. Every captured subprocess is told that nothing can answer it, and stdin is never attached. For `eas` that is `--non-interactive`, or `--json`, which implies it. For `expo` it is `CI=1` in the child environment, because the Expo CLI rejects `--non-interactive` and names the variable instead. The exception is the captured run that starts a dev server (`expo start`, `expo run:ios`, `expo run:android`): `CI` also turns Metro's file watcher off, so that child inherits the caller's environment. Nothing is set, not `CI=0`: a machine whose own environment says `CI` is a machine where a frozen bundler is right. The child's stdout is a pipe, never a TTY, so the Expo CLI still knows that nobody can answer.
 3. Stderr classify. Match the captured output against the registry. The load-bearing patterns: eas-cli's `Either log in with … EXPO_TOKEN`, `@expo/cli`'s `is in non-interactive mode`, and the `in non-interactive mode` fragment that eas-cli's prompt sites share.
 4. Generic prompt fallback. Only for a captured child, and only when the caller opts in. If the child writes nothing for `AGENT_CLI_PROMPT_TIMEOUT_MS` (default 20 s) _and_ its last non-empty line is prompt-shaped, it is killed and the line is quoted as untrusted text. Never in `inherit` mode.
 
@@ -144,7 +141,7 @@ Four rules decide how an argv resolves to a command, and what a wrong argv gets.
 
 A group name followed by options and no action, in a group with no default action, is an error. The CLI prints the group listing first and the error last, as `UNKNOWN_ACTION` with `Try: npx @expo/agent-cli <group> --help`, and exits `1`. An exit `0` there would read as success, and an agent would wait for output that never comes. The last line is what an agent acts on.
 
-A bare group prints its listing and exits `0`: asking a group what it does is not wrong. `<group> --help` and `-h` always print the listing. A group with a default action gives that action every option, so `@expo/agent-cli doctor --json` checks, and its `--help` prints the listing and then the action's own help.
+A bare group with no default action prints its listing and exits `0`: asking a group what it does is not wrong. `<group> --help` and `-h` always print the listing. A group with a default action gives that action every option, so `@expo/agent-cli doctor --json` checks, and its `--help` prints the listing and then the action's own help.
 
 ### (b) A group cannot capture the bare form of a forwarded `expo` command
 
@@ -182,7 +179,7 @@ An outcome failure is not an error: it prints its report with its follow-ups. A 
 
 Every suggestion is written `npx @expo/agent-cli …` and printed in the spelling of the runner the caller used. The line is rewritten as it goes out. The runner is Bun when the CLI runs on Bun, or when `npm_config_user_agent` or `npm_execpath` names Bun. `BUN_INSTALL` is not a signal: it says Bun is installed, not that Bun ran this. Only `npx @expo/agent-cli` is rewritten. `--json` payloads and events keep the written form.
 
-The runner this CLI _spawns_ with is a different question. It is `bunx` when Bun started the process _and_ `bunx` is on `PATH`, else `npx`. `eas simulator:exec npx <agent-device>` is exempt: that `npx` runs in a datacenter.
+The runner this CLI _spawns_ with is a different question. It is `bunx` when Bun started the process, or, for `eas-cli`, when the project's lockfile is Bun's; either way only when `bunx` is on `PATH`. Else it is `npx`. `eas simulator:exec npx <agent-device>` is exempt: that `npx` runs in a datacenter.
 
 ## EAS JSON
 
@@ -212,7 +209,7 @@ Gaps found while building the tool layer. Per [[0001-agentic-cli-on-expo-cli]] c
 - Put the Metro error class on the web dev server's static error page, and report the file relative to the project root.
 - A standalone typegen command, so `expo-env.d.ts` and `.expo/types/` can be generated without a dev server.
 - `expo cache:clear`.
-- Do not print the app's deep-link scheme as the dev server's URL. With the v2 tunnel the advertised URL picks up the scheme. Worked around by reading the URL from the dev server's own output.
+- Do not print the app's deep-link scheme as the dev server's URL. With the v2 tunnel the advertised URL picks up the scheme. Worked around by keeping the host of the printed URL and replacing a non-HTTP scheme with `https` for a tunnel host, `http` otherwise.
 - Emit `devserver:url` in a released SDK. Until then the tunnel host is parsed from `Waiting on <url>`.
 
 `create-expo`:
@@ -236,16 +233,16 @@ Expo Go (iOS):
 
 The constants and the resolution rules have unit tests. The envelope, the needs-human protocol and each command's exit codes are tested through the built bin against stub tools ([[0002-testing-and-evals]]).
 
-| Section                               | Tests                                                                                                                                                                                                                                                                                    |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| §Exit codes                           | `src/__tests__/exitCodes-test.ts`; `src/utils/__tests__/errors-test.ts`                                                                                                                                                                                                                  |
-| §An empty target list is inconclusive | `src/runtime/__tests__/preflight-test.ts`; `e2e/__tests__/runtime-preflight-test.ts`                                                                                                                                                                                                     |
-| §Forwarded codes, and the exception   | `e2e/__tests__/wrapper-test.ts`, `install-bootstrap-test.ts`, `doctor-test.ts`                                                                                                                                                                                                           |
-| §The fourth: `typecheck`              | `src/typecheck/__tests__/checkAsync-test.ts`, `parseTscOutput-test.ts`, `typecheckAsync-test.ts`; `e2e/__tests__/typecheck-test.ts`                                                                                                                                                      |
-| §Other gates, in brief                | `src/status/__tests__/assert-test.ts`; `src/runtime/__tests__/bundleCheck-test.ts`, `stopAsync-test.ts`; `e2e/__tests__/runtime-test.ts`, `status-test.ts`, `stop-test.ts`                                                                                                               |
-| §Needs-human protocol                 | `src/needsHuman/__tests__/registry-test.ts`, `detect-test.ts`, `preflight-test.ts`, `promptShape-test.ts`; `src/utils/__tests__/subprocess-test.ts`, `expoCli-test.ts`, `wrapperCrash-test.ts`, `errors-test.ts`; `src/dev/__tests__/portCollision-test.ts`; `e2e/__tests__/dev-test.ts` |
-| §The `--json` error envelope          | `src/utils/__tests__/errors-test.ts`, `jsonMode-test.ts`, `unknownOption-test.ts`, `args-test.ts`; `e2e/__tests__/dev-test.ts`, `typecheck-test.ts`                                                                                                                                      |
-| §Registry rules                       | `src/__tests__/commandRegistry-test.ts`; `src/utils/__tests__/args-test.ts`; `e2e/__tests__/help-test.ts`, `wrapper-test.ts`                                                                                                                                                             |
-| §Three names for the recovery         | `e2e/__tests__/help-test.ts`                                                                                                                                                                                                                                                             |
-| §Suggestions are pasted               | `src/utils/__tests__/invoker-test.ts`, `packageRunner-test.ts`                                                                                                                                                                                                                           |
-| §EAS JSON                             | none: a rule for parsers, not a behavior a test can observe                                                                                                                                                                                                                              |
+| Section                               | Tests                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §Exit codes                           | `src/__tests__/exitCodes-test.ts`; `src/utils/__tests__/errors-test.ts`                                                                                                                                                                                                                                                                                                                                                                             |
+| §An empty target list is inconclusive | `src/runtime/__tests__/preflight-test.ts`; `e2e/__tests__/runtime-preflight-test.ts`                                                                                                                                                                                                                                                                                                                                                                |
+| §Forwarded codes, and the exception   | `e2e/__tests__/wrapper-test.ts`, `install-bootstrap-test.ts`, `doctor-test.ts`                                                                                                                                                                                                                                                                                                                                                                      |
+| §The fourth: `typecheck`              | `src/typecheck/__tests__/checkAsync-test.ts`, `parseTscOutput-test.ts`, `typecheckAsync-test.ts`; `e2e/__tests__/typecheck-test.ts`                                                                                                                                                                                                                                                                                                                 |
+| §Other gates, in brief                | `src/status/__tests__/assert-test.ts`; `src/runtime/__tests__/bundleCheck-test.ts`, `stopAsync-test.ts`; `e2e/__tests__/runtime-test.ts`, `status-test.ts`, `stop-test.ts`; `src/dev/__tests__/stopAsync-test.ts`                                                                                                                                                                                                                                   |
+| §Needs-human protocol                 | `src/needsHuman/__tests__/registry-test.ts`, `detect-test.ts`, `preflight-test.ts`, `promptShape-test.ts`; `src/utils/__tests__/subprocess-test.ts`, `expoCli-test.ts`, `wrapperCrash-test.ts`, `errors-test.ts`; `src/dev/__tests__/portCollision-test.ts`; `e2e/__tests__/dev-test.ts`; `src/dev/__tests__/detachAsync-test.ts`; `e2e/__tests__/deploy-test.ts`, `dev-detach-test.ts`; `src/deferred/build-wait/__tests__/build-wait-e2e-test.ts` |
+| §The `--json` error envelope          | `src/utils/__tests__/errors-test.ts`, `jsonMode-test.ts`, `unknownOption-test.ts`, `args-test.ts`; `e2e/__tests__/dev-test.ts`, `typecheck-test.ts`                                                                                                                                                                                                                                                                                                 |
+| §Registry rules                       | `src/__tests__/commandRegistry-test.ts`; `src/utils/__tests__/args-test.ts`; `e2e/__tests__/help-test.ts`, `wrapper-test.ts`                                                                                                                                                                                                                                                                                                                        |
+| §Three names for the recovery         | `e2e/__tests__/help-test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| §Suggestions are pasted               | `src/utils/__tests__/invoker-test.ts`, `packageRunner-test.ts`; `src/utils/__tests__/easCli-test.ts`                                                                                                                                                                                                                                                                                                                                                |
+| §EAS JSON                             | none: a rule for parsers, not a behavior a test can observe                                                                                                                                                                                                                                                                                                                                                                                         |

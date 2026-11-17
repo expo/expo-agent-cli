@@ -605,7 +605,7 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
       label: 'smoke-android',
     });
     // **22 and not 0**, on a working app, and that is the honest answer rather than a defect: the
-    // `runtime` phase cannot measure, and llp/0010 §Other gates, in brief
+    // `runtime` phase cannot measure, and llp/0005 §Android does not let a gate that cannot measure
     // pass. `smoke --android` is therefore not a green light on Expo Go — it is four proofs and two
     // abstentions, and the report says which is which.
     expectExit(result, 22, 'a gate that cannot read the runtime must not report a pass');
