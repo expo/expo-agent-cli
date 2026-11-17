@@ -374,8 +374,16 @@ describe('@expo/agent-cli dev --detach', () => {
     async function holdDualStackAsync(port: number): Promise<net.Server | null> {
       const server = net.createServer((socket) => socket.destroy());
       return await new Promise((resolve) => {
-        // Already held by something else on this machine, which is the same precondition.
-        server.once('error', () => resolve(null));
+        server.once('error', (error: NodeJS.ErrnoException) => {
+          if (error.code === 'EAFNOSUPPORT') {
+            // No IPv6 on this machine: the IPv4 unspecified address is the same shape of listener.
+            server.once('error', () => resolve(null));
+            server.listen({ port, host: '0.0.0.0' }, () => resolve(server));
+            return;
+          }
+          // Already held by something else on this machine, which is the same precondition.
+          resolve(null);
+        });
         server.listen({ port, host: '::', ipv6Only: false }, () => resolve(server));
       });
     }
