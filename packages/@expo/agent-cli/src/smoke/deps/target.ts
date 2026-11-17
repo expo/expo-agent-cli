@@ -102,7 +102,7 @@ export async function resolveSmokeTargetAsync(
   } catch (error: unknown) {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing
     // about, and refusing or choosing a device on an unread plan would stop runs that would have
-    // worked. Everything below degrades to the behaviour that was here before it.
+    // worked. The run goes on with no install kind, so it installs nothing.
     Log.warn(
       `The start plan could not be read (${firstLine(error instanceof Error ? error.message : String(error))}), so smoke installs no app on the device.`
     );

@@ -73,8 +73,8 @@ async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
 }
 
 /**
- * The next value says whether the boot said its device has no app: a simulator the registry
- * created this run, whose disk holds nothing to read (llp/0035 §Lifecycle smoke).
+ * The next value says whether this run's boot created or spawned the device. Such a device has no
+ * app, so the install runs without a disk read (llp/0035 §Lifecycle smoke).
  */
 async function bootStep(
   walk: PhaseWalk
