@@ -271,7 +271,7 @@ The broadcast needs no platform tool, app id or device, and keeps state that is 
 | `Page.reload` to each own target | `auto` or `dev-server`; the scope skips an app (§Target owner) | `dev-server` / `page-reload` | `debugger-context-replaced` | yes          | exit 22 if a target answered, else 20 |
 | Local relaunch                   | `device`, or `auto` when rung 1 climbs, without `--eas`        | `device` / `device`          | `app-relaunch`              | yes          | —                                     |
 | EAS relaunch                     | the same, with `--eas` (§Cloud simulator)                      | `device` / `device`          | none                        | yes          | —                                     |
-| `expo.reloadAppAsync()`          | `runtime` only                                                 | `runtime` / `runtime`        | none                        | no           | exit 22 if called, else 20            |
+| `expo.reloadAppAsync(reason)`    | `runtime` only                                                 | `runtime` / `runtime`        | `debugger-context-replaced` | yes          | exit 22 if called, else 20            |
 
 Rung 1 is decided on one observation after the bundle gate: a fresh target list and the device facts that place it. That observation serves dispatch, evidence, counts and the relaunch. When the read fails, or a device tool stops answering, the run keeps the preflight observation (in `smoke`, the last list its own reads placed).
 
@@ -293,7 +293,13 @@ When a mechanism ran, the shared observations of §What proves a reload decide t
 
 Rung 2 costs the app's JavaScript state. When an app was attached, the attempt's reason says so and says why rung 1 did not suffice. Off `--eas`, rung 2 is `simctl terminate` or `am force-stop`, then the deep link. A stop that finds the app not running is success. The app id comes from the own targets only, by the ladder in §Stopping the app. A link refused after the stop leaves the app named in `leftAppStopped`.
 
-`--method runtime` calls `expo.reloadAppAsync()` at the target `runtime:eval` reads. An app whose `expo` global has no `reloadAppAsync` is reported as such.
+`--method runtime` calls `expo.reloadAppAsync(reason)` over the debugger, on the own target that `runtime:eval` reads. The reason is required: SDK 58 rejects a call with no argument and reloads nothing. The call keeps the page id, so it is proved as `Page.reload` is, by a new JavaScript context on the same target, within at most 5 s of `--timeout`. The rest of `--timeout` watches the shared observations.
+
+- An app with no `expo` global, or no `reloadAppAsync`, answers at once and is not asked: the attempt is not delivered, exit 20.
+- A lost answer after the call is delivered and unproved, because the call tears down the context that would answer. The run then watches for a bundle, and exits 22 without one.
+- The run never climbs to a relaunch.
+
+Tests: `e2e/__tests__/runtime-reload-test.ts` "passes the reason SDK 58 requires and proves the reload on the same page id (%s)", "fails at once for an app with no expo global", "reports a lost answer as delivered, waits for a bundle, and never relaunches".
 
 The entry-bundle check runs before any rung (rows 2 and 3 of the exit table in §What proves a reload). `unknown` passes, and `--no-bundle-check` skips it. The `bundle` object is the one `smoke` and `dev:wait` print. `appsConnected` on a refused run is the count of own apps that the preflight read, not `0`.
 
@@ -339,7 +345,7 @@ The known ids are read after the bundle gate, just before the action, so a save 
 
 A reload that showed the app back (row 5 below) and whose last target read was zero reads again within the 3 s reconnect window. A zero that survives keeps its meaning: an EAS session can list nothing while the app runs.
 
-`verifiedBy` is the first label with evidence, in this order: the mechanism's own, `fresh-debugger-target`, `dev-server-bundle`. `--method runtime` and the EAS relaunch have no label of their own.
+`verifiedBy` is the first label with evidence, in this order: the mechanism's own, `fresh-debugger-target`, `dev-server-bundle`. The EAS relaunch has no label of its own.
 
 Which observations may count:
 
@@ -352,15 +358,15 @@ A project with no captured dev server log has no bundle observation. The run sti
 
 The exit code comes from the observations, not from the label. The first row that matches decides:
 
-| #   | Run                                                                                                                                                                  | `reloaded` | `verifiedBy`                             | Exit               |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------- | ------------------ |
-| 1   | not attempted: no dev server, a `--route` the project has not got, or a bad argument                                                                                 | —          | —                                        | 1                  |
-| 2   | the entry bundle does not compile                                                                                                                                    | `false`    | `null`                                   | 20, `attempts: []` |
-| 3   | the entry bundle was still building when its check ran out of budget                                                                                                 | `false`    | `null`                                   | 22                 |
-| 4   | no mechanism reached the app                                                                                                                                         | `false`    | `null`                                   | 20                 |
-| 5   | a mechanism ran, and a new context on an own target, a fresh own target, or a bundle that may count showed the app back                                              | `true`     | the first label with evidence            | 0                  |
-| 6   | rung 1 `proved` by peer churn, or a local relaunch, and nothing showed the app back                                                                                  | `true`     | `message-socket-peers` or `app-relaunch` | 22                 |
-| 7   | any other mechanism ran (an `acted` broadcast, an EAS relaunch, `--method runtime`, a `Page.reload` that did not replace a context), and nothing showed the app back | `false`    | `null`                                   | 22                 |
+| #   | Run                                                                                                                                                                    | `reloaded` | `verifiedBy`                             | Exit               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------- | ------------------ |
+| 1   | not attempted: no dev server, a `--route` the project has not got, or a bad argument                                                                                   | —          | —                                        | 1                  |
+| 2   | the entry bundle does not compile                                                                                                                                      | `false`    | `null`                                   | 20, `attempts: []` |
+| 3   | the entry bundle was still building when its check ran out of budget                                                                                                   | `false`    | `null`                                   | 22                 |
+| 4   | no mechanism reached the app                                                                                                                                           | `false`    | `null`                                   | 20                 |
+| 5   | a mechanism ran, and a new context on an own target, a fresh own target, or a bundle that may count showed the app back                                                | `true`     | the first label with evidence            | 0                  |
+| 6   | rung 1 `proved` by peer churn, or a local relaunch, and nothing showed the app back                                                                                    | `true`     | `message-socket-peers` or `app-relaunch` | 22                 |
+| 7   | any other mechanism ran (an `acted` broadcast, an EAS relaunch, a `Page.reload` or `--method runtime` that did not replace a context), and nothing showed the app back | `false`    | `null`                                   | 22                 |
 
 Rows 6 and 7 end when `--timeout` ends, or at once when nothing can be watched. With nothing attached, `--method auto` starts the app and can exit 0. A pinned `--method dev-server` is then row 4.
 
