@@ -143,18 +143,10 @@ export async function stopAppOnDeviceAsync(params: StopAppParams): Promise<StopA
   // `adb shell am force-stop` exits 0 whether or not the app was running and prints nothing either
   // way, so on Android the answer comes from the `pidof` above and from nowhere else (F102). iOS
   // reads it off the tool's own refusal, which does name the process.
-  if (params.platform === 'android') {
-    return {
-      command: display,
-      ok: true,
-      wasRunning: running,
-      reason: null,
-    };
-  }
   return {
     command: display,
     ok: true,
-    wasRunning: !(exitCode !== 0 && notRunning),
+    wasRunning: params.platform === 'android' ? running : exitCode === 0,
     reason: null,
   };
 }

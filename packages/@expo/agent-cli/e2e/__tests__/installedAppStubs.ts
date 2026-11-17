@@ -283,6 +283,7 @@ export async function installStubAdbAsync(
       `  process.exit(0);`,
       `}`,
       `if (args[2] === 'shell' && args[3] === 'am' && args[4] === 'start' && args.includes('-d')) {`,
+      `  if (process.env.STUB_ADB_START_FAILS_AFTER_STOP && fs.readFileSync(${JSON.stringify(recordPath)}, 'utf8').includes('force-stop')) process.exit(1);`,
       `  process.exit(serials.includes(args[1]) ? 0 : 1);`,
       `}`,
       `if (args[2] === 'shell' && args[3] === 'pidof') {`,

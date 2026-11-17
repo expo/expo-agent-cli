@@ -132,9 +132,41 @@ export interface OpenRouteResult extends ResolvedRoute {
   attach: AttachCheck;
 }
 
-/** Whether the app was seen to connect to the dev server after the link was opened. */
-export type AttachRecovery = 'none' | 'stopped' | 'reopened-not-running' | 'reopened-unknown';
+/**
+ * What the attach recovery did, set once the second open has run: nothing, stopped a running app
+ * and opened the link again, opened it again after a stop of an app that was not running, opened it
+ * again after a stop whose effect could not be checked, or stopped and could not open it again.
+ */
+export type AttachRecovery =
+  | 'none'
+  | 'stopped'
+  | 'reopened-not-running'
+  | 'reopened-unknown'
+  | 'reopen-failed';
 
+/** The clause of the attach reason, and of the Why line, that says what the recovery did. */
+export const ATTACH_RECOVERY_TEXT: Record<AttachRecovery, { reason: string; why: string }> = {
+  none: { reason: '', why: '' },
+  stopped: {
+    reason: ', including after the app was stopped and the link opened again',
+    why: ' The app was stopped and the link opened a second time, and that did not attach either.',
+  },
+  'reopened-not-running': {
+    reason: ', including after the link was opened again with the app not running',
+    why: ' The app was not running, so nothing was stopped; the link opened a second time, and that did not attach either.',
+  },
+  'reopened-unknown': {
+    reason:
+      ', including after the link was opened again after a stop whose effect could not be checked',
+    why: ' The link was opened again after a stop whose effect could not be checked, and that did not attach either.',
+  },
+  'reopen-failed': {
+    reason: ', and opening the link again after the stop failed',
+    why: ' The app was stopped, and opening the link again failed, so the link was opened only once.',
+  },
+};
+
+/** Whether the app was seen to connect to the dev server after the link was opened. */
 export interface AttachCheck {
   /** Whether this run looked at all. False when the caller asked for no wait. */
   checked: boolean;
@@ -149,11 +181,7 @@ export interface AttachCheck {
   waitedMs: number;
   /** How many debugger targets this platform had when the wait ended. */
   targets: number;
-  /**
-   * What the recovery did when no app attached: nothing, stopped a running app and opened the link
-   * again, opened it again after a stop of an app that was not running, or opened it again after a
-   * stop whose effect could not be checked.
-   */
+  /** What the recovery did when no app attached. */
   recovery: AttachRecovery;
   /**
    * What the system dialog on a cloud session turned out to be, or null when none was looked for.
@@ -660,12 +688,6 @@ async function confirmAttachAsync({
     });
     debugEvent('attach_recovery', { appId, stopped: stopped.ok });
     if (stopped.ok) {
-      recovery =
-        stopped.wasRunning === true
-          ? 'stopped'
-          : stopped.wasRunning === false
-            ? 'reopened-not-running'
-            : 'reopened-unknown';
       const again = await openUrlOnDeviceAsync({
         platform: device.platform,
         deviceId: device.deviceId,
@@ -676,7 +698,15 @@ async function confirmAttachAsync({
         projectRoot,
       });
       if (again.exitCode === 0) {
+        recovery =
+          stopped.wasRunning === true
+            ? 'stopped'
+            : stopped.wasRunning === false
+              ? 'reopened-not-running'
+              : 'reopened-unknown';
         targets = await waitAsync(Date.now() + budgetMs);
+      } else {
+        recovery = 'reopen-failed';
       }
     }
   }
@@ -692,22 +722,8 @@ async function confirmAttachAsync({
     reason:
       targets > 0
         ? null
-        : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${attachRecoveryReason(recovery)}${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
+        : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${ATTACH_RECOVERY_TEXT[recovery].reason}${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
   };
-}
-
-/** The clause of the attach reason that says what the recovery did. */
-function attachRecoveryReason(recovery: AttachRecovery): string {
-  switch (recovery) {
-    case 'none':
-      return '';
-    case 'stopped':
-      return ', including after the app was stopped and the link opened again';
-    case 'reopened-not-running':
-      return ', including after the link was opened again with the app not running';
-    case 'reopened-unknown':
-      return ', including after the link was opened again after a stop whose effect could not be checked';
-  }
 }
 
 /** An attach check that did not look, and why. */

@@ -40,10 +40,13 @@ type Scenario = {
   flags?: string[];
   initial: 'own' | 'other' | 'empty';
   neverAttaches?: boolean;
-  /** The app is not running when the recovery asks `pidof`, so the run stops nothing. */
-  appNotRunning?: boolean;
-  /** `pidof` cannot run on the device, so the recovery cannot tell whether the app was running. */
-  pidofBroken?: boolean;
+  /**
+   * What `pidof` answers when the recovery asks: the app runs (the default), the app does not run,
+   * or `pidof` cannot run, so the recovery cannot tell.
+   */
+  pidof?: 'running' | 'none' | 'broken';
+  /** The device refuses the link when the recovery opens it a second time. */
+  reopenFails?: boolean;
   /** The app attaches only once this run has stopped it and opened the link again. */
   attachesAfterStop?: boolean;
   /** An Android app of another model is attached too, which this run must not stop or count. */
@@ -151,7 +154,7 @@ const scenarios: Scenario[] = [
     platform: 'android',
     initial: 'empty',
     neverAttaches: true,
-    appNotRunning: true,
+    pidof: 'none',
   },
   {
     name: 'no flag, bound Android emulator, pidof cannot run when the recovery asks',
@@ -159,7 +162,15 @@ const scenarios: Scenario[] = [
     platform: 'android',
     initial: 'empty',
     neverAttaches: true,
-    pidofBroken: true,
+    pidof: 'broken',
+  },
+  {
+    name: 'no flag, bound Android emulator, the device refuses the link the recovery opens a second time',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
+    reopenFails: true,
   },
   {
     name: 'no flag, Android session, never attaches',
@@ -183,6 +194,20 @@ const scenarios: Scenario[] = [
     twinAttachesWhileWaiting: true,
   },
 ];
+
+const PIDOF_ENV = {
+  running: { STUB_ADB_PIDOF: '4242' },
+  none: {},
+  broken: { STUB_ADB_PIDOF_BROKEN: '1' },
+} as const;
+
+/** What the recovery could tell about the stop, which only a local `pidof` answers. */
+const STOP_SEEN_STDERR = {
+  running: 'The app was stopped and the link opened a second time, and that did not attach either.',
+  none: 'The app was not running, so nothing was stopped; the link opened a second time',
+  broken: 'link was opened again after a stop whose effect could not be checked',
+  reopenFailed: 'opening the link again failed',
+} as const;
 
 async function deviceFixture(root: string, scenario: Scenario) {
   const xcrun = await installStubXcrunAsync(root, {
@@ -332,11 +357,8 @@ it.each(scenarios)('$name', async (scenario) => {
         env: {
           ...device.env,
           ...twinEnv,
-          ...(scenario.pidofBroken
-            ? { STUB_ADB_PIDOF_BROKEN: '1' }
-            : scenario.appNotRunning
-              ? {}
-              : { STUB_ADB_PIDOF: '4242' }),
+          ...PIDOF_ENV[scenario.pidof ?? 'running'],
+          ...(scenario.reopenFails ? { STUB_ADB_START_FAILS_AFTER_STOP: '1' } : {}),
         },
       }
     );
@@ -352,28 +374,30 @@ it.each(scenarios)('$name', async (scenario) => {
     const ownAttached = scenario.initial === 'own' && scenario.twin !== 'both';
     const stuck = !!(scenario.neverAttaches || scenario.attachesAfterStop);
     const recovers = stuck && scenario.platform === 'android' && scenario.backend !== 'local-ios';
-    const stopVerified = scenario.backend === 'local-android' && !scenario.pidofBroken;
+    const stopSeen =
+      scenario.backend === 'local-android' ? (scenario.pidof ?? 'running') : 'broken';
     // A launcher missing here with the recovery run is a stub run that failed: its exit code is in
     // the report's `launch`, and a stub that threw left its stack in `failures()`.
     expect(device.opens(), `${result.all}\n${device.failures?.() ?? ''}`).toEqual(
       ownAttached ? [ROUTE] : recovers ? [launcher, ROUTE, ROUTE] : [launcher, ROUTE]
     );
     if (!recovers) expect(device.forceStops?.() ?? []).toEqual([]);
-    expect(report.attachRecovered).toBe(recovers && stopVerified && !scenario.appNotRunning);
+    expect(report.attachRecovered).toBe(
+      recovers && stopSeen === 'running' && !scenario.reopenFails
+    );
     if (ownAttached) expect(report.launch).toBeNull();
     else expect(report.launch).toMatchObject({ url: launcher, attached: !stuck });
     if (scenario.neverAttaches && scenario.platform === 'android') {
       expect(result.stderr).toContain('no android app connected');
       expect(result.stderr).toContain('accepted the intent and nothing more');
       expect(result.stderr).toContain(
-        !stopVerified && recovers
-          ? 'link was opened again after a stop whose effect could not be checked'
-          : scenario.appNotRunning
-            ? 'The app was not running, so nothing was stopped; the link opened a second time'
-            : 'The app was stopped and the link opened a second time, and that did not attach either.'
+        STOP_SEEN_STDERR[scenario.reopenFails ? 'reopenFailed' : recovers ? stopSeen : 'running']
       );
-      if (scenario.appNotRunning || (recovers && !stopVerified))
-        expect(result.stderr).not.toContain('The app was stopped');
+      if (stopSeen !== 'running' || scenario.reopenFails)
+        expect(result.stderr).not.toContain(
+          'The app was stopped and the link opened a second time'
+        );
+      if (scenario.reopenFails) expect(result.stderr).not.toContain('opened a second time');
     }
     if (device.calls) {
       const calls = device.calls();
