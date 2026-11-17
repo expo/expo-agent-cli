@@ -145,24 +145,31 @@ export type AttachRecovery =
   | 'reopen-failed';
 
 /** The clause of the attach reason, and of the Why line, that says what the recovery did. */
-export const ATTACH_RECOVERY_TEXT: Record<AttachRecovery, { reason: string; why: string }> = {
-  none: { reason: '', why: '' },
+export const ATTACH_RECOVERY_TEXT: Record<
+  AttachRecovery,
+  { reason: string; why: string; success: string }
+> = {
+  none: { reason: '', why: '', success: '' },
   stopped: {
     reason: ', including after the app was stopped and the link opened again',
     why: ' The app was stopped and the link opened a second time, and that did not attach either.',
+    success: ', after a restart',
   },
   'reopened-not-running': {
     reason: ', including after the link was opened again with the app not running',
     why: ' The app was not running, so nothing was stopped; the link opened a second time, and that did not attach either.',
+    success: ', after the link was opened again',
   },
   'reopened-unknown': {
     reason:
       ', including after the link was opened again after a stop whose effect could not be checked',
     why: ' The link was opened again after a stop whose effect could not be checked, and that did not attach either.',
+    success: ', after the link was opened again',
   },
   'reopen-failed': {
-    reason: ', and opening the link again after the stop failed',
+    reason: ', and after the stop ran, opening the link again failed',
     why: ' The stop ran, and opening the link again failed, so the link was opened only once.',
+    success: '',
   },
 };
 

@@ -328,7 +328,7 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
             ` · ${opened.attach.targets} ${opened.platform} debugger ${
               opened.attach.targets === 1 ? 'target' : 'targets'
             } after ${opened.attach.waitedMs}ms${
-              opened.attach.recovery === 'stopped' ? ', after a restart' : ''
+              ATTACH_RECOVERY_TEXT[opened.attach.recovery].success
             }`
           )
         : opened.attach.confirmed === false
