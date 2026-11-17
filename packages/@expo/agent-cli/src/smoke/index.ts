@@ -73,7 +73,7 @@ export const smokeHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Phases: dev server, bundler, entry bundle, app, reload, route, runtime, errors, screenshot,`,
+    `Phases: dev-server, bundler-ready, bundle, app, reload, route, runtime, errors, screenshot,`,
     `and start-dev-server, start-session, boot-device, install-app when this run did them.`,
     `0 passed · 20 failed · 22 inconclusive · 1 the command itself was wrong.`,
     `A running app is reloaded onto the code on disk (unproved: 22). A wrong Expo Go is replaced.`,
