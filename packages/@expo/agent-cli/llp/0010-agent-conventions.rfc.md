@@ -26,7 +26,7 @@ A driving agent reads the exit code before it reads the output. The code answers
 | `22`    | The tool worked. It could not conclude: timed out, or nothing could measure     | Look again, or read why it could not measure     |
 | `23-29` | Reserved for further outcome classes                                            |                                                  |
 
-The codes sit in bands. `20-29` is one band an agent can test with a range, so a command that grows a new outcome class does not break a caller that knew only the old ones. `1` is the whole "the tool did not work" band. `7` sits away from both: a step only a person can complete (signing in through a browser, approving a device, finishing a launch in a web page) is its own class, because a retry of the same command cannot finish it. Inconclusive sits apart from failure: looking again can help after `22` and is a waste of minutes after `20`. No code this CLI assigns is above `125`, which POSIX shells and `npx` use for their own conditions. A forwarded code is the subprocess's own.
+The codes sit in bands. `20-29` is one band an agent can test with a range, so a command that grows a new outcome class does not break a caller that knew only the old ones. `1` is the whole "the tool did not work" band. `7` sits away from both: a step only a person can complete (signing in through a browser, approving a device, finishing a launch in a web page) is its own class, because a retry of the same command cannot finish it. Inconclusive sits apart from failure: looking again can help after `22` and is a waste of minutes after `20`. No code this CLI assigns is above `125`, which POSIX shells and `npx` use for their own conditions. The exception follows the shell's own convention: a signal that stops `dev` exits `128` plus the signal number (`DEV_INTERRUPTED`). A forwarded code is the subprocess's own.
 
 `21` is reserved. The constant stays defined so the number keeps its meaning for the command that brings it back. A unit test fails when loadable source starts to use it. `dev --plan` runs nothing on purpose and exits `0`: that is a success, not a cancellation.
 
@@ -42,9 +42,9 @@ No dev server, and a target list with no app in the run's scope (another platfor
 
 ### Forwarded codes, and the exception
 
-`install`, `start`, `dev`, and the `expo` passthrough hand back the subprocess's exit code unchanged. A wrapper's own failures use the table.
+`install`, `start`, `dev`, and the `expo` passthrough hand back the subprocess's exit code unchanged. A child that a signal ended has no code: `SIGINT` and `SIGTERM` give `0`, any other signal `1`. A wrapper's own failures use the table.
 
-A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's plain install (`npm install`, `bun install`, `pnpm install` or `yarn install`) in the directory `@expo/package-manager` resolves (the project's workspace root, or the project), and exits with its code. An unrelated parent's lockfile never runs. The install is not frozen: `npm ci` deletes a workspace root's `node_modules` for every member, and a runnable clone is worth a lockfile update. A manager that is not installed stops with `PACKAGE_MANAGER_NOT_FOUND`. An install that exits 0 and leaves `expo` unresolved stops with `DEPENDENCIES_NOT_INSTALLED` and names the command that ran. Every other form of `install` runs `expo install`, which cannot read the SDK yet, so in that state it stops with `DEPENDENCIES_NOT_INSTALLED` and `Try:` the bare `install`.
+A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's own plain install command in the directory `@expo/package-manager` resolves (the project's workspace root, or the project), and exits with its code. An unrelated parent's lockfile never runs. The install is not frozen: `npm ci` deletes a workspace root's `node_modules` for every member, and a runnable clone is worth a lockfile update. A manager that is not installed stops with `PACKAGE_MANAGER_NOT_FOUND`. An install that exits 0 and leaves `expo` unresolved stops with `DEPENDENCIES_NOT_INSTALLED` and names the command that ran. Every other form of `install` runs `expo install`, which cannot read the SDK yet, so in that state it stops with `DEPENDENCIES_NOT_INSTALLED` and `Try:` the bare `install`.
 
 The exception is a command that adds a verdict: `doctor` ([[0016-v1-scope]] §Doctor's exit code).
 
@@ -58,7 +58,7 @@ The exception is a command that adds a verdict: `doctor` ([[0016-v1-scope]] §Do
 | `20` | does not type-check. The diagnostics are the payload                                                   |
 | `1`  | a TypeScript project with no compiler, a compiler that cannot start, or one that failed saying nothing |
 
-A project with no TypeScript exits `0` with `checked: false`. `reason` is present exactly when `checked` is false. The follow-up says so as a command as well as a field, so "nothing was checked" cannot read as "everything passed". Either `tsconfig.json` or `.ts`/`.tsx` sources make a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
+A project with no TypeScript exits `0` with `checked: false`. `reason` is non-null exactly when `checked` is false. The follow-up says so as a command as well as a field, so "nothing was checked" cannot read as "everything passed". Either `tsconfig.json` or the project's own `.ts`, `.tsx`, `.mts` or `.cts` sources make a TypeScript project. `.d.ts` files alone do not, since `expo-env.d.ts` is generated into every app.
 
 A TypeScript project with no compiler is `1` (`TYPECHECK_CLI_MISSING`) with `Try: npx @expo/agent-cli install typescript --dev`. In an Expo app whose dependencies are not installed, that is the cause, so the stop is `DEPENDENCIES_NOT_INSTALLED` with the bare `install` as its `Try:` line.
 
@@ -74,7 +74,7 @@ A command that reports on the app does not gate on what it reported. `runtime:er
 
 `status --assert <class>` exits `20` when the real class is stronger than the one named, and `22` when nothing could be classified. Without the flag it exits `0`. Every `--assert` or `--fail-on-*` flag answers a measured failure with `20` and an unmeasurable state with `22`.
 
-Stopping: a target already in the asked-for state is success, exit `0`. The report fields and the other `20` cases are [[0005-runtime-loop-tools]] §Stopping the app. Beyond those, `runtime:stop` exits `1` when the device tool refused, and `dev:stop` exits `20` when an EAS session did not stop or a device tool failed, and `22` while an EAS session is still starting.
+Stopping: a target already in the asked-for state is success, exit `0`. The report fields and the other `20` cases are [[0005-runtime-loop-tools]] §Stopping the app. Beyond those, `runtime:stop` exits `1` when the device tool refused, and `dev:stop` exits `20` when the dev server or an EAS session did not stop or a device tool failed. `dev:stop --eas` exits `22` while the EAS session is still starting.
 
 The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `runtime:tap` and `runtime:type`. A broken bundle is `20`. A cold first build that does not finish inside `--timeout` is `22`. `unknown` is not `broken`: `bundle.checked` is exactly `bundle.ok != null`. The check sends its HEAD to the dev server it was given ([[0005-runtime-loop-tools]] §Where a device reaches the dev server) with the path and query that the manifest or web page names, never their host, and `bundle.url` is that URL. The reason: a HEAD of the bundle through the Expo tunnel closes every websocket on that tunnel, the app's debugger socket too, and a GET cancelled after its headers does the same.
 
@@ -86,7 +86,7 @@ The needs-human error is a tool error with exit code `7` and a record: `scenario
 
 ```
 Needs a human   eas-login
-Ask the user    npx eas login
+Ask the user    npx @expo/agent-cli login
 Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)
 ```
 
@@ -105,29 +105,29 @@ A busy port is a `PORT_IN_USE` failure (exit `20` when the caller named `--port`
 
 A failure counts as "not the CLI" only when its output holds nothing that looks like that CLI's _and_ the process died the way a wrapper dies: exit `101`, `126`, `127`, `134`, `139`, or a panic signature. That preflight rung then gives no answer instead of "signed out".
 
-A failed `dev` plan step raises. The plan object prints only when every step worked. `--json` gets the error envelope (`PLAN_STEP_FAILED`) with the tail of what the step printed. A real stop carries `error.needsHuman`. A coincidence, such as Node leaving with `7` after an unhandled rejection, carries `null` there. `dev` captures its steps whenever nobody watches a terminal (`--json`, or a non-TTY run) and inherits the terminal when somebody does. Forwarded passthrough commands inherit the terminal and are not classified.
+A failed `dev` plan step raises. The plan object prints only when every step worked. A stop that layer 3 or 4 recognises raises that row's needs-human error, with the row's own code (such as `EXPO_NEEDS_INPUT`). Any other failure is `PLAN_STEP_FAILED`, with the tail of what the step printed and the step's own exit code, and `error.needsHuman` is `null`. That holds even for a step that exited `7`, such as Node leaving with `7` after an unhandled rejection: a coincidence is not a stop. `dev` captures its steps whenever nobody watches a terminal (`--json`, or a non-TTY run) and inherits the terminal when somebody does. Forwarded passthrough commands inherit the terminal and are not classified.
 
 ## The `--json` error envelope
 
-A command run with `--json` prints one JSON object on stdout whether it succeeded or failed. The failure object is:
+A command that has its own `--json` prints one JSON object on stdout when it runs with `--json`, whether it succeeded or failed. `--help` prints help. `start` and the forwarded `expo` commands have no `--json` of their own. The failure object is:
 
 ```json
 {
   "error": {
     "code": "EAS_DEPLOY_FAILED",
     "message": "…",
-    "suggestedCommand": "npx eas-cli whoami",
-    "needsHuman": { "scenario": "eas-login", "need": "…", "command": "npx eas login" },
+    "suggestedCommand": "npx @expo/agent-cli login",
+    "needsHuman": { "scenario": "eas-login", "need": "…", "command": "npx @expo/agent-cli login" },
     "data": null
   }
 }
 ```
 
-The key set never varies. `suggestedCommand`, `needsHuman`, and `data` are `null`, not absent. `needsHuman` is the whole record of §Needs-human protocol; the example shows three of its fields. `data` holds a flat object of the facts the refusal was made on, or `null`. The key set inside `data` is fixed per error code, and nothing goes in it that is not already in the message a person reads. Success paths are untouched. stderr still carries the what / Why: / How: / `Try:` block.
+The key set never varies. `suggestedCommand`, `needsHuman`, and `data` are `null`, not absent. `needsHuman` is the whole record of §Needs-human protocol; the example shows three of its fields. For a needs-human error, `suggestedCommand` is the record's `command`. `data` holds a flat object of the facts the refusal was made on, or `null`. The key set inside `data` is fixed per error code, and nothing goes in it that is not already in the message a person reads. Success paths are untouched. stderr still carries the what / Why: / How: / `Try:` block.
 
 The envelope covers argument parsing: an unknown option and a stray positional are tool errors, caught where every command is invoked, so the envelope is a property of the CLI and not of each command. A bad option gets `Try: <command> --help`. When the option exists on another command, such as `--port` on `dev`, the error names that command, and a unit test checks that each named command still resolves.
 
-Whether `--json` was asked for is read from the raw argv, because the error path often runs before the command parsed its own arguments. Only the part before a `--` separator counts: `@expo/agent-cli install -- --json` is npm's flag.
+Whether `--json` was asked for is read from the raw arguments after the command name, because the error path often runs before the command parsed its own arguments. Only the part before a `--` separator counts: `@expo/agent-cli install -- --json` is npm's flag.
 
 `dev --json` captures the subprocesses and prints exactly one object when the run ends: the plan with the step results on a clean exit, or the envelope. `dev --plan --json` prints the plan, which is the answer there. The plan still reaches a driving agent before the first step, on the `cli:start_plan` event.
 
@@ -147,7 +147,7 @@ A bare group with no default action prints its listing and exits `0`: asking a g
 
 The naming rule of [[0006-agent-native-cli-surface]] decides it: a command that shares a name with an `expo` command behaves like that command.
 
-The bare form of such a name forwards: `@expo/agent-cli config --type public` is `expo config --type public`. The colon forms belong to the group: `config:doctor` resolves as any group action does, and an action the group does not have is `UNKNOWN_ACTION`, never a forward. The space form is unavailable there: `@expo/agent-cli config doctor` forwards two arguments to `expo config`.
+No v1 group has a forwarded name; the rule is unit-tested with a synthetic `config` group. The bare form of such a name forwards: `@expo/agent-cli config --type public` is `expo config --type public`. The colon forms belong to the group: that group's `config:doctor` would resolve as any group action does, and an action the group does not have is `UNKNOWN_ACTION`, never a forward. The space form is unavailable there: `@expo/agent-cli config doctor` forwards two arguments to `expo config`.
 
 A group under a forwarded name has one spelling for its actions instead of two. The group's `--help` must show the colon form.
 
@@ -177,9 +177,9 @@ An outcome failure is not an error: it prints its report with its follow-ups. A 
 
 ## Suggestions are pasted, so they have to be runnable
 
-Every suggestion is written `npx @expo/agent-cli …` and printed in the spelling of the runner the caller used. The line is rewritten as it goes out. The runner is Bun when the CLI runs on Bun, or when `npm_config_user_agent` or `npm_execpath` names Bun. `BUN_INSTALL` is not a signal: it says Bun is installed, not that Bun ran this. Only `npx @expo/agent-cli` is rewritten. `--json` payloads and events keep the written form.
+Every suggestion (a `Try:` line, an `Ask the user` line, a `Suggested next:` entry, an error message) is written `npx @expo/agent-cli …` and printed in the spelling of the runner the caller used. The line is rewritten as it goes out. The runner is Bun when the CLI runs on Bun, or when `npm_config_user_agent` or `npm_execpath` names Bun. `BUN_INSTALL` is not a signal: it says Bun is installed, not that Bun ran this. Only `npx @expo/agent-cli` is rewritten. `--json` payloads and events keep the written form.
 
-The runner this CLI _spawns_ with is a different question. It is `bunx` when Bun started the process, or, for `eas-cli`, when the project's lockfile is Bun's; either way only when `bunx` is on `PATH`. Else it is `npx`. `eas simulator:exec npx <agent-device>` is exempt: that `npx` runs in a datacenter.
+The runner this CLI _spawns_ with is a different question. It is `bunx` when the runner above is Bun, or, for `eas-cli`, when the project's lockfile is Bun's; either way only when `bunx` is on `PATH`. Else it is `npx`. `eas simulator:exec npx <agent-device>` is exempt: that `npx` runs in a datacenter.
 
 ## EAS JSON
 
