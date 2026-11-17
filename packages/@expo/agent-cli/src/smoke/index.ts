@@ -3,6 +3,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs, DURATION_HELP_NOTE, DURATION_METAVAR } from '../utils/args';
+import { SMOKE_ALWAYS_PHASE_IDS, SMOKE_CONDITIONAL_PHASE_IDS } from './types';
 
 export const smokeHelp: CommandHelp = {
   command: 'smoke',
@@ -73,8 +74,8 @@ export const smokeHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Phases: dev-server, bundler-ready, bundle, app, reload, route, runtime, errors, screenshot,`,
-    `and start-dev-server, start-session, boot-device, install-app when this run did them.`,
+    `Phases: ${SMOKE_ALWAYS_PHASE_IDS.join(', ')},`,
+    `and ${SMOKE_CONDITIONAL_PHASE_IDS.join(', ')} when this run did them.`,
     `0 passed · 20 failed · 22 inconclusive · 1 the command itself was wrong.`,
     `A running app is reloaded onto the code on disk (unproved: 22). A wrong Expo Go is replaced.`,
     `This run stops exactly what it started, and brings its own environment: it starts a dev`,

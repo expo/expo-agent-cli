@@ -102,8 +102,10 @@ export async function resolveDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
+  // The platform the printed start command names; a caller that named none gets `--ios`.
+  const startPlatform = platform ?? 'ios';
   if (context.cloud === 'required') {
-    return await resolveCloudDeviceAsync(platform, context);
+    return await resolveCloudDeviceAsync(platform, startPlatform, context);
   }
 
   const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });
@@ -123,7 +125,7 @@ export async function resolveDeviceAsync(
   if (found.toolError) {
     throw found.toolError;
   }
-  throw withOtherDoors(found.refusal, context, cloud?.probe ?? null, platform);
+  throw withOtherDoors(found.refusal, context, cloud?.probe ?? null, startPlatform);
 }
 
 /** How much of the ladder a caller wants: whether the cloud backend is on it, and how. */
@@ -194,6 +196,7 @@ async function cloudFallbackAsync(
  */
 async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
+  startPlatform: NavigatePlatform,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
   const rung = deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'required'));
@@ -203,7 +206,7 @@ async function resolveCloudDeviceAsync(
   if (rung.probe.state === 'unknown') {
     throw cloudSessionUnknownError(rung.probe);
   }
-  throw cloudSessionUnavailableError(rung.probe, platform);
+  throw cloudSessionUnavailableError(rung.probe, startPlatform);
 }
 
 /**
@@ -222,7 +225,7 @@ function withOtherDoors(
   refusal: CommandError,
   context: ResolveDeviceContext,
   cloudProbe: CloudSessionProbe | null,
-  platform: NavigatePlatform | undefined
+  platform: NavigatePlatform
 ): CommandError {
   const lines = refusal.message.split('\n');
   // The How line stays last (llp/0035 §Output and errors), so the doors go in above it.
@@ -254,7 +257,7 @@ function withOtherDoors(
 /** The `Or:` line for a cloud session this project has on record and this run could not use. */
 function cloudSessionLine(
   probe: CloudSessionProbe | null,
-  platform: NavigatePlatform | undefined
+  platform: NavigatePlatform
 ): string | null {
   if (probe == null) {
     return null;

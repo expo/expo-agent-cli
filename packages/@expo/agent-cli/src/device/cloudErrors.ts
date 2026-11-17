@@ -32,7 +32,7 @@ import {
  */
 export function cloudSessionUnavailableError(
   probe: Extract<CloudSessionProbe, { state: 'inactive' | 'none' | 'unavailable' }>,
-  platform?: CloudPlatform | null
+  platform: CloudPlatform
 ): CommandError {
   const start = cloudSessionStartCommand(platform);
 

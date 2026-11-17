@@ -138,6 +138,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     // for an Expo Go run it means `--no-start` forbade the install this gate would have done. Both
     // lead with the command that puts the app there, and neither leads with `navigate` — which is
     // what this used to suggest, and which is refused in exactly the same way every time (llp/0009).
+    // These two kinds come only from a local device, so the re-run drops `--eas` and `same` is not used.
     if (input.appMismatchKind === 'app-not-installed') {
       return capFollowUps([
         {

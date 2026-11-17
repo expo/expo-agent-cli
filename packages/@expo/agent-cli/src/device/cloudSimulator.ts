@@ -118,8 +118,8 @@ export const CLOUD_SIMULATOR_WAITLIST_URL = 'https://expo.dev/services/simulator
  * Start a usable app, including Metro and the project's Expo Go/development-build choice.
  * Keep this in the foreground: detached dev may reuse Metro without opening a session.
  */
-export function cloudSessionStartCommand(platform?: CloudPlatform | null): string {
-  return `${PROGRAM_PREFIX} dev --${platform ?? 'ios'} --eas`;
+export function cloudSessionStartCommand(platform: CloudPlatform): string {
+  return `${PROGRAM_PREFIX} dev --${platform} --eas`;
 }
 
 // ---- The argv, as pure functions -------------------------------------------------------------

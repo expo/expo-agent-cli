@@ -457,12 +457,6 @@ describe(`${buildSmokeFollowUps.name} for the wrong version of Expo Go`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
-//
-// The third kind of mismatch, and the one a live run met: the device has not got the app, so the
-// deep link was refused and nothing could attach. This used to lead with `navigate / --ios`, which
-// is refused in exactly the same way every time — the llp/0009 mistake, reached because the run did
-// not know why the link failed [observed — Kudo, local run, 2026-09-04].
 describe(`${buildSmokeFollowUps.name} for an app mismatch keeps the run's flags`, () => {
   it.each([
     ['app-not-installed', { cloud: false, port: '9377' }, 'smoke --ios --port 9377'],
@@ -475,6 +469,11 @@ describe(`${buildSmokeFollowUps.name} for an app mismatch keeps the run's flags`
   });
 });
 
+// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+//
+// The third kind of mismatch: the device has not got the app, so the deep link was refused and
+// nothing could attach. Leading with `navigate / --ios` is refused in exactly the same way every
+// time — the llp/0009 mistake, reached because the run did not know why the link failed.
 describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
   const missing = {
     outcome: 'failed' as const,
