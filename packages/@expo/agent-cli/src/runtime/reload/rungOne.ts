@@ -265,7 +265,8 @@ export const CHURN_NOT_ASKED: CommandSocketChurn = {
 
 /** What rung 1 does on this run, and which evidence may prove it. */
 export type RungOnePolicy = {
-  skippedApps: SkippedApp[];
+  /** What keeps a served bundle from proving the reload: skipped apps, and listed apps on no known platform. */
+  bundleBlockers: { skipped: SkippedApp[]; undetermined: number };
   /** Listed apps outside `read` that the broadcast also reaches: other-platform and unplaced ones. */
   reachedOutside: number;
   /** The platforms whose served bundle proves the reload: never one an app outside `read` can fetch. */
@@ -298,22 +299,27 @@ export function rungOnePolicy(
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
   const broadcast = classifiedTargets.skipped.length === 0;
-  const outside = broadcast
-    ? [
-        ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
-        ...classifiedTargets.undetermined.map(() => null),
-      ]
-    : classifiedTargets.skipped.map(
-        ({ target }) => platformOfTarget(target, deviceInventory).platform
-      );
+  const reached = [
+    ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
+    ...classifiedTargets.undetermined.map(() => null),
+  ];
+  const outside = [
+    ...classifiedTargets.skipped.map(
+      ({ target }) => platformOfTarget(target, deviceInventory).platform
+    ),
+    ...reached,
+  ];
   return {
     ...(!broadcast
       ? { mechanism: 'page-reload' }
       : unread == null
         ? { mechanism: 'broadcast' }
         : { mechanism: 'none', unread }),
-    skippedApps: broadcast ? [] : skippedAppsOf(classifiedTargets),
-    reachedOutside: broadcast ? outside.length : 0,
+    bundleBlockers: {
+      skipped: skippedAppsOf(classifiedTargets),
+      undetermined: classifiedTargets.undetermined.length,
+    },
+    reachedOutside: broadcast ? reached.length : 0,
     bundlePlatforms:
       outside.length === 0 && scoped === 'any'
         ? 'any'
@@ -574,7 +580,7 @@ async function reloadOwnTargetsAsync(
   const attempt = targetProofAttempt(
     'page-reload',
     outcomes,
-    `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app, and this run skips ${policy.skippedApps.length} of them (\`skippedApps\`).`
+    `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app, and this run skips ${policy.bundleBlockers.skipped.length} of them (\`skippedApps\`).`
   );
   const churn = {
     ...CHURN_NOT_ASKED,

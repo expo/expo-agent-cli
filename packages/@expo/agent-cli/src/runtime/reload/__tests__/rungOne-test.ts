@@ -89,6 +89,13 @@ describe('what rung 1 does, and which bundle proves it', () => {
       bundlePlatforms: [],
     },
     {
+      name: 'no bundle proves a Page.reload beside an app nothing places, as well as a skipped one',
+      targets: [ownAndroid, onClone, elsewhere],
+      targetSelection: FLAG_ANDROID,
+      mechanism: 'page-reload',
+      bundlePlatforms: [],
+    },
+    {
       name: 'sends nothing when the fresh read failed and no app is skipped',
       targets: [ownIos],
       targetSelection: BOUND_SIMULATOR,
