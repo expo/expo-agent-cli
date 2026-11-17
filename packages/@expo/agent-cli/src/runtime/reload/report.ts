@@ -199,23 +199,35 @@ function describeBundleBlockers({
 }
 
 /** The How line of a reload that ran and that nothing proved. */
-function unprovedHowLine(
-  smokeBase: string,
-  smokePlatform: string,
-  cloud: boolean | undefined,
-  bundleLogMissing: boolean
-): string {
+function unprovedHowLine({
+  smokeBase,
+  smokePlatform,
+  cloud,
+  bundleLogMissing,
+}: {
+  smokeBase: string;
+  smokePlatform: string;
+  cloud: boolean | undefined;
+  bundleLogMissing: boolean;
+}): string {
   const screenCheck = `look at the screen — "${smokeBase} --no-route-check" photographs it`;
   // An EAS session ends with the foreground dev server that started it, so no restart is advised there.
-  const logStep = !bundleLogMissing
-    ? ` — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`
-    : cloud
-      ? '.'
-      : `. This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${smokePlatform}" so its output is recorded.`;
-  const cloudStep = cloud
-    ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.'
-    : '';
-  return `How: ${screenCheck}${logStep}${cloudStep}`;
+  const restartAdvised = bundleLogMissing && !cloud;
+  return [
+    bundleLogMissing
+      ? `How: ${screenCheck}.`
+      : `How: ${screenCheck} — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`,
+    ...(restartAdvised
+      ? [
+          `This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${smokePlatform}" so its output is recorded.`,
+        ]
+      : []),
+    ...(cloud
+      ? [
+          'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.',
+        ]
+      : []),
+  ].join(' ');
 }
 
 /** The what / why / how for a reload that did not end where it was supposed to. */
@@ -287,7 +299,12 @@ export function explainReloadFailure(
       why,
       unprovable
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
-        : unprovedHowLine(smokeBase, smokePlatform, options.cloud, state.bundleLogMissing),
+        : unprovedHowLine({
+            smokeBase,
+            smokePlatform,
+            cloud: options.cloud,
+            bundleLogMissing: state.bundleLogMissing,
+          }),
     ].join('\n');
   }
   if (!report.reloaded) {
