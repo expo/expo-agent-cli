@@ -211,6 +211,12 @@ async function installNeededOnDevice(
   //
   // `unknown` installs nothing: a machine that is offline, or one whose version would not
   // read, has shown no reason to spend a few hundred megabytes.
+  //
+  // Only for an Expo Go target. A native-build target's app is on the device, and the Expo Go
+  // beside it is not the app under test.
+  if (target.installWithKind !== 'expo-go') {
+    return false;
+  }
   return (await checkExpoGoVersion(ctx, deviceId)).verdict === 'mismatch';
 }
 

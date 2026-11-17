@@ -32,6 +32,7 @@ import {
   readEvents,
   readJsonLines,
 } from '../utils';
+import { simulatorDeviceDir } from '../../src/device/installedApps';
 import { createdSimulatorName } from '../../src/deviceBinding/choose';
 import { digestForRoot } from '../../src/deviceBinding/registry';
 import {
@@ -1186,6 +1187,93 @@ describe('@expo/agent-cli smoke', () => {
         expect(readNpx().some((argv) => argv.includes('run:ios'))).toBe(false);
         expect(report.phases.some((phase: any) => phase.id === 'install-app')).toBe(false);
       } finally {
+        await stub.close();
+      }
+    });
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+  //
+  // A development build is the app of a `native-build` project, so the Expo Go beside it is not part
+  // of the install decision: a device that holds the build installs nothing.
+  describe('a stale Expo Go beside an installed development build', () => {
+    async function devBuildFixtureAsync(): Promise<string> {
+      const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.android = { package: 'com.example.devclientfreshapp' };
+      config.expo.ios = { bundleIdentifier: 'com.example.devclientfreshapp' };
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+      return projectRoot;
+    }
+
+    it('builds nothing for Android', async () => {
+      const projectRoot = await devBuildFixtureAsync();
+      const adb = await installStubAdbForExpoGoAsync(projectRoot, '54.0.8');
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--android', '--json', '--no-screenshot', '--timeout', '4s'],
+          { env: { ...stubExpoEnv(projectRoot), ...adb.env }, reject: false }
+        );
+        const report = JSON.parse(result.stdout);
+
+        expect(readNpx().some((argv) => argv.includes('run:android'))).toBe(false);
+        expect(report.phases.some((entry: any) => entry.id === 'install-app')).toBe(false);
+      } finally {
+        await release();
+        await stub.close();
+      }
+    });
+
+    it.skipIf(process.platform !== 'darwin')('builds nothing for iOS', async () => {
+      const projectRoot = await devBuildFixtureAsync();
+      await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-BOOTED', name: 'dogfood-explicit', state: 'Booted' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-BOOTED', 'dogfood-explicit');
+      const home = path.join(projectRoot, '.stub-home');
+      const apps = path.join(
+        simulatorDeviceDir('E2E-BOOTED', { homedir: home }),
+        'data/Containers/Bundle/Application'
+      );
+      const installs = [
+        { dir: 'dev', id: 'com.example.devclientfreshapp', version: '1.0.0' },
+        { dir: 'go', id: 'host.exp.Exponent', version: '54.0.8' },
+      ];
+      for (const { dir, id, version } of installs) {
+        const bundle = path.join(apps, dir, 'App.app');
+        await fs.promises.mkdir(bundle, { recursive: true });
+        await fs.promises.writeFile(
+          path.join(bundle, 'Info.plist'),
+          '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>' +
+            `<key>CFBundleIdentifier</key><string>${id}</string>` +
+            `<key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`
+        );
+      }
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '4s'],
+          {
+            env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0', HOME: home },
+            reject: false,
+          }
+        );
+        const report = JSON.parse(result.stdout);
+
+        expect(readNpx().some((argv) => argv.includes('run:ios'))).toBe(false);
+        expect(report.phases.some((entry: any) => entry.id === 'install-app')).toBe(false);
+      } finally {
+        await release();
         await stub.close();
       }
     });
