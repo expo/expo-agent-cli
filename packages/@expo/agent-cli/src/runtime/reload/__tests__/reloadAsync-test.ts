@@ -671,7 +671,11 @@ describe(reloadAsync, () => {
 // nothing in this command can restore. The report said only "The app was not reloaded", so a reader
 // was left with a session they could not use and no idea that this run is what emptied it.
 describe(explainReloadFailure, () => {
-  const NO_RUNG_ONE = { unwatched: null, rungOne: null, undeterminedApps: 0 };
+  const NO_RUNG_ONE = {
+    unwatched: null,
+    rungOne: null,
+    bundleBlockers: { skipped: [], undetermined: 0 },
+  };
 
   function strandedReport(): ReloadResultJson {
     return {
@@ -763,7 +767,7 @@ describe(explainReloadFailure, () => {
     const explained = explainReloadFailure(report, options({ cloud: false }), {
       unwatched: 'nothing-can-prove',
       rungOne: null,
-      undeterminedApps: 2,
+      bundleBlockers: { skipped: [], undetermined: 2 },
     });
 
     expect(explained).toContain('2 listed apps on no known platform');

@@ -8,7 +8,7 @@ import { describeSkippedApps } from '../targetSelection';
 import { hasTargetOutcomes, keepsPageId, settledAttempt, summarizeTargetOutcomes } from './attempt';
 import { describeEvidence, type Unwatched } from './evidence';
 import { type ReloadOptions } from './resolveOptions';
-import { type RungOneOutcome } from './rungOne';
+import { type RungOneOutcome, type RungOnePolicy } from './rungOne';
 import { easCommandPrefix } from '../../utils/easCli';
 import type { ReloadResultJson } from './reloadAsync';
 
@@ -178,11 +178,11 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
 export interface ReloadFailureState {
   unwatched: Unwatched | null;
   rungOne: RungOneOutcome | null;
-  /** Listed apps on no known platform: their bundle fetch cannot be told from this run's. */
-  undeterminedApps: number;
+  /** The apps whose bundle fetch cannot be told from this run's. */
+  bundleBlockers: RungOnePolicy['bundleBlockers'];
 }
 
-function describeBundleBlockers(skipped: ReloadResultJson['skippedApps'], undetermined: number) {
+function describeBundleBlockers({ skipped, undetermined }: ReloadFailureState['bundleBlockers']) {
   return [
     skipped.length > 0 ? describeSkippedApps(skipped) : null,
     undetermined > 0
@@ -246,7 +246,7 @@ export function explainReloadFailure(
   if (report.method != null && (report.verifiedBy == null || keeps != null)) {
     const outside = state.rungOne?.kind === 'acted' ? state.rungOne.reachedOutside : 0;
     const why = unprovable
-      ? `Why: ${unprovable}, and no bundle may count here (${describeBundleBlockers(report.skippedApps, state.undeterminedApps)}), so nothing could prove the reload and nothing was watched.`
+      ? `Why: ${unprovable}, and no bundle may count here (${describeBundleBlockers(state.bundleBlockers)}), so nothing could prove the reload and nothing was watched.`
       : [
           outside > 0
             ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`
