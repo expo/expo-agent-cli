@@ -785,7 +785,7 @@ describe(explainReloadFailure, () => {
       ...strandedReport(),
       platform: null,
       method: 'dev-server' as const,
-      attempts: [{ method: 'dev-server' as const, ok: true, reason: 'sent' }],
+      attempts: [{ method: 'dev-server' as const, ok: true, reason: 'sent', leftAppStopped: null }],
     };
 
     const explained = explainReloadFailure(report, options({ platform }), {
