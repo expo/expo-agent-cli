@@ -15,7 +15,7 @@ export const navigateHelp: CommandHelp = {
     `--app-id <id>           Application id of the target app`,
     `--dev-server-url <url>  Dev server to read (default: the project's own, then 8081)`,
     `--print-url             Print the URL and open nothing; needs no device`,
-    `--attach-timeout <dur>  How long to wait for the app to connect (default: 45s)`,
+    `--attach-timeout <dur>  Each wait for the app to connect lasts this long (default: 45s)`,
     `--no-wait-attach        Report what the device tool said, without waiting for the app`,
     `--json                  Print the result as JSON`,
     `--no-route-check        Open the link without checking the route against the project`,

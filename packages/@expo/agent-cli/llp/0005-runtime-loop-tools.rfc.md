@@ -253,7 +253,7 @@ A lease lasts 60 minutes ([[0035-one-device-per-worktree]] §Lease). A dev serve
 
 The debugger replays old errors to every new connection, so an error window outlives the fix until a reload. So the follow-ups of a non-empty `runtime:errors` window start with `runtime:reload`.
 
-`runtime:reload` needs a dev server (§One preflight for the runtime family). `--timeout` (default 30 s) bounds the whole run. A `--route` the project has not got is exit 1 before anything reloads (§Verifying the route). The route opens after the app is seen back, because Expo Go reloads the URL it was launched with. The EAS relaunch opens no second link, because its own open carries the route. A local relaunch opens the route link as the relaunch, and again after the app is back. On a development build that is not running, that link shows the dev launcher, so the app does not come back [observed — SDK 58 development build, iOS 27.1 simulator, 2026-11-17] (Risk 14).
+`runtime:reload` needs a dev server (§One preflight for the runtime family). `--timeout` (default 30 s) bounds the whole run. A `--route` the project has not got is exit 1 before anything reloads (§Verifying the route). The route opens after the app is seen back, because Expo Go reloads the URL it was launched with. The EAS relaunch opens no second link, because its own open carries the route. A local relaunch opens the route link as the relaunch, and again after the app is back. On a development build that is not running, that link shows the dev launcher, so the app does not come back [observed — SDK 58 development build, iOS 27.1 simulator, 2026-11-17] (Risk 9).
 
 ### How it reloads
 
@@ -330,7 +330,7 @@ Each target keeps its outcome in the attempt's `outcomes`:
 
 | Outcome              | Trigger                                                                                                       | Test                                                                                     |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                         | none (Risk 17)                                                                           |
+| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                         | none (Risk 12)                                                                           |
 | `unmarkable`         | the context did not keep the marker, or answered a CDP error (Expo Go for Android: `-32601`); nothing is sent | e2e runtime-target-selection-test "sends no Page.reload…"; contextReplacedTransport-test |
 | `not-delivered`      | the mark got no answer, the `Page.reload` answer was lost and no read proved it, or the action failed         | rungOneTargets-test "reports a mark…", "reports a Page.reload whose answer was lost…"    |
 | `delivered-unproved` | `Page.reload` answered and the marker stayed                                                                  | rungOneTargets-test "watches an own target…"                                             |
@@ -383,14 +383,14 @@ So `navigate` opens the launcher URL first when all four hold:
 
 The open runs these steps in order. A step whose condition does not hold is passed over.
 
-| #   | Step                                         | Runs when                                                  | Wait                                                               | Reports                                                                                                        |
-| --- | -------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| 1   | open the launcher URL                        | the four conditions above hold                             | —                                                                  | `launch.url`, `launch.command`, `launch.exitCode`                                                              |
-| 2   | wait for the app                             | step 1 exited 0                                            | `--attach-timeout`                                                 | `launch.attached`, `launch.waitedMs`                                                                           |
-| 3   | open the route link, also for `/`            | always                                                     | —                                                                  | `command`, `exitCode`                                                                                          |
-| 4   | wait for the app                             | the device took the link, and the run has an attach budget | the rest of `--attach-timeout`; at least 2 s after a launcher open | `attached`                                                                                                     |
-| 5   | answer the open dialog                       | an EAS session, and nothing attached                       | step 4's budget again, after an accepted dialog                    | `attachAlert` (§Cloud simulator)                                                                               |
-| 6   | stop the app once, open the route link again | Android, local or EAS, and nothing attached                | step 4's budget again, when the second open exits 0                | `attachRecovered`: `true` only when `pidof` saw the app running, the stop worked, and the second open exited 0 |
+| #   | Step                                         | Runs when                                                  | Wait                                                               | Reports                                                                             |
+| --- | -------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| 1   | open the launcher URL                        | the four conditions above hold                             | —                                                                  | `launch.url`, `launch.command`, `launch.exitCode`                                   |
+| 2   | wait for the app                             | step 1 exited 0                                            | `--attach-timeout`                                                 | `launch.attached`, `launch.waitedMs`                                                |
+| 3   | open the route link, also for `/`            | always                                                     | —                                                                  | `command`, `exitCode`                                                               |
+| 4   | wait for the app                             | the device took the link, and the run has an attach budget | the rest of `--attach-timeout`; at least 2 s after a launcher open | `attached`                                                                          |
+| 5   | answer the open dialog                       | an EAS session, and nothing attached                       | step 4's budget again, after an accepted dialog                    | `attachAlert` (§Cloud simulator)                                                    |
+| 6   | stop the app once, open the route link again | Android, local or EAS, and nothing attached                | step 4's budget again, when the second open exits 0                | `attachRecovered`: `true` only when `pidof` saw the app running and the stop worked |
 
 `--attach-timeout` bounds each wait, not the whole open. A recovery starts only after step 4 used its whole budget, so steps 5 and 6 each wait step 4's budget again. One `navigate` waits up to two budgets on local Android and on an EAS iOS session, and up to three on an EAS Android session.
 
@@ -653,7 +653,7 @@ A start phase that compiles rewrites the app config: `expo prebuild` writes unde
 
 #### A refused link is a device without the app
 
-When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The rows of §Two mismatches, two next actions give every other answer. The follow-ups branch on the value. On `app-not-installed` they do not lead with `navigate`, which the device refuses in the same way every time. With no finding (`appMismatchKind: null`), the follow-ups name `navigate <route> --<platform>`: first, or after the `dev` restart when the run stopped its dev server or released its device (Risk 15).
+When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The rows of §Two mismatches, two next actions give every other answer. The follow-ups branch on the value. On `app-not-installed` they do not lead with `navigate`, which the device refuses in the same way every time. With no finding (`appMismatchKind: null`), the follow-ups name `navigate <route> --<platform>`: first, or after the `dev` restart when the run stopped its dev server or released its device (Risk 10).
 
 ### A link nobody can approve is a link that never opens
 
@@ -697,8 +697,8 @@ The readiness wait asks the dev server's `/status` until the budget ends, as lon
 
 - **Only a connection failure retries.** A refused, reset or unreachable connection is asked again, with a growing gap of at most 1 s.
 - **An answer ends the wait.** A non-2xx status, a body that is not `packager-status:running`, a TLS failure: each is returned at once. `ENOTFOUND` is not retried, so a mistyped host does not become a 30-minute hang.
-- **The timeout names what happened.** A budget with one refused connection anywhere in it reports `nothing was listening on <url> for <N>ms …, so no dev server had finished starting`, also when the server listened later (Risk 16). A server that accepts the connection and never answers ends as "the bundler was still working" ([[0021-honest-reports]] §The rules).
-- **The caller's abort ends the loop at the next retry**, up to 1 s later (Risk 16), and is not called a timeout.
+- **The timeout names what happened.** A budget with one refused connection anywhere in it reports `nothing was listening on <url> for <N>ms …, so no dev server had finished starting`, also when the server listened later (Risk 11). A server that accepts the connection and never answers ends as "the bundler was still working" ([[0021-honest-reports]] §The rules).
+- **The caller's abort ends the loop at the next retry**, up to 1 s later (Risk 11), and is not called a timeout.
 
 ### The device that can open the app
 
@@ -753,13 +753,13 @@ A `localhost` or `lan` URL is refused before anything opens; no `adb reverse` re
 
 **When there is no session.** `unknown` is a tool that did not answer, and it says nothing about the world.
 
-| Probe state                           | Error                                                                                  |
-| ------------------------------------- | -------------------------------------------------------------------------------------- |
-| `inactive` (a bound id is not live)   | `NO_CLOUD_SIMULATOR_SESSION`, naming the id                                            |
-| `none`, live sessions of another type | `NO_CLOUD_SIMULATOR_SESSION`, naming the types                                         |
-| `none`, feature available             | `NO_CLOUD_SIMULATOR_SESSION`; How: `dev --ios --eas`, then `dev:stop --eas`            |
-| `unavailable`                         | `CLOUD_SIMULATOR_UNAVAILABLE`, with the waitlist URL, a local device and `--print-url` |
-| `unknown`                             | `CLOUD_SIMULATOR_SESSION_UNKNOWN`; How: `simulator:list`, never a start                |
+| Probe state                           | Error                                                                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `inactive` (a bound id is not live)   | `NO_CLOUD_SIMULATOR_SESSION`, naming the id                                                                             |
+| `none`, live sessions of another type | `NO_CLOUD_SIMULATOR_SESSION`, naming the types                                                                          |
+| `none`, feature available             | `NO_CLOUD_SIMULATOR_SESSION`; How: `dev --<platform> --eas` (`--ios` when the caller named none), then `dev:stop --eas` |
+| `unavailable`                         | `CLOUD_SIMULATOR_UNAVAILABLE`, with the waitlist URL, a local device and `--print-url`                                  |
+| `unknown`                             | `CLOUD_SIMULATOR_SESSION_UNKNOWN`; How: `simulator:list`, never a start                                                 |
 
 `eas simulator:availability` runs only when the listing has no usable session. "Start one" for a session the CLI could not rule out starts a second billed session.
 
@@ -828,15 +828,10 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 6. `hostType` is `tunnel` for any host name that is not loopback and not an IP literal, for example `mymac.local`. Such a URL passes the EAS refusal. A tunnel whose transport has died is still advertised (§Where a device reaches the dev server).
 7. Expo Go for Android cannot pass `smoke`: the run ends 22 on a working app. It also pays the 5 s `-32601` grace on almost every run, because a reload is the default and every opened or reloaded app counts as moved (§Android, §A reloading runtime answers like one with no debugger).
 8. The Expo Go version check runs only on a local device, and `unknown` says nothing. An EAS session that the CLI did not start, or one kept across an SDK change, can hold another SDK's Expo Go, and the run does not name it. Offline, a stale Expo Go is not named, and on Android "no Expo Go" and "`adb` could not run" both read as `unknown` (§The Expo Go on the device is not the Expo Go the SDK wants).
-9. `smoke --help` says "Nine phases", while the run has 13 phases (4 of them conditional). Its list of JSON keys leaves out `appMismatch` and `appMismatchKind` (§The smoke gate).
-10. The three app-mismatch follow-ups drop the run's `--eas` and `--port`, unlike the other `smoke` follow-ups (§Two mismatches, two next actions).
-11. `NO_CLOUD_SIMULATOR_SESSION` names `dev --ios --eas`, also to a caller who asked for Android (§Cloud simulator).
-12. `dev:wait` is deferred and not shipped. Its follow-ups print `navigate / --cloud`, a flag the CLI refuses, and name a bare `npx eas simulator:stop` with no `--id`, which works only when `.env.eas-simulator` names the session.
-13. `navigate --help` does not say that each recovery waits the attach budget again (§Loading the app is not navigating it).
-14. The local relaunch opens `<scheme>://<route>` (the root without `--route`), not the launcher URL that `navigate` opens first. A development build that is not running shows the dev launcher for that link, so the app does not come back, and the run still reports `reloaded: true` with `verifiedBy: app-relaunch` at exit 22. On Expo Go the app comes back, and with `--route` the route opens twice: as the relaunch, and again after the app is back (§Reloading the app).
-15. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
-16. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
-17. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
+9. The local relaunch opens `<scheme>://<route>` (the root without `--route`), not the launcher URL that `navigate` opens first. A development build that is not running shows the dev launcher for that link, so the app does not come back, and the run still reports `reloaded: true` with `verifiedBy: app-relaunch` at exit 22. On Expo Go the app comes back, and with `--route` the route opens twice: as the relaunch, and again after the app is back (§Reloading the app).
+10. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
+11. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
+12. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
 
 ## Testing
 

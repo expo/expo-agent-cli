@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { smokeHelp } from '../../src/smoke';
 import { bindOtherWorktreeAsync } from '../runtimeTargetFixtures';
 import {
   breakXcodeSelectAsync,
@@ -314,6 +315,7 @@ describe('@expo/agent-cli smoke', () => {
       expect(result.exitCode).toBe(20);
       const report = JSON.parse(result.stdout);
       expect(report).toMatchObject({ ok: false, outcome: 'failed', started: false });
+      expect(Object.keys(report).sort()).toEqual([...smokeHelp.json!.keys].sort());
       expect(report.environment).toEqual({
         devServer: 'absent',
         device: 'absent',

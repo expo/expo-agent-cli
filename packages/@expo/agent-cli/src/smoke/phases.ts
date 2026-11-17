@@ -1,6 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
-// The gate itself: nine phases, one verdict — and two more that only some runs perform.
+// The gate itself: nine phases, one verdict — and four more that only some runs perform.
 //
 // Every phase is a question one existing command already answers, asked here through the same
 // function rather than by running that command again. That is the whole design constraint. A
@@ -16,6 +16,7 @@
 // | `dev-server`       | every runtime command            | `discoverDevServerAsync`    |
 // | `bundler-ready`    | this command only                | `waitForBundlerReadyAsync`  |
 // | `bundle`           | this command, `runtime:reload`   | `checkEntryBundleAsync`     |
+// | `start-session`    | `dev --eas` (conditional)        | `ensureEasSessionAsync`     |
 // | `boot-device`      | `dev` (conditional)              | `acquireDeviceAsync`        |
 // | `install-app`      | (new, conditional)               | `installExpoGoAsync`        |
 // | `app`              | this command only                | `waitForAppConnectionAsync` |
@@ -29,7 +30,7 @@
 // (llp/0016). The library functions they call are unchanged and still live in `src/runtime/`; only
 // the second command that called them is gone.
 //
-// **The three conditional phases are acts rather than questions**, and that shapes three things
+// **The four conditional phases are acts rather than questions**, and that shapes three things
 // (llp/0005 §The run brings its own environment): they are reported only by a run that performed
 // them, they are never charged to `--timeout`, and the ones that hold a resource register the way
 // to undo themselves *before* they do anything. `runSmokePhasesAsync` is the wrapper that runs

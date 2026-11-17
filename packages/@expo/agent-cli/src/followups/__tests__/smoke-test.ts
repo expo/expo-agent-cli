@@ -463,6 +463,18 @@ describe(`${buildSmokeFollowUps.name} for the wrong version of Expo Go`, () => {
 // deep link was refused and nothing could attach. This used to lead with `navigate / --ios`, which
 // is refused in exactly the same way every time — the llp/0009 mistake, reached because the run did
 // not know why the link failed [observed — Kudo, local run, 2026-09-04].
+describe(`${buildSmokeFollowUps.name} for an app mismatch keeps the run's flags`, () => {
+  it.each([
+    ['app-not-installed', { cloud: false, port: '9377' }, 'smoke --ios --port 9377'],
+    ['expo-go-version', { cloud: false, port: '9377' }, 'smoke --ios --port 9377'],
+    ['expo-go-incompatible', { cloud: true, port: null }, 'dev --ios --eas'],
+  ] as const)('%s', (appMismatchKind, flags, rest) => {
+    expect(
+      commands({ outcome: 'inconclusive', appMismatch: 'x', appMismatchKind, ...flags })[0]
+    ).toBe(`npx @expo/agent-cli ${rest}`);
+  });
+});
+
 describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
   const missing = {
     outcome: 'failed' as const,

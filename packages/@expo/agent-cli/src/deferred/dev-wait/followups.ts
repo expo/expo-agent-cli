@@ -133,10 +133,10 @@ export function buildDevWaitFollowUps({
     return capFollowUps([
       {
         id: 'dev-wait-open-app',
-        command: `${PROGRAM_PREFIX} navigate /${openOn === 'cloud' ? ' --cloud' : ''}`,
+        command: `${PROGRAM_PREFIX} navigate /${openOn === 'cloud' ? ' --eas' : ''}`,
         why:
           openOn === 'cloud'
-            ? 'The bundle is built but no app is attached. This machine has no booted simulator and no attached device, and this project has an EAS Simulator session on record — so this opens the app on that. It needs a tunnelled dev server, and the session bills until "npx eas simulator:stop".'
+            ? 'The bundle is built but no app is attached. This machine has no booted simulator and no attached device, and this project has an EAS Simulator session on record — so this opens the app on that. It needs a tunnelled dev server, and the session bills until "npx @expo/agent-cli dev:stop --eas".'
             : 'The bundle is built but no app is attached, so open it on the booted simulator or the attached device — this is the step nothing else does for you.',
       },
       {
