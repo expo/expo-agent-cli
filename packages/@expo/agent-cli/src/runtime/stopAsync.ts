@@ -38,7 +38,8 @@ export interface RuntimeStopResultJson {
    * state the caller wanted, `wasRunning` is whether this command is what produced it. An agent
    * that stops an app twice must not read the second run as a failure.
    *
-   * **Null on a cloud simulator**, where it cannot be established: `agent-device close` answers
+   * **Null when the stop cannot show it**: a stop that failed, an Android `pidof` that gave no
+   * usable answer, and any cloud simulator. On a cloud simulator it cannot be established: `agent-device close` answers
    * about the controller's session whatever application id it is given, so its success says the
    * app in front was closed and says nothing about *this* id [observed — live, 2026-08-26]. A
    * `true` there would be this command inventing the one fact it exists to report, which is worse

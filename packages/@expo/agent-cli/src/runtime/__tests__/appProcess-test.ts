@@ -53,13 +53,15 @@ describe(stopAppOnDeviceAsync, () => {
 // F102 — MAJOR, found live on 2026-08-27 against Expo Go on `tuft-pixel`.
 //
 // What it was: `adb shell am force-stop` exits 0 and prints nothing whether the app was running or
-// not — this file's own comment said so — and the result was still returned as `wasRunning: true`, which `runtime:stop` renders as **`wasRunning: true`**. So every
+// not — this file's own comment said so — and the result was still returned as a verified stop
+// of a running app, which `runtime:stop` rendered as **`wasRunning: true`**. So every
 // Android stop claimed the app had been running, on no evidence at all. Live it claimed it for an
 // application id that is not even installed on Android (F101): `stopped: true, wasRunning: true`
 // while `adb shell pidof host.exp.exponent` still answered `3933`.
 //
 // The fix is an observation rather than a downgrade: `pidof` is one more `adb` round trip and it
-// answers the question the exit code cannot. When `pidof` itself cannot run, `wasRunning` is null — llp/0021's rule that a report may be silent and may not be wrong.
+// answers the question the exit code cannot. When `pidof` itself cannot run, `wasRunning` is
+// null — llp/0021's rule that a report may be silent and may not be wrong.
 describe('what an Android stop can establish about the app it stopped', () => {
   const android = {
     platform: 'android' as const,
