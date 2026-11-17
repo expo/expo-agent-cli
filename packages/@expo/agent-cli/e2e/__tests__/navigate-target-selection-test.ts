@@ -173,6 +173,32 @@ const scenarios: Scenario[] = [
     reopenFails: true,
   },
   {
+    name: 'no flag, bound Android emulator, the app is not running and the device refuses the second link',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
+    pidof: 'none',
+    reopenFails: true,
+  },
+  {
+    name: 'no flag, bound Android emulator, pidof cannot run and the device refuses the second link',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
+    pidof: 'broken',
+    reopenFails: true,
+  },
+  {
+    name: 'no flag, Android session, the session refuses the second link',
+    backend: 'cloud',
+    platform: 'android',
+    initial: 'empty',
+    neverAttaches: true,
+    reopenFails: true,
+  },
+  {
     name: 'no flag, Android session, never attaches',
     backend: 'cloud',
     platform: 'android',
@@ -206,7 +232,13 @@ const STOP_SEEN_STDERR = {
   running: 'The app was stopped and the link opened a second time, and that did not attach either.',
   none: 'The app was not running, so nothing was stopped; the link opened a second time',
   broken: 'link was opened again after a stop whose effect could not be checked',
-  reopenFailed: 'opening the link again failed',
+} as const;
+
+/** What a failed second open says about the stop before it. */
+const REOPEN_FAILED_STDERR = {
+  running: 'an app the stop closed stays closed',
+  none: 'The app was not running, so nothing was stopped, and opening the link again failed',
+  broken: "The stop's effect could not be checked, and opening the link again failed",
 } as const;
 
 async function deviceFixture(root: string, scenario: Scenario) {
@@ -358,7 +390,9 @@ it.each(scenarios)('$name', async (scenario) => {
           ...device.env,
           ...twinEnv,
           ...PIDOF_ENV[scenario.pidof ?? 'running'],
-          ...(scenario.reopenFails ? { STUB_ADB_START_FAILS_AFTER_STOP: '1' } : {}),
+          ...(scenario.reopenFails
+            ? { STUB_ADB_START_FAILS_AFTER_STOP: '1', STUB_SIM_OPEN_FAILS_AFTER_CLOSE: '1' }
+            : {}),
         },
       }
     );
@@ -391,7 +425,9 @@ it.each(scenarios)('$name', async (scenario) => {
       expect(result.stderr).toContain('no android app connected');
       expect(result.stderr).toContain('accepted the intent and nothing more');
       expect(result.stderr).toContain(
-        STOP_SEEN_STDERR[scenario.reopenFails ? 'reopenFailed' : recovers ? stopSeen : 'running']
+        scenario.reopenFails
+          ? REOPEN_FAILED_STDERR[stopSeen]
+          : STOP_SEEN_STDERR[recovers ? stopSeen : 'running']
       );
       if (stopSeen !== 'running' || scenario.reopenFails)
         expect(result.stderr).not.toContain(
@@ -399,7 +435,7 @@ it.each(scenarios)('$name', async (scenario) => {
         );
       if (scenario.reopenFails) {
         expect(result.stderr).not.toContain('opened a second time');
-        expect(result.stderr).toContain('an app the stop closed stays closed');
+        if (stopSeen !== 'running') expect(result.stderr).not.toContain('stays closed');
       }
     }
     if (device.calls) {

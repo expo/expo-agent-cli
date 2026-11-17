@@ -94,6 +94,7 @@
 //
 // `simulator:exec`
 // - STUB_SIM_EXEC_EXIT / STUB_SIM_STDERR: a verb the session refused
+// - STUB_SIM_OPEN_FAILS_AFTER_CLOSE: an `open` that comes after a `close` exits 1
 // - STUB_SIM_ALERT: what `alert get` answers. Unset is the controller's own empty answer — exit 1
 //   and `Error (COMMAND_FAILED): alert not found` [observed — `agent-device@latest alert get`,
 //   2026-08-27]
@@ -566,6 +567,13 @@ if (command === 'simulator:exec') {
     });
     if (result.error) process.stderr.write(result.error.message + '\n');
     process.exit(result.status ?? 1);
+  }
+  if (
+    process.env.STUB_SIM_OPEN_FAILS_AFTER_CLOSE &&
+    args.includes('open') &&
+    fs.readFileSync(path.join(cwd, LOG_NAME), 'utf8').includes('"close"')
+  ) {
+    exitWith(process.stderr, 'open failed', 1);
   }
   const exitCode = Number(process.env.STUB_SIM_EXEC_EXIT || 0);
   if (exitCode !== 0) {

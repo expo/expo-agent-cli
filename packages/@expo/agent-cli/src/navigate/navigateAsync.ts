@@ -24,7 +24,7 @@ import { openInPhrase } from './connectUrl';
 import {
   openRouteAsync,
   type AlertCheck,
-  ATTACH_RECOVERY_TEXT,
+  attachRecoveryText,
   type OpenRouteResult,
 } from './openRoute';
 import type { NavigateOptions } from './resolveOptions';
@@ -271,7 +271,8 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
     reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
     attached: opened.attach.confirmed,
     attachWaitedMs: opened.attach.waitedMs,
-    attachRecovered: opened.attach.recovery === 'stopped',
+    attachRecovered:
+      opened.attach.recovery?.reopened === true && opened.attach.recovery.wasRunning === true,
     attachAlert: opened.attach.alert,
     followups,
   };
@@ -328,7 +329,7 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
             ` · ${opened.attach.targets} ${opened.platform} debugger ${
               opened.attach.targets === 1 ? 'target' : 'targets'
             } after ${opened.attach.waitedMs}ms${
-              ATTACH_RECOVERY_TEXT[opened.attach.recovery].success
+              attachRecoveryText(opened.attach.recovery).success
             }`
           )
         : opened.attach.confirmed === false
@@ -538,7 +539,7 @@ function attachNotConfirmed(opened: OpenRouteResult): string {
     chalk.red(
       `The link was opened on the device, and no ${opened.platform} app connected to ${opened.devServerUrl} within ${opened.attach.waitedMs}ms.`
     ),
-    `Why: "${opened.command}" exited 0, which says the device accepted the intent and nothing more — an app that fails to load its bundle sits on an error screen having accepted one.${reverseClause}${ATTACH_RECOVERY_TEXT[opened.attach.recovery].why}${alertClause}`,
+    `Why: "${opened.command}" exited 0, which says the device accepted the intent and nothing more — an app that fails to load its bundle sits on an error screen having accepted one.${reverseClause}${attachRecoveryText(opened.attach.recovery).why}${alertClause}`,
     `How: look at what the dev server was asked for with "${PROGRAM_PREFIX} dev:logs", and at the screen with "${look}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s. Pass --no-wait-attach to report only what the device tool said, which is what this command used to do.${alertHow}`,
   ].join('\n');
 }
