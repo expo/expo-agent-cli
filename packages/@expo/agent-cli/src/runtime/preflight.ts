@@ -281,8 +281,8 @@ export async function preflightRuntimeAsync(
   }
 
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
-  // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
-  // seventh and eighth calls a success.
+  // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §Other
+  // gates, in brief calls a success.
   if (need === 'debugger-target' && classifiedTargets.read.length === 0) {
     throw withLiveSessionNote(
       emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory),

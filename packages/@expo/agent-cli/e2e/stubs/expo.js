@@ -84,7 +84,7 @@ const devServerPort = process.env.STUB_EXPO_DEV_SERVER_PORT
 
 // `ci` and `isTTY` are recorded because the wrapper's needs-human protocol is *about* them:
 // a captured step is told `CI=1`, the dev-server step deliberately is not, and both rely on
-// stdout never being a TTY (llp/0010 §Force non-interactive).
+// stdout never being a TTY (llp/0010 §Needs-human protocol, layer 2).
 fs.appendFileSync(
   logPath,
   JSON.stringify({ args, cwd, ci: process.env.CI ?? null, isTTY: Boolean(process.stdout.isTTY) }) +
