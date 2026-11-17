@@ -675,6 +675,7 @@ describe(explainReloadFailure, () => {
     unwatched: null,
     rungOne: null,
     bundleBlockers: { skipped: [], undetermined: 0 },
+    bundleLogMissing: false,
   };
 
   function strandedReport(): ReloadResultJson {
@@ -768,6 +769,7 @@ describe(explainReloadFailure, () => {
       unwatched: 'nothing-can-prove',
       rungOne: null,
       bundleBlockers: { skipped: [], undetermined: 2 },
+      bundleLogMissing: false,
     });
 
     expect(explained).toContain('2 listed apps on no known platform');

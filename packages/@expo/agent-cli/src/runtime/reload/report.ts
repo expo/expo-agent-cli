@@ -180,6 +180,8 @@ export interface ReloadFailureState {
   rungOne: RungOneOutcome | null;
   /** The apps whose bundle fetch cannot be told from this run's; null when no mechanism was prepared. */
   bundleBlockers: RungOnePolicy['bundleBlockers'] | null;
+  /** The project has no captured dev server log, so no `Bundled` line could prove the reload. */
+  bundleLogMissing: boolean;
 }
 
 function describeBundleBlockers({
@@ -265,7 +267,9 @@ export function explainReloadFailure(
       why,
       unprovable
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
-        : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". ${options.cloud ? 'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ' : ''}${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.` : ''}`.trim(),
+        : state.bundleLogMissing
+          ? `How: look at the screen — "${smokeBase} --no-route-check" photographs it. This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.${options.cloud ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.' : ''}`
+          : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".${options.cloud ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.' : ''}`,
     ].join('\n');
   }
   if (!report.reloaded) {
