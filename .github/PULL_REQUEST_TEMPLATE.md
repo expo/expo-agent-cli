@@ -12,7 +12,7 @@ Delete guidance comments when done.
 
 ## Bug fix
 
-<!-- What goes wrong, and under what conditions? State expected vs. actual behavior and the root cause if known. -->
+<!-- What goes wrong, and under what conditions? Give the root cause if known. -->
 
 ### Steps to reproduce
 
@@ -20,6 +20,14 @@ Delete guidance comments when done.
 
 1.
 2.
+
+### Actual behavior
+
+<!-- What happens after these steps, before this fix. Say which parts you observed and which you inferred. -->
+
+### Expected behavior
+
+<!-- What should happen after the same steps, with this fix. -->
 
 ## How
 
