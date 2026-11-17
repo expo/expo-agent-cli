@@ -253,7 +253,7 @@ A lease lasts 60 minutes ([[0035-one-device-per-worktree]] §Lease). A dev serve
 
 The debugger replays old errors to every new connection, so an error window outlives the fix until a reload. So the follow-ups of a non-empty `runtime:errors` window start with `runtime:reload`.
 
-`runtime:reload` needs a dev server (§One preflight for the runtime family). `--timeout` (default 30 s) bounds the whole run. A `--route` the project has not got is exit 1 before anything reloads (§Verifying the route). The route opens after the app is seen back, because Expo Go reloads the URL it was launched with. The EAS relaunch opens no second link, because its own open carries the route. A local relaunch opens the route link as the relaunch, and again after the app is back (Risk 17).
+`runtime:reload` needs a dev server (§One preflight for the runtime family). `--timeout` (default 30 s) bounds the whole run. A `--route` the project has not got is exit 1 before anything reloads (§Verifying the route). The route opens after the app is seen back, because Expo Go reloads the URL it was launched with. The EAS relaunch opens no second link, because its own open carries the route. A local relaunch opens the route link as the relaunch, and again after the app is back. On a development build that is not running, that link shows the dev launcher, so the app does not come back [observed — SDK 58 development build, iOS 27.1 simulator, 2026-11-17] (Risk 17).
 
 ### How it reloads
 
@@ -832,7 +832,7 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 14. `attachRecovered` is true, and the reason says the app was stopped, when `pidof` could not run and on an EAS session. `navigate --help` does not say that each recovery waits the attach budget again (§Loading the app is not navigating it).
 15. On `--eas`, row 4 of the install table decides before the session's device is excluded, so `smoke --eas` on a project that was never prebuilt asks for a development build install onto the session (§The gate installs the app, whichever app it is).
 16. A plan that cannot be read installs a development build: row 4 starts `expo run:<platform>` for a project whose kind is unknown, which can be an Expo Go project. A code comment in the smoke target reader says that nothing is installed (§An app that cannot be named still has to be installed).
-17. With `--route`, a local relaunch opens the route link as the relaunch and again after the app is back. The first open comes before the observation (§Reloading the app).
+17. The local relaunch opens `<scheme>://<route>` (the root without `--route`), not the launcher URL that `navigate` opens first. A development build that is not running shows the dev launcher for that link, so the app does not come back, and the run still reports `reloaded: true` with `verifiedBy: app-relaunch` at exit 22. On Expo Go the app comes back, and with `--route` the route opens twice: as the relaunch, and again after the app is back (§Reloading the app).
 18. After `Page.reload`, a served bundle can prove the reload beside an unplaced app, which could have fetched that bundle (§What proves a reload).
 19. With no captured dev server log, the failure names `dev:logs`, not `dev --detach`, which is the command that captures the log (§What proves a reload).
 20. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
