@@ -330,7 +330,7 @@ Each target keeps its outcome in the attempt's `outcomes`:
 
 | Outcome              | Trigger                                                                                                       | Test                                                                                     |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                         | none (Risk 18)                                                                           |
+| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                         | none (Risk 17)                                                                           |
 | `unmarkable`         | the context did not keep the marker, or answered a CDP error (Expo Go for Android: `-32601`); nothing is sent | e2e runtime-target-selection-test "sends no Page.reload…"; contextReplacedTransport-test |
 | `not-delivered`      | the mark got no answer, the `Page.reload` answer was lost and no read proved it, or the action failed         | rungOneTargets-test "reports a mark…", "reports a Page.reload whose answer was lost…"    |
 | `delivered-unproved` | `Page.reload` answered and the marker stayed                                                                  | rungOneTargets-test "watches an own target…"                                             |
@@ -354,7 +354,7 @@ Which observations may count:
 - After a broadcast or a `Page.reload`, a served bundle counts only for a platform that no app outside the scope is on: a skipped app, or another platform's app. An unplaced app could fetch either bundle, so beside one, no bundle counts. Test: `src/runtime/reload/__tests__/rungOne-test.ts` "no bundle proves a Page.reload beside an app nothing places, as well as a skipped one".
 - The settled attempt is the last one that reloaded or reached the app. Nothing can prove the reload when all three hold: the settled attempt keeps the page id, the own app was listed before the run, and no bundle may count. Then the run watches nothing and ends at once. A relaunch that nothing confirmed does not call the listed runtime the old one.
 
-A project with no captured dev server log has no bundle observation. The run still watches the other observations, and `bundlesAfterReload.reason` says that the project has no detached dev server log. The How line names `dev:logs`, not `dev --detach` (Risk 15).
+A project with no captured dev server log has no bundle observation. The run still watches the other observations, and `bundlesAfterReload.reason` says that the project has no detached dev server log. Off `--eas`, the How line names `dev --detach --<platform>`, which captures the log, in place of `dev:logs`, and says to stop a dev server that runs in a terminal first. The platform is the device's or the flag's. When the run knows neither, the line names two commands, `dev --detach --ios` and `dev --detach --android`: `dev` requires a platform, and a restart on the host's guess starts the wrong plan. On `--eas` the How line names no restart: an EAS session ends with the foreground `dev --eas` that started it, so the line keeps the screen check and the `--timeout` advice only. Test: `e2e/__tests__/runtime-reload-test.ts` "relaunches the app when the command socket has no client to broadcast to", `src/runtime/reload/__tests__/reloadAsync-test.ts` "names the restart platform only when the reload knows it", and `e2e/__tests__/cloud-simulator-test.ts` "gives no restart advice when the project has no captured dev server log".
 
 The exit code comes from the observations, not from the label. The first row that matches decides:
 
@@ -653,7 +653,7 @@ A start phase that compiles rewrites the app config: `expo prebuild` writes unde
 
 #### A refused link is a device without the app
 
-When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The rows of §Two mismatches, two next actions give every other answer. The follow-ups branch on the value. On `app-not-installed` they do not lead with `navigate`, which the device refuses in the same way every time. With no finding (`appMismatchKind: null`), the follow-ups name `navigate <route> --<platform>`: first, or after the `dev` restart when the run stopped its dev server or released its device (Risk 16).
+When the device refuses the deep link that would open the app (the open exits non-zero), the `app` phase is `failed`. The run then asks the local device whether it has the app this project runs, Expo Go or a development build. When the device answers no, the finding goes into the `app` phase's reason beside the refusal, and into the report as `appMismatchKind: app-not-installed`. The rows of §Two mismatches, two next actions give every other answer. The follow-ups branch on the value. On `app-not-installed` they do not lead with `navigate`, which the device refuses in the same way every time. With no finding (`appMismatchKind: null`), the follow-ups name `navigate <route> --<platform>`: first, or after the `dev` restart when the run stopped its dev server or released its device (Risk 15).
 
 ### A link nobody can approve is a link that never opens
 
@@ -697,8 +697,8 @@ The readiness wait asks the dev server's `/status` until the budget ends, as lon
 
 - **Only a connection failure retries.** A refused, reset or unreachable connection is asked again, with a growing gap of at most 1 s.
 - **An answer ends the wait.** A non-2xx status, a body that is not `packager-status:running`, a TLS failure: each is returned at once. `ENOTFOUND` is not retried, so a mistyped host does not become a 30-minute hang.
-- **The timeout names what happened.** A budget with one refused connection anywhere in it reports `nothing was listening on <url> for <N>ms …, so no dev server had finished starting`, also when the server listened later (Risk 17). A server that accepts the connection and never answers ends as "the bundler was still working" ([[0021-honest-reports]] §The rules).
-- **The caller's abort ends the loop at the next retry**, up to 1 s later (Risk 17), and is not called a timeout.
+- **The timeout names what happened.** A budget with one refused connection anywhere in it reports `nothing was listening on <url> for <N>ms …, so no dev server had finished starting`, also when the server listened later (Risk 16). A server that accepts the connection and never answers ends as "the bundler was still working" ([[0021-honest-reports]] §The rules).
+- **The caller's abort ends the loop at the next retry**, up to 1 s later (Risk 16), and is not called a timeout.
 
 ### The device that can open the app
 
@@ -834,10 +834,9 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 12. `dev:wait` is deferred and not shipped. Its follow-ups print `navigate / --cloud`, a flag the CLI refuses, and name a bare `npx eas simulator:stop` with no `--id`, which works only when `.env.eas-simulator` names the session.
 13. `attachRecovered` is true, and the reason says the app was stopped, when `pidof` could not run and on an EAS session. `navigate --help` does not say that each recovery waits the attach budget again (§Loading the app is not navigating it).
 14. The local relaunch opens `<scheme>://<route>` (the root without `--route`), not the launcher URL that `navigate` opens first. A development build that is not running shows the dev launcher for that link, so the app does not come back, and the run still reports `reloaded: true` with `verifiedBy: app-relaunch` at exit 22. On Expo Go the app comes back, and with `--route` the route opens twice: as the relaunch, and again after the app is back (§Reloading the app).
-15. With no captured dev server log, the failure names `dev:logs`, not `dev --detach`, which is the command that captures the log (§What proves a reload).
-16. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
-17. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
-18. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
+15. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
+16. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
+17. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
 
 ## Testing
 

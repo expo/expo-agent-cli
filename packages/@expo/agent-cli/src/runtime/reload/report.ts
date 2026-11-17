@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { AGENT_DEVICE_SPEC } from '../../device/cloudSimulator';
 import * as Log from '../../log';
-import { type PlanPlatform } from '../../plan/types';
+import { type NativePlatform, type PlanPlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import { describeSkippedApps } from '../targetSelection';
@@ -180,6 +180,8 @@ export interface ReloadFailureState {
   rungOne: RungOneOutcome | null;
   /** The apps whose bundle fetch cannot be told from this run's; null when no mechanism was prepared. */
   bundleBlockers: RungOnePolicy['bundleBlockers'] | null;
+  /** The project has no captured dev server log, so no `Bundled` line could prove the reload. */
+  bundleLogMissing: boolean;
 }
 
 function describeBundleBlockers({
@@ -196,6 +198,42 @@ function describeBundleBlockers({
     .join(' ');
 }
 
+/** The How line of a reload that ran and that nothing proved. */
+function unprovedHowLine({
+  smokeBase,
+  statedPlatform,
+  cloud,
+  bundleLogMissing,
+}: {
+  smokeBase: string;
+  /** The platform this reload knows. Null names both, because a restart on a guessed one starts the wrong plan. */
+  statedPlatform: NativePlatform | null;
+  cloud: boolean | undefined;
+  bundleLogMissing: boolean;
+}): string {
+  const screenCheck = `look at the screen — "${smokeBase} --no-route-check" photographs it`;
+  // An EAS session ends with the foreground dev server that started it, so no restart is advised there.
+  const restartAdvised = bundleLogMissing && !cloud;
+  const restartCommands = (statedPlatform ? [statedPlatform] : (['ios', 'android'] as const))
+    .map((platform) => `"${PROGRAM_PREFIX} dev --detach --${platform}"`)
+    .join(' or ');
+  return [
+    bundleLogMissing
+      ? `How: ${screenCheck}.`
+      : `How: ${screenCheck} — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`,
+    ...(restartAdvised
+      ? [
+          `This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with ${restartCommands} so its output is recorded.`,
+        ]
+      : []),
+    ...(cloud
+      ? [
+          'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.',
+        ]
+      : []),
+  ].join(' ');
+}
+
 /** The what / why / how for a reload that did not end where it was supposed to. */
 export function explainReloadFailure(
   report: ReloadResultJson,
@@ -204,9 +242,10 @@ export function explainReloadFailure(
 ): string {
   // The `smoke` this points at needs a platform now. Prefer the device this reload ran against,
   // then the flag the caller passed, then the host's default — and carry `--eas` through.
-  const smokePlatform =
-    statedSmokePlatform((report.platform as PlanPlatform | null) ?? options.platform) ??
-    (process.platform === 'darwin' ? 'ios' : 'android');
+  const statedPlatform = statedSmokePlatform(
+    (report.platform as PlanPlatform | null) ?? options.platform
+  );
+  const smokePlatform = statedPlatform ?? (process.platform === 'darwin' ? 'ios' : 'android');
   const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --eas' : ''}`;
 
   // The refusal comes first, because nothing was attempted: an attempts list that is empty for
@@ -265,7 +304,12 @@ export function explainReloadFailure(
       why,
       unprovable
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
-        : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". ${options.cloud ? 'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ' : ''}${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.` : ''}`.trim(),
+        : unprovedHowLine({
+            smokeBase,
+            statedPlatform,
+            cloud: options.cloud,
+            bundleLogMissing: state.bundleLogMissing,
+          }),
     ].join('\n');
   }
   if (!report.reloaded) {

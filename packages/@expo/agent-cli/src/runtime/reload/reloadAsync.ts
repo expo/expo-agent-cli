@@ -348,6 +348,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
         unwatched: observation.unwatched,
         rungOne: ladder.rungOne,
         bundleBlockers: ladder.kind === 'climbed' ? ladder.prepared.policy.bundleBlockers : null,
+        bundleLogMissing: ladder.kind === 'climbed' && ladder.bundleMark.available === false,
       })
     );
   }

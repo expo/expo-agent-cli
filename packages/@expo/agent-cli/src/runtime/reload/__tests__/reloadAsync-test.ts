@@ -675,6 +675,7 @@ describe(explainReloadFailure, () => {
     unwatched: null,
     rungOne: null,
     bundleBlockers: { skipped: [], undetermined: 0 },
+    bundleLogMissing: false,
   };
 
   function strandedReport(): ReloadResultJson {
@@ -768,10 +769,32 @@ describe(explainReloadFailure, () => {
       unwatched: 'nothing-can-prove',
       rungOne: null,
       bundleBlockers: { skipped: [], undetermined: 2 },
+      bundleLogMissing: false,
     });
 
     expect(explained).toContain('2 listed apps on no known platform');
     expect(explained).not.toContain('Skipped 0 apps');
+  });
+
+  // `dev` requires a platform, and a restart on a guessed one starts the wrong plan.
+  it.each([
+    [undefined, 'dev --detach --ios" or "npx @expo/agent-cli dev --detach --android"'],
+    ['android' as const, 'dev --detach --android"'],
+  ])(`names the restart platform only when the reload knows it: --%s`, (platform, expected) => {
+    const report = {
+      ...strandedReport(),
+      platform: null,
+      method: 'dev-server' as const,
+      attempts: [{ method: 'dev-server' as const, ok: true, reason: 'sent', leftAppStopped: null }],
+    };
+
+    const explained = explainReloadFailure(report, options({ platform }), {
+      ...NO_RUNG_ONE,
+      bundleLogMissing: true,
+    });
+
+    expect(explained).toContain(expected);
+    expect(explained).not.toContain('ios|android');
   });
 
   it(`says nothing about a stopped app when the fallback never stopped one`, () => {

@@ -912,6 +912,43 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
     }
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload. An EAS session lives and dies
+  // with the foreground `dev --eas` that started it, so with no captured log the How line gives no
+  // restart advice: stopping that dev server or detaching a local one would end or miss the session.
+  it(`gives no restart advice when the project has no captured dev server log`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [],
+      messageSocket: 'none',
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:reload', '--eas', '--timeout', '2s', '--no-followups'],
+        { reject: false }
+      );
+
+      expect(result.exitCode).toBe(22);
+      expect(result.stderr).toContain('no detached dev server log');
+      expect(result.stderr).toContain('--timeout');
+      expect(result.stderr).not.toContain('dev --detach');
+      expect(result.stderr).not.toContain('stop the dev server');
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
   // @ref llp/0005 §Cloud simulator. The refusal comes **before** the device is
   // touched, which is the other half of the S12 fix: a run that restarts the app and only then
   // finds the URL unusable is how a billed session was left with nothing on it.
