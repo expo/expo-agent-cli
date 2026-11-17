@@ -298,14 +298,15 @@ export function rungOnePolicy(
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
   const broadcast = classifiedTargets.skipped.length === 0;
-  const outside = broadcast
-    ? [
-        ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
-        ...classifiedTargets.undetermined.map(() => null),
-      ]
-    : classifiedTargets.skipped.map(
-        ({ target }) => platformOfTarget(target, deviceInventory).platform
-      );
+  const outside = [
+    ...(broadcast
+      ? []
+      : classifiedTargets.skipped.map(
+          ({ target }) => platformOfTarget(target, deviceInventory).platform
+        )),
+    ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
+    ...classifiedTargets.undetermined.map(() => null),
+  ];
   return {
     ...(!broadcast
       ? { mechanism: 'page-reload' }
@@ -313,7 +314,9 @@ export function rungOnePolicy(
         ? { mechanism: 'broadcast' }
         : { mechanism: 'none', unread }),
     skippedApps: broadcast ? [] : skippedAppsOf(classifiedTargets),
-    reachedOutside: broadcast ? outside.length : 0,
+    reachedOutside: broadcast
+      ? classifiedTargets.otherPlatform.length + classifiedTargets.undetermined.length
+      : 0,
     bundlePlatforms:
       outside.length === 0 && scoped === 'any'
         ? 'any'

@@ -347,6 +347,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       explainReloadFailure(report, options, {
         unwatched: observation.unwatched,
         rungOne: ladder.rungOne,
+        undeterminedApps: ladder.actionConnection.classifiedTargets.undetermined.length,
       })
     );
   }

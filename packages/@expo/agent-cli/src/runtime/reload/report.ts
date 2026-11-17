@@ -178,6 +178,19 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
 export interface ReloadFailureState {
   unwatched: Unwatched | null;
   rungOne: RungOneOutcome | null;
+  /** Listed apps on no known platform: their bundle fetch cannot be told from this run's. */
+  undeterminedApps: number;
+}
+
+function describeBundleBlockers(skipped: ReloadResultJson['skippedApps'], undetermined: number) {
+  return [
+    skipped.length > 0 ? describeSkippedApps(skipped) : null,
+    undetermined > 0
+      ? `${undetermined} listed app${undetermined === 1 ? '' : 's'} on no known platform could have fetched any bundle.`
+      : null,
+  ]
+    .filter((part) => part != null)
+    .join(' ');
 }
 
 /** The what / why / how for a reload that did not end where it was supposed to. */
@@ -233,7 +246,7 @@ export function explainReloadFailure(
   if (report.method != null && (report.verifiedBy == null || keeps != null)) {
     const outside = state.rungOne?.kind === 'acted' ? state.rungOne.reachedOutside : 0;
     const why = unprovable
-      ? `Why: ${unprovable}, and no bundle may count here (${describeSkippedApps(report.skippedApps)}), so nothing could prove the reload and nothing was watched.`
+      ? `Why: ${unprovable}, and no bundle may count here (${describeBundleBlockers(report.skippedApps, state.undeterminedApps)}), so nothing could prove the reload and nothing was watched.`
       : [
           outside > 0
             ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`

@@ -671,7 +671,7 @@ describe(reloadAsync, () => {
 // nothing in this command can restore. The report said only "The app was not reloaded", so a reader
 // was left with a session they could not use and no idea that this run is what emptied it.
 describe(explainReloadFailure, () => {
-  const NO_RUNG_ONE = { unwatched: null, rungOne: null };
+  const NO_RUNG_ONE = { unwatched: null, rungOne: null, undeterminedApps: 0 };
 
   function strandedReport(): ReloadResultJson {
     return {
@@ -751,6 +751,23 @@ describe(explainReloadFailure, () => {
     expect(explained).toContain('host.exp.Exponent');
     expect(explained).not.toContain('eas-cli simulator:exec');
     expect(explained).toContain('npx @expo/agent-cli navigate /');
+  });
+
+  it(`names an app on no known platform as the reason no bundle may count, never an empty skipped list`, () => {
+    const report = {
+      ...strandedReport(),
+      method: 'device' as const,
+      attempts: [{ method: 'device' as const, ok: true, reason: 'sent', leftAppStopped: null }],
+    };
+
+    const explained = explainReloadFailure(report, options({ cloud: false }), {
+      unwatched: 'nothing-can-prove',
+      rungOne: null,
+      undeterminedApps: 2,
+    });
+
+    expect(explained).toContain('2 listed apps on no known platform');
+    expect(explained).not.toContain('Skipped 0 apps');
   });
 
   it(`says nothing about a stopped app when the fallback never stopped one`, () => {
