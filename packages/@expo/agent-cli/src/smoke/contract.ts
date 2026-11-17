@@ -52,12 +52,6 @@ export interface SmokeBootResult {
   reason: string | null;
   /** Why this device rather than another, for the report. Null when none was chosen. */
   choice?: string | null;
-  /**
-   * The device came up **without** the app, so the caller has an install to do.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-   */
-  installNeeded?: boolean;
   /** The worktree device the boot bound, for the report. */
   bound?: { name: string; action: AcquireAction };
 }
@@ -238,11 +232,11 @@ export interface SmokeDeps {
   /** This worktree's binding for the run's platform, read only. Null when there is none. */
   readBoundDevice(): { id: string; name: string } | null;
   /**
-   * Put the app on the device this run booted, when the boot said it has not got it.
+   * Put the app on the device this run settled on, when the install decision said it needs it.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-   * Only ever called for a boot whose {@link SmokeBootResult.installNeeded} is true, and only
-   * after that boot: the device has to be up for `simctl install` to reach it.
+   * Only ever called after {@link SmokeDeps.installNeededOnDevice} answered yes, so the device
+   * is up for `simctl install` to reach it.
    *
    * **Registers no cleanup, deliberately.** "Stop only what you started" is about resources this
    * run is *holding* — a dev server, a booted simulator. An installed app is not held, it is
@@ -253,16 +247,20 @@ export interface SmokeDeps {
   /**
    * Whether this run has an app to put on that device before it can open anything.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-   * True only when the app is one this run may install *and* the device has not got it. The policy
-   * half lives with the caller, so the walk stays a walk over phases rather than a second opinion
-   * about which apps may be installed.
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+   * The install table from row 3 is decided here, so the walk stays a walk over phases rather than a
+   * second opinion about which apps may be installed. Rows 1 and 2, `--no-start` and no device, are
+   * the walk's. `createdByBoot` is whether this run's boot
+   * created or spawned the device (`SmokeBootResult.bound.action`).
    *
    * Asked of the device this run settled on, however it got there — **not** only of one this run
-   * booted. A simulator someone left running without Expo Go is the ordinary case, and the first
-   * version of this phase missed it by hanging the question off the boot [observed, 2026-09-03].
+   * booted. A simulator someone left running without Expo Go is the ordinary case.
    */
-  installNeededOnDevice(deviceId: string, backend: DeviceBackend | null): Promise<boolean>;
+  installNeededOnDevice(
+    deviceId: string,
+    backend: DeviceBackend | null,
+    createdByBoot: boolean
+  ): Promise<boolean>;
   waitForBundlerReady(devServerUrl: string, timeoutMs: number): Promise<BundlerReadyResult>;
   checkEntryBundle(devServerUrl: string, timeoutMs: number): Promise<BundleCheckResult>;
   waitForAppConnection(devServerUrl: string, timeoutMs: number): Promise<AppConnectionResult>;

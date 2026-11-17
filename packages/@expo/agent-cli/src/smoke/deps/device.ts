@@ -24,6 +24,7 @@ import { PROGRAM_PREFIX } from '../../programName';
 import { readSdkVersionAsync } from '../../project/nodeModules';
 import { EAS_SIMULATOR_PROFILE } from '../../toolchain/runsOn';
 import type { SmokeAppFit, SmokeDeps, SmokeSessionResult } from '../contract';
+import { decideInstall, type InstallFacts } from './decideInstall';
 import { whatAndHow } from './reasons';
 import type { SmokeDepsContext } from './shared';
 
@@ -135,7 +136,6 @@ async function bootDevice(
       deviceId: deviceIdOf(acquired.device),
       backend: localBackendOf(platform),
       choice: choiceOf(acquired.device),
-      installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
       reason: null,
       bound: { name: deviceNameOf(acquired.device), action: acquired.action },
     };
@@ -150,66 +150,39 @@ async function bootDevice(
   }
 }
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
 //
-// Both halves of the question, so the phase runner carries no policy: is this an app this run
-// may install, and has the device not got it. The first is the plan's `expo-go` rule, which
-// already means "the project fits in Expo Go and nothing overrode it to a development build".
-// The second is the same disk read the device choice makes (`installedApps.ts`).
+// Gathers the device reads the install table asks for, one at a time and only when a row asks, and
+// leaves the decision to `decideInstall`. `null` from a read is "could not look", never a licence
+// to install (@ref src/device/hasApp §hasAppOnDeviceAsync).
 async function installNeededOnDevice(
   ctx: SmokeDepsContext,
   deviceId: string,
-  backend: DeviceBackend | null
+  backend: DeviceBackend | null,
+  createdByBoot: boolean
 ): ReturnType<SmokeDeps['installNeededOnDevice']> {
   const target = await ctx.targetAsync();
-
-  // @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
-  //
-  // **No app id is not "no app".** For a native build it is the ordinary state of a project
-  // that has never been prebuilt for this platform: `android.package` is undeclared and there
-  // is no `android/app/build.gradle` yet, because `expo prebuild` is the thing that writes
-  // both. Skipping the install there is the bug that outlived two attempts at fixing it — the
-  // emulator booted, nothing was installed, and the deep link was refused, three runs in a row
-  // [observed — Kudo, 2026-09-04].
-  //
-  // The id is only needed to ask "is it already there". `expo run:<platform>` needs none: it
-  // resolves the package itself, from the config it is about to write. So a run that cannot see
-  // whether the app is installed installs it — and after that first build the package *is*
-  // declared, so every later run resolves it and checks properly. One build, then normal.
-  //
-  // Expo Go is excluded because its ids are constants: an Expo Go run that cannot name its app
-  // has a plan this could not read, and downloading 423 MB on that basis would be a guess.
-  if (target.appId == null) {
-    return target.installWithKind === 'native-build';
+  const facts: InstallFacts = {
+    deviceId,
+    createdByBoot,
+    backend,
+    kind: target.installWithKind,
+    appId: target.appId,
+  };
+  for (;;) {
+    const decision = decideInstall(facts);
+    if ('install' in decision) return decision.install;
+    if (decision.ask === 'hasApp') {
+      facts.hasApp = await hasAppOnDeviceAsync(decision.deviceId, backend, decision.appId);
+    } else {
+      facts.expoGoVerdict = (await checkExpoGoVersion(ctx, decision.deviceId)).verdict;
+    }
   }
-  // @ref src/device/hasApp §hasAppOnDeviceAsync. Local devices only — a cloud session's device is
-  // not this machine's, and there is nothing this CLI can install on somebody else's session
-  // (llp/0005 §Cloud simulator) — and `null` for a lookup that did not happen, which is never
-  // a licence to install.
-  const has = await hasAppOnDeviceAsync(deviceId, backend, target.appId);
-  if (has == null) {
-    return false;
-  }
-  if (!has) {
-    return true;
-  }
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
-  //
-  // Installed is not the same as right, and this is the half `@expo/cli` gets right and a first
-  // cut here did not: `ExpoGoInstaller` compares with `semver.eq` and, when it cannot prompt,
-  // installs the recommended release rather than reporting the difference — "better to have the
-  // correct version than not have Expo Go work at all". An agent loop is exactly the caller
-  // that cannot be prompted.
-  //
-  // `unknown` installs nothing: a machine that is offline, or one whose version would not
-  // read, has shown no reason to spend a few hundred megabytes.
-  return (await checkExpoGoVersion(ctx, deviceId)).verdict === 'mismatch';
 }
 
-// `expo-go download` for the binary and `simctl install` for the device, both as subprocesses.
-// Only reached for a boot that came up without the app, and only when the plan's rule is Expo
-// Go — so the SDK version is the one the project reports, and the release is the one that SDK
-// ships rather than whatever is newest.
+// Runs after `installNeededOnDevice` answered yes. For Expo Go: `expo-go download` for the binary
+// and `simctl install` for the device, both as subprocesses, at the SDK version the project
+// reports. For a native build: this project's own artefact.
 // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
 //
 // Two installs, because they put two different apps on the device: a published binary to
@@ -222,6 +195,14 @@ async function installApp(
 ): ReturnType<SmokeDeps['installApp']> {
   const { projectRoot, options } = ctx;
   const target = await ctx.targetAsync();
+  if (target.installWithKind == null) {
+    return {
+      ok: false,
+      version: null,
+      replaced: null,
+      reason: 'the plan could not be read, so there is no app to install',
+    };
+  }
   if (target.installWithKind === 'expo-go') {
     return await installExpoGoAsync(
       deviceId,
@@ -413,7 +394,8 @@ export function createDeviceDeps(ctx: SmokeDepsContext) {
     readBoundDevice: () => readBoundDevice(ctx),
     releaseDevice: () => releaseDevice(ctx, bound),
     bootDevice: () => bootDevice(ctx, bound),
-    installNeededOnDevice: (deviceId, backend) => installNeededOnDevice(ctx, deviceId, backend),
+    installNeededOnDevice: (deviceId, backend, createdByBoot) =>
+      installNeededOnDevice(ctx, deviceId, backend, createdByBoot),
     installApp: (deviceId) => installApp(ctx, deviceId),
     probeDevice: () => probeDevice(ctx),
     explainSilentApp: (deviceId, backend) => explainSilentApp(ctx, deviceId, backend),

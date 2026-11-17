@@ -73,12 +73,12 @@ async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
 }
 
 /**
- * The next value says whether the boot said its device has no app: a simulator the registry
- * created this run, whose disk holds nothing to read (llp/0035 §Lifecycle smoke).
+ * The next value says whether this run's boot created or spawned the device. Such a device has no
+ * app, so the install runs without a disk read (llp/0035 §Lifecycle smoke).
  */
 async function bootStep(
   walk: PhaseWalk
-): Promise<Step<{ firstConnection: AppConnectionResult; bootInstallNeeded: boolean }>> {
+): Promise<Step<{ firstConnection: AppConnectionResult; createdByBoot: boolean }>> {
   const { deps, environment, cleanups } = walk;
   // The **app** is asked about first, and the device only if nothing answers. Two reasons, and
   // they point the same way. An app attached to this dev server is the app under test whatever
@@ -91,7 +91,7 @@ async function bootStep(
     Math.min(walk.remaining(), APP_PROBE_MS)
   );
   if (firstConnection.appsConnected !== 0 || (await walk.deps.probeDevice()).deviceId != null) {
-    return { next: { firstConnection, bootInstallNeeded: false } };
+    return { next: { firstConnection, createdByBoot: false } };
   }
   const { value: boot } = await walk.record(
     'boot-device',
@@ -128,7 +128,12 @@ async function bootStep(
     environment.boundDevice = boot.bound
       ? { id: boot.deviceId, ...boot.bound, released: false, shutDown: false }
       : null;
-    return { next: { firstConnection, bootInstallNeeded: boot.installNeeded === true } };
+    return {
+      next: {
+        firstConnection,
+        createdByBoot: boot.bound?.action === 'created' || boot.bound?.action === 'spawned',
+      },
+    };
   }
   environment.device = 'failed';
   walk.skipRest(
@@ -149,26 +154,23 @@ async function bootStep(
 // Conditional and an *act*, like the start and the boot: only a run that installed something
 // reports a row, because a machine that already had the app never had an install to do.
 //
-// Driven off the **device**, not off the boot. Hanging it on the boot was the first version and
-// it missed the ordinary case: a simulator somebody left running without Expo Go, where this run
-// boots nothing and the deep link comes back `115` [observed — iOS 26.5, 2026-09-03].
+// Driven off the **device**, not off the boot: a simulator somebody left running without Expo Go
+// has no boot of this run, and the deep link to it comes back `115`.
 //
 // Bootstrap, like the boot: a 423 MB download is cold this run caused, and charging it to
 // `--timeout` would leave the error window with nothing. Only for a run allowed to bring its own
 // environment — `--no-start` says read what is there, and installing an app is not reading.
 //
 // The next value is whether the install replaced the app (@see DeviceReady.appReplaced).
-async function installStep(walk: PhaseWalk, bootInstallNeeded: boolean): Promise<Step<boolean>> {
+async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Step<boolean>> {
   const { deps, environment } = walk;
-  const device = await walk.deps.probeDevice();
-  if (
-    device.deviceId == null ||
-    !(bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))
-  ) {
+  const { deviceId, backend } = await walk.deps.probeDevice();
+  // Row 2 of the install table: no device, nothing to install onto, and no plan to read.
+  if (deviceId == null || !(await deps.installNeededOnDevice(deviceId, backend, createdByBoot))) {
     return { next: false };
   }
   const releasedAfterRun =
-    environment.boundDevice?.id === device.deviceId && environment.boundDevice.released !== null;
+    environment.boundDevice?.id === deviceId && environment.boundDevice.released !== null;
   // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
   //
   // The build budget rather than an install budget, because this phase now covers both and the
@@ -179,12 +181,12 @@ async function installStep(walk: PhaseWalk, bootInstallNeeded: boolean): Promise
   const { value: installed } = await walk.record(
     'install-app',
     async () => {
-      const result = await deps.installApp(device.deviceId!);
+      const result = await deps.installApp(deviceId);
       return result.ok
         ? {
             status: 'ok' as const,
             reason: [
-              `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
+              `installed ${result.version ?? 'the app'} on ${deviceId}`,
               result.replaced ? `, replacing ${result.replaced}` : '',
               releasedAfterRun ? '' : `, and left it there`,
             ].join(''),
@@ -216,8 +218,8 @@ async function installStep(walk: PhaseWalk, bootInstallNeeded: boolean): Promise
   walk.skipRest('app', 'the app could not be installed, so there was nothing to open');
   return {
     stop: walk.done('failed', {
-      deviceId: device.deviceId,
-      deviceBackend: device.backend,
+      deviceId: deviceId,
+      deviceBackend: backend,
       screenshot: noScreenshot(
         'the app could not be installed, so there was nothing to photograph it running'
       ),
@@ -235,7 +237,7 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
     return { next: { firstConnection: null, appReplaced: false } };
   }
   let firstConnection: AppConnectionResult | null = null;
-  let bootInstallNeeded = false;
+  let createdByBoot = false;
   if (walk.deps.cloudRoute.current === 'required') {
     const session = await startSessionStep(walk);
     if ('stop' in session) return session;
@@ -245,9 +247,9 @@ export async function prepareDeviceStep(walk: PhaseWalk): Promise<Step<DeviceRea
     // (llp/0005 §Cloud simulator).
     const booted = await bootStep(walk);
     if ('stop' in booted) return booted;
-    ({ firstConnection, bootInstallNeeded } = booted.next);
+    ({ firstConnection, createdByBoot } = booted.next);
   }
-  const installed = await installStep(walk, bootInstallNeeded);
+  const installed = await installStep(walk, createdByBoot);
   if ('stop' in installed) return installed;
   return {
     next: installed.next

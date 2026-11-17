@@ -823,8 +823,9 @@ describe(runSmokePhasesAsync, () => {
               backend: 'local-ios' as const,
               reason: null,
               choice: 'agent-cli 0000',
-              installNeeded: true,
+              bound: { name: 'agent-cli 0000', action: 'created' as const },
             }),
+            installNeededOnDevice: async (_deviceId, _backend, createdByBoot) => createdByBoot,
           }),
         }),
         options({ bootstrap: true })
@@ -836,7 +837,7 @@ describe(runSmokePhasesAsync, () => {
       expect(reason).toContain('booted SIM-BOUND for this run because agent-cli 0000');
       expect(reason).not.toContain('shut it down');
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
-      // A created simulator has no app, and its disk holds nothing to read: the boot's word decides.
+      // A created simulator has no app, and its disk holds nothing to read.
       expect(statusOf(run, 'install-app')).toBe('ok');
     });
 
@@ -2741,6 +2742,24 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
   it(`says nothing at all on a run that had no install to do`, async () => {
     const run = await runSmokePhasesAsync(deps(), options());
 
+    expect(run.phases.some((phase) => phase.id === 'install-app')).toBe(false);
+  });
+
+  // Row 2 is the walk's: with no device the install question is not asked, so no plan is read.
+  it(`asks nothing about an install when there is no device`, async () => {
+    const installNeededOnDevice = vi.fn(async () => true);
+    const installApp = vi.fn();
+    const run = await runSmokePhasesAsync(
+      deps({
+        probeDevice: async () => ({ deviceId: null, backend: null, reason: 'no booted device' }),
+        installNeededOnDevice,
+        installApp,
+      }),
+      options({ bootstrap: true })
+    );
+
+    expect(installNeededOnDevice).not.toHaveBeenCalled();
+    expect(installApp).not.toHaveBeenCalled();
     expect(run.phases.some((phase) => phase.id === 'install-app')).toBe(false);
   });
 

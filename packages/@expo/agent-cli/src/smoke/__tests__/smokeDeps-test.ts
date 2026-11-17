@@ -99,7 +99,6 @@ describe('bootDevice', () => {
       deviceId: 'SIM-1',
       backend: 'local-ios',
       choice: 'agent-cli 0000',
-      installNeeded: true,
       reason: null,
       bound: { name: 'agent-cli 0000', action: 'created' },
     });
@@ -127,7 +126,6 @@ describe('bootDevice', () => {
       ok: true,
       deviceId: 'emulator-5556',
       backend: 'local-android',
-      installNeeded: true,
     });
   });
 

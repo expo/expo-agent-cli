@@ -1,5 +1,7 @@
 import type { CloudPreference } from '../../navigate/device';
+import { Log } from '../../log';
 import { PROGRAM_PREFIX } from '../../programName';
+import { firstLine } from '../../utils/text';
 import type { StartPlan } from '../../project/types';
 import type { SmokeOptions } from '../resolveOptions';
 
@@ -53,8 +55,10 @@ export interface SmokeTarget {
    * - `native-build` — `expo run:<platform> --no-bundler --device <id>`, which builds what is
    *   missing and installs it onto the device this run chose. `--no-bundler` because this run
    *   already has a dev server and a second one would be a second answer to "which bundle".
+   * - `null` — the plan could not be read, so this run does not know which app to install, and
+   *   installs nothing.
    */
-  installWithKind: 'expo-go' | 'native-build';
+  installWithKind: 'expo-go' | 'native-build' | null;
 }
 
 /** Read the plan once, and answer both questions from it. Never throws. */
@@ -77,10 +81,8 @@ export async function resolveSmokeTargetAsync(
     appId: null,
     appLabel: null,
     installWith: null,
-    // A plan this could not read still gets the native path rather than none, and that is safe:
-    // every caller of this checks `appId` first, and an unread plan has none — so nothing is
-    // installed for a project whose rule is unknown, because there is no app to look for.
-    installWithKind: 'native-build',
+    // An unread plan can be an Expo Go project, so a development build is a guess: install nothing.
+    installWithKind: null,
   };
 
   let plan;
@@ -97,10 +99,13 @@ export async function resolveSmokeTargetAsync(
           : {}),
       })
     ).plan;
-  } catch {
+  } catch (error: unknown) {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing
     // about, and refusing or choosing a device on an unread plan would stop runs that would have
-    // worked. Everything below degrades to the behaviour that was here before it.
+    // worked. The run goes on with no install kind, so it installs nothing.
+    Log.warn(
+      `The start plan could not be read (${firstLine(error instanceof Error ? error.message : String(error))}), so smoke installs no app on the device.`
+    );
     return unknown;
   }
 
