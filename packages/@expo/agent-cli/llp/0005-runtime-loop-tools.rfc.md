@@ -617,19 +617,19 @@ The second follow-up of each is `status`. The `smoke` follow-ups drop `--no-star
 
 The `install-app` budget (§The smoke gate) is the same for both kinds, because a development build compiles. The Expo Go download and installer bounds fall inside it. The phase is not charged to `--timeout` (§The run brings its own environment). It runs after the start, session and boot phases. The first row that matches decides whether it installs:
 
-| #   | Condition                                                          | Install |
-| --- | ------------------------------------------------------------------ | ------- |
-| 1   | `--no-start`                                                       | no      |
-| 2   | the run has no device                                              | no      |
-| 3   | the plan could not be read, so the run has no kind                 | no      |
-| 4   | this run's boot created the device                                 | yes     |
-| 5   | the device is an EAS session's device                              | no      |
-| 6   | no app id, and the kind is `native-build`                          | yes     |
-| 7   | no app id, and the kind is `expo-go`                               | no      |
-| 8   | the device could not be asked                                      | no      |
-| 9   | the device has not got the app                                     | yes     |
-| 10  | the kind is `expo-go`, and the Expo Go on the device is `mismatch` | yes     |
-| 11  | any other case                                                     | no      |
+| #   | Condition                                                                               | Install |
+| --- | --------------------------------------------------------------------------------------- | ------- |
+| 1   | `--no-start`                                                                            | no      |
+| 2   | the run has no device                                                                   | no      |
+| 3   | the plan could not be read, so the run has no kind; a warning on stderr names the error | no      |
+| 4   | this run's boot created the device                                                      | yes     |
+| 5   | the device is an EAS session's device                                                   | no      |
+| 6   | no app id, and the kind is `native-build`                                               | yes     |
+| 7   | no app id, and the kind is `expo-go`                                                    | no      |
+| 8   | the device could not be asked                                                           | no      |
+| 9   | the device has not got the app                                                          | yes     |
+| 10  | the kind is `expo-go`, and the Expo Go on the device is `mismatch`                      | yes     |
+| 11  | any other case                                                                          | no      |
 
 Tests: `src/smoke/__tests__/decideInstall-test.ts`, one case per row; `e2e/__tests__/cloud-simulator-test.ts` "installs nothing onto the session for a project with no app id" (row 5); `e2e/__tests__/smoke-test.ts` "a stale Expo Go beside an installed development build" (row 11).
 

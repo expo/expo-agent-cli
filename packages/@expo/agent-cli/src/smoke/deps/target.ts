@@ -1,5 +1,7 @@
 import type { CloudPreference } from '../../navigate/device';
+import { Log } from '../../log';
 import { PROGRAM_PREFIX } from '../../programName';
+import { firstLine } from '../../utils/text';
 import type { StartPlan } from '../../project/types';
 import type { SmokeOptions } from '../resolveOptions';
 
@@ -97,10 +99,13 @@ export async function resolveSmokeTargetAsync(
           : {}),
       })
     ).plan;
-  } catch {
+  } catch (error: unknown) {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing
     // about, and refusing or choosing a device on an unread plan would stop runs that would have
     // worked. Everything below degrades to the behaviour that was here before it.
+    Log.warn(
+      `The start plan could not be read (${firstLine(error instanceof Error ? error.message : String(error))}), so smoke installs no app on the device.`
+    );
     return unknown;
   }
 
