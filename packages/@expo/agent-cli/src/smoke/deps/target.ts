@@ -53,8 +53,10 @@ export interface SmokeTarget {
    * - `native-build` — `expo run:<platform> --no-bundler --device <id>`, which builds what is
    *   missing and installs it onto the device this run chose. `--no-bundler` because this run
    *   already has a dev server and a second one would be a second answer to "which bundle".
+   * - `null` — the plan could not be read, so this run does not know which app to install, and
+   *   installs nothing.
    */
-  installWithKind: 'expo-go' | 'native-build';
+  installWithKind: 'expo-go' | 'native-build' | null;
 }
 
 /** Read the plan once, and answer both questions from it. Never throws. */
@@ -77,10 +79,8 @@ export async function resolveSmokeTargetAsync(
     appId: null,
     appLabel: null,
     installWith: null,
-    // A plan this could not read still gets the native path rather than none, and that is safe:
-    // every caller of this checks `appId` first, and an unread plan has none — so nothing is
-    // installed for a project whose rule is unknown, because there is no app to look for.
-    installWithKind: 'native-build',
+    // An unread plan can be an Expo Go project, so a development build is a guess: install nothing.
+    installWithKind: null,
   };
 
   let plan;
