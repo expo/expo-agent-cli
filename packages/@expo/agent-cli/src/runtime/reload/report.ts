@@ -198,6 +198,26 @@ function describeBundleBlockers({
     .join(' ');
 }
 
+/** The How line of a reload that ran and that nothing proved. */
+function unprovedHowLine(
+  smokeBase: string,
+  smokePlatform: string,
+  cloud: boolean | undefined,
+  bundleLogMissing: boolean
+): string {
+  const screenCheck = `look at the screen — "${smokeBase} --no-route-check" photographs it`;
+  // An EAS session ends with the foreground dev server that started it, so no restart is advised there.
+  const logStep = !bundleLogMissing
+    ? ` — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`
+    : cloud
+      ? '.'
+      : `. This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${smokePlatform}" so its output is recorded.`;
+  const cloudStep = cloud
+    ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.'
+    : '';
+  return `How: ${screenCheck}${logStep}${cloudStep}`;
+}
+
 /** The what / why / how for a reload that did not end where it was supposed to. */
 export function explainReloadFailure(
   report: ReloadResultJson,
@@ -260,16 +280,6 @@ export function explainReloadFailure(
             `The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected})${options.cloud ? ', which a cloud simulator often never does — an app has run this project on one with that list empty throughout' : ''}.`,
             `And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
           ].join(' ');
-    const screenCheck = `look at the screen — "${smokeBase} --no-route-check" photographs it`;
-    // An EAS session ends with the foreground dev server that started it, so no restart is advised there.
-    const logStep = !state.bundleLogMissing
-      ? ` — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`
-      : options.cloud
-        ? '.'
-        : `. This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${smokePlatform}" so its output is recorded.`;
-    const cloudStep = options.cloud
-      ? ' A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try.'
-      : '';
     return [
       chalk.red(
         `The app was ${relaunched ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
@@ -277,7 +287,7 @@ export function explainReloadFailure(
       why,
       unprovable
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
-        : `How: ${screenCheck}${logStep}${cloudStep}`,
+        : unprovedHowLine(smokeBase, smokePlatform, options.cloud, state.bundleLogMissing),
     ].join('\n');
   }
   if (!report.reloaded) {
