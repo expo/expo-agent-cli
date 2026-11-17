@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { AGENT_DEVICE_SPEC } from '../../device/cloudSimulator';
 import * as Log from '../../log';
-import { type PlanPlatform } from '../../plan/types';
+import { type NativePlatform, type PlanPlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import { describeSkippedApps } from '../targetSelection';
@@ -201,12 +201,13 @@ function describeBundleBlockers({
 /** The How line of a reload that ran and that nothing proved. */
 function unprovedHowLine({
   smokeBase,
-  smokePlatform,
+  statedPlatform,
   cloud,
   bundleLogMissing,
 }: {
   smokeBase: string;
-  smokePlatform: string;
+  /** The platform this reload knows. Null names both, because a restart on a guessed one starts the wrong plan. */
+  statedPlatform: NativePlatform | null;
   cloud: boolean | undefined;
   bundleLogMissing: boolean;
 }): string {
@@ -219,7 +220,7 @@ function unprovedHowLine({
       : `How: ${screenCheck} — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs".`,
     ...(restartAdvised
       ? [
-          `This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${smokePlatform}" so its output is recorded.`,
+          `This project has no captured dev server log, which is where the one usable proof would have been: stop the dev server that runs in a terminal, then start it with "${PROGRAM_PREFIX} dev --detach --${statedPlatform ?? 'ios|android'}" so its output is recorded.`,
         ]
       : []),
     ...(cloud
@@ -238,9 +239,10 @@ export function explainReloadFailure(
 ): string {
   // The `smoke` this points at needs a platform now. Prefer the device this reload ran against,
   // then the flag the caller passed, then the host's default — and carry `--eas` through.
-  const smokePlatform =
-    statedSmokePlatform((report.platform as PlanPlatform | null) ?? options.platform) ??
-    (process.platform === 'darwin' ? 'ios' : 'android');
+  const statedPlatform = statedSmokePlatform(
+    (report.platform as PlanPlatform | null) ?? options.platform
+  );
+  const smokePlatform = statedPlatform ?? (process.platform === 'darwin' ? 'ios' : 'android');
   const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --eas' : ''}`;
 
   // The refusal comes first, because nothing was attempted: an attempts list that is empty for
@@ -301,7 +303,7 @@ export function explainReloadFailure(
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
         : unprovedHowLine({
             smokeBase,
-            smokePlatform,
+            statedPlatform,
             cloud: options.cloud,
             bundleLogMissing: state.bundleLogMissing,
           }),

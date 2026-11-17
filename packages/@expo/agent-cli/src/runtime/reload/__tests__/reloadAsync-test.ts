@@ -776,6 +776,26 @@ describe(explainReloadFailure, () => {
     expect(explained).not.toContain('Skipped 0 apps');
   });
 
+  // `dev` requires a platform, and a restart on a guessed one starts the wrong plan.
+  it.each([
+    [undefined, 'dev --detach --ios|android"'],
+    ['android' as const, 'dev --detach --android"'],
+  ])(`names the restart platform only when the reload knows it: --%s`, (platform, expected) => {
+    const report = {
+      ...strandedReport(),
+      platform: null,
+      method: 'dev-server' as const,
+      attempts: [{ method: 'dev-server' as const, ok: true, reason: 'sent' }],
+    };
+
+    const explained = explainReloadFailure(report, options({ platform }), {
+      ...NO_RUNG_ONE,
+      bundleLogMissing: true,
+    });
+
+    expect(explained).toContain(expected);
+  });
+
   it(`says nothing about a stopped app when the fallback never stopped one`, () => {
     const report = strandedReport();
     report.attempts = [report.attempts[0]!];
