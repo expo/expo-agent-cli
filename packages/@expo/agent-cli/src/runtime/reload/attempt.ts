@@ -134,7 +134,8 @@ const KEEPS_PAGE_ID: Record<ReloadAttempt['method'], string | null> = {
   'page-reload': 'the app answered Page.reload, which keeps its page id',
   device: 'a relaunched app registers again under the page id it had',
   'dev-server': null,
-  runtime: 'the app answered expo.reloadAppAsync, which keeps its page id',
+  // Not "answered": a lost answer to this call still settles the run (`delivered-unproved`).
+  runtime: "expo.reloadAppAsync keeps the app's page id",
 };
 
 /** {@link KEEPS_PAGE_ID} for the attempt the run settled on. */
