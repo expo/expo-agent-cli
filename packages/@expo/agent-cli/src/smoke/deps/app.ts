@@ -117,7 +117,7 @@ async function checkAppFitsProject(
   // ordinary state of a fresh clone (@ref src/project/expoGo §RULES_OUT_EXPO_GO).
   if (decidesAgainstExpoGo(await checkExpoGoCompatibilityAsync(projectRoot)) === false) {
     return {
-      mismatch: `the app that answered is Expo Go (${expoGo}), and this project cannot run in Expo Go — its native code is not in that runtime, so this window is about Expo Go rather than about this project. "${PROGRAM_PREFIX} dev --${options.platform}" makes the development build that can run it`,
+      mismatch: `the app that answered is Expo Go (${expoGo}), and this project cannot run in Expo Go — its native code is not in that runtime, so this window is about Expo Go rather than about this project. "${PROGRAM_PREFIX} dev --${options.platform}${ctx.cloudRoute.current === 'required' ? ' --eas' : ''}" makes the development build that can run it`,
       kind: 'expo-go-incompatible' as const,
       note: null,
     };

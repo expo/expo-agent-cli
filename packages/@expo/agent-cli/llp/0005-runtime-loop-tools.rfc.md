@@ -594,13 +594,13 @@ On rows 5 and 6 the run asks a local device, first match:
 2. The target is Expo Go, and the Expo Go on the device is `mismatch`: `expo-go-version`.
 3. Any other answer, an EAS session's device, or a device that could not be asked: none.
 
-| `appMismatchKind`      | what it means                                                          | first follow-up                            |
-| ---------------------- | ---------------------------------------------------------------------- | ------------------------------------------ |
-| `expo-go-incompatible` | this project's native code is not in Expo Go's runtime, in any version | `dev --<platform>`: a development build    |
-| `expo-go-version`      | the project fits in Expo Go; the copy on the device is another SDK's   | `smoke --<platform>`, without `--no-start` |
-| `app-not-installed`    | the device has not got the app this project runs, of either kind       | `smoke --<platform>`, without `--no-start` |
+| `appMismatchKind`      | what it means                                                          | first follow-up                                       |
+| ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- |
+| `expo-go-incompatible` | this project's native code is not in Expo Go's runtime, in any version | `dev --<platform>`: a development build, `--eas` kept |
+| `expo-go-version`      | the project fits in Expo Go; the copy on the device is another SDK's   | `smoke --<platform>`, without `--no-start`            |
+| `app-not-installed`    | the device has not got the app this project runs, of either kind       | `smoke --<platform>`, without `--no-start`            |
 
-The second follow-up of each is `status`. The `smoke` follow-ups drop `--no-start` whether or not the caller passed it, because `--no-start` is the flag that forbids the install. The `expo-go-version` row also changes the inconclusive How line: looking again reads the same wrong runtime, and a run without `--no-start` installs the right one.
+The second follow-up of each is `status`. The `smoke` follow-ups drop `--no-start` whether or not the caller passed it, because `--no-start` is the flag that forbids the install. The `expo-go-version` row also changes the inconclusive How line: looking again reads the same wrong runtime, and a run without `--no-start` installs the right one. On `smoke --eas`, the `expo-go-incompatible` Why line names the same `dev --<platform> --eas` as its follow-up (`src/smoke/__tests__/appFitsProject-test.ts`).
 
 ### The gate installs the app, whichever app it is
 
