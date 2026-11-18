@@ -11,7 +11,10 @@
 // - patch-package 8.0.1 cannot make a patch for a package it cannot download again (a `file:`
 //   tarball): it reinstalls `<name>@<version>` from the registry. So the npm backend writes the patch
 //   itself, in patch-package's format, and patch-package only applies it at `postinstall`.
-// Yarn berry follows pnpm's shape and is not tested yet.
+// - yarn 4.18.1 follows pnpm's shape: `yarn patch <pkg>` prints an edit folder, `yarn patch-commit -s`
+//   saves it to `.yarn/patches/` and rewrites the dependency to a `patch:` spec.
+// - yarn 1.22.22 has no patch feature, so it takes the npm path; its clean copy comes from the
+//   `resolved` field of `yarn.lock`.
 
 import fs from 'fs';
 import os from 'os';
@@ -191,7 +194,14 @@ export function patchPackageFileName(packageName: string, version: string): stri
 async function fetchCleanCopyAsync(target: PatchTarget, scratch: string): Promise<string> {
   const root = target.packageManager.root;
   const spec =
-    resolvedSpecFromNpmLock(root, target.packageDir) ?? `${target.packageName}@${target.version}`;
+    (target.packageManager.name === 'yarn-classic'
+      ? resolvedSpecFromYarnLock(
+          fs.readFileSync(path.join(root, 'yarn.lock'), 'utf8'),
+          target.packageName,
+          target.version
+        )
+      : resolvedSpecFromNpmLock(root, target.packageDir)) ??
+    `${target.packageName}@${target.version}`;
   const result = await runToolAsync(
     'npm',
     ['pack', spec, '--json', '--pack-destination', scratch],
@@ -217,6 +227,40 @@ function resolvedSpecFromNpmLock(root: string, packageDir: string): string | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * The `resolved` of a yarn classic lockfile entry for `<name>` at `<version>`, without its `#hash`.
+ *
+ * An entry is a header line of one or more specs (`"name@^1.0.0", name@~1.0.1:`) and indented
+ * fields under it.
+ */
+export function resolvedSpecFromYarnLock(
+  lockfile: string,
+  packageName: string,
+  version: string
+): string | null {
+  for (const block of lockfile.split(/\r?\n\s*\r?\n/)) {
+    const lines = block.split(/\r?\n/).filter((line) => line && !line.startsWith('#'));
+    const header = lines[0];
+    if (!header || /^\s/.test(header)) {
+      continue;
+    }
+    const names = header
+      .replace(/:$/, '')
+      .split(/,\s*/)
+      .map((spec) => spec.replace(/^"|"$/g, ''))
+      .map((spec) => spec.slice(0, spec.indexOf('@', 1)));
+    const field = (key: string) =>
+      lines
+        .map((line) => new RegExp(`^\\s+${key}\\s+"?([^"\\s]+)"?$`).exec(line)?.[1])
+        .find(Boolean);
+    if (names.includes(packageName) && field('version') === version) {
+      const resolved = field('resolved');
+      return resolved ? resolved.replace(/#.*$/, '') : null;
+    }
+  }
+  return null;
 }
 
 function parsePackFilename(stdout: string): string {
