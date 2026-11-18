@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** a new top-level `patch` command (`src/patch/`); package-manager detection (`src/utils/packageManager.ts`, new; the deferred `doctor-fix` keeps its own); `expo.autolinking.*.buildFromSource` in the project `package.json`; the follow-up block (`src/followups/patch.ts`); `gh` and `git` as subprocesses
+**Systems:** a new top-level `patch` command (`src/patch/`); package-manager detection (`src/utils/packageManager.ts`, new, on top of `@expo/package-manager`); `expo.autolinking.*.buildFromSource` in the project `package.json`; the follow-up block (`src/followups/patch.ts`); `gh` and `git` as subprocesses
 **Author:** Kudo (drafted with Claude agent)
 **Date:** 2026-11-17
 **Related:** [[0006-agent-native-cli-surface]], [[0008-guardrails]], [[0009-smart-followups]], [[0010-agent-conventions]], [[0011-impact-and-freshness]], [[0017-deferred-commands.reference]]
@@ -33,7 +33,7 @@ Both support `--json`. There is no list command: the patches are already in `pac
 
 ## Package-manager backends
 
-Detection reuses the lockfile table in `src/deferred/doctor-fix/packageManager.ts`. Move it to `src/utils/` and make it live code. It already walks up to the workspace root.
+Detection uses `@expo/package-manager` (`resolvePackageManager` and `resolveWorkspaceRoot`), as `install` does, so the CLI and `expo install` pick the same package manager. That package has one `yarn`; the CLI splits it into yarn classic and yarn berry, because only berry has a patch command. A package manager that `patch` does not support (nub) gets an error.
 
 The CLI always writes the patch through the package manager's own commands, so the format and the registration are the ones the package manager expects. Where the package manager needs its own edit directory, the CLI makes that directory and copies the agent's edits into it.
 
