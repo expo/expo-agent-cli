@@ -791,6 +791,14 @@ export type StubDevServerOptions = {
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
+   * What a `live` socket answers to `typeof globalThis.__r`, the probe for whether the app's
+   * bundle ran (llp/0005 §The bundle state). The responder above never sees that expression.
+   *
+   * Unset answers `function`: the stub models an app whose bundle ran. `undefined` is an app that
+   * is still loading its bundle, and {@link NO_ANSWER} sends no reply.
+   */
+  requireType?: (device: string) => unknown;
+  /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
    * An empty object is a dev server nothing has connected to, which is the case where there is
@@ -929,6 +937,7 @@ export async function startStubDevServerAsync({
   bundleLogPath = null,
   targetsAppearWithFile = null,
   inspectorEvaluate,
+  requireType = () => 'function',
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1169,6 +1178,13 @@ export async function startStubDevServerAsync({
           return;
         }
         const expression = message.params?.expression ?? '';
+        if (expression === 'typeof globalThis.__r') {
+          const type = requireType(device);
+          if (type !== NO_ANSWER) {
+            reply({ result: { type: 'string', value: type } });
+          }
+          return;
+        }
         const globals = markers.get(device) ?? new Map<string, string>();
         markers.set(device, globals);
         const setMarker = /(__expoAgentCliReloadMarker\w*) = "([^"]+)"/.exec(expression);
