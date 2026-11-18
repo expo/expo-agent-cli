@@ -19,6 +19,8 @@ import {
   executeAgentCliAsync,
   installStubBinAsync,
   installStubEasRunnerAsync,
+  installStubExpoAsync,
+  installStubExpoScriptSync,
   pathEnvVars,
   readDevLockAsync,
   setupFixtureAsync,
@@ -31,17 +33,6 @@ async function temporaryDirWithSpaceAsync(): Promise<string> {
   return await fs.promises.realpath(
     await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli e2e '))
   );
-}
-
-/** Install the fixture's stub `expo` bin into a project that was copied by hand. */
-async function installStubExpoAsync(projectRoot: string): Promise<void> {
-  const stubScript = path.join(projectRoot, 'node_modules', 'expo', 'bin', 'cli');
-  for (const dir of [
-    path.join(projectRoot, '.stub-bin'),
-    path.join(projectRoot, 'node_modules', '.bin'),
-  ]) {
-    await installStubBinAsync(dir, 'expo', stubScript);
-  }
 }
 
 /** Copy a fixture into a directory the caller chose, stub bins included. */
@@ -189,6 +180,7 @@ describe('a project inside a workspace', () => {
         projectRoot,
         { recursive: true, verbatimSymlinks: true }
       );
+      installStubExpoScriptSync(projectRoot);
 
       const hoisted = path.join(workspace, 'node_modules');
       await fs.promises.rename(path.join(projectRoot, 'node_modules'), hoisted);
