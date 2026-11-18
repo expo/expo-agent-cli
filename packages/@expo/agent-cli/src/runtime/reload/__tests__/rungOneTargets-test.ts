@@ -14,8 +14,9 @@ const BUDGET_MS = 3000;
 
 /**
  * Rung 1 against a fake inspector: each own id answers `Page.reload`, and the ids in `replaces` get
- * a new context. `holdUntil` holds every answer until that many `Page.reload`s arrived. The ids in
- * `dropOnReload` close their socket instead of answering, and keep their context.
+ * a new context in which a bundle ran. `holdUntil` holds every answer until that many `Page.reload`s
+ * arrived. The ids in `dropOnReload` close their socket instead of answering, and keep their
+ * context.
  */
 async function runRungOneBesideForeignAsync(
   ids: string[],
@@ -42,7 +43,7 @@ async function runRungOneBesideForeignAsync(
           return;
         }
         held.push(() => {
-          if (replaces.includes(id)) globals.set(id, {});
+          if (replaces.includes(id)) globals.set(id, { __r() {} });
           socket.send(JSON.stringify({ id: message.id, result: {} }));
         });
         if (held.length >= holdUntil) held.splice(0).forEach((answer) => answer());

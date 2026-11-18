@@ -549,10 +549,10 @@ describe('the three commands in the help', () => {
 // @ref llp/0018-interaction-commands.rfc.md §Shape of the code — friction run 7, F62.
 //
 // The unit suite proves what the gate decides; this proves the parts only a process boundary has:
-// the exit code an agent branches on, one JSON object on stdout, and that the app is never asked
-// anything when the project does not compile.
+// the exit code an agent branches on, one JSON object on stdout, and that the tree is not walked
+// when the project does not compile.
 describe('the entry bundle gate', () => {
-  it(`stops runtime:tree at exit 20 without evaluating anything`, async () => {
+  it(`stops runtime:tree at exit 20 before it walks the tree`, async () => {
     const sent: string[] = [];
     const devServer = await startStubDevServerAsync({
       targets: [EXPO_GO_TARGET],
@@ -577,7 +577,8 @@ describe('the entry bundle gate', () => {
         nodes: [],
         bundle: { checked: true, ok: false, error: { filename: 'src/app/index.tsx' } },
       });
-      expect(sent).toEqual([]);
+      // The marker of the tree walk expression, as `responder` reads it.
+      expect(sent.filter((expression) => expression.includes('var FULL ='))).toEqual([]);
       expect(result.stderr).toContain('does not compile');
       expect(result.stderr).toContain('src/app/index.tsx:101:2');
     } finally {

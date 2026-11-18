@@ -19,6 +19,7 @@ import {
 } from '../followups';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
+import { deviceFlags, NO_BUNDLE_WHY, noBundleRemedy } from '../runtime/appLoadedText';
 import type { DevServerSource } from '../runtime/devServer';
 import { openInPhrase } from './connectUrl';
 import {
@@ -140,10 +141,17 @@ export interface NavigateResultJson {
    * Whether an app on this platform was seen to connect to the dev server afterwards.
    *
    * `null` when this run did not wait (`--no-wait-attach`). **This, not {@link exitCode}, is what
-   * says the app is running the project**: `am start` exits 0 for an intent that lands on Expo Go's
-   * error screen.
+   * says the app is connected to the dev server**: `am start` exits 0 for an intent that lands on
+   * Expo Go's error screen. An attached app can have run no bundle: see {@link appLoaded}.
    */
   attached: boolean | null;
+  /**
+   * Whether the attached app's runtime answered that a JavaScript bundle ran. `false` is exit 22.
+   * `null` when this run did not ask, when no app attached, and when the runtime cannot be asked.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
+   */
+  appLoaded: boolean | null;
   /** How long the wait for that took, in milliseconds. */
   attachWaitedMs: number;
   /** Whether the app had to be stopped and the link opened again to get there. */
@@ -205,7 +213,10 @@ export async function navigateAsync(
   // device accepted has a screen to capture, so a refusal carries no follow-up: its own what/why/
   // how below is the next step.
   const followups =
-    opened.exitCode === 0 && opened.attach.confirmed !== false && followUpsEnabled(wantFollowUps)
+    opened.exitCode === 0 &&
+    opened.attach.confirmed !== false &&
+    opened.attach.loaded !== false &&
+    followUpsEnabled(wantFollowUps)
       ? buildNavigateFollowUps({
           backend: opened.deviceBackend,
           platform: opened.platform,
@@ -242,6 +253,10 @@ export async function navigateAsync(
     reportFollowUps('navigate', followups, { json });
     return EXIT_OUTCOME_TIMEOUT;
   }
+  if (opened.attach.loaded === false) {
+    Log.error(appNotLoaded(opened));
+    return EXIT_OUTCOME_TIMEOUT;
+  }
 
   // Last, so the `Suggested next:` section is the last thing in the terminal, after what the device said.
   reportFollowUps('navigate', followups, { json });
@@ -270,6 +285,7 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
     routeCheck: opened.routeCheck,
     reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
     attached: opened.attach.confirmed,
+    appLoaded: opened.attach.loaded,
     attachWaitedMs: opened.attach.waitedMs,
     attachRecovered:
       opened.attach.recovery?.reopened === true && opened.attach.recovery.wasRunning === true,
@@ -322,20 +338,7 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
           }}`,
         ]
       : []),
-    chalk`{bold App} ${
-      opened.attach.confirmed === true
-        ? chalk.green('attached') +
-          chalk.dim(
-            ` · ${opened.attach.targets} ${opened.platform} debugger ${
-              opened.attach.targets === 1 ? 'target' : 'targets'
-            } after ${opened.attach.waitedMs}ms${
-              attachRecoveryText(opened.attach.recovery).success
-            }`
-          )
-        : opened.attach.confirmed === false
-          ? chalk.red('not attached') + chalk.dim(` · ${opened.attach.reason}`)
-          : chalk.dim(`not checked · ${opened.attach.reason}`)
-    }`,
+    chalk`{bold App} ${appLine(opened.platform, opened.attach)}`,
     chalk`{bold Route} ${
       opened.routeCheck.ok
         ? `${opened.routeCheck.matched}${chalk.dim(
@@ -431,6 +434,7 @@ async function printRouteUrlAsync(projectRoot: string, options: NavigateOptions)
       // was waited for, which is not the same as nothing having connected.
       reversedPort: null,
       attached: null,
+      appLoaded: null,
       attachWaitedMs: 0,
       attachRecovered: false,
       attachAlert: null,
@@ -497,6 +501,44 @@ function reachLine(hostType: string | null): string {
   return chalk.dim(
     'unknown · nothing captured what the dev server advertised, so the host above is where it listens on this machine'
   );
+}
+
+/** The `App` line of the text result: what the attach wait found. */
+function appLine(platform: string, attach: OpenRouteResult['attach']): string {
+  if (attach.confirmed === false) {
+    return chalk.red('not attached') + chalk.dim(` · ${attach.reason}`);
+  }
+  if (attach.confirmed == null) {
+    return chalk.dim(`not checked · ${attach.reason}`);
+  }
+  const count = `${attach.targets} ${platform} debugger ${attach.targets === 1 ? 'target' : 'targets'}`;
+  if (attach.loaded === false) {
+    return (
+      chalk.red('attached, not loaded') +
+      chalk.dim(` · ${count}, and its runtime ran no JavaScript bundle in ${attach.waitedMs}ms`)
+    );
+  }
+  return (
+    chalk.green('attached') +
+    chalk.dim(
+      ` · ${count} after ${attach.waitedMs}ms${attachRecoveryText(attach.recovery).success}`
+    )
+  );
+}
+
+/** The what / why / how for an attached app whose runtime ran no bundle before the deadline. */
+function appNotLoaded(opened: OpenRouteResult): string {
+  const flags = deviceFlags({
+    platform: opened.platform,
+    cloud: opened.deviceBackend === 'cloud',
+  });
+  return [
+    chalk.red(
+      `The link was opened on the device, and the ${opened.platform} app attached to ${opened.devServerUrl} ran no JavaScript bundle in ${opened.attach.waitedMs}ms.`
+    ),
+    `Why: the dev server lists the app's debugger target and the app's runtime answers, but no bundle ran in it. ${NO_BUNDLE_WHY}`,
+    `How: run this command again, or raise the wait with --attach-timeout 90s. ${noBundleRemedy(flags)}`,
+  ].join('\n');
 }
 
 /**

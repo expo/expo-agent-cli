@@ -30,14 +30,13 @@ export async function reloadStep(walk: PhaseWalk): Promise<void> {
   walk.report.reload = reloadJson;
 
   if (walk.app.openedByThisRun) {
-    // Nothing to replace: the app came up during the `app` phase, so it fetched the bundle the dev
-    // server is serving now on its way in. A reload here would cost a relaunch to reach the state
-    // the run is already in.
+    // Nothing to replace: the app came up during the `app` phase, so it holds no bundle older than
+    // the one the dev server serves now. Whether that bundle ran is the `runtime` phase's question.
     phases.push({
       id: 'reload',
       status: 'skipped',
       ms: 0,
-      reason: 'this run opened the app, so it already fetched the bundle the dev server is serving',
+      reason: 'this run opened the app, so it has no older bundle to replace',
     });
   } else if (!options.reload) {
     // Asked for, so the row says which of the two questions this run is answering rather than
@@ -146,7 +145,9 @@ export async function routeStep(walk: PhaseWalk): Promise<Step<null>> {
  * @ref ../timeouts §RUNTIME_READY_TIMEOUT_MS. The settle before it waits for the target *list* to
  * stop changing, which is a fact about registration and turned out to be too weak a proxy for "the
  * bundle has run": two reads of one id 500 ms apart are alike whether the app is ready or about
- * to reload. This asks the runtime itself, which is the thing the phase is about.
+ * to reload. This asks the runtime itself whether a JavaScript bundle ran. An answer proves that
+ * the runtime answers the debugger; only the answer "no bundle ran" is not `ok`
+ * (llp/0005 §A loaded app).
  *
  * An app that was already there when this run arrived **and was not reloaded** is asked once,
  * exactly as before: it is not coming up, so a second look would answer the same and cost the

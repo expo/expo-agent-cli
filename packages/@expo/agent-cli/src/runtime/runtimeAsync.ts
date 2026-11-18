@@ -53,7 +53,12 @@ export async function runtimeEvalAsync(
   // device facts come back together, so the platform this command was told about is the platform
   // of the app it reads and the two steps cannot disagree about which app that is (F51).
   const { devServerUrl, targetSelection, deviceInventory } = await preflightRuntimeAsync(
-    { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
+    {
+      need: 'debugger-target',
+      devServerUrl: options.devServerUrl,
+      platform: options.platform,
+      readsEmptyRuntime: true,
+    },
     context
   );
 
