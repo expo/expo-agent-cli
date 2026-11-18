@@ -16,7 +16,7 @@ Shipped: plan-with-cost dry runs, `dev --plan` as the dry run a caller asks for,
 
 `dev` itself has no consent gate. It prints the plan and runs it, in a terminal as much as out of one. The two gates that used to be here — a `? Run this plan? ›` prompt, then a `Nothing ran` stop that handed back the same line with `--yes` — are both gone, and so is `--yes` itself. §The plan is announced, not negotiated is the record of why.
 
-Checkpoints are deferred. See [[0017-deferred-commands]]. Code is on `src/deferred/checkpoint/`. Nothing in the v1 surface takes a snapshot. `runGitAsync` and `resolveWorkTreeAsync` stayed live in `src/utils/git.ts` because `src/impact/` reads a diff through them.
+Checkpoints are deferred. See [[0017-deferred-commands]]. Nothing in the v1 surface takes a snapshot. `runGitAsync` and `resolveWorkTreeAsync` stayed live in `src/utils/git.ts` because `src/impact/` reads a diff through them.
 
 MCP permission-tier metadata is not built. There is no MCP server. It is scoped out in [[0016-v1-scope]], not a v1 candidate.
 
@@ -58,6 +58,6 @@ A command whose targets are gitignored must state that its recovery does not cov
 
 ## Testing
 
-Checkpoint/undo was deterministic. Its suites moved to `src/deferred/checkpoint/__tests__/` with the code and are not run. Plan-emission is covered by the smart start tests.
+Checkpoint/undo was deterministic. Its suites left the tree with the code ([[0017-deferred-commands]]). Plan-emission is covered by the smart start tests.
 
 That a plan which builds runs unasked is covered by `src/dev/__tests__/devAsync-test.ts` §a plan that builds, which runs the stale-dev-client case on both sides of the TTY check — the axis the old gate turned on, pinned so it cannot come back by accident. `src/dev/__tests__/resolveOptions-test.ts` pins that `--yes` is refused rather than ignored, and `e2e/__tests__/dev-test.ts` asserts that neither `Run this plan?` nor `Nothing ran` appears in a real run.

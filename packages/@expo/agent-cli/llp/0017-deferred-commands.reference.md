@@ -2,7 +2,7 @@
 
 **Type:** Reference
 **Status:** Deferred - reference
-**Systems:** the reference shelf (`src/deferred/dev-wait/`, `src/deferred/checkpoint/`, `src/deferred/build-wait/`, `src/deferred/runtime-network/`, `src/deferred/doctor-fix/`); the JSONL event declarations these commands left behind in `src/events.ts`
+**Systems:** none in the tree. The code is at the git tag `agent-cli-deferred-v1`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-26
 **Revised:** 2026-08-30
@@ -12,15 +12,19 @@
 
 The home for everything that is not in the v1 surface. [[0016-v1-scope]] is what ships. This document is what waits.
 
-Five commands have code on `src/deferred/<area>/`. The rest never shipped: no registry entry, no shelf, no tests. A restored command comes back from its shelf directory and its section here. An unbuilt idea comes back from the list at the bottom.
+Five commands have code. It is not in the tree. It is at the git tag `agent-cli-deferred-v1`, under `packages/@expo/agent-cli/src/deferred/<area>/`. Every `src/deferred/` path below is a path at that tag. The rest never shipped: no registry entry, no code, no tests. A restored command comes back from the tag and its section here:
+
+````bash
+git checkout agent-cli-deferred-v1 -- packages/@expo/agent-cli/src/deferred/<area>
+``` An unbuilt idea comes back from the list at the bottom.
 
 Nothing described below is a command this CLI has.
 
 Anywhere else in the corpus, a thing that is not v1 gets a one-line pointer here.
 
-**This document is not verified.** Nothing type-checks the shelf and nothing runs its tests ([[0016-v1-scope]]). Both the code and the prose here rot at the rate the tree around them moves. Read a path as where a thing was on 2026-08-26, not as where it is.
+**This document is not verified.** The tagged code did not compile or run its tests when it was tagged ([[0016-v1-scope]]). The prose here rots at the rate the tree around it moves. Read a path as where a thing was, not as where it is.
 
-| Section                | The command                                | Code                            | Why it left v1                                           |
+| Section                | The command                                | Code at the tag                 | Why it left v1                                           |
 | ---------------------- | ------------------------------------------ | ------------------------------- | -------------------------------------------------------- |
 | §dev:wait              | `@expo/agent-cli dev:wait`                 | `src/deferred/dev-wait/`        | `smoke` asks its questions and three more                |
 | §The checkpoint system | `@expo/agent-cli checkpoint[:list\|:undo]` | `src/deferred/checkpoint/`      | agents manage git themselves                             |
@@ -135,7 +139,7 @@ Open questions, if it returns: a `--from-check` mode that plans only the steps t
 
 ## Not built
 
-No code on the shelf. Do not design these in the living LLPs.
+No code at the tag. Do not design these in the living LLPs.
 
 **Commands and flags**
 
@@ -163,3 +167,4 @@ No code on the shelf. Do not design these in the living LLPs.
 - A hosted, community-fed build-failure signature DB. v1 is the capped in-repo table ([[0012-build-explain]]).
 - Scripted MCP client replay in the eval harness.
 - `runtime:tree` picking a list row by its text. v1 matching is by testID and `--index`.
+````

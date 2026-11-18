@@ -64,7 +64,6 @@ packages/@expo/agent-cli/       # model-free CLI (Shape 1). No agent loop.
 │   ├── impact/                 # the change classifier the status command runs
 │   ├── runtime/                # eval, errors, reload, stop, tree/tap/type
 │   ├── inspect via builds/, config/
-│   ├── deferred/               # reference shelf. Not a live command ([[0017-deferred-commands]])
 │   ├── project/                # project-state probe
 │   └── new/, deploy/           # headless creation and shipping ([[0007-deploy-and-headless]])
 ├── e2e/

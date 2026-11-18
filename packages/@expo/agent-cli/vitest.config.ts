@@ -54,10 +54,7 @@ export default defineConfig({
     clearMocks: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/__tests__/**/*-test.ts'],
-    // `src/deferred/` is the v1 narrowing's reference shelf (llp/0016): code no registry entry loads,
-    // with the suites that covered it. They assert against a surface this CLI no longer has, so
-    // running them would fail on the deferral itself rather than on a regression.
-    exclude: ['**/node_modules/**', 'src/deferred/**'],
+    exclude: ['**/node_modules/**'],
     pool: 'forks',
     // `bun run` sets these, and `renderForInvoker` would rewrite every `npx @expo/agent-cli`
     // suggestion to `bunx`. Unit tests pin the written `npx` form unless they set a Bun agent.

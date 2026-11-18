@@ -46,16 +46,8 @@ export default {
       rules: { 'no-console': 'off' },
     },
     {
-      // Tests are table-driven and long by design; size limits apply to shipped code. Nothing
-      // loads, compiles or tests `src/deferred/`, so its size does not matter either.
-      files: [
-        '**/__tests__/**',
-        'e2e/**',
-        'e2e-live/**',
-        'evals/**',
-        'scripts/**',
-        'src/deferred/**',
-      ],
+      // Tests are table-driven and long by design; size limits apply to shipped code.
+      files: ['**/__tests__/**', 'e2e/**', 'e2e-live/**', 'evals/**', 'scripts/**'],
       rules: { 'max-lines': 'off', 'max-lines-per-function': 'off', 'max-depth': 'off' },
     },
     ...Object.entries(longFunctionFiles).map(([file, max]) => ({

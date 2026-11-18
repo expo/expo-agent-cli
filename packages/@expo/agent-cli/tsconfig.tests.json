@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["./src/deferred"],
+  "exclude": [],
   "compilerOptions": {
     "types": ["node", "vitest/globals"]
   }
