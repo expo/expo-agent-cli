@@ -37,20 +37,20 @@ Detection reuses the lockfile table in `src/deferred/doctor-fix/packageManager.t
 
 The CLI always writes the patch through the package manager's own commands, so the format and the registration are the ones the package manager expects. Where the package manager needs its own edit directory, the CLI makes that directory and copies the agent's edits into it.
 
-| Package manager   | What `patch <pkg>` runs                                                                                                                                                      | Where the patch is recorded                                                                 | Tested                               |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------ |
-| bun               | `bun patch --commit node_modules/<pkg>`                                                                                                                                      | `patches/`, `patchedDependencies` in `package.json`                                         | yes, bun 1.4.4, macOS (2026-11-17)   |
-| pnpm              | `pnpm patch <pkg>@<version> --edit-dir <tmp>`, copy the edited files into `<tmp>`, then `pnpm patch-commit <tmp>`                                                            | `patches/`, `patchedDependencies` in `pnpm-workspace.yaml`                                  | yes, pnpm 12.2.1, macOS (2026-11-17) |
-| yarn berry        | `yarn patch <pkg>`, copy the edited files into the printed directory, then `yarn patch-commit -s <dir>`                                                                      | `.yarn/patches/`, a `patch:` resolution                                                     | no                                   |
-| npm, yarn classic | The CLI writes the patch itself in patch-package's format (`patches/<pkg>+<version>.patch`, paths from `node_modules/<pkg>/`), from a clean copy made with `npm pack <spec>` | `patches/`, plus a `postinstall: patch-package` script and a `patch-package` dev dependency | yes, npm, macOS (2026-11-17)         |
+| Package manager   | What `patch <pkg>` runs                                                                                                                                                      | Where the patch is recorded                                                                 | Tested                                        |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| bun               | `bun patch --commit node_modules/<pkg>`                                                                                                                                      | `patches/`, `patchedDependencies` in `package.json`                                         | yes, bun 1.4.4, macOS (2026-11-17)            |
+| pnpm              | `pnpm patch <pkg>@<version> --edit-dir <tmp>`, copy the edited files into `<tmp>`, then `pnpm patch-commit <tmp>`                                                            | `patches/`, `patchedDependencies` in `pnpm-workspace.yaml`                                  | yes, pnpm 12.2.1, macOS (2026-11-17)          |
+| yarn berry        | `yarn patch <pkg>`, copy the edited files into the printed directory, then `yarn patch-commit -s <dir>`                                                                      | `.yarn/patches/`, a `patch:` resolution                                                     | yes, yarn 4.18.1, macOS (2026-11-18)          |
+| npm, yarn classic | The CLI writes the patch itself in patch-package's format (`patches/<pkg>+<version>.patch`, paths from `node_modules/<pkg>/`), from a clean copy made with `npm pack <spec>` | `patches/`, plus a `postinstall: patch-package` script and a `patch-package` dev dependency | yes, npm and yarn 1.22.22, macOS (2026-11-18) |
 
-Why the npm backend does not run `patch-package` to make the patch: patch-package 8.0.1 makes its clean copy by installing `<name>@<version>` from the registry, so it failed (exit 254) on a package installed from a `file:` tarball [observed — 2026-11-17]. `npm pack` of the spec in `package-lock.json` works for registry, tarball and git dependencies. patch-package still applies the patch at `postinstall`.
+Why the npm backend does not run `patch-package` to make the patch: patch-package 8.0.1 makes its clean copy by installing `<name>@<version>` from the registry, so it failed (exit 254) on a package installed from a `file:` tarball [observed — 2026-11-17]. `npm pack` of the spec in `package-lock.json` (npm) or the `resolved` field of `yarn.lock` (yarn classic) works for registry, tarball and git dependencies. patch-package still applies the patch at `postinstall`.
 
 Observed: `bun patch --commit` works without a prior `bun patch <pkg>`. `pnpm patch-commit node_modules/<pkg>` fails with "is not a valid patch directory", so pnpm needs the edit directory step above.
 
 Rules:
 
-- Yarn classic and yarn berry both have `yarn.lock`. Tell them apart by `.yarnrc.yml` or `yarn --version`.
+- Yarn classic and yarn berry both have `yarn.lock`. Tell them apart by `.yarnrc.yml` or a `packageManager` field of `yarn@2` or later.
 - Copy only the files that differ from the clean package. Do not copy the whole package, because build output in `node_modules` can differ for other reasons.
 - Linked files: on macOS, bun and pnpm gave each file in `node_modules` a link count of 1 (observed). On Linux they can use hard links to a global store, where an edit in place also changes the store (not tested). If a package file has a link count above 1, do not save the patch. Report that the store is linked and give the steps to reinstall the package and edit again.
 - The `patch-package` path changes `package.json` (a `postinstall` script and a dev dependency). That is a project change the caller did not ask for, so it needs consent: without `--yes`, `patch <pkg>` prints the plan and the re-run line (llp/0008 §Consent is a re-run, never a prompt).
@@ -135,19 +135,17 @@ Not built yet: the `dev` follow-up names Expo Go in its text, but does not read 
 
 ## Testing (llp/0002)
 
-`e2e/__tests__/patch-test.ts` runs the real package managers against two fake packages, packed from `e2e/fixtures/patch-packages/` into local tarballs, so no test needs the network. Each saved patch is checked by deleting `node_modules` and installing again.
+`e2e/__tests__/patch-test.ts` runs the real package managers against two fake packages, packed from `e2e/fixtures/patch-packages/` into local tarballs. The test installs pnpm, yarn 1 and yarn 4 from the npm registry at pinned versions, so no manager is skipped, on CI or on a machine that does not have it. Each saved patch is checked by deleting `node_modules` and installing again.
 
-| Rule                                                                                                                          | Test                                                                                      |
-| ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| bun, pnpm and npm save a patch that a fresh install applies                                                                   | `patch — bun`, `patch — pnpm` (skipped where pnpm is missing; CI has none), `patch — npm` |
-| npm writes nothing to `package.json` without `--yes`                                                                          | `patch — npm`                                                                             |
-| A native patch to a precompiled module adds `buildFromSource` for that platform only, and keeps an entry that already matches | `patch — bun`                                                                             |
-| No edits and hard-linked files are refused                                                                                    | `patch — bun`                                                                             |
-| `--upstream-plan` opens nothing, exits 7, and refuses `--yes` and a package not from `expo/expo`                              | `patch --upstream-plan`                                                                   |
-| `applyCommand` applies both patch formats inside an `expo/expo` clone, without `build/`                                       | `patch --upstream-plan` (a stand-in git repository)                                       |
-| `--repro` takes only a GitHub repository URL; the steps work without `gh`                                                     | `patch --upstream-plan`                                                                   |
-
-yarn berry is implemented and has no e2e test.
+| Rule                                                                                                                          | Test                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| bun, pnpm, yarn 4, npm and yarn 1 save a patch that a fresh install applies                                                   | `patch — bun`, `patch — pnpm`, `patch — yarn4`, `patch — npm`, `patch — yarn1` |
+| npm and yarn 1 write nothing to `package.json` without `--yes`                                                                | `patch — npm`, `patch — yarn1`                                                 |
+| A native patch to a precompiled module adds `buildFromSource` for that platform only, and keeps an entry that already matches | `patch — bun`                                                                  |
+| No edits and hard-linked files are refused                                                                                    | `patch — bun`                                                                  |
+| `--upstream-plan` opens nothing, exits 7, and refuses `--yes` and a package not from `expo/expo`                              | `patch --upstream-plan`                                                        |
+| `applyCommand` applies both patch formats inside an `expo/expo` clone, without `build/`                                       | `patch --upstream-plan` (a stand-in git repository)                            |
+| `--repro` takes only a GitHub repository URL; the steps work without `gh`                                                     | `patch --upstream-plan`                                                        |
 
 ## Open questions
 
