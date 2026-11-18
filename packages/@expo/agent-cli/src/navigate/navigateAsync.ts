@@ -49,7 +49,7 @@ export interface NavigateResultJson {
   /**
    * Which step produced {@link devServerUrl}: `flag`, `lock`, `log`, `default` or `scan`.
    *
-   * Reported for the same reason `status` and `dev:wait` report it: `flag` and `lock` name a dev
+   * Reported for the same reason `status` reports it: `flag` and `lock` name a dev
    * server on purpose, and `default` or `scan` only found one that answered — which on a machine
    * running two projects may not be this one's.
    */

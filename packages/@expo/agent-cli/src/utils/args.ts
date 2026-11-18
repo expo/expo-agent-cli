@@ -1,7 +1,6 @@
 // Common utilities for interacting with `args` library.
 // These functions should be used by every command.
 import arg from 'arg';
-import chalk from 'chalk';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 
@@ -30,9 +29,8 @@ export function getProjectRoot(args: arg.Result<arg.Spec>) {
  *
  * Stated per command rather than inferred, and with no default, so the type checker asks the
  * question of every command that parses arguments — including the next one somebody writes.
- * `@expo/agent-cli checkpoint:undo <id>` accepted an argument it had no place for, dropped it, and
- * restored the newest checkpoint over the working tree while reporting success. That command was
- * deferred out of v1 (llp/0016); the rule it forced applies to every command with no positional.
+ * A command that drops an argument it has no place for reports success for work the caller did
+ * not ask for.
  *
  * @ref llp/0010-agent-conventions.rfc.md §Registry rules
  */
@@ -52,7 +50,7 @@ export type PositionalArgPolicy =
   | 'own';
 
 export interface AssertArgsOptions extends arg.Options {
-  /** The command as a caller types it, e.g. `checkpoint:undo`. Printed by the errors below. */
+  /** The command as a caller types it, e.g. `dev:stop`. Printed by the errors below. */
   command: string;
   /** What this command does with the arguments that are not options. */
   positionalArgs: PositionalArgPolicy;
@@ -119,7 +117,7 @@ export function assertWithOptionsArgs(
  * Shared by {@link assertWithOptionsArgs} and by the `resolve*Options` functions of the commands
  * that parse permissively, so the one mistake reads the same wherever it is caught.
  *
- * @param command the command as a caller types it, e.g. `checkpoint:undo`.
+ * @param command the command as a caller types it, e.g. `dev:stop`.
  * @param positional the arguments that were not options, as `arg` collected them.
  * @param options.hint one sentence naming what the caller probably meant.
  */
@@ -253,29 +251,4 @@ function parseDuration(value: unknown): number {
     }
   }
   return Number(value);
-}
-
-/**
- * @deprecated Use `printCommandHelp` from `src/help/format.ts`.
- *
- * The free-form help block every command used to build for itself: an `Info` line, a usage line,
- * an option list, and an `extra` string that grew into sixty lines of rationale. One shape per
- * command is a shape nothing can check, which is why the registry now requires a `CommandHelp`
- * (llp/0024). Nothing under a registry entry calls this — only `src/deferred/`, the v1 narrowing's
- * reference shelf (llp/0016), which is kept verbatim and loaded by nothing.
- */
-export function printHelp(info: string, usage: string, options: string, extra: string = ''): never {
-  Log.exit(
-    chalk`
-  {bold Info}
-    ${info}
-
-  {bold Usage}
-    {dim $} ${usage}
-
-  {bold Options}
-    ${options.split('\n').join('\n    ')}
-` + extra,
-    0
-  );
 }

@@ -47,8 +47,7 @@ export function projectBinFileName(name: string): string {
  * ([[0001-agentic-cli-on-expo-cli]] §Constraints item 5) holds unchanged.
  *
  * **The stop is the filesystem root**, which is where `resolvePackageRootSync`
- * (`src/project/nodeModules.ts`) and `detectPackageManager`
- * (`src/deferred/doctor-fix/packageManager.ts`) stop too, and where Node's own resolution stops. A
+ * (`src/project/nodeModules.ts`) stops too, and where Node's own resolution stops. A
  * walk that stopped at "the workspace root" would have to decide what one is, and no filesystem
  * marks it: a `workspaces` field, a `pnpm-workspace.yaml`, a lockfile and a `.git` directory all
  * disagree in real repositories, and each disagreement would be a project whose installed tool this

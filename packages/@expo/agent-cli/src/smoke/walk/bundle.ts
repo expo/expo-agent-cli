@@ -91,7 +91,7 @@ export async function bundleStep(walk: PhaseWalk): Promise<Step<null>> {
             value: result,
           };
         default:
-          // Fail-open, unchanged from `dev:wait`: a dev server that answered nothing this CLI
+          // Fail-open: a dev server that answered nothing this CLI
           // understands has not shown the project to be broken (llp/0010 §An empty target list is inconclusive).
           return {
             status: 'inconclusive' as const,

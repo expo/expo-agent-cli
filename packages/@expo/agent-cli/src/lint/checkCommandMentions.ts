@@ -11,8 +11,7 @@
 //    (`commandFlags.ts`), an option the parse would reject is the same failure one level down.
 // 3. **Its arguments have somewhere to go.** A command that declares `positionalArgs: 'none'`
 //    answers `BAD_ARGS` for one, which is llp/0010 §Registry rules (d) read from the other end:
-//    the rule exists because `checkpoint:undo <id>` was the natural line to type, and a message
-//    that suggests that line is the CLI teaching it.
+//    a message that suggests an argument the command rejects is the CLI teaching the mistake.
 // 4. **It is runnable as printed.** A `Try:` line or a `Next:` rung with a `<placeholder>` in it
 //    cannot be run, and the reader has to work out what to substitute from a message that stopped
 //    to tell them what to run. A handful genuinely cannot be filled in by this CLI, and those are
@@ -316,7 +315,7 @@ function checkOptions(
  * Rule 3: an argument the command has no place for is an error, not a shrug.
  *
  * The one thing that makes this readable is knowing which words are *values*: `--timeout 90s` has
- * no positional argument in it and `checkpoint:undo abc123` has one. A word whose meaning is only
+ * no positional argument in it and `navigate /settings` has one. A word whose meaning is only
  * known at runtime stops the check for the whole mention rather than being guessed at — an
  * interpolation may expand to ` --json` as easily as to a bare id.
  *

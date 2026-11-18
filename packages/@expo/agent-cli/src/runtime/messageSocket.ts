@@ -53,7 +53,7 @@ export function resolveMessageSocketUrl(devServerUrl: string): string {
  * Whether the set of connected clients changed between two reads.
  *
  * Null when either read failed, because a comparison that was never made is not evidence of
- * anything — the same rule `dev:wait`'s bundle check follows for `unknown` (llp/0010 §An empty target list is inconclusive
+ * anything — the same rule the entry-bundle check follows for `unknown` (llp/0010 §An empty target list is inconclusive
  * to ask about the _project_).
  */
 export function peersChanged(

@@ -61,7 +61,7 @@ export interface RuntimeErrorsOptions extends RuntimeSharedOptions {
    * Exit 20 when the window caught anything (`--fail-on-error`).
    *
    * Opt-in, because the default job of this command is to collect: an empty window means "nothing
-   * happened while I watched", which is not the same claim `dev:wait` makes when it exits 0.
+   * happened while I watched", which is not the same claim `smoke` makes when it exits 0.
    */
   failOnError: boolean;
 }
@@ -90,9 +90,6 @@ const EVAL_ARGS = {
 // `errors` listens over a window and reports follow-ups. `eval` does not take `--no-followups`:
 // there it would be a flag that does nothing, and an unknown flag is a clearer answer than a
 // silent no-op.
-//
-// `runtime:network` shared this schema until the v1 narrowing deferred it (llp/0016); what it took
-// with it is in `src/deferred/runtime-network/resolveOptions.ts`.
 const ERRORS_ARGS = {
   ...SHARED_ARGS,
   '--duration': String,

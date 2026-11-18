@@ -8,8 +8,7 @@
 // here [decision — 2026-08-24, kept through the v1 narrowing]. Every check expo-doctor reports on is
 // a dependency or a configuration problem — a package behind the SDK, a missing lockfile, a plugin
 // that will not resolve — and none of them is fixed by deleting a cache. That shape of follow-up is
-// what llp/0009 caps the budget to keep out. It is also why deferring `doctor:fix` (llp/0016) cost
-// this builder nothing: it never named that command.
+// what llp/0009 caps the budget to keep out.
 
 import { forwardedCommands } from '../commandRegistry';
 import type { DoctorCheck, DoctorReport } from '../doctor/types';

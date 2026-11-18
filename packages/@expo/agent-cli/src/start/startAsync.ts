@@ -258,8 +258,9 @@ async function waitForOwnMetroAsync(
  *
  * **`ci: false` is load-bearing here, and only here.** A dev server told `CI=1` turns Metro's file
  * watcher off and serves its start-up snapshot forever, so an agent that edits a file and then asks
- * `dev:wait` whether the project compiles is answered about code that no longer exists [observed —
- * live on an SDK 57 app, 2026-08-23: a syntax error appended to a route left `dev:wait` at exit 0].
+ * the entry-bundle check whether the project compiles is answered about code that no longer exists
+ * [observed — live on an SDK 57 app, 2026-08-23: a syntax error appended to a route left the check
+ * passing].
  * The prompts still fail fast without it — that half is the pipe, not the variable. See
  * {@link spawnExpoAsync}.
  */

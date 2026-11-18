@@ -125,7 +125,7 @@ export const agentCliSmoke: Command = async (argv) => {
 
   return (async () => {
     const resolved = resolveSmokeOptions(argv ?? []);
-    // Asserting, unlike `dev:wait`: this command reads the project's routes and writes its
+    // Asserting: this command reads the project's routes and writes its
     // screenshot under the project's `.expo`, so there is no useful run outside one.
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
     assertDependenciesInstalledSync(projectRoot);

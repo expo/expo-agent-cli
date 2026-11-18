@@ -1,10 +1,9 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §One preflight for the runtime family
 // Which device a runtime command acts on, from the three spellings that name one.
 //
-// `--ios` and `--android` are this CLI's own spelling and `expo start`'s. `--platform ios` is the
-// spelling `dev:wait` takes, and `runtime:stop --json` reports `"platform": "ios"`
-// back — so a caller reading one report and writing the next command typed `--platform ios` and was
-// answered `unknown or unexpected option` [observed — friction run 4, 2026-08-23]. Accepting it is
+// `--ios` and `--android` are this CLI's own spelling and `expo start`'s. `runtime:stop --json`
+// reports `"platform": "ios"`, so a caller reading that report and writing the next command typed
+// `--platform ios` and was answered `unknown or unexpected option` [observed — friction run 4, 2026-08-23]. Accepting it is
 // one line; making the caller translate between two spellings of one fact is not.
 
 import type { NavigatePlatform } from '../navigate/device';

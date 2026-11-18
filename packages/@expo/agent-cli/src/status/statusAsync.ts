@@ -773,8 +773,7 @@ async function readLocalDeviceStatusAsync(
  *
  * Deliberately a short probe, not a wait: `GET /status` only answers once the bundle finishes, so
  * a status command that awaited it would hang for the length of a cold bundle. The budget expiring
- * is reported as `ready: null` — "still working", which is a different fact from "not ready" and
- * the reason `dev:wait` exists. The project-root header is flushed before the bundler is awaited,
+ * is reported as `ready: null` — "still working", which is a different fact from "not ready". The project-root header is flushed before the bundler is awaited,
  * so `projectRootMatched` is answered even by the probe that expires.
  */
 async function readDevServerReadinessAsync(

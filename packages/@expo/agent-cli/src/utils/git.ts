@@ -5,9 +5,7 @@
 // git is a machine artifact, and a project whose `user.email` is unset must still be able to make
 // one. Hooks and pagers belong to the user's own git commands, so they are turned off here.
 //
-// The plumbing that made a checkpoint out of these calls left with the command
-// (`src/deferred/checkpoint/git.ts`, llp/0016); what stayed is what `src/impact/changedFiles.ts`
-// reads a diff with.
+// `src/impact/changedFiles.ts` reads a diff with these calls.
 
 import { spawn } from 'child_process';
 
@@ -98,7 +96,7 @@ export async function runGitAsync(args: string[], options: RunGitOptions): Promi
  * The work tree the project is in, or null when it is not in one.
  *
  * A project outside git is the normal case for a fresh `create-expo-app`, so this is a question,
- * not a failure: the caller skips the checkpoint and runs anyway.
+ * not a failure: the caller skips the git step and runs anyway.
  */
 export async function resolveWorkTreeAsync(projectRoot: string): Promise<GitWorkTree | null> {
   try {

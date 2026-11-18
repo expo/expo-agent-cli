@@ -174,10 +174,7 @@ interface SchemaFlags {
  *
  * Three shapes, because three shapes are what the commands use: the object literal itself, a `const`
  * in the same file, and a conditional between two of those — a resolver shared by two commands picks
- * its schema with a ternary, and the union of the two branches is the honest answer for either. The
- * case that forced it was `runtime:errors` and `runtime:network`, which shared one resolver until
- * the v1 narrowing deferred the second (llp/0016); the shape is still one the commands reach for,
- * so the branch stays.
+ * its schema with a ternary, and the union of the two branches is the honest answer for either.
  */
 function readSchemaFlags(node: ts.Expression, sourceFile: ts.SourceFile): SchemaFlags | null {
   if (ts.isObjectLiteralExpression(node)) {
