@@ -1,72 +1,47 @@
 // @ref llp/0037-patch-command.rfc.md §Package-manager backends
-// Which package manager owns this project, read from the lockfile the project already has.
+// Which package manager owns this project. `@expo/package-manager` decides it, from the lockfile at
+// the workspace root, as it does for `install` (`src/install/bareInstall.ts`).
 //
-// The lockfile table and its precedence mirror `@expo/package-manager`'s `resolvePackageManager`
-// [observed — `packages/@expo/package-manager/src/utils/nodeManagers.ts`]. It is a copy of a
-// *decision*, not an import: the process boundary of llp/0001 rules out reaching into that package.
-// The deferred `doctor:fix` keeps its own copy (`src/deferred/doctor-fix/packageManager.ts`), because
-// deferred code is reference material and imports nothing live.
-//
-// One addition over that table: yarn is split in two. Yarn classic and yarn berry write the same
+// One addition over its answer: yarn is split in two. Yarn classic and yarn berry write the same
 // `yarn.lock` name and have nothing else in common where patches are concerned — berry has a patch
 // protocol of its own, classic has none.
 
+import { resolvePackageManager, resolveWorkspaceRoot } from '@expo/package-manager';
 import fs from 'fs';
 import path from 'path';
+
+import { CommandError } from './errors';
 
 export type PackageManagerName = 'bun' | 'pnpm' | 'yarn-berry' | 'yarn-classic' | 'npm';
 
 export interface DetectedPackageManager {
   name: PackageManagerName;
-  /** The lockfile that decided it, or null when the project has none (npm, the default). */
-  lockfile: string | null;
-  /** The directory the package manager runs in: the lockfile's, or the project root. */
+  /** The directory the package manager runs in: the workspace root, or the project root. */
   root: string;
 }
 
-/** Lockfile names per manager, in the order one directory is searched. */
-const LOCKFILES: { name: 'bun' | 'yarn' | 'npm' | 'pnpm'; files: string[] }[] = [
-  { name: 'bun', files: ['bun.lock', 'bun.lockb'] },
-  { name: 'yarn', files: ['yarn.lock'] },
-  { name: 'npm', files: ['package-lock.json'] },
-  { name: 'pnpm', files: ['pnpm-lock.yaml'] },
-];
-
 /**
- * Find the package manager of a project.
- *
- * Walks up from the project, because a package of a monorepo has no lockfile of its own and the
- * workspace root's is the one that matters.
+ * Find the package manager of a project. A project with no lockfile is npm's, as
+ * `@expo/package-manager`'s `createForProject` falls back to npm.
  */
 export function detectPackageManager(projectRoot: string): DetectedPackageManager {
-  let dir = path.resolve(projectRoot);
-  for (;;) {
-    const found = lockfileIn(dir);
-    if (found) {
-      return found;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      return { name: 'npm', lockfile: null, root: path.resolve(projectRoot) };
-    }
-    dir = parent;
+  const root = resolveWorkspaceRoot(projectRoot) ?? path.resolve(projectRoot);
+  const name = resolvePackageManager(projectRoot);
+  switch (name) {
+    case null:
+      return { name: 'npm', root };
+    case 'yarn':
+      return { name: isYarnBerry(root) ? 'yarn-berry' : 'yarn-classic', root };
+    case 'bun':
+    case 'npm':
+    case 'pnpm':
+      return { name, root };
+    default:
+      throw new CommandError(
+        'PATCH_UNSUPPORTED_PACKAGE_MANAGER',
+        `This project uses ${name}, and patch supports bun, pnpm, yarn and npm.`
+      );
   }
-}
-
-/** The package manager whose lockfile is in this directory, if any. */
-function lockfileIn(dir: string): DetectedPackageManager | null {
-  for (const { name, files } of LOCKFILES) {
-    const file = files.find((candidate) => fs.existsSync(path.join(dir, candidate)));
-    if (!file) {
-      continue;
-    }
-    const lockfile = path.join(dir, file);
-    if (name === 'yarn') {
-      return { name: isYarnBerry(dir) ? 'yarn-berry' : 'yarn-classic', lockfile, root: dir };
-    }
-    return { name, lockfile, root: dir };
-  }
-  return null;
 }
 
 /**
