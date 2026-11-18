@@ -410,9 +410,9 @@ describe(reloadAsync, () => {
     mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }, { 'socket#4': 'role=ios' }]).socket);
 
-    await expect(reloadAsync(projectRoot, options({ timeoutMs: 300, json: true }))).resolves.toBe(
-      EXIT_OUTCOME_TIMEOUT
-    );
+    await expect(
+      reloadAsync(projectRoot, options({ method: 'dev-server', timeoutMs: 300, json: true }))
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
     expect(JSON.parse(printed())).toMatchObject({
       reloaded: true,
       appsConnected: 1,
@@ -530,9 +530,9 @@ describe(reloadAsync, () => {
       json: async () => (listCalls++ === 0 ? [EXPO_GO_TARGET] : []),
     })) as unknown as typeof fetch;
 
-    await expect(reloadAsync(projectRoot, options({ timeoutMs: 300, json: true }))).resolves.toBe(
-      EXIT_OUTCOME_TIMEOUT
-    );
+    await expect(
+      reloadAsync(projectRoot, options({ method: 'dev-server', timeoutMs: 300, json: true }))
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
     expect(JSON.parse(printed())).toMatchObject({ reloaded: true, appsConnected: 0 });
   });
 
@@ -1445,15 +1445,15 @@ describe('the rung the ladder picks', () => {
   });
 
   // ...and with neither observation it is still 22, which is the hold F45 put in: peer churn proves
-  // the app acted and never that it came back.
+  // the app acted and never that it came back. Pinned: under `auto` the run climbs instead.
   it(`stays at 22 when neither a fresh target nor a bundle arrived`, async () => {
     writeProject({ [detachedLogPath(projectRoot)]: 'Starting project at /project\n' });
     mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }, { 'socket#4': 'role=ios' }]).socket);
 
-    await expect(reloadAsync(projectRoot, options({ json: true, timeoutMs: 600 }))).resolves.toBe(
-      EXIT_OUTCOME_TIMEOUT
-    );
+    await expect(
+      reloadAsync(projectRoot, options({ method: 'dev-server', json: true, timeoutMs: 600 }))
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
     expect(JSON.parse(printed())).toMatchObject({
       reloaded: true,
       bundlesAfterReload: { observed: false },

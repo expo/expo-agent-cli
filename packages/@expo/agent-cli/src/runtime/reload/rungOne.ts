@@ -55,6 +55,59 @@ const PEER_CHURN_TIMEOUT_MS = 8000;
  */
 const PAGE_RELOAD_PROOF_MS = 8000;
 
+/**
+ * How long `auto` waits after churn for the app to come back: a fresh target or a bundle. The bundle
+ * gate has built the bundle, so a reloading app fetches it well inside this.
+ */
+const CHURN_FOLLOW_MS = 10_000;
+
+/** A shorter window leaves no time for a relaunch after it, so the churn stays the run's proof. */
+const CHURN_FOLLOW_MIN_MS = 1_000;
+
+/**
+ * Rung 1 after its churn was followed: a broadcast proved by churn stays `proved` only when a fresh
+ * own target or a bundle shows the app back within the window. Otherwise it is `delivered`: the
+ * churn proves nothing, and `auto` climbs. Every other outcome is returned as it is.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. The window is at most half of what is
+ * left, so the relaunch keeps at least as much. A broadcast keeps the page id [observed — SDK 58
+ * development build, RN 0.88, iOS 26.4 simulator, 2026-11-18], so only a bundle can show the app
+ * back: with no bundle to watch there is no window.
+ */
+export async function followChurnAsync(
+  outcome: RungOneOutcome,
+  {
+    remainingMs,
+    bundleWatched,
+    cameBackAsync,
+  }: {
+    remainingMs: number;
+    /** A captured dev server log exists, so a `Bundled` line can show the app back. */
+    bundleWatched: boolean;
+    cameBackAsync: (timeoutMs: number) => Promise<boolean>;
+  }
+): Promise<RungOneOutcome> {
+  if (outcome.kind !== 'proved' || outcome.proof !== 'message-socket-peers' || !bundleWatched) {
+    return outcome;
+  }
+  const windowMs = Math.min(CHURN_FOLLOW_MS, Math.floor(remainingMs / 2));
+  if (windowMs < CHURN_FOLLOW_MIN_MS || (await cameBackAsync(windowMs))) {
+    return outcome;
+  }
+  const missing = `no new debugger target and no bundle followed within ${windowMs}ms`;
+  return {
+    kind: 'delivered',
+    attempt: {
+      ...outcome.attempt,
+      ok: false,
+      delivered: true,
+      reason: `${outcome.attempt.reason}, but ${missing}`,
+    },
+    churn: outcome.churn,
+    relaunchWhy: `the app reconnected to the dev server's command socket after the broadcast, but ${missing}, so the app was relaunched instead`,
+  };
+}
+
 /** How often the peers are read while waiting for the app to reconnect. */
 const PEER_POLL_INTERVAL_MS = 250;
 

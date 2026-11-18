@@ -174,6 +174,14 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
   ];
 }
 
+/** What a failed relaunch may have left: a closed app, and on a cloud session a refused verb. */
+function explainLeftClosed(report: ReloadResultJson, options: ReloadOptions): string[] {
+  return [
+    ...explainStrandedApp(report, options),
+    ...(options.cloud ? explainCloudRelaunchRefusal(report) : []),
+  ];
+}
+
 /** What the payload does not carry and the failure text needs: the state rung 1 and the wait ended in. */
 export interface ReloadFailureState {
   unwatched: Unwatched | null;
@@ -302,6 +310,8 @@ export function explainReloadFailure(
         `The app was ${relaunched ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
       ),
       why,
+      // A relaunch that failed after a rung 1 that ran: the stop may have left the app closed.
+      ...explainLeftClosed(report, options),
       unprovable
         ? `How: ${relaunched ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
         : unprovedHowLine({
@@ -317,8 +327,7 @@ export function explainReloadFailure(
     return [
       chalk.red(`The app was not reloaded.`),
       `Why: ${report.attempts.map((attempt) => `${attempt.method} — ${attempt.reason}`).join('; ') || 'no method was tried'}.`,
-      ...explainStrandedApp(report, options),
-      ...(options.cloud ? explainCloudRelaunchRefusal(report) : []),
+      ...explainLeftClosed(report, options),
       // @ref llp/0005 §What proves a reload — K2 and K3. Two different dead ends, and the old
       // text described only the second: "open the app first" is advice for a caller whose app is
       // *not* running, and printing it for a connected app is how a reader was sent to start a

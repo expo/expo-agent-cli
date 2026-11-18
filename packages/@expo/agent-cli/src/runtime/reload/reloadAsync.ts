@@ -54,11 +54,17 @@ import {
 } from './bundleSignal';
 import { reloadOnCloudSimulatorAsync } from './cloudReload';
 import { keepsPageId, settleTargetProof, type ReloadAttempt } from './attempt';
-import { observeReloadAsync, type ReloadEvidence, type Unwatched } from './evidence';
+import {
+  appCameBackAsync,
+  observeReloadAsync,
+  type ReloadEvidence,
+  type Unwatched,
+} from './evidence';
 import { debugEvent, event } from './events';
 import { type ReloadOptions } from './resolveOptions';
 import {
   CHURN_NOT_ASKED,
+  followChurnAsync,
   prepareRungOneAsync,
   runRungOneAsync,
   settleRungOne,
@@ -459,6 +465,33 @@ async function preflightAsync(
   };
 }
 
+/**
+ * Rung 1, and under `auto` the follow of its churn (llp/0005 §How it reloads). The follow's
+ * evidence is not kept: the watch after the ladder starts from the same mark and known ids, so it
+ * finds the same target or bundle at once.
+ */
+async function runAndFollowRungOneAsync(
+  devServerUrl: string,
+  projectRoot: string,
+  options: ReloadOptions,
+  {
+    prepared,
+    bundleMark,
+    remainingMs,
+  }: { prepared: PreparedRungOne; bundleMark: BundleSignalMark; remainingMs: RemainingMs }
+): Promise<RungOneOutcome> {
+  const outcome = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
+  if (options.method !== 'auto') {
+    return outcome;
+  }
+  return followChurnAsync(outcome, {
+    remainingMs: remainingMs(),
+    bundleWatched: bundleMark.available,
+    cameBackAsync: (timeoutMs) =>
+      appCameBackAsync(devServerUrl, projectRoot, { prepared, bundleMark, timeoutMs }),
+  });
+}
+
 async function climbLadderAsync(
   projectRoot: string,
   options: ReloadOptions,
@@ -536,7 +569,11 @@ async function climbLadderAsync(
   // and the answer — not `--eas`, not the location of the device — is what picks the rung. A
   // pinned `--method` skips this, as a pinned method always has.
   if (options.method === 'auto' || options.method === 'dev-server') {
-    rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
+    rungOne = await runAndFollowRungOneAsync(devServerUrl, projectRoot, options, {
+      prepared,
+      bundleMark,
+      remainingMs,
+    });
     attempts.push(rungOne.attempt);
     // @ref llp/0005 §How it reloads — F97. A delivered or acted reload is a mechanism that ran;
     // its own proof is missing, so the two shared observations below — a fresh debugger target,

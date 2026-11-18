@@ -187,6 +187,40 @@ export function chooseVerifiedBy<Proof extends Label>(
   );
 }
 
+/** The shared watch for this run's own apps, against the target ids and the log read before acting. */
+function watchAfter(
+  prepared: PreparedRungOne,
+  bundleMark: BundleSignalMark,
+  timeoutMs: number
+): Parameters<typeof waitForReloadEvidenceAsync>[2] {
+  return {
+    timeoutMs,
+    knownTargetIds: prepared.targets.map((target) => target.id),
+    targetSelection: prepared.targetSelection,
+    deviceInventory: prepared.deviceInventory,
+    bundleMark,
+    bundlePlatforms: prepared.policy.bundlePlatforms,
+  };
+}
+
+/** Whether a fresh own target or a bundle that may count showed the app back within `timeoutMs`. */
+export async function appCameBackAsync(
+  devServerUrl: string,
+  projectRoot: string,
+  {
+    prepared,
+    bundleMark,
+    timeoutMs,
+  }: { prepared: PreparedRungOne; bundleMark: BundleSignalMark; timeoutMs: number }
+): Promise<boolean> {
+  const evidence = await waitForReloadEvidenceAsync(
+    devServerUrl,
+    projectRoot,
+    watchAfter(prepared, bundleMark, timeoutMs)
+  );
+  return evidence.freshTargets > 0 || evidence.bundle.observed;
+}
+
 /** Why the shared observations were not watched after a mechanism ran. */
 export type Unwatched =
   /** A new JavaScript context on the own target already proved the reload. */
@@ -238,14 +272,11 @@ export async function observeReloadAsync<Proof extends Label>(
         : null;
   const evidence =
     unwatched == null
-      ? await waitForReloadEvidenceAsync(devServerUrl, projectRoot, {
-          timeoutMs,
-          knownTargetIds: prepared.targets.map((target) => target.id),
-          targetSelection: prepared.targetSelection,
-          deviceInventory: prepared.deviceInventory,
-          bundleMark,
-          bundlePlatforms,
-        })
+      ? await waitForReloadEvidenceAsync(
+          devServerUrl,
+          projectRoot,
+          watchAfter(prepared, bundleMark, timeoutMs)
+        )
       : null;
   const verifiedBy = chooseVerifiedBy(mechanismProof, {
     churn,
