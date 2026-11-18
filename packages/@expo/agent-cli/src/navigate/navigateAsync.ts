@@ -333,7 +333,8 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
             }`
           )
         : opened.attach.confirmed === false
-          ? chalk.red('not attached') + chalk.dim(` · ${opened.attach.reason}`)
+          ? (opened.attach.loading > 0 ? chalk.yellow('loading') : chalk.red('not attached')) +
+            chalk.dim(` · ${opened.attach.reason}`)
           : chalk.dim(`not checked · ${opened.attach.reason}`)
     }`,
     chalk`{bold Route} ${
@@ -534,6 +535,16 @@ function attachNotConfirmed(opened: OpenRouteResult): string {
   const look = cloud
     ? `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --eas --no-route-check`
     : `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --no-route-check`;
+
+  if (opened.attach.loading > 0) {
+    return [
+      chalk.red(
+        `The link was opened on the device, and the ${opened.platform} app on ${opened.devServerUrl} was still loading after ${opened.attach.waitedMs}ms: its JavaScript bundle had not run.`
+      ),
+      `Why: the app's debugger target is listed, but "typeof globalThis.__r" was not "function". The app is still downloading its bundle, or the download failed. A force-stop would throw the download away, so this run did not stop the app.`,
+      `How: look at the bundle requests with "${PROGRAM_PREFIX} dev:logs", and wait for the bundle with "${look}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s.`,
+    ].join('\n');
+  }
 
   return [
     chalk.red(

@@ -13,6 +13,7 @@
 // that the dev server that answered belongs to this project — the caveat `discoverDevServerAsync`
 // documents but cannot close.
 
+import { attachedAppsAsync } from './bundleState';
 import type { CdpTarget } from './cdpClient';
 import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
 import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './projectRootHeader';
@@ -278,6 +279,8 @@ export interface AppConnectionResult {
    * Scoped when a platform was named: it is the number of apps *on that platform*.
    */
   appsConnected: number;
+  /** Own apps whose bundle has not run, at the last read (llp/0005 §The bundle state). */
+  loadingApps: number;
   /** The wait expired with no app attached. */
   timedOut: boolean;
   /** How long the wait took, in milliseconds. */
@@ -376,8 +379,10 @@ export async function waitForAppConnectionAsync(
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
     const classifiedTargets = await classify(probe.targets, deadline);
-    const counted = classifiedTargets.read.length;
+    const { attached, loading } = await attachedAppsAsync(classifiedTargets.read);
+    const counted = attached.length;
     const extra = {
+      loadingApps: loading.length,
       skippedApps: skippedAppsOf(classifiedTargets),
       ...(targetSelection.platform != null || targetSelection.device != null
         ? {
@@ -425,7 +430,10 @@ export interface WaitForFreshAppConnectionOptions extends Omit<
   signal?: AbortSignal;
 }
 
-export interface FreshAppConnectionResult extends Omit<AppConnectionResult, 'skippedApps'> {
+export interface FreshAppConnectionResult extends Omit<
+  AppConnectionResult,
+  'skippedApps' | 'loadingApps'
+> {
   /**
    * Targets the dev server listed that it had not listed before the reload.
    *

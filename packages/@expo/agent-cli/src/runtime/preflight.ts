@@ -29,7 +29,11 @@
 // question is asked for the length of that window before it is answered, and a list that is still
 // empty afterwards is reported as inconclusive rather than as a call to fix.
 
-import { resolveTargetSelectionAsync } from './resolveTargetSelection';
+import { attachedAppsAsync } from './bundleState';
+import {
+  resolveTargetSelectionAsync,
+  type ResolvedTargetSelection,
+} from './resolveTargetSelection';
 import { liveCloudBindings } from '../deviceBinding/cloud';
 import * as Log from '../log';
 import type { NavigatePlatform } from '../navigate/device';
@@ -45,11 +49,18 @@ import {
   type DevServerSource,
 } from './devServer';
 import { discoverDevServerAsync } from './discoverDevServer';
-import { emptyScopeError, noAppConnectedError, reachTheAppLadder, withData } from './scopeRefusal';
+import {
+  bundleNotRunError,
+  emptyScopeError,
+  noAppConnectedError,
+  reachTheAppLadder,
+  withData,
+} from './scopeRefusal';
 import {
   skippedAppsOf,
   describeSkippedApps,
   describeSelectedDevice,
+  classifyTargets,
   EMPTY_DEVICE_INVENTORY,
   READ_EVERY_TARGET,
   type DeviceInventory,
@@ -99,6 +110,13 @@ export interface RuntimeConnection {
   targets: CdpTarget[];
   /** Connected targets classified once for every reader of this connection. */
   classifiedTargets: ClassifiedTargets;
+  /**
+   * Own targets whose bundle ran, or whose runtime cannot say (llp/0005 §The bundle state).
+   * Probed only for `debugger-target`; for the other needs it is every own target.
+   */
+  attached: CdpTarget[];
+  /** Own targets whose bundle has not run. Empty when nothing was probed. */
+  loading: CdpTarget[];
   /** The platform and device this command intends to read. */
   targetSelection: TargetSelection;
   /** Known devices and worktree bindings used to classify {@link targets} for {@link targetSelection}. */
@@ -224,6 +242,8 @@ export async function preflightRuntimeAsync(
         ...found,
         targets: [],
         classifiedTargets: { read: [], otherPlatform: [], undetermined: [], skipped: [] },
+        attached: [],
+        loading: [],
         targetSelection: READ_EVERY_TARGET,
         deviceInventory: knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY,
       };
@@ -238,22 +258,18 @@ export async function preflightRuntimeAsync(
     });
   }
 
-  const { targetSelection, deviceInventory, classifiedTargets } = await resolveTargetSelectionAsync(
-    {
-      projectRoot: context.projectRoot ?? null,
-      flags: { platform, eas: cloud },
-      targets,
-      deviceInventory: knownDeviceInventory,
-      devServerUrl: url,
-    }
-  );
-  const base: RuntimeConnection = {
-    ...found,
+  const resolved = await resolveTargetSelectionAsync({
+    projectRoot: context.projectRoot ?? null,
+    flags: { platform, eas: cloud },
     targets,
-    classifiedTargets,
-    targetSelection,
-    deviceInventory,
-  };
+    deviceInventory: knownDeviceInventory,
+    devServerUrl: url,
+  });
+  const { targetSelection, deviceInventory } = resolved;
+  const observed = await observeAppsAsync(need, url, targets, resolved, retryBudgetMs, cloud);
+  targets = observed.targets;
+  const { classifiedTargets } = observed;
+  const base: RuntimeConnection = { ...found, ...observed, targetSelection, deviceInventory };
 
   if (need === 'debugger-target' && targets.length === 0) {
     throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
@@ -283,6 +299,45 @@ export async function preflightRuntimeAsync(
     Log.progress(describeSkippedApps(skipped));
   }
   return base;
+}
+
+/**
+ * The own targets split by bundle state, for a command that needs a debugger target; every own
+ * target is attached for the others. While every own target is loading, list and probe again
+ * inside the budget, then refuse (llp/0005 §The bundle state).
+ */
+async function observeAppsAsync(
+  need: RuntimeNeed,
+  url: string,
+  targets: CdpTarget[],
+  { targetSelection, deviceInventory, classifiedTargets }: ResolvedTargetSelection,
+  budgetMs: number,
+  cloud: boolean
+): Promise<Pick<RuntimeConnection, 'targets' | 'classifiedTargets' | 'attached' | 'loading'>> {
+  if (need !== 'debugger-target') {
+    return { targets, classifiedTargets, attached: classifiedTargets.read, loading: [] };
+  }
+  let apps = await attachedAppsAsync(classifiedTargets.read);
+  const deadline = Date.now() + budgetMs;
+  while (apps.attached.length === 0 && apps.loading.length > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
+    const probe = await probeDevServerAsync(url);
+    if (!probe.reachable) break;
+    targets = probe.targets;
+    classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
+    apps = await attachedAppsAsync(classifiedTargets.read);
+  }
+  if (apps.attached.length === 0 && apps.loading.length > 0) {
+    throw bundleNotRunError({
+      devServerUrl: url,
+      loading: apps.loading.length,
+      debuggerTargets: targets.length,
+      retryMs: budgetMs,
+      cloud,
+      platform: targetSelection.platform?.value,
+    });
+  }
+  return { targets, classifiedTargets, ...apps };
 }
 
 /** A local binding outranks a live session of this worktree; only --eas reads the session. */

@@ -111,6 +111,44 @@ export function noAppConnectedError({
 }
 
 /**
+ * Every own app is listed and its bundle has not run: it is still loading, or the load failed.
+ *
+ * Exit 22, like an empty list: asking again can change the answer.
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state
+ */
+export function bundleNotRunError({
+  devServerUrl,
+  loading,
+  debuggerTargets,
+  retryMs,
+  cloud = false,
+  platform,
+}: {
+  devServerUrl: string;
+  /** How many own apps are loading. */
+  loading: number;
+  /** How many targets the dev server listed. */
+  debuggerTargets: number;
+  retryMs: number;
+  cloud?: boolean;
+  platform?: NavigatePlatform;
+}): CommandError {
+  const smoke = `${PROGRAM_PREFIX} smoke --${platform ?? hostPlatform()}${cloud ? ' --eas' : ''}`;
+  const apps = loading === 1 ? 'The app' : `${loading} apps`;
+  const error = new CommandError(
+    'APP_BUNDLE_NOT_RUN',
+    [
+      `${apps} on the Expo dev server at ${devServerUrl} ${loading === 1 ? 'is' : 'are'} loading: the JavaScript bundle has not run, so there is no app code to read.`,
+      `Why: the debugger target is listed, but "typeof globalThis.__r" was not "function"${retryMs > 0 ? `, and it was still not ${retryMs}ms later` : ''}. The app is still downloading its bundle, or the download failed.`,
+      `How: run "${smoke}", which checks that the bundle compiles and waits for the app. Run "${PROGRAM_PREFIX} dev:logs" to see a bundling error. Then run this command again.`,
+    ].join('\n')
+  );
+  error.exitCode = EXIT_OUTCOME_TIMEOUT;
+  error.suggestedCommand = smoke;
+  return withData(error, { devServerUrl, devServerReachable: true, debuggerTargets, platform });
+}
+
+/**
  * The failure for an EAS Simulator session with no platform flag whose app nothing places.
  *
  * Two or more unclaimed apps leave no way to say which one is the session's, and a device tool that

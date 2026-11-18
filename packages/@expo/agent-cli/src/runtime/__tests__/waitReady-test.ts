@@ -23,6 +23,9 @@ import {
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
 // A target nothing places makes the attachment wait ask the device tools; they answer nothing here.
+vi.mock('../bundleState', () => ({
+  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
+}));
 vi.mock('../../utils/spawnCapture', () => ({
   spawnCaptureAsync: vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: '' })),
 }));

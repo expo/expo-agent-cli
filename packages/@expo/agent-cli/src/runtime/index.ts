@@ -17,6 +17,7 @@ const SHARED_RUNTIME_OPTIONS = [
 const RUNTIME_CONNECTION_NOTE = [
   `Needs a dev server with the app connected to it. Without either, exit 1 with NO_DEV_SERVER`,
   `or NO_APP_CONNECTED: run "${PROGRAM_PREFIX} dev --ios|--android --detach", then "${PROGRAM_PREFIX} navigate /".`,
+  `An app whose JS bundle has not run is loading: exit 22 with APP_BUNDLE_NOT_RUN.`,
 ];
 
 export const runtimeEvalHelp: CommandHelp = {

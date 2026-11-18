@@ -41,6 +41,9 @@ import { buildSmokeDeps, cleanupLeft } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
+vi.mock('../../runtime/bundleState', () => ({
+  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
+}));
 vi.mock('../../log');
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),

@@ -142,7 +142,7 @@ async function openAppAsync(
   },
   context: RuntimeContext
 ): Promise<OpenApp> {
-  const { devServerUrl, targetSelection, deviceInventory, classifiedTargets } =
+  const { devServerUrl, targetSelection, deviceInventory, classifiedTargets, loading } =
     await preflightRuntimeAsync(
       { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
       context
@@ -193,7 +193,12 @@ async function openAppAsync(
 
   return {
     devServerUrl,
-    client: new CdpClient({ metroUrl: devServerUrl, targetSelection, deviceInventory }),
+    client: new CdpClient({
+      metroUrl: devServerUrl,
+      targetSelection,
+      deviceInventory,
+      loadingTargetIds: loading.map((target) => target.id),
+    }),
     bundle: json,
     refusal,
   };

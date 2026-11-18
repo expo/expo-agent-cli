@@ -209,6 +209,13 @@ export interface CdpClientOptions {
   targetSelection: TargetSelection;
   /** What this machine's device tools reported, for placing targets in {@link targetSelection}. */
   deviceInventory: DeviceInventory;
+  /**
+   * Targets the preflight found loading (llp/0005 §The bundle state). The client never picks one.
+   *
+   * A deny list rather than the attached ids: a reload gives the app a new page id, and an allow
+   * list read before the reload would leave no target to pick in the reconnect window (F39).
+   */
+  loadingTargetIds?: readonly string[];
 }
 
 /** How often the target list is re-read while {@link CdpClientOptions.targetRetryMs} runs. */
@@ -252,6 +259,7 @@ export class CdpClient {
     // Re-read the list rather than re-run the selector over the same array: what changes during a
     // reconnect is which targets the dev server lists, not what this can make of a given one.
     const deadline = Date.now() + (this.options.targetRetryMs ?? 0);
+    const loading = new Set(this.options.loadingTargetIds);
     let target: CdpTarget | null = null;
     let classifiedTargets: ClassifiedTargets;
     for (;;) {
@@ -260,7 +268,7 @@ export class CdpClient {
         this.options.targetSelection,
         this.options.deviceInventory
       );
-      target = await selector(classifiedTargets.read);
+      target = await selector(classifiedTargets.read.filter((each) => !loading.has(each.id)));
       this.options.signal?.throwIfAborted();
       if (target || Date.now() >= deadline) {
         break;

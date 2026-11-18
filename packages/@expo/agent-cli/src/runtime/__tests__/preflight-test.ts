@@ -12,6 +12,9 @@ import { makeDeviceInventory } from './targetSelectionFixtures';
 import { mockDevServer } from './fakeDevServer';
 
 vi.mock('../../log');
+vi.mock('../bundleState', () => ({
+  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
+}));
 // `xcrun simctl list devices` answers with these booted simulators, none by default, and
 // `adb get-state` with an emulator that is up; every other tool fails to run.
 let bootedSimulators: { udid: string; name: string }[] = [];
@@ -75,6 +78,8 @@ describe(preflightRuntimeAsync, () => {
       reachable: true,
       targets: [TARGET],
       classifiedTargets: { read: [TARGET], otherPlatform: [], undetermined: [], skipped: [] },
+      attached: [TARGET],
+      loading: [],
     });
   });
 

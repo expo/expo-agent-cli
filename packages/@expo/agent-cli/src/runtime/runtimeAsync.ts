@@ -52,7 +52,7 @@ export async function runtimeEvalAsync(
   // One preflight, one read of the target list (`./preflight`): the dev server, the app and the
   // device facts come back together, so the platform this command was told about is the platform
   // of the app it reads and the two steps cannot disagree about which app that is (F51).
-  const { devServerUrl, targetSelection, deviceInventory } = await preflightRuntimeAsync(
+  const { devServerUrl, targetSelection, deviceInventory, loading } = await preflightRuntimeAsync(
     { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
     context
   );
@@ -63,6 +63,7 @@ export async function runtimeEvalAsync(
       metroUrl: devServerUrl,
       targetSelection,
       deviceInventory,
+      loadingTargetIds: loading.map((target) => target.id),
     }).evaluateAsync(expression, {
       awaitPromise,
       timeoutMs,
@@ -245,6 +246,7 @@ export async function runtimeErrorsAsync(
     targetRetryMs: APP_RECONNECT_GRACE_MS,
     targetSelection,
     deviceInventory,
+    loadingTargetIds: connection.loading.map((target) => target.id),
   });
   try {
     errors = await collector.collectAsync();
