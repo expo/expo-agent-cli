@@ -1,6 +1,9 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
 //
 // The runs where `runtime:reload` climbs, or cannot climb, to rung 2: the relaunch.
+import fs from 'node:fs';
+import path from 'node:path';
+
 import {
   executeAgentCliAsync,
   holdLockForAsync,
@@ -18,6 +21,125 @@ import { type ReloadResultJson } from '../../src/runtime/reload/reloadAsync';
 import { EXPO_GO_TARGET, installNoDeviceXcrunAsync } from './reloadFixtures';
 
 describe('runtime:reload climbs to the relaunch', () => {
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads. The app reconnects to the command
+  // socket after the broadcast and never fetches the bundle [observed — live-cloud CI, Android dev
+  // build, 2026-11-11]. The run climbs to the relaunch, and the churn proves nothing after it.
+  // One platform: the climb reads no platform, and the relaunch on each is tested elsewhere.
+  it.each([
+    {
+      relaunch: 'works',
+      installXcrunAsync: (root: string) =>
+        installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] }),
+      exitCode: 0,
+      verifiedBy: 'app-relaunch',
+      stderr: null,
+    },
+    {
+      relaunch: 'finds no device',
+      installXcrunAsync: (root: string) => installNoDeviceXcrunAsync(root),
+      exitCode: 22,
+      verifiedBy: null,
+      stderr: null,
+    },
+    {
+      // The stop works and the link is refused, so the app is left closed.
+      relaunch: 'is refused after the stop',
+      installXcrunAsync: (root: string) =>
+        installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR], expoGoMissing: true }),
+      exitCode: 22,
+      verifiedBy: null,
+      stderr: 'The app was left closed',
+    },
+  ])(
+    'climbs when the app reconnects after the broadcast and fetches no bundle: the relaunch $relaunch',
+    async ({ relaunch, installXcrunAsync, exitCode, verifiedBy, stderr }) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const logPath = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+      await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
+      await fs.promises.writeFile(logPath, 'Starting Metro Bundler\n');
+      const started = appStartedMarkerPath(projectRoot);
+      let fetched = false;
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        // A relaunched app registers under the page id it had and fetches its bundle.
+        targets: () => {
+          if (!fetched && fs.existsSync(started)) {
+            fetched = true;
+            fs.appendFileSync(
+              logPath,
+              'iOS Bundled 25ms node_modules/expo-router/entry.js (1 module)\n'
+            );
+          }
+          return [EXPO_GO_TARGET];
+        },
+        messageSocket: 'v2',
+        reloadTargets: 'stale',
+      });
+      const releaseLock = await holdLockForAsync(projectRoot, stub);
+      await installXcrunAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['runtime:reload', '--ios', '--timeout', '25s', '--json'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+
+        expect(result.exitCode, result.all).toBe(exitCode);
+        const report: ReloadResultJson = JSON.parse(result.stdout);
+        expect(report.commandSocketChurn.reconnected).toBe(1);
+        expect(report.verifiedBy).toBe(verifiedBy);
+        expect(report.attempts.map(({ method, ok }) => ({ method, ok }))).toEqual([
+          { method: 'dev-server', ok: false },
+          { method: 'device', ok: relaunch === 'works' },
+        ]);
+        expect(report.attempts[0]!.reason).toContain('within 10000ms');
+        if (stderr != null) {
+          expect(result.stderr).toContain(stderr);
+        }
+      } finally {
+        releaseLock();
+        await stub.close();
+      }
+    }
+  );
+
+  // A broadcast keeps the page id [observed — SDK 58 development build, RN 0.88, iOS 26.4
+  // simulator, 2026-11-18]. With no captured dev server log nothing can show the app back, so
+  // the churn stays the proof and the app is not force-stopped.
+  it('does not relaunch after churn when no dev server log is captured', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [EXPO_GO_TARGET],
+      messageSocket: 'v2',
+      reloadTargets: 'stale',
+    });
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:reload', '--ios', '--timeout', '4s', '--json'],
+        { env: stubExpoEnv(projectRoot), reject: false }
+      );
+
+      expect(result.exitCode, result.all).toBe(22);
+      const report: ReloadResultJson = JSON.parse(result.stdout);
+      expect(report.verifiedBy).toBe('message-socket-peers');
+      expect(report.attempts.map(({ method, ok }) => ({ method, ok }))).toEqual([
+        { method: 'dev-server', ok: true },
+      ]);
+      expect(readXcrun().some((call) => call[1] === 'terminate')).toBe(false);
+    } finally {
+      releaseLock();
+      await stub.close();
+    }
+  });
+
   it('falls back to stopping the app on the device when no app is connected', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({

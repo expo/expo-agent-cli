@@ -2,7 +2,13 @@
 import type { CdpTarget } from '../../cdpClient';
 import { classifyTargets, READ_EVERY_TARGET, type TargetSelection } from '../../targetSelection';
 import { makeDeviceInventory } from '../../__tests__/targetSelectionFixtures';
-import { CHURN_NOT_ASKED, rungOnePolicy, settleRungOne, type RungOneOutcome } from '../rungOne';
+import {
+  CHURN_NOT_ASKED,
+  followChurnAsync,
+  rungOnePolicy,
+  settleRungOne,
+  type RungOneOutcome,
+} from '../rungOne';
 
 const CLONE = 'agent-cli c4ed0a60';
 const deviceInventory = makeDeviceInventory({
@@ -152,5 +158,105 @@ describe('what rung 1 leaves for the rest of the run', () => {
     },
   ])('$outcome.kind', ({ outcome, settled }) => {
     expect(settleRungOne(outcome)).toEqual(settled);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — churn proves the app acted, not that it
+// came back.
+describe('what follows churn under auto', () => {
+  const attempt = {
+    method: 'dev-server' as const,
+    ok: true,
+    reason: 'reconnected',
+    leftAppStopped: null,
+  };
+  const base = { attempt, churn: CHURN_NOT_ASKED };
+  const churn: RungOneOutcome = { ...base, kind: 'proved', proof: 'message-socket-peers' };
+
+  it.each<{
+    name: string;
+    outcome: RungOneOutcome;
+    remainingMs: number;
+    cameBack: boolean;
+    bundleWatched?: boolean;
+    windowMs: number | null;
+    kind: RungOneOutcome['kind'];
+  }>([
+    {
+      name: 'caps the window at 10 s',
+      outcome: churn,
+      remainingMs: 30_000,
+      cameBack: false,
+      windowMs: 10_000,
+      kind: 'delivered',
+    },
+    {
+      name: 'leaves the relaunch half of a short budget',
+      outcome: churn,
+      remainingMs: 8_000,
+      cameBack: false,
+      windowMs: 4_000,
+      kind: 'delivered',
+    },
+    {
+      name: 'keeps churn the app came back after',
+      outcome: churn,
+      remainingMs: 30_000,
+      cameBack: true,
+      windowMs: 10_000,
+      kind: 'proved',
+    },
+    {
+      name: 'opens no window when too little time is left for a relaunch after it',
+      outcome: churn,
+      remainingMs: 1_500,
+      cameBack: false,
+      windowMs: null,
+      kind: 'proved',
+    },
+    {
+      // A broadcast keeps the page id [observed — SDK 58 development build, RN 0.88, iOS 26.4
+      // simulator, 2026-11-18], so with no captured log nothing could show the app back.
+      name: 'opens no window when no bundle can be watched',
+      outcome: churn,
+      remainingMs: 30_000,
+      cameBack: false,
+      bundleWatched: false,
+      windowMs: null,
+      kind: 'proved',
+    },
+    {
+      name: 'does not follow a replaced context',
+      outcome: { ...base, kind: 'proved', proof: 'debugger-context-replaced' },
+      remainingMs: 30_000,
+      cameBack: false,
+      windowMs: null,
+      kind: 'proved',
+    },
+    {
+      name: 'does not follow an acted broadcast',
+      outcome: { ...base, kind: 'acted', reachedOutside: 1 },
+      remainingMs: 30_000,
+      cameBack: false,
+      windowMs: null,
+      kind: 'acted',
+    },
+  ])('$name', async ({ outcome, remainingMs, cameBack, bundleWatched = true, windowMs, kind }) => {
+    const asked: number[] = [];
+    const followed = await followChurnAsync(outcome, {
+      remainingMs,
+      bundleWatched,
+      cameBackAsync: async (timeoutMs) => {
+        asked.push(timeoutMs);
+        return cameBack;
+      },
+    });
+
+    expect(asked).toEqual(windowMs == null ? [] : [windowMs]);
+    expect(followed.kind).toBe(kind);
+    if (followed.kind === 'delivered') {
+      expect(followed.attempt).toMatchObject({ ok: false, delivered: true });
+      expect(followed.attempt.reason).toContain(`within ${windowMs}ms`);
+    }
   });
 });
