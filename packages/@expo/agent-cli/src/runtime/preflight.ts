@@ -110,13 +110,6 @@ export interface RuntimeConnection {
   targets: CdpTarget[];
   /** Connected targets classified once for every reader of this connection. */
   classifiedTargets: ClassifiedTargets;
-  /**
-   * Own targets whose bundle ran, or whose runtime cannot say (llp/0005 §The bundle state).
-   * Probed only for `debugger-target`; for the other needs it is every own target.
-   */
-  attached: CdpTarget[];
-  /** Own targets whose bundle has not run. Empty when nothing was probed. */
-  loading: CdpTarget[];
   /** The platform and device this command intends to read. */
   targetSelection: TargetSelection;
   /** Known devices and worktree bindings used to classify {@link targets} for {@link targetSelection}. */
@@ -209,48 +202,36 @@ export async function preflightRuntimeAsync(
   });
   const url = normalizeDevServerUrl(discovery.devServerUrl);
 
-  let reachable = discovery.reachable;
-  let targets = discovery.targets;
-  let unreachableReason = discovery.reason ?? null;
-
-  // Only an empty list is worth asking again about: an unreachable dev server does not become
-  // reachable by re-reading it within three seconds, and a list with something in it is an answer.
-  if (reachable && targets.length === 0 && retryBudgetMs > 0) {
-    const deadline = Date.now() + retryBudgetMs;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
-      const probe = await probeDevServerAsync(url);
-      reachable = probe.reachable;
-      targets = probe.targets;
-      unreachableReason = probe.reason ?? null;
-      if (!reachable || targets.length > 0) {
-        break;
-      }
-    }
-  }
-
-  const found = {
-    devServerUrl: url,
-    devServerSource: discovery.source,
-    named,
-    reachable,
-    unreachableReason: reachable ? null : unreachableReason,
-  };
-  if (!reachable) {
+  const observed = await observeAsync({
+    need,
+    url,
+    first: discovery,
+    deadline: Date.now() + retryBudgetMs,
+    resolveAsync: (targets) =>
+      resolveTargetSelectionAsync({
+        projectRoot: context.projectRoot ?? null,
+        flags: { platform, eas: cloud },
+        targets,
+        deviceInventory: knownDeviceInventory,
+        devServerUrl: url,
+      }),
+  });
+  const found = { devServerUrl: url, devServerSource: discovery.source, named };
+  if (!observed.reachable) {
     if (need === 'optional') {
       return {
         ...found,
+        reachable: false,
+        unreachableReason: observed.unreachableReason,
         targets: [],
         classifiedTargets: { read: [], otherPlatform: [], undetermined: [], skipped: [] },
-        attached: [],
-        loading: [],
         targetSelection: READ_EVERY_TARGET,
         deviceInventory: knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY,
       };
     }
     throw noDevServerError({
       devServerUrl: url,
-      reason: unreachableReason,
+      reason: observed.unreachableReason,
       named,
       cloud,
       platform,
@@ -258,18 +239,17 @@ export async function preflightRuntimeAsync(
     });
   }
 
-  const resolved = await resolveTargetSelectionAsync({
-    projectRoot: context.projectRoot ?? null,
-    flags: { platform, eas: cloud },
+  const { targets, classifiedTargets, loading } = observed;
+  const { targetSelection, deviceInventory } = observed.resolved;
+  const base: RuntimeConnection = {
+    ...found,
+    reachable: true,
+    unreachableReason: null,
     targets,
-    deviceInventory: knownDeviceInventory,
-    devServerUrl: url,
-  });
-  const { targetSelection, deviceInventory } = resolved;
-  const observed = await observeAppsAsync(need, url, targets, resolved, retryBudgetMs, cloud);
-  targets = observed.targets;
-  const { classifiedTargets } = observed;
-  const base: RuntimeConnection = { ...found, ...observed, targetSelection, deviceInventory };
+    classifiedTargets,
+    targetSelection,
+    deviceInventory,
+  };
 
   if (need === 'debugger-target' && targets.length === 0) {
     throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
@@ -284,6 +264,16 @@ export async function preflightRuntimeAsync(
       targetSelection,
       context.projectRoot
     );
+  }
+  if (loading != null) {
+    throw bundleNotRunError({
+      devServerUrl: url,
+      loading: loading.count,
+      debuggerTargets: targets.length,
+      retryMs: Date.now() - loading.since,
+      cloud,
+      platform: targetSelection.platform?.value,
+    });
   }
   if (
     targetSelection.bound &&
@@ -302,42 +292,85 @@ export async function preflightRuntimeAsync(
 }
 
 /**
- * The own targets split by bundle state, for a command that needs a debugger target; every own
- * target is attached for the others. While every own target is loading, list and probe again
- * inside the budget, then refuse (llp/0005 §The bundle state).
+ * Read the list until it is an answer, inside one budget. Two states are worth asking again about:
+ * an empty list, and own apps that are all loading (llp/0005 §The bundle state). An unreachable dev
+ * server does not become reachable by re-reading it within three seconds, and any other list is an
+ * answer.
  */
-async function observeAppsAsync(
-  need: RuntimeNeed,
-  url: string,
-  targets: CdpTarget[],
-  { targetSelection, deviceInventory, classifiedTargets }: ResolvedTargetSelection,
-  budgetMs: number,
-  cloud: boolean
-): Promise<Pick<RuntimeConnection, 'targets' | 'classifiedTargets' | 'attached' | 'loading'>> {
-  if (need !== 'debugger-target') {
-    return { targets, classifiedTargets, attached: classifiedTargets.read, loading: [] };
-  }
-  let apps = await attachedAppsAsync(classifiedTargets.read);
-  const deadline = Date.now() + budgetMs;
-  while (apps.attached.length === 0 && apps.loading.length > 0 && Date.now() < deadline) {
+async function observeAsync({
+  need,
+  url,
+  first,
+  deadline,
+  resolveAsync,
+}: {
+  need: RuntimeNeed;
+  url: string;
+  first: { reachable: boolean; targets: CdpTarget[]; reason?: string | null };
+  deadline: number;
+  resolveAsync: (targets: CdpTarget[]) => Promise<ResolvedTargetSelection>;
+}): Promise<
+  | { reachable: false; unreachableReason: string | null; targets: CdpTarget[] }
+  | {
+      reachable: true;
+      targets: CdpTarget[];
+      resolved: ResolvedTargetSelection;
+      classifiedTargets: ClassifiedTargets;
+      loading: { count: number; since: number } | null;
+    }
+> {
+  let reachable = first.reachable;
+  let targets = first.targets;
+  let unreachableReason = first.reason ?? null;
+  let resolved: ResolvedTargetSelection | null = null;
+  let classifiedTargets: ClassifiedTargets | null = null;
+  // Set while every own app is loading: how many, and since when.
+  let loading: { count: number; since: number } | null = null;
+  for (;;) {
+    const loadingSince: number = loading?.since ?? Date.now();
+    loading = null;
+    classifiedTargets = null;
+    if (reachable && targets.length > 0) {
+      if (resolved == null) {
+        resolved = await resolveAsync(targets);
+        classifiedTargets = resolved.classifiedTargets;
+      } else {
+        classifiedTargets = classifyTargets(
+          targets,
+          resolved.targetSelection,
+          resolved.deviceInventory
+        );
+      }
+      const apps =
+        need === 'debugger-target' && classifiedTargets.read.length > 0
+          ? await attachedAppsAsync(classifiedTargets.read, { deadline })
+          : null;
+      if (apps != null && apps.attached.length === 0) {
+        loading = { count: apps.loading.length, since: loadingSince };
+      }
+    }
+    const empty = reachable && targets.length === 0;
+    if ((!empty && loading == null) || Date.now() >= deadline) {
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
     const probe = await probeDevServerAsync(url);
-    if (!probe.reachable) break;
+    reachable = probe.reachable;
     targets = probe.targets;
-    classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
-    apps = await attachedAppsAsync(classifiedTargets.read);
+    unreachableReason = probe.reason ?? null;
   }
-  if (apps.attached.length === 0 && apps.loading.length > 0) {
-    throw bundleNotRunError({
-      devServerUrl: url,
-      loading: apps.loading.length,
-      debuggerTargets: targets.length,
-      retryMs: budgetMs,
-      cloud,
-      platform: targetSelection.platform?.value,
-    });
+  if (!reachable) {
+    return { reachable, unreachableReason, targets };
   }
-  return { targets, classifiedTargets, ...apps };
+  // An empty list ends the loop with no read of the device tools; read them now, as for any list.
+  resolved ??= await resolveAsync(targets);
+  return {
+    reachable,
+    targets,
+    resolved,
+    classifiedTargets: classifiedTargets ?? resolved.classifiedTargets,
+    loading,
+  };
 }
 
 /** A local binding outranks a live session of this worktree; only --eas reads the session. */

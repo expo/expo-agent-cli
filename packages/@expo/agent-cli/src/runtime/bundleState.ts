@@ -1,43 +1,41 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state
 import type { WebSocket } from 'ws';
 
-import { evaluateJsFromCdpAsync, type CdpTarget } from './cdpClient';
+import { probeTargetAsync, type CdpTarget } from './cdpClient';
 
-export type BundleState = 'ran' | 'not-run' | 'unknown';
-
-/** Own targets split by bundle state. `unknown` counts as attached. */
+/** Own targets split by bundle state. A target that cannot say counts as attached. */
 export interface AttachedApps {
   attached: CdpTarget[];
   loading: CdpTarget[];
 }
 
-export const BUNDLE_STATE_EXPRESSION = 'typeof globalThis.__r';
-
 const PROBE_TIMEOUT_MS = 2000;
+/** The least a probe gets near a deadline: a probe that times out says nothing. */
+const PROBE_FLOOR_MS = 250;
 
-/** The state for what the probe resolved to: a string, or undefined for any other value. */
-export function bundleStateOf(answer: string | undefined): BundleState {
-  if (answer === undefined) return 'unknown';
-  return answer === 'function' ? 'ran' : 'not-run';
-}
-
-/** One evaluate per target, in parallel. Never throws. */
+/**
+ * One probe per target, in parallel. Never throws.
+ *
+ * @param options.deadline caps each probe at the time left, so a wait ends near its deadline.
+ */
 export async function attachedAppsAsync(
   read: readonly CdpTarget[],
-  options: { timeoutMs?: number; createWebSocket?: (url: string) => WebSocket } = {}
+  options: { deadline?: number; createWebSocket?: (url: string) => WebSocket } = {}
 ): Promise<AttachedApps> {
-  const states = await Promise.all(
+  const timeoutMs =
+    options.deadline == null
+      ? PROBE_TIMEOUT_MS
+      : Math.min(PROBE_TIMEOUT_MS, Math.max(PROBE_FLOOR_MS, options.deadline - Date.now()));
+  const probes = await Promise.all(
     read.map((target) =>
-      evaluateJsFromCdpAsync(
-        target.webSocketDebuggerUrl,
-        BUNDLE_STATE_EXPRESSION,
-        options.timeoutMs ?? PROBE_TIMEOUT_MS,
-        options
-      ).then(bundleStateOf, (): BundleState => 'unknown')
+      probeTargetAsync(target.webSocketDebuggerUrl, {
+        timeoutMs,
+        createWebSocket: options.createWebSocket,
+      })
     )
   );
   return {
-    attached: read.filter((_, index) => states[index] !== 'not-run'),
-    loading: read.filter((_, index) => states[index] === 'not-run'),
+    attached: read.filter((_, index) => probes[index] !== 'not-run'),
+    loading: read.filter((_, index) => probes[index] === 'not-run'),
   };
 }

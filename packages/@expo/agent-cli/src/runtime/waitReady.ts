@@ -379,7 +379,7 @@ export async function waitForAppConnectionAsync(
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
     const classifiedTargets = await classify(probe.targets, deadline);
-    const { attached, loading } = await attachedAppsAsync(classifiedTargets.read);
+    const { attached, loading } = await attachedAppsAsync(classifiedTargets.read, { deadline });
     const counted = attached.length;
     const extra = {
       loadingApps: loading.length,

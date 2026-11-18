@@ -6,6 +6,7 @@ import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { SIMCTL_TIMEOUT_MS } from '../../device/simulators';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { APP_RECONNECT_GRACE_MS } from '../devServer';
+import { attachedAppsAsync } from '../bundleState';
 import { preflightRuntimeAsync } from '../preflight';
 import { reachTheAppLadder } from '../scopeRefusal';
 import { makeDeviceInventory } from './targetSelectionFixtures';
@@ -78,8 +79,6 @@ describe(preflightRuntimeAsync, () => {
       reachable: true,
       targets: [TARGET],
       classifiedTargets: { read: [TARGET], otherPlatform: [], undetermined: [], skipped: [] },
-      attached: [TARGET],
-      loading: [],
     });
   });
 
@@ -238,6 +237,35 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
     }).catch((e) => e);
 
     expect(error.message).toContain('still empty 300ms later');
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state — one budget for both waits.
+  it(`should wait out an empty list and a loading app inside one budget`, async () => {
+    const server = mockDevServer([]);
+    setTimeout(() => server.listing([TARGET]), 500);
+    vi.mocked(attachedAppsAsync).mockImplementation(async (read) => ({
+      attached: [],
+      loading: [...read],
+    }));
+    onTestFinished(() => {
+      vi.mocked(attachedAppsAsync).mockImplementation(async (read) => ({
+        attached: [...read],
+        loading: [],
+      }));
+    });
+    const started = Date.now();
+
+    const error = await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      retryMs: 1000,
+    }).catch((e) => e);
+
+    expect(error.code).toBe('APP_BUNDLE_NOT_RUN');
+    expect(Date.now() - started).toBeLessThan(1500);
+    const waited = Number(/still not (\d+)ms later/.exec(error.message)?.[1]);
+    expect(waited).toBeGreaterThan(0);
+    expect(waited).toBeLessThan(1000);
   });
 
   it(`should refuse only on the dev server for a command that starts an app itself`, async () => {

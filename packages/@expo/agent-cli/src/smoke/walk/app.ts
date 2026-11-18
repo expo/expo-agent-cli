@@ -1,3 +1,4 @@
+import { PROGRAM_PREFIX } from '../../programName';
 import { describeSkippedApps } from '../../runtime/targetSelection';
 import type { AppConnectionResult } from '../../runtime/waitReady';
 import { stopWithPicture } from './capture';
@@ -37,9 +38,16 @@ export async function appStep(walk: PhaseWalk, ready: DeviceReady): Promise<Step
     { bootstrap: () => walk.app.openedByThisRun && walk.coldEnvironment() }
   );
 
-  const { appsConnected, skippedApps } = connection;
+  const { appsConnected, skippedApps, loadingApps } = connection;
   Object.assign(walk.report, { appsConnected, skippedApps });
   if (appsConnected === 0) {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state
+    if (loadingApps > 0) {
+      appendReason(
+        phase,
+        `${loadingApps === 1 ? 'An app is' : `${loadingApps} apps are`} listed on the dev server and ${loadingApps === 1 ? 'its' : 'their'} JavaScript bundle has not run: still loading, or the load failed. Look at the bundle requests with "${PROGRAM_PREFIX} dev:logs".`
+      );
+    }
     return { stop: await noAppExit(walk, phase, refused) };
   }
   return { next: phase };

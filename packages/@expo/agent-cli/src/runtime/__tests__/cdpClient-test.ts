@@ -537,8 +537,8 @@ class FailingWebSocket extends EventEmitter {
 }
 
 type ProbeBehavior =
-  /** The runtime answered; a string value means it asks to be hidden from the inspector. */
-  | { kind: 'answers'; hidden?: boolean }
+  /** The runtime answered the probe: `hidden`, or `typeof globalThis.__r` (default `function`). */
+  | { kind: 'answers'; value?: string }
   /** The runtime answered the request with a JSON-RPC error. */
   | { kind: 'rpcError'; code: number }
   /** The debugger connection never opened. */
@@ -553,8 +553,12 @@ function target(overrides: Partial<CdpTarget>): CdpTarget {
 }
 
 /** A default selector whose probe answers per debugger URL, so no dev server is needed. */
-function selectorWithProbes(behaviors: Record<string, ProbeBehavior>) {
+function selectorWithProbes(
+  behaviors: Record<string, ProbeBehavior>,
+  { pickLoading = false }: { pickLoading?: boolean } = {}
+) {
   return createDefaultTargetSelector({
+    pickLoading,
     createWebSocket: (url) => {
       const behavior = behaviors[url];
       if (behavior?.kind === 'transportError') {
@@ -573,10 +577,10 @@ function selectorWithProbes(behaviors: Record<string, ProbeBehavior>) {
           JSON.stringify({
             id: request.id,
             result: {
-              result:
-                behavior?.kind === 'answers' && behavior.hidden
-                  ? { type: 'string', value: 'true' }
-                  : { type: 'undefined' },
+              result: {
+                type: 'string',
+                value: (behavior?.kind === 'answers' && behavior.value) || 'function',
+              },
             },
           })
         );
@@ -601,11 +605,26 @@ describe(createDefaultTargetSelector, () => {
     const hidden = target({ webSocketDebuggerUrl: 'ws://hidden' });
     const app = target({ webSocketDebuggerUrl: 'ws://app' });
     const selector = selectorWithProbes({
-      'ws://hidden': { kind: 'answers', hidden: true },
+      'ws://hidden': { kind: 'answers', value: 'hidden' },
       'ws://app': { kind: 'answers' },
     });
 
     await expect(selector([hidden, app])).resolves.toBe(app);
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state
+  it.each([
+    [false, 'app'],
+    [true, 'loading'],
+  ] as const)(`with pickLoading %s, picks the %s target`, async (pickLoading, expected) => {
+    const loading = target({ webSocketDebuggerUrl: 'ws://loading' });
+    const app = target({ webSocketDebuggerUrl: 'ws://app' });
+    const selector = selectorWithProbes(
+      { 'ws://loading': { kind: 'answers', value: 'undefined' }, 'ws://app': { kind: 'answers' } },
+      { pickLoading }
+    );
+
+    await expect(selector([loading, app])).resolves.toBe(expected === 'app' ? app : loading);
   });
 
   it(`should skip a target that does not reload natively`, async () => {
@@ -666,7 +685,7 @@ describe(createDefaultTargetSelector, () => {
 
   it(`should return null when every target is skipped`, async () => {
     const hidden = target({ webSocketDebuggerUrl: 'ws://hidden' });
-    const selector = selectorWithProbes({ 'ws://hidden': { kind: 'answers', hidden: true } });
+    const selector = selectorWithProbes({ 'ws://hidden': { kind: 'answers', value: 'hidden' } });
 
     await expect(selector([hidden])).resolves.toBeNull();
     await expect(selector([])).resolves.toBeNull();

@@ -67,7 +67,8 @@ export async function reloadOverRuntimeAsync(
       `no app of this worktree is connected to the dev server, so there is no runtime to ask — this method reloads an app through its debugger and cannot start one`
     );
   }
-  const target = await createDefaultTargetSelector()(own);
+  // A reload is an identity read: a loading app is reloaded too (llp/0005 §The bundle state).
+  const target = await createDefaultTargetSelector({ pickLoading: true })(own);
   if (target == null) {
     return targetProofAttempt('runtime', [], 'no app of this worktree answered over the debugger');
   }

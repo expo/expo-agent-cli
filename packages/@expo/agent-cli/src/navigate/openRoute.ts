@@ -187,17 +187,19 @@ export function attachRecoveryText(recovery: AttachRecovery): RecoveryText {
   return table[String(recovery.wasRunning) as keyof ByWasRunning];
 }
 
+/**
+ * How the app stood when the attach wait ended. `loading`: an own target is listed and its bundle
+ * has not run (llp/0005 §The bundle state). `absent`: no own target is listed.
+ */
+export type AttachState = 'unchecked' | 'attached' | 'loading' | 'absent';
+
 /** Whether the app was seen to connect to the dev server after the link was opened. */
 export interface AttachCheck {
-  /** Whether this run looked at all. False when the caller asked for no wait. */
-  checked: boolean;
   /**
-   * An app on this platform holds a debugger target on this dev server.
-   *
-   * Null exactly when {@link checked} is false. **Never assumed**: a link that was delivered and an
-   * app that is running are different facts, and reporting the first as the second is F50.
+   * `unchecked` when this run did not look. **Never assumed** attached: a link that was delivered
+   * and an app that is running are different facts, and reporting the first as the second is F50.
    */
-  confirmed: boolean | null;
+  state: AttachState;
   /** How long the wait took, in milliseconds. */
   waitedMs: number;
   /** How many attached debugger targets this platform had when the wait ended. */
@@ -212,8 +214,23 @@ export interface AttachCheck {
    * @see AlertCheck — and llp/0005 §Cloud simulator.
    */
   alert: AlertCheck | null;
-  /** Why it is not confirmed, or null when it is. */
+  /** Why it is not attached, or null when it is. */
   reason: string | null;
+}
+
+/** The report's `attached`: null when this run did not look. */
+export function attachConfirmed({ state }: AttachCheck): boolean | null {
+  return state === 'unchecked' ? null : state === 'attached';
+}
+
+/** What the attach waiter counted when it ended. */
+interface AttachCount {
+  targets: number;
+  loading: number;
+}
+
+function attachStateOf({ targets, loading }: AttachCount): Exclude<AttachState, 'unchecked'> {
+  return targets > 0 ? 'attached' : loading > 0 ? 'loading' : 'absent';
 }
 
 /**
@@ -357,7 +374,7 @@ export async function openRouteAsync(
     deviceId: device.deviceId,
     exitCode: result.exitCode,
     reversedPort: reverse?.port ?? null,
-    attached: attach.confirmed,
+    attached: attachConfirmed(attach),
     launchUrl: launch?.url ?? null,
   });
 
@@ -458,7 +475,7 @@ const ROUTE_ATTACH_FLOOR_MS = 2_000;
  * @returns the attached and loading targets this scope had when the wait ended: zero attached
  * means the deadline won.
  */
-type AttachWaiter = (deadline: number) => Promise<{ targets: number; loading: number }>;
+type AttachWaiter = (deadline: number) => Promise<AttachCount>;
 
 /**
  * Read this device's apps: once now, for the decisions before the link, and again on each poll.
@@ -489,7 +506,7 @@ async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDev
         for (;;) {
           const probe = await probeDevServerAsync(devServerUrl);
           const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
-          const { attached, loading } = await attachedAppsAsync(read);
+          const { attached, loading } = await attachedAppsAsync(read, { deadline });
           if (attached.length > 0 || Date.now() >= deadline) {
             return { targets: attached.length, loading: loading.length };
           }
@@ -667,13 +684,14 @@ async function confirmAttachAsync({
 
   const startedAt = Date.now();
 
-  let { targets, loading } = await waitAsync(startedAt + budgetMs);
+  let seen = await waitAsync(startedAt + budgetMs);
   let recovery: AttachRecovery = null;
   let alert: AlertCheck | null = null;
 
   // The cloud recovery, before the Android one: a modal that is never answered blocks whatever the
-  // force-stop-and-relink would do next, so the dialog has to come off the screen first.
-  if (targets === 0 && device.backend === 'cloud') {
+  // force-stop-and-relink would do next, so the dialog has to come off the screen first. A loading
+  // app took the link, so no dialog stands in its way.
+  if (attachStateOf(seen) === 'absent' && device.backend === 'cloud') {
     alert = await resolveOpenDialogAsync({
       sessionId: device.deviceId,
       projectRoot,
@@ -682,7 +700,7 @@ async function confirmAttachAsync({
     });
     debugEvent('attach_alert', { found: alert.found, accepted: alert.accepted });
     if (alert.accepted) {
-      ({ targets, loading } = await waitAsync(Date.now() + budgetMs));
+      seen = await waitAsync(Date.now() + budgetMs);
     }
   }
 
@@ -694,7 +712,7 @@ async function confirmAttachAsync({
   // running it on iOS would restart an app that is merely slow.
   const canRecover = device.platform === 'android' && device.backend !== 'local-ios';
   // A loading app is not stopped: a force-stop throws the download away.
-  if (targets === 0 && loading === 0 && canRecover && options.recoverStuckApp !== false) {
+  if (attachStateOf(seen) === 'absent' && canRecover && options.recoverStuckApp !== false) {
     // This device's read is empty here, so no attached app names the id: `--app-id`, then the app
     // config, then Expo Go. The other apps on the dev server belong to other devices. A run that
     // opened Expo Go stops Expo Go: `android.package` is normal on a managed app that runs in it.
@@ -724,33 +742,34 @@ async function confirmAttachAsync({
         projectRoot,
       });
       recovery = { wasRunning: stopped.wasRunning, reopened: again.exitCode === 0 };
-      if (recovery.reopened) ({ targets, loading } = await waitAsync(Date.now() + budgetMs));
+      if (recovery.reopened) seen = await waitAsync(Date.now() + budgetMs);
     }
   }
 
   const waitedMs = Date.now() - startedAt;
+  const state = attachStateOf(seen);
+  const { targets, loading } = seen;
+  const recoveryReason = attachRecoveryText(recovery).reason;
   return {
-    checked: true,
-    confirmed: targets > 0,
+    state,
     waitedMs,
     targets,
     loading,
     recovery,
     alert,
     reason:
-      targets > 0
+      state === 'attached'
         ? null
-        : loading > 0
-          ? `${loading} ${device.platform} debugger target${loading === 1 ? '' : 's'}, bundle not run after ${waitedMs}ms`
-          : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${attachRecoveryText(recovery).reason}${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
+        : state === 'loading'
+          ? `${loading} ${device.platform} debugger target${loading === 1 ? '' : 's'}, bundle not run after ${waitedMs}ms${recoveryReason}`
+          : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${recoveryReason}${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
   };
 }
 
 /** An attach check that did not look, and why. */
 function uncheckedAttach(reason: string): AttachCheck {
   return {
-    checked: false,
-    confirmed: null,
+    state: 'unchecked',
     waitedMs: 0,
     targets: 0,
     loading: 0,

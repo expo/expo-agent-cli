@@ -24,6 +24,7 @@ import { openInPhrase } from './connectUrl';
 import {
   openRouteAsync,
   type AlertCheck,
+  attachConfirmed,
   attachRecoveryText,
   type OpenRouteResult,
 } from './openRoute';
@@ -205,7 +206,9 @@ export async function navigateAsync(
   // device accepted has a screen to capture, so a refusal carries no follow-up: its own what/why/
   // how below is the next step.
   const followups =
-    opened.exitCode === 0 && opened.attach.confirmed !== false && followUpsEnabled(wantFollowUps)
+    opened.exitCode === 0 &&
+    attachConfirmed(opened.attach) !== false &&
+    followUpsEnabled(wantFollowUps)
       ? buildNavigateFollowUps({
           backend: opened.deviceBackend,
           platform: opened.platform,
@@ -237,7 +240,7 @@ export async function navigateAsync(
   // nothing was proved right". The link was delivered and no app came back, which is exactly that:
   // the device may still be loading a cold bundle, and it may be sitting on an error screen. What
   // it is not is a success, which is what exit 0 said here [friction run 6, F50].
-  if (opened.attach.confirmed === false) {
+  if (attachConfirmed(opened.attach) === false) {
     Log.error(attachNotConfirmed(opened));
     reportFollowUps('navigate', followups, { json });
     return EXIT_OUTCOME_TIMEOUT;
@@ -269,7 +272,7 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
     launch: opened.launch,
     routeCheck: opened.routeCheck,
     reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
-    attached: opened.attach.confirmed,
+    attached: attachConfirmed(opened.attach),
     attachWaitedMs: opened.attach.waitedMs,
     attachRecovered:
       opened.attach.recovery?.reopened === true && opened.attach.recovery.wasRunning === true,
@@ -279,6 +282,24 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
 }
 
 /** The human summary of a run: one line per fact, for stdout. */
+function formatAttach({ attach, platform }: OpenRouteResult): string {
+  switch (attach.state) {
+    case 'attached':
+      return (
+        chalk.green('attached') +
+        chalk.dim(
+          ` · ${attach.targets} ${platform} debugger ${attach.targets === 1 ? 'target' : 'targets'} after ${attach.waitedMs}ms${attachRecoveryText(attach.recovery).success}`
+        )
+      );
+    case 'loading':
+      return chalk.yellow('loading') + chalk.dim(` · ${attach.reason}`);
+    case 'absent':
+      return chalk.red('not attached') + chalk.dim(` · ${attach.reason}`);
+    case 'unchecked':
+      return chalk.dim(`not checked · ${attach.reason}`);
+  }
+}
+
 function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
   // The backend, not only the platform: `Device ios <udid>` reads as a simulator on this desk,
   // and a run that drove an EAS session has to say so on the line a reader scans.
@@ -322,21 +343,7 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
           }}`,
         ]
       : []),
-    chalk`{bold App} ${
-      opened.attach.confirmed === true
-        ? chalk.green('attached') +
-          chalk.dim(
-            ` · ${opened.attach.targets} ${opened.platform} debugger ${
-              opened.attach.targets === 1 ? 'target' : 'targets'
-            } after ${opened.attach.waitedMs}ms${
-              attachRecoveryText(opened.attach.recovery).success
-            }`
-          )
-        : opened.attach.confirmed === false
-          ? (opened.attach.loading > 0 ? chalk.yellow('loading') : chalk.red('not attached')) +
-            chalk.dim(` · ${opened.attach.reason}`)
-          : chalk.dim(`not checked · ${opened.attach.reason}`)
-    }`,
+    chalk`{bold App} ${formatAttach(opened)}`,
     chalk`{bold Route} ${
       opened.routeCheck.ok
         ? `${opened.routeCheck.matched}${chalk.dim(
@@ -515,7 +522,22 @@ function reachLine(hostType: string | null): string {
  * reason: `--platform ios` is a local flag, and a host that reached for a cloud session may have no
  * local device to run it against.
  */
+/** The command that waits for the bundle and shows the screen. */
+function look(opened: OpenRouteResult): string {
+  return `${PROGRAM_PREFIX} smoke --platform ${opened.platform}${opened.deviceBackend === 'cloud' ? ' --eas' : ''} --no-route-check`;
+}
+
 function attachNotConfirmed(opened: OpenRouteResult): string {
+  if (opened.attach.state === 'loading') {
+    return [
+      chalk.red(
+        `The link was opened on the device, and the ${opened.platform} app on ${opened.devServerUrl} was still loading after ${opened.attach.waitedMs}ms: its JavaScript bundle had not run.`
+      ),
+      `Why: the app's debugger target is listed, but "typeof globalThis.__r" was not "function". The app is still downloading its bundle, or the download failed.${opened.attach.recovery == null ? ' A force-stop would throw the download away, so this run did not stop the app.' : attachRecoveryText(opened.attach.recovery).why}`,
+      `How: look at the bundle requests with "${PROGRAM_PREFIX} dev:logs", and wait for the bundle with "${look(opened)}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s.`,
+    ].join('\n');
+  }
+
   const reverseClause =
     opened.reverse?.ran && opened.reverse.ok === false
       ? ` The port forward this link needs did not go in either (${opened.reverse.reason}), so the app had no route back to this machine at all.`
@@ -532,25 +554,11 @@ function attachNotConfirmed(opened: OpenRouteResult): string {
       : cloud
         ? ` On a cloud session the usual cause is a system dialog nothing answered — read it with "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} alert get" and answer it with "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} alert accept".`
         : '';
-  const look = cloud
-    ? `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --eas --no-route-check`
-    : `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --no-route-check`;
-
-  if (opened.attach.loading > 0) {
-    return [
-      chalk.red(
-        `The link was opened on the device, and the ${opened.platform} app on ${opened.devServerUrl} was still loading after ${opened.attach.waitedMs}ms: its JavaScript bundle had not run.`
-      ),
-      `Why: the app's debugger target is listed, but "typeof globalThis.__r" was not "function". The app is still downloading its bundle, or the download failed. A force-stop would throw the download away, so this run did not stop the app.`,
-      `How: look at the bundle requests with "${PROGRAM_PREFIX} dev:logs", and wait for the bundle with "${look}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s.`,
-    ].join('\n');
-  }
-
   return [
     chalk.red(
       `The link was opened on the device, and no ${opened.platform} app connected to ${opened.devServerUrl} within ${opened.attach.waitedMs}ms.`
     ),
     `Why: "${opened.command}" exited 0, which says the device accepted the intent and nothing more — an app that fails to load its bundle sits on an error screen having accepted one.${reverseClause}${attachRecoveryText(opened.attach.recovery).why}${alertClause}`,
-    `How: look at what the dev server was asked for with "${PROGRAM_PREFIX} dev:logs", and at the screen with "${look}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s. Pass --no-wait-attach to report only what the device tool said, which is what this command used to do.${alertHow}`,
+    `How: look at what the dev server was asked for with "${PROGRAM_PREFIX} dev:logs", and at the screen with "${look(opened)}". A first bundle on a cold device can take longer than this wait — raise it with --attach-timeout 90s. Pass --no-wait-attach to report only what the device tool said, which is what this command used to do.${alertHow}`,
   ].join('\n');
 }

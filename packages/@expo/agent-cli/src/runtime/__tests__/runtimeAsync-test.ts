@@ -73,11 +73,7 @@ describe(runtimeEvalAsync, () => {
 
     await expect(runtimeEvalAsync(evalOptions)).resolves.toBe(0);
 
-    expect(CdpClient).toHaveBeenCalledWith({
-      ...EVERY_TARGET_CLIENT,
-      metroUrl: devServerUrl,
-      loadingTargetIds: [],
-    });
+    expect(CdpClient).toHaveBeenCalledWith({ ...EVERY_TARGET_CLIENT, metroUrl: devServerUrl });
     expect(evaluateAsync).toHaveBeenCalledWith('globalThis.count', {
       awaitPromise: true,
       timeoutMs: 5000,
@@ -295,7 +291,6 @@ describe(runtimeErrorsAsync, () => {
       // The reconnect grace period, so the command the CLI names straight after a reload does not
       // read the app's brief invisibility as "there is no app" (friction run 4, F39).
       targetRetryMs: 3000,
-      loadingTargetIds: [],
     });
     expect(printed()).toContain('No runtime errors were reported');
     expect(printed()).not.toContain(UNTRUSTED_OUTPUT_BEGIN);

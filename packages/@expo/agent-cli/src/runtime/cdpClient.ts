@@ -209,13 +209,6 @@ export interface CdpClientOptions {
   targetSelection: TargetSelection;
   /** What this machine's device tools reported, for placing targets in {@link targetSelection}. */
   deviceInventory: DeviceInventory;
-  /**
-   * Targets the preflight found loading (llp/0005 §The bundle state). The client never picks one.
-   *
-   * A deny list rather than the attached ids: a reload gives the app a new page id, and an allow
-   * list read before the reload would leave no target to pick in the reconnect window (F39).
-   */
-  loadingTargetIds?: readonly string[];
 }
 
 /** How often the target list is re-read while {@link CdpClientOptions.targetRetryMs} runs. */
@@ -259,7 +252,6 @@ export class CdpClient {
     // Re-read the list rather than re-run the selector over the same array: what changes during a
     // reconnect is which targets the dev server lists, not what this can make of a given one.
     const deadline = Date.now() + (this.options.targetRetryMs ?? 0);
-    const loading = new Set(this.options.loadingTargetIds);
     let target: CdpTarget | null = null;
     let classifiedTargets: ClassifiedTargets;
     for (;;) {
@@ -268,7 +260,7 @@ export class CdpClient {
         this.options.targetSelection,
         this.options.deviceInventory
       );
-      target = await selector(classifiedTargets.read.filter((each) => !loading.has(each.id)));
+      target = await selector(classifiedTargets.read);
       this.options.signal?.throwIfAborted();
       if (target || Date.now() >= deadline) {
         break;
@@ -644,62 +636,82 @@ export function parseEvaluateResponse(
   };
 }
 
-const HIDE_FROM_INSPECTOR_ENV = 'globalThis.__expo_hide_from_inspector__';
+/**
+ * What one evaluate tells about a target: whether it asks to be hidden from the inspector, and
+ * whether its bundle ran (`typeof globalThis.__r`).
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state
+ */
+export type TargetProbe = 'hidden' | 'ran' | 'not-run' | 'no-evaluate' | 'unreachable';
+
+const TARGET_PROBE_EXPRESSION =
+  "typeof globalThis.__expo_hide_from_inspector__ === 'string' ? 'hidden' : typeof globalThis.__r";
 
 /**
- * Build the default target selector: pick the app page to talk to, which is the first target that
- * reloads natively and does not ask to be hidden from the inspector. Metro also lists stale and
- * internal pages, which would answer with values from a runtime that is no longer on screen.
+ * Ask one target what it is, over a one-shot connection. Never throws.
  *
- * The probe asks the runtime for a global, so it needs `Runtime.evaluate`. A runtime that has no
- * evaluate handler therefore cannot be classified at all, and "cannot classify" must not read as
+ * A runtime with no evaluate handler cannot be classified, and "cannot classify" must not read as
  * "exclude": Expo Go on Android answers `Runtime.evaluate` with `-32601`
- * [observed — Expo Go 57.0.9 on an Android emulator, 2026-08-22], and excluding it made *every*
- * runtime command report "No target found" there, including `runtime:errors`, which never
- * evaluates anything. Such a target is kept as a fallback instead: it is used when no
- * target answered the probe, so a runtime that can be driven still wins when there is one.
+ * [observed — Expo Go 57.0.9 on an Android emulator, 2026-08-22], so it is `no-evaluate`.
+ */
+export async function probeTargetAsync(
+  webSocketDebuggerUrl: string,
+  options: { timeoutMs?: number; createWebSocket?: (url: string) => WebSocket } = {}
+): Promise<TargetProbe> {
+  try {
+    const answer = await evaluateJsFromCdpAsync(
+      webSocketDebuggerUrl,
+      TARGET_PROBE_EXPRESSION,
+      options.timeoutMs,
+      options
+    );
+    if (answer === undefined) return 'no-evaluate';
+    if (answer === 'hidden') return 'hidden';
+    return answer === 'function' ? 'ran' : 'not-run';
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (isMethodNotFoundError(error)) {
+      debugEvent('cdp_target_undetermined', { url: webSocketDebuggerUrl, reason });
+      return 'no-evaluate';
+    }
+    debugEvent('cdp_target_skipped', { url: webSocketDebuggerUrl, reason });
+    return 'unreachable';
+  }
+}
+
+/**
+ * Build the default target selector: pick the app page to talk to. Metro also lists stale and
+ * internal pages, which would answer with values from a runtime that is no longer on screen, and a
+ * loading app has no app code to read.
  *
+ * It takes the first target that reloads natively and whose bundle ran. A target that cannot be
+ * probed (`no-evaluate`) is the fallback, so a runtime that can be driven still wins when there is
+ * one. A hidden, loading or unreachable target is skipped.
+ *
+ * @param options.pickLoading take a loading target like one whose bundle ran: an identity reader
+ * such as a reload acts on a loading app too.
  * @param options.createWebSocket socket factory for the probe, so the probe is injectable in tests
  * and honors a factory the caller passed to {@link CdpClient}.
  */
 export function createDefaultTargetSelector(options?: {
+  pickLoading?: boolean;
   createWebSocket?: (url: string) => WebSocket;
 }): CdpTargetSelector {
   return async (targets) => {
-    const undetermined: CdpTarget[] = [];
-
+    let fallback: CdpTarget | null = null;
     for (const target of targets) {
-      const capabilities = target.reactNative?.capabilities ?? {};
-      if (capabilities.nativePageReloads !== true) {
+      if (target.reactNative?.capabilities?.nativePageReloads !== true) {
         continue;
       }
-      try {
-        const hideFromInspector =
-          (await evaluateJsFromCdpAsync(
-            target.webSocketDebuggerUrl,
-            HIDE_FROM_INSPECTOR_ENV,
-            undefined,
-            options
-          )) !== undefined;
-        if (hideFromInspector) {
-          continue;
-        }
-      } catch (error: unknown) {
-        const reason = error instanceof Error ? error.message : String(error);
-        if (isMethodNotFoundError(error)) {
-          // The runtime is there and healthy, it just cannot answer this question.
-          debugEvent('cdp_target_undetermined', { url: target.webSocketDebuggerUrl, reason });
-          undetermined.push(target);
-          continue;
-        }
-        // A target we cannot reach is skipped, not an error: another target may answer.
-        debugEvent('cdp_target_skipped', { url: target.webSocketDebuggerUrl, reason });
-        continue;
+      const probe = await probeTargetAsync(target.webSocketDebuggerUrl, options);
+      if (probe === 'ran' || (probe === 'not-run' && options?.pickLoading)) {
+        return target;
       }
-      return target;
+      if (probe === 'no-evaluate') {
+        fallback ??= target;
+      }
     }
-
-    return undetermined[0] ?? null;
+    return fallback;
   };
 }
 
