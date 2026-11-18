@@ -571,8 +571,8 @@ describe(isUnstableCommand, () => {
     ),
   ].filter(isUnstableCommand);
 
-  it('is on patch and inspect:config-plugins and on nothing else', () => {
-    expect(marked).toEqual(['patch', 'inspect:config-plugins']);
+  it('is on inspect:config-plugins and on nothing else', () => {
+    expect(marked).toEqual(['inspect:config-plugins']);
   });
 
   it('answers for the colon form, which is what the help prints', () => {

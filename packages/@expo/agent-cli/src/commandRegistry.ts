@@ -48,8 +48,7 @@ export type HelpLoader = () => Promise<CommandHelp>;
  * than as the default.
  *
  * **The mark comes off against a record, not against a feeling** (llp/0016-v1-scope.rfc.md §Experimental is per command).
- * Two commands carry it: `inspect:config-plugins`, and `patch` until its e2e covers all four
- * package managers (llp/0037 §Open questions).
+ * One command carries it: `inspect:config-plugins`.
  */
 export type Unstable = true;
 
@@ -154,7 +153,6 @@ export const topLevelCommands: { [command: string]: TopLevelCommand } = {
     summary: 'Save node_modules edits as a patch',
     load: () => import('./patch').then((i) => i.agentCliPatch),
     help: () => import('./patch').then((i) => i.patchHelp),
-    unstable: true,
   },
   // A capability only this CLI has, so it gets a verb of its own (llp/0006 naming rule).
   smoke: {
