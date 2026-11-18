@@ -26,10 +26,6 @@
 // | `errors`           | `runtime:errors`                 | `CdpRuntimeErrorCollector`  |
 // | `screenshot`       | (new)                            | `captureScreenshotAsync`    |
 //
-// The `bundler-ready`/`bundle`/`app` rows used to be `dev:wait`'s, which the v1 narrowing deferred
-// (llp/0016). The library functions they call are unchanged and still live in `src/runtime/`; only
-// the second command that called them is gone.
-//
 // **The four conditional phases are acts rather than questions**, and that shapes three things
 // (llp/0005 §The run brings its own environment): they are reported only by a run that performed
 // them, they are never charged to `--timeout`, and the ones that hold a resource register the way

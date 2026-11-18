@@ -3,8 +3,8 @@
 // Put the running app back on the code that is on disk, and prove that it went.
 //
 // The friction this exists for [observed — friction run 3, F31, 2026-08-23]: a component threw
-// while rendering. The file on disk was fixed, the served bundle was clean, and `dev:wait` exited
-// 0 — while the simulator showed a blank screen and `runtime:errors --fail-on-error` kept exiting
+// while rendering. The file on disk was fixed, the served bundle was clean, and the entry-bundle
+// check passed — while the simulator showed a blank screen and `runtime:errors --fail-on-error` kept exiting
 // 20 for the *old* error. Every gate in the CLI was asking about the dev server; nothing could see
 // the app's own session. The only recovery was `xcrun simctl terminate` by hand.
 //
@@ -170,7 +170,7 @@ export interface ReloadResultJson {
   /**
    * What building this project's entry bundle answered, before anything was reloaded.
    *
-   * The same object `dev:wait` prints under the same key, because it is the same check
+   * The same object `smoke` prints under the same key, because it is the same check
    * (llp/0010 §Other gates, in brief). `ok: false` is the one answer that stops the command.
    */
   bundle: BundleCheckJson;
@@ -438,7 +438,7 @@ async function preflightAsync(
     bundles.find((entry) => entry.outcome === 'timeout') ??
     bundles[0] ??
     null;
-  // `unknown` passes, the way it does for `dev:wait`: a dev server that answered nothing this CLI
+  // `unknown` passes, the way it does for `smoke`: a dev server that answered nothing this CLI
   // understands has not shown the project to be broken, and a refusal there would stop a reload
   // that would have worked and name no fix.
   const refusal: Preflight['refusal'] =
@@ -709,7 +709,7 @@ async function observeAsync(
 
 /**
  * A bundle that does not compile is `20` and a bundle that was still building is `22`, for the
- * reason llp/0010 gives `dev:wait`: a file with a syntax error in it does not parse on the second
+ * reason llp/0010 gives the entry-bundle check: a file with a syntax error in it does not parse on the second
  * look, and a cold first build really is worth looking at again.
  *
  * Then one rule for every rung (llp/0005 §How it reloads): no mechanism ran is `20`, a mechanism ran
@@ -776,7 +776,7 @@ function buildReport({
       timedOut: connection.timedOut,
       timeoutMs: options.timeoutMs,
     }),
-    // The same flag as `dev:wait`'s, so the reason a null bundle carries is the same sentence
+    // The same flag as `smoke`'s, so the reason a null bundle carries is the same sentence
     // whichever command asked the question (llp/0010 §Other gates, in brief).
     bundle: bundleToJson(bundle, { skippedByFlag: !options.bundleCheck }),
     bundlesAfterReload: {

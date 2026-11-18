@@ -42,8 +42,8 @@ export function smokeResultToJson(
     environment: run.environment,
     appsConnected: run.appsConnected,
     skippedApps: run.skippedApps,
-    // The same object `dev:wait` and `runtime:reload` print, from the same function: one question
-    // asked in three commands must not have three shapes (llp/0010 §Other gates, in brief).
+    // The same object `runtime:reload` prints, from the same function: one question
+    // asked in two commands must not have two shapes (llp/0010 §Other gates, in brief).
     bundle: bundleToJson(run.bundle),
     route: run.route,
     routeCheck:

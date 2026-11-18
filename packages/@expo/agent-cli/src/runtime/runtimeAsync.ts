@@ -312,7 +312,7 @@ export async function runtimeErrorsAsync(
 
   // Collected errors are a report, not a failure of the command: the app was reached and answered,
   // and a window that catches nothing is the common case. `--fail-on-error` is the opt-in for a
-  // caller using this as a gate, which is what `dev:wait` is by default — the two differ because
+  // caller using this as a gate, which is what `smoke` is by default — the two differ because
   // an empty window here means "nothing happened while I watched", not "the app is healthy".
   if (failOnError && errors.length > 0) {
     return EXIT_OUTCOME_FAILED;

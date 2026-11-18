@@ -30,7 +30,7 @@ Anywhere else in the corpus, a thing that is not v1 gets a one-line pointer here
 
 A deferred area's findings that still govern live code stayed in the LLP that made them. Each section below names which and where.
 
-The events stayed too. `cli:dev_wait`, `cli:runtime_network`, `cli:build_wait*` and `cli:doctor_fix_*` are still declared in `src/events.ts`, each annotated with its deferral. A deferral is not a schema change. Nothing emits them now.
+The events left with the code. `cli:dev_wait`, `cli:runtime_network`, `cli:build_wait*` and `cli:doctor_fix_*` are not declared in `src/events.ts`, because nothing emits them. A command that returns declares its events again.
 
 ## dev:wait
 

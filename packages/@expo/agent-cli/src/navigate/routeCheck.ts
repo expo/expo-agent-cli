@@ -2,8 +2,8 @@
 // Deciding whether a route is real before a device is told to open it.
 //
 // The finding this answers [observed — friction run 3, F32, 2026-08-23]: `navigate
-// /totally-bogus-route-xyz` exited 0, and so did `runtime:errors --fail-on-error` and `dev:wait
-// --require-app` after it, while the simulator sat on Expo Router's "Unmatched Route" screen. An
+// /totally-bogus-route-xyz` exited 0, and so did `runtime:errors --fail-on-error` and the entry-bundle
+// check after it, while the simulator sat on Expo Router's "Unmatched Route" screen. An
 // unmatched route is not an error the app *reports* — the router renders a screen for it, which is
 // exactly what it is supposed to do — so no runtime gate can ever see it. The check has to happen
 // before the link is opened, against the route table (`src/project/routes.ts`).
@@ -22,8 +22,8 @@ const MAX_LISTED_ROUTES = 24;
  * Machine shape of the route check, inside `@expo/agent-cli navigate --json`.
  *
  * `checked` is exactly `ok != null` and `reason` is present exactly when `ok` is null, so the
- * three keys read as one fact — the discipline llp/0010 §Other gates, in brief settled
- * for `dev:wait`'s bundle check.
+ * three keys read as one fact — the discipline of the entry-bundle check (llp/0010 §Other gates,
+ * in brief).
  */
 export interface RouteCheckJson {
   /** The route was compared against the project's routes. */

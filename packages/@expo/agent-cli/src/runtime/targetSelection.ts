@@ -31,7 +31,7 @@ export interface DeviceInventory {
   androidReverse: { port: number; serials: string[] } | null;
   /**
    * Every worktree's live local iOS binding, read only for a run in a project. A run with no
-   * project root (`dev:wait`, a `navigate` wait) has no "this worktree", so it reads none.
+   * project root (a `navigate` wait) has no "this worktree", so it reads none.
    */
   iosBindings: LiveIosBinding[];
 }

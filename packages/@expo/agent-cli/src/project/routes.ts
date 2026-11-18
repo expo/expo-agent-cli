@@ -59,7 +59,7 @@ export interface ProjectRouteTable {
    * Why the table is empty, or null when it was read.
    *
    * Present exactly when {@link routes} is empty, so a caller reads one fact instead of two — the
-   * same rule `dev:wait`'s `bundle.checked`/`bundle.ok` pair follows (llp/0010).
+   * same rule the `bundle.checked`/`bundle.ok` pair follows (llp/0010).
    */
   reason: string | null;
 }

@@ -175,7 +175,7 @@ async function openAppAsync(
       results[0] ??
       null;
   }
-  // `unknown` passes, as it does for `dev:wait` and `runtime:reload`: a dev server that answered
+  // `unknown` passes, as it does for `smoke` and `runtime:reload`: a dev server that answered
   // nothing this CLI understands has not shown the project to be broken, and refusing there would
   // stop a read that would have worked and name no fix.
   const refusal =

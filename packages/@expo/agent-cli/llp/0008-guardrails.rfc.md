@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** `src/dev/devAsync.ts`; `src/utils/consent.ts` (deferred `doctor:fix` only); runtime fences (`src/runtime/untrusted.ts`)
+**Systems:** `src/dev/devAsync.ts`; `src/utils/consent.ts`; runtime fences (`src/runtime/untrusted.ts`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20
 **Revised:** 2026-09-06
