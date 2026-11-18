@@ -5,7 +5,7 @@
 **Systems:** `@expo/agent-cli` runtime commands (`src/runtime/`, `src/runtime/preflight.ts`, `src/navigate/`, `src/runtime/reload/`, `src/project/routes.ts`); `@expo/agent-cli smoke` (`src/smoke/`, `src/device/screenshot.ts`, `src/device/bootDevice.ts`, `src/device/installedApps.ts`, `src/device/installExpoGo.ts`, `src/device/expoGoVersion.ts`, `src/device/approveScheme.ts`); the cloud device layer (`src/device/cloudSimulator.ts`); the Android device layer (`src/device/adb.ts`, `src/device/androidApps.ts`, `src/navigate/adbReverse.ts`, `src/runtime/targetPlatform.ts`, `src/runtime/targetLiveness.ts`, `src/dev/logErrors.ts`); installed-app readers (`src/installedApp/`); `@expo/cli` CDP debugging layer and dev-server message socket; `expo-router` link handling; LogBox
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-08-30 · 2026-09-08 · 2026-11-16
+**Revised:** 2026-08-30 · 2026-09-08 · 2026-11-16 · 2026-11-18
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0004-smart-start-and-project-state]], [[0006-agent-native-cli-surface]], [[0008-guardrails]], [[0010-agent-conventions]], [[0015-backend-selection-and-config]], [[0016-v1-scope]], [[0018-interaction-commands]], [[0021-honest-reports]], [[0022-live-tier]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]], [[0035-one-device-per-worktree]]
 
 ## Summary
@@ -89,7 +89,7 @@ The route is percent-encoded once. Delimiters, escapes the caller wrote, and IPv
 
 `--print-url` resolves the URL and opens nothing, at exit 0. Its `--json` has `url`, `hostType`, `connect` and `printUrl: true`; `deviceBackend`, `platform`, `deviceId`, `command`, `exitCode` and `launch` are `null`. With `--eas` it is `BAD_ARGS`: one flag asks for a device and the other for none. `navigate` with no device names the URL and `--print-url` in its failure.
 
-Exit codes: 0 when the link opened and an app attached, or under `--no-wait-attach` (`attached: null`); 1 for usage, `ROUTE_NOT_FOUND`, `DEEP_LINK_UNRESOLVED`, `CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER`, or a refused link; 20 when there is no device; 22 when no app attached (§Loading the app is not navigating it).
+Exit codes: 0 when the link opened and an app attached, or under `--no-wait-attach` (`attached: null`); 1 for usage, `ROUTE_NOT_FOUND`, `DEEP_LINK_UNRESOLVED`, `CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER`, or a refused link; 20 when there is no device; 22 when no app attached (§Loading the app is not navigating it), or when the attached app ran no bundle inside the attach wait (§A loaded app).
 
 ### The route table
 
@@ -147,13 +147,14 @@ On Android a loopback host needs `adb reverse tcp:<port> tcp:<port>`; `am start`
 
 ## One preflight for the runtime family
 
-Every runtime command asks one question before it does any work: is a dev server running, and is an app attached to it? One preflight asks it for every command, and every command prints the same refusals.
+Every runtime command asks one question before it does any work: is a dev server running, and is a loaded app attached to it? One preflight asks it for every command, and every command prints the same refusals.
 
-| Command                                                                         | Needs             | No dev server answers   | The dev server lists no app                             |
-| ------------------------------------------------------------------------------- | ----------------- | ----------------------- | ------------------------------------------------------- |
-| `runtime:eval`, `runtime:errors`, `runtime:tree`, `runtime:tap`, `runtime:type` | a debugger target | `NO_DEV_SERVER`, exit 1 | `NO_APP_CONNECTED`, exit 22, after a 3 s wait           |
-| `runtime:reload`                                                                | a dev server      | `NO_DEV_SERVER`, exit 1 | no refusal: the reload starts the app (§How it reloads) |
-| `runtime:stop`                                                                  | a device          | no refusal              | no refusal                                              |
+| Command                                                         | Needs             | No dev server answers   | The dev server lists no app                             | The app is attached and ran no bundle                                 |
+| --------------------------------------------------------------- | ----------------- | ----------------------- | ------------------------------------------------------- | --------------------------------------------------------------------- |
+| `runtime:errors`, `runtime:tree`, `runtime:tap`, `runtime:type` | a debugger target | `NO_DEV_SERVER`, exit 1 | `NO_APP_CONNECTED`, exit 22, after a 3 s wait           | `APP_NOT_LOADED`, exit 22, after the same 3 s                         |
+| `runtime:eval`                                                  | a debugger target | `NO_DEV_SERVER`, exit 1 | `NO_APP_CONNECTED`, exit 22, after a 3 s wait           | no refusal: it evaluates after the same 3 s, with a warning on stderr |
+| `runtime:reload`                                                | a dev server      | `NO_DEV_SERVER`, exit 1 | no refusal: the reload starts the app (§How it reloads) | no refusal                                                            |
+| `runtime:stop`                                                  | a device          | no refusal              | no refusal                                              | no refusal                                                            |
 
 `runtime:stop` acts on a device, and the dev server is only its evidence for which app runs. An app that is already stopped is success ([[0010-agent-conventions]] §Other gates, in brief). With no device, `runtime:stop` refuses `NO_BOUND_DEVICE` ([[0035-one-device-per-worktree]] §Output and errors).
 
@@ -162,14 +163,15 @@ The refusals:
 - `NO_DEV_SERVER`, exit 1: nothing answered `GET /json/list` on the dev server the command was going to use. The dev server is probed first, so "no dev server" and "no app on a running dev server" stay two facts.
 - `NO_APP_CONNECTED`, exit 22: the target list was still empty after the reconnect wait. A reloading app is absent from the list for a short time, so a command that needs a debugger target polls an empty list for 3 s ([[0010-agent-conventions]] §An empty target list is inconclusive).
 - `NO_APP_CONNECTED`, exit 1: the dev server lists apps, and none is in the run's scope (§Which app a run reads). Asking again gives the same answer until the app is opened.
+- `APP_NOT_LOADED`, exit 22: an app is attached, and its runtime still answered that no JavaScript bundle ran when the reconnect wait ended (§A loaded app). The two waits share one 3 s budget. The suggested command is `navigate / --<platform>`, which waits for the bundle and restarts nothing. `runtime:eval` does not refuse: it reports a value and makes no claim about the app, and it is the command that can read a runtime with no bundle. It says on stderr that no bundle ran.
 
-The codes hold under a gate flag: `runtime:errors --fail-on-error` is 1 with no dev server and 22 with an empty list, never 0.
+The codes hold under a gate flag: `runtime:errors --fail-on-error` is 1 with no dev server, 22 with an empty list, and 22 for an app that ran no bundle, never 0.
 
 The How line takes its steps from one ladder in one order: `npx @expo/agent-cli dev --detach --<platform>`, then `navigate / --<platform>`, then `smoke --<platform>`. `NO_DEV_SERVER` names `dev --detach` and `navigate /`. The exit-22 `NO_APP_CONNECTED` names `navigate /`, `navigate / --print-url` for a device this machine cannot drive, and `smoke`. An exit-1 `NO_APP_CONNECTED` names the step for its scope: `navigate / --<platform>` on this worktree's device, closing the apps that are not the session's, or the `adb` step for model twins. With no platform flag, the ladder names the host's platform: iOS on macOS, Android elsewhere. When the caller passed `--eas`, `navigate` and `smoke` keep `--eas`, and `dev --detach` gets `--tunnel`, because an EAS session cannot reach this machine's loopback. Of the family, only `runtime:reload` and `runtime:stop` take `--eas`. When the caller named the dev server, `NO_DEV_SERVER` names that URL and says that nothing else was tried; otherwise it names `--dev-server-url` and `--port`.
 
 `error.data` in the `--json` envelope holds what the refusal observed: `devServerUrl`, `devServerReachable`, `debuggerTargets`, `commandSocketClients`, `platform` ([[0010-agent-conventions]] §The `--json` error envelope). Every key is present. `devServerReachable` is a boolean, and `debuggerTargets` is `0` when nothing was counted. `platform` is `null` when the run does not have the fact. `commandSocketClients` is always `null` in `error.data`, because every refusal comes before a command opens `/message`; only the `runtime:reload` result carries the count. Rejected: a caller that parses the English message for these counts.
 
-The connection is asked before the bundle gate. With nothing attached, `runtime:tree`, `runtime:tap` and `runtime:type` exit 22 whatever the code on disk compiles to, and do not spend the gate's 20 s budget.
+The connection is asked before the bundle gate. With nothing attached, or with an attached app that ran no bundle, `runtime:tree`, `runtime:tap` and `runtime:type` exit 22 whatever the code on disk compiles to, and do not spend the gate's 20 s budget.
 
 Every command of the family takes `--port <n>` as shorthand for `--dev-server-url http://127.0.0.1:<n>`; both together is `BAD_ARGS`. Every command takes `--platform ios|android` beside `--ios` and `--android`. `--ios --platform ios` is accepted; `--ios --platform android` is `BAD_ARGS`.
 
@@ -247,6 +249,73 @@ A local device's app can stand beside this worktree's own EAS session on the sam
 
 A lease lasts 60 minutes ([[0035-one-device-per-worktree]] §Lease). A dev server that the CLI started renews it every 5 minutes, and `navigate` renews it. A runtime read does not renew it: a renewal takes the registry lock, and reads are the most frequent calls (Risk 2).
 
+## A loaded app
+
+On an iOS development build, the dev server lists the app's debugger target, and the runtime answers `Runtime.evaluate`, before the app downloads its JavaScript bundle. So an attached app is not proof that the project's code runs. A read of that runtime finds no errors and no React DevTools hook, which are also the answers of a healthy app and of a production bundle.
+
+Two terms:
+
+- **Attached** keeps its definition (§Which app a run reads): the app is an own app with a debugger target.
+- **Loaded**: the runtime of the target that a read command reads answers that a JavaScript bundle ran. Loaded does not mean rendered, and it does not mean healthy. `smoke` is the gate for health.
+
+The question is one expression: is the Metro `require` global (`__r`) a function? Each Metro bundle defines it, for development and for production. The command asks the target that the debugger client chooses for the scope, so the fact and the read are about one target.
+
+The runtime gives one of three answers. Only the second answer changes a verdict.
+
+| Answer        | Meaning                   | Effect                           |
+| ------------- | ------------------------- | -------------------------------- |
+| a bundle ran  | loaded                    | none                             |
+| no bundle ran | attached, not loaded      | the command waits, then exits 22 |
+| cannot ask    | the command does not know | none: the command does not wait  |
+
+"Cannot ask" is each of these: no own target that reloads natively; a debugger socket that refuses the connection or sends no answer; a runtime with no debugger (`-32601`, as Expo Go for Android has); an answer that is not one of the two expected values. Such a runtime gets the verdicts that it gets without the question.
+
+States of a development build on an iOS simulator [observed, 2026-11-18]:
+
+| State                                  | `__r`     | Loaded    |
+| -------------------------------------- | --------- | --------- |
+| No app, or the dev launcher's home     | no target | not asked |
+| The bundle download is in progress     | undefined | no        |
+| The bundle load failed (red screen)    | undefined | no        |
+| The bundle crashed at module top level | function  | yes       |
+| The bundle crashed in a render         | function  | yes       |
+| The app shows its first screen         | function  | yes       |
+
+The debugger cannot separate a bundle that still loads from a load that failed. The screen can: a loading banner, or a red error screen. So both states get one answer, and its text names both.
+
+Where the fact is read:
+
+- The preflight of each command that needs a debugger target (§One preflight for the runtime family).
+- The attach wait of `navigate`, which is also the open inside `smoke`. `navigate` adds no wait before the route link. After a launcher open, the link follows the launcher wait, and that wait ends on a loaded app or at its budget. `--json` has `appLoaded`: `true`, `false`, or `null` for "cannot ask" and for a run that did not wait.
+- The `runtime` phase of `smoke` (§The device that can open the app).
+- The proof of a reload by a new JavaScript context (§What proves a reload).
+
+`status` and `dev` do not read the fact: they make no claim about the bundle.
+
+Contracts:
+
+| Rule                                                                                                                                                                                                                  | Test                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `runtime:errors`, `runtime:tree`, `runtime:tap` and `runtime:type` refuse an attached app that ran no bundle: `APP_NOT_LOADED`, exit 22, after the reconnect wait.                                                    | `e2e/__tests__/runtime-preflight-test.ts` "%s refuses an app that ran no bundle"                                                                                                                       |
+| `runtime:eval` evaluates in an attached app that ran no bundle, exits as the expression decides, and says on stderr that no bundle ran.                                                                               | same file, "runtime:eval evaluates in an app that ran no bundle, and says so"                                                                                                                          |
+| `navigate` does not stop and reopen an Android app that ran no bundle, also when the app leaves the target list before the wait ends: a stop discards the load in progress.                                           | `e2e/__tests__/navigate-target-selection-test.ts` "does not stop an Android app that ran no bundle"                                                                                                    |
+| `runtime:stop` stops an attached app that ran no bundle.                                                                                                                                                              | `e2e/__tests__/runtime-preflight-test.ts` "runtime:stop stops an app that ran no bundle"                                                                                                               |
+| A reader command continues when the bundle runs inside the reconnect wait.                                                                                                                                            | same file, "waits for a bundle that runs inside the wait"                                                                                                                                              |
+| `navigate` exits 22 with `attached: true`, `appLoaded: false` and no follow-ups when no bundle ran inside the attach wait, with and without a launcher open. The text result has the line `App attached, not loaded`. | `e2e/__tests__/navigate-test.ts` "exits 22 when no bundle ran inside the attach wait", "prints the App line as attached, not loaded"                                                                   |
+| `navigate` waits inside `--attach-timeout` and exits 0 when the bundle runs.                                                                                                                                          | same file, "waits inside --attach-timeout and exits 0 when the bundle runs"                                                                                                                            |
+| `smoke` is never `passed` for an app that ran no bundle: the `runtime` phase is `inconclusive`, exit 22.                                                                                                              | `e2e/__tests__/smoke-app-loaded-test.ts` "smoke is inconclusive"                                                                                                                                       |
+| A command does not refuse and does not wait because a runtime cannot answer the question.                                                                                                                             | `runtime-preflight-test.ts` "%s gets past the preflight"; `navigate-test.ts` "an app whose runtime cannot be asked is attached"; `runtime-test.ts` "exits 0 for the same window without the gate flag" |
+| A bundle that ran and crashed at module top level is loaded.                                                                                                                                                          | `runtime-preflight-test.ts` "reads an app whose bundle crashed at the top level"                                                                                                                       |
+| A new JavaScript context in which no bundle ran does not prove a reload.                                                                                                                                              | `e2e/__tests__/runtime-reload-test.ts` "does not prove a reload by a context with no bundle"                                                                                                           |
+
+Rejected:
+
+- Attached includes the bundle. `smoke` boots a device and opens an app when nothing is attached, and both `navigate` recoveries fire on the same count. An app that loads would look like no app.
+- `RN$isRuntimeReady()` as the question. It answers `false` after a crash at module top level, so `runtime:errors` would refuse an app whose crash it can report.
+- "Cannot ask" counts as not loaded. Expo Go for Android always answers `-32601`, and a stale target would cost each command its full wait.
+- A reader refuses at once. Each reload has an empty runtime for about 165 ms [observed].
+- One answer from all own targets. A read command reads one target, so the fact must be about that target.
+
 ## Reloading the app
 
 `runtime:reload` puts the running app back on the code on disk, and reports a reload only when it observed one.
@@ -293,13 +362,14 @@ When a mechanism ran, the shared observations of §What proves a reload decide t
 
 Rung 2 costs the app's JavaScript state. When an app was attached, the attempt's reason says so and says why rung 1 did not suffice. Off `--eas`, rung 2 is `simctl terminate` or `am force-stop`, then the deep link. A stop that finds the app not running is success. The app id comes from the own targets only, by the ladder in §Stopping the app. A link refused after the stop leaves the app named in `leftAppStopped`.
 
-`--method runtime` calls `expo.reloadAppAsync(reason)` over the debugger, on the own target that `runtime:eval` reads. The reason is required: SDK 58 rejects a call with no argument and reloads nothing. The call keeps the page id, so it is proved as `Page.reload` is, by a new JavaScript context on the same target, within at most 5 s of `--timeout`. The rest of `--timeout` watches the shared observations.
+`--method runtime` calls `expo.reloadAppAsync(reason)` over the debugger, on the own target that `runtime:eval` reads. The reason is required: SDK 58 rejects a call with no argument and reloads nothing. The call keeps the page id, so it is proved as `Page.reload` is, by a new JavaScript context on the same target that does not answer that no bundle ran (§A loaded app), within at most 5 s of `--timeout`. The rest of `--timeout` watches the shared observations.
 
 - An app with no `expo` global, or no `reloadAppAsync`, answers at once and is not asked: the attempt is not delivered, exit 20.
 - A lost answer after the call is delivered and unproved, because the call tears down the context that would answer. The run then watches for a bundle, and exits 22 without one.
+- A new context that answers that no bundle ran, until the proof window ends, is delivered and unproved. The run then watches for a bundle, and exits 22 without one.
 - The run never climbs to a relaunch.
 
-Tests: `e2e/__tests__/runtime-reload-test.ts` "passes the reason SDK 58 requires and proves the reload on the same page id (%s)", "fails at once for an app with no expo global", "reports a lost answer as delivered, waits for a bundle, and never relaunches".
+Tests: `e2e/__tests__/runtime-reload-test.ts` "passes the reason SDK 58 requires and proves the reload on the same page id (%s)", "fails at once for an app with no expo global", "reports a lost answer as delivered, waits for a bundle, and never relaunches", "does not prove a reload by a context with no bundle", "proves a reload when the new context runs a bundle after it answered that none ran".
 
 The entry-bundle check runs before any rung (rows 2 and 3 of the exit table in §What proves a reload). `unknown` passes, and `--no-bundle-check` skips it. The `bundle` object is the one `smoke` and `dev:wait` print. `appsConnected` on a refused run is the count of own apps that the preflight read, not `0`.
 
@@ -322,20 +392,20 @@ Four observations. The first three share one budget, and the first to answer end
 1. **Message-socket peers.** The dev server never reuses a socket id. The wait counts client ids it had not listed before (`commandSocketChurn.reconnected`), not a changed list, because a client that left changes the list too. This proves that the app acted, not that it came back.
 2. **A fresh debugger target.** The dev server never reuses a page id, so a target it had not listed is an app that came back (`appsReconnected`).
 3. **A new `Bundled` line** in the dev server's captured output (`bundlesAfterReload`). It says the dev server served a bundle after this command acted, not which client asked. A relaunched app keeps its page id, so this is how a relaunch can exit 0.
-4. **A new JavaScript context on an own target after `Page.reload`.** One own target is enough, and nothing is watched after it.
+4. **A new JavaScript context on an own target after `Page.reload`,** which does not answer that no bundle ran (§A loaded app). One own target is enough, and nothing is watched after it.
 
-`Page.reload` keeps the page id, so its proof is a context replacement. The CLI sets a per-check global on the target, sends `Page.reload`, and reads the global on the same target id until it is gone. The whole proof, cleanup of the marker included, ends at the caller's deadline.
+`Page.reload` keeps the page id, so its proof is a context replacement. The CLI sets a per-check global on the target, sends `Page.reload`, and reads the global on the same target id until it is gone. Then it asks the new context whether a bundle ran. An answer of "no bundle ran" is not yet a proof, and the read continues. Each other answer is a proof. A question with no answer is a proof too, unless the context answered "no bundle ran" before. The whole proof, cleanup of the marker included, ends at the caller's deadline.
 
 Each target keeps its outcome in the attempt's `outcomes`:
 
-| Outcome              | Trigger                                                                                                       | Test                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                         | none (Risk 12)                                                                           |
-| `unmarkable`         | the context did not keep the marker, or answered a CDP error (Expo Go for Android: `-32601`); nothing is sent | e2e runtime-target-selection-test "sends no Page.reload…"; contextReplacedTransport-test |
-| `not-delivered`      | the mark got no answer, the `Page.reload` answer was lost and no read proved it, or the action failed         | rungOneTargets-test "reports a mark…", "reports a Page.reload whose answer was lost…"    |
-| `delivered-unproved` | `Page.reload` answered and the marker stayed                                                                  | rungOneTargets-test "watches an own target…"                                             |
-| `context-replaced`   | the marker is gone on the same target id                                                                      | rungOneTargets-test "sends Page.reload to every own target…"                             |
-| `stopped`            | another own target proved first; the check still removes its marker                                           | rungOneTargets-test "sends Page.reload to every own target…"                             |
+| Outcome              | Trigger                                                                                                                                | Test                                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unsupported`        | the target cannot take `Page.reload`; nothing is sent                                                                                  | none (Risk 12)                                                                                                                                                             |
+| `unmarkable`         | the context did not keep the marker, or answered a CDP error (Expo Go for Android: `-32601`); nothing is sent                          | e2e runtime-target-selection-test "sends no Page.reload…"; contextReplacedTransport-test                                                                                   |
+| `not-delivered`      | the mark got no answer, the `Page.reload` answer was lost and no read proved it, or the action failed                                  | rungOneTargets-test "reports a mark…", "reports a Page.reload whose answer was lost…"                                                                                      |
+| `delivered-unproved` | `Page.reload` answered and the marker stayed, or the marker is gone and the new context answered that no bundle ran until the deadline | rungOneTargets-test "watches an own target…"; e2e runtime-reload-test "does not prove a reload by a context with no bundle"                                                |
+| `context-replaced`   | the marker is gone on the same target id, and the new context did not answer that no bundle ran                                        | rungOneTargets-test "sends Page.reload to every own target…"; e2e runtime-reload-test "proves a reload when the new context runs a bundle after it answered that none ran" |
+| `stopped`            | another own target proved first; the check still removes its marker                                                                    | rungOneTargets-test "sends Page.reload to every own target…"                                                                                                               |
 
 `stopped` is not `smoke`'s `reload.disposition: 'not-needed'`, which says the run opened the app itself.
 
@@ -487,7 +557,7 @@ The phase is the first rung of `runtime:reload` only, in the same process (§How
 
 | `disposition` | when                                                                              | `reload` row   | effect on the verdict |
 | ------------- | --------------------------------------------------------------------------------- | -------------- | --------------------- |
-| `not-needed`  | this run opened the app, so it loaded the served bundle                           | `skipped`      | none                  |
+| `not-needed`  | this run opened the app, so it has no older bundle to replace                     | `skipped`      | none                  |
 | `reloaded`    | the app was attached, and `verifiedBy` names a signal                             | `ok`           | none                  |
 | `unproved`    | the reload was not proved: nothing took it, or nothing showed that it took effect | `inconclusive` | `inconclusive`        |
 | `declined`    | `--no-reload`                                                                     | `skipped`      | none; the row says so |
@@ -704,7 +774,7 @@ The readiness wait asks the dev server's `/status` until the budget ends, as lon
 
 When no app is attached and no device is up, the run boots the device that this worktree binds, on both platforms. That is a simulator the registry reuses or creates, or an emulator instance it spawns ([[0035-one-device-per-worktree]] §Choice; [[0035-one-device-per-worktree]] §Android boot). A created or spawned device has no app, so `install-app` puts the app there. The boot budgets are outside `--timeout` (§The smoke gate). The run boots nothing when an app is already attached, when a device is already up, or with `--eas`, which starts or reuses a session instead ([[0027-everything-on-eas]] §smoke).
 
-An attached app is not yet a readable app: its target goes away and comes back when the JS runtime starts, and a read in that gap answers `No target found`. So for an app this run opened or reloaded, the run first waits, at most 4 s, for two reads of the target list that name the same ids. Then the `runtime` phase asks `Runtime.evaluate('1')` every 500 ms until it answers, inside the runtime-ready budget (§The smoke gate). After the first `-32601`, the run asks again (§A reloading runtime answers like one with no debugger). A wait that ends with no answer reports the runtime's own reason.
+An attached app is not yet a readable app: its target goes away and comes back when the JS runtime starts, and a read in that gap answers `No target found`. So for an app this run opened or reloaded, the run first waits, at most 4 s, for two reads of the target list that name the same ids. Then the `runtime` phase asks whether a JavaScript bundle ran, every 500 ms, until the runtime answers that one ran (§A loaded app), inside the runtime-ready budget (§The smoke gate). After the first `-32601`, the run asks again (§A reloading runtime answers like one with no debugger). A wait that ends with no answer reports the runtime's own reason.
 
 A development-build open that still shows the launcher lists no debugger target on this dev server. The `app` phase is `inconclusive`, and the reading phases are `skipped`. The picture's label comes from the open's own report (§Loading the app is not navigating it).
 
@@ -832,6 +902,10 @@ The file is `{hash, fingerprintVersion, sources}`. Anything else (absent, empty,
 10. A refused link with no `appMismatchKind` puts `navigate` in the follow-ups, first or after the `dev` restart. The device refuses `navigate` in the same way (§A refused link is a device without the app).
 11. One refused connection early in the readiness wait makes its timeout say that nothing was listening, also when a server listened later. The caller's abort ends the wait up to 1 s late (§A refused connection is not an answer).
 12. The `unsupported` outcome of `Page.reload` has no test (§What proves a reload).
+13. On Android, a development build that reloads answers `-32601` on its kept target, which is "cannot ask". So on Android a command can report an app that ran no bundle as attached, at exit 0 (§A loaded app, §A reloading runtime answers like one with no debugger).
+14. Expo Go on iOS is not observed while its bundle download is in progress (§A loaded app).
+15. The default reload of an app that then stalls on its bundle prints `Reloaded yes` beside exit 22, and its reason does not name the bundle (§What proves a reload).
+16. A reader command waits 3 s, and one observed first load took 4.8 s. So a reader that runs less than about 2 s after an open can refuse `APP_NOT_LOADED` while the first load is in progress. The refusal says to run the command again (§A loaded app).
 
 ## Testing
 
@@ -848,6 +922,7 @@ The route table, the scope rules and the reload evidence are pure decisions, so 
 | §One preflight for the runtime family                                                                                      | `src/runtime/__tests__/preflight-test.ts`, `devicePlatform-test.ts`; `e2e/__tests__/runtime-preflight-test.ts`, `runtime-test.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | §Which app a run reads                                                                                                     | the Test column of its table; the EAS session pass: `src/runtime/__tests__/targetSelection-test.ts` "reads no unclaimed target", `targetInventory-test.ts` "allows cloud attribution", `e2e/__tests__/runtime-bound-selection-test.ts` "eval with", `cloud-simulator-test.ts` "reads neither unclaimed app"; `src/runtime/__tests__/targetPlatform-test.ts`, `bundleCheck-test.ts`, `waitReady-test.ts`; `src/smoke/__tests__/targetSelection-test.ts`; `e2e/__tests__/smoke-binding-test.ts`, `smoke-target-selection-test.ts`, `navigate-target-selection-test.ts` |
 | §Target owner                                                                                                              | `src/runtime/__tests__/targetSelection-test.ts`, `ownershipSelection-test.ts`, `cdpClient-test.ts`; `src/runtime/reload/__tests__/rungOne-test.ts`, `evidence-test.ts`; `src/smoke/__tests__/smokeDeps-test.ts`; `e2e/__tests__/runtime-target-selection-test.ts`, `runtime-preflight-test.ts`, `smoke-test.ts`                                                                                                                                                                                                                                                      |
+| §A loaded app                                                                                                              | the Test column of its contracts table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | §Reloading the app, §How it reloads                                                                                        | `src/runtime/__tests__/messageSocket-test.ts`, `appProcess-test.ts`; `src/runtime/reload/__tests__/rungOne-test.ts`, `reloadAsync-test.ts`, `resolveOptions-test.ts`; `src/followups/__tests__/commands-test.ts`; `e2e/__tests__/runtime-reload-test.ts`, `runtime-target-selection-test.ts`, `smoke-target-selection-test.ts`                                                                                                                                                                                                                                       |
 | §What proves a reload                                                                                                      | the Test column of the outcome table; `src/runtime/__tests__/contextReplaced-test.ts`, `contextReplacedTransport-test.ts`; `src/runtime/reload/__tests__/rungOneTargets-test.ts`, `evidence-test.ts`, `bundleSignal-test.ts`; `e2e/__tests__/runtime-reload-test.ts`, `cloud-simulator-test.ts`                                                                                                                                                                                                                                                                      |
 | §Loading the app is not navigating it                                                                                      | `src/navigate/__tests__/navigateAsync-test.ts`, `openUrl-test.ts`; `src/smoke/__tests__/phases-test.ts`; `e2e/__tests__/navigate-target-selection-test.ts`, `smoke-test.ts`                                                                                                                                                                                                                                                                                                                                                                                          |

@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { devClientConnectUrl } from '../../src/navigate/connectUrl';
 import { makeTarget } from '../../src/runtime/__tests__/targetSelectionFixtures';
+import { appRuntime, expoGoRuntimeTarget } from '../runtimeTargetFixtures';
 import {
   installStubEasAsync,
   stubEasArgs,
@@ -506,6 +507,48 @@ it('recovers an Expo Go run by stopping Expo Go, not the android.package of the 
     expect(result.stderr).toContain(
       'The app was stopped and the link opened a second time, and that did not attach either.'
     );
+  } finally {
+    await releaseLock();
+    await server.close();
+  }
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app — a stop discards the load in progress.
+it.each([
+  { name: 'that stays listed', listedForAnswers: Infinity },
+  // The list is empty after two polls asked the app. The app that the wait saw is the answer.
+  { name: 'that leaves the list before the wait ends', listedForAnswers: 4 },
+])('does not stop an Android app that ran no bundle, $name', async ({ listedForAnswers }) => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  const device = await deviceFixture(root, {
+    name: 'no bundle',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+  });
+  const runtime = appRuntime({});
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: () =>
+      runtime.answers().length < listedForAnswers ? [expoGoRuntimeTarget('android')] : [],
+    inspectorEvaluate: runtime.evaluate,
+  });
+  const releaseLock = await holdDevLockAsync(root, {
+    url: server.url,
+    port: server.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot: root,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['navigate', '/profile/42', '--no-route-check', '--attach-timeout', '2s', '--json'],
+      { reject: false, env: { ...device.env, STUB_ADB_PIDOF: '4242' } }
+    );
+    expect(result.exitCode, result.all).toBe(22);
+    expect(JSON.parse(result.stdout)).toMatchObject({ attached: true, appLoaded: false });
+    expect(device.forceStops!()).toEqual([]);
   } finally {
     await releaseLock();
     await server.close();

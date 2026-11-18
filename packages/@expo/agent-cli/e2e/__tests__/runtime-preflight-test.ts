@@ -17,6 +17,7 @@ import path from 'node:path';
 import { digestOf } from '../../src/devLock/address';
 import { hostPlatform } from '../../src/smoke/suggest';
 import { canonicalizeExistingPath } from '../../src/utils/dir';
+import { appRuntime, expoGoRuntimeTarget } from '../runtimeTargetFixtures';
 import {
   executeAgentCliAsync,
   expoHomeOf,
@@ -256,6 +257,107 @@ describe('a dev server with an app connected', () => {
     const payload = JSON.parse(result.stdout);
     expect(payload.error?.code).not.toBe('NO_APP_CONNECTED');
     expect(payload.error?.code).not.toBe('NO_DEV_SERVER');
+    // This runtime answers `undefined` to each question, so it cannot say whether a bundle ran.
+    expect(payload.error?.code).not.toBe('APP_NOT_LOADED');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
+// The dev server lists the app's debugger target and the runtime answers, before the app runs its
+// JavaScript bundle. The preflight is shared, so tap and type run on one platform.
+describe('a dev server whose app ran no bundle', () => {
+  type Platform = 'ios' | 'android';
+
+  async function runOnAsync(
+    platform: Platform,
+    argv: string[],
+    runtime: ReturnType<typeof appRuntime>
+  ) {
+    const stub = await startStubDevServerAsync({
+      targets: [expoGoRuntimeTarget(platform)],
+      inspectorEvaluate: runtime.evaluate,
+    });
+    try {
+      return await runAsync([...argv, `--${platform}`], stub.url);
+    } finally {
+      await stub.close();
+    }
+  }
+
+  const command = (name: string) => NEEDS_AN_APP.find(([n]) => n === name)!;
+  const [evaluate, errors, tree, tap, type] = [
+    'runtime:eval',
+    'runtime:errors',
+    'runtime:tree',
+    'runtime:tap',
+    'runtime:type',
+  ].map(command);
+  const failOnError: (typeof NEEDS_AN_APP)[number] = [
+    'runtime:errors --fail-on-error',
+    [...errors![1], '--fail-on-error'],
+  ];
+  it.each([
+    ...(['ios', 'android'] as const).flatMap((platform) =>
+      [errors!, failOnError, tree!].map(([name, argv]) => [name, platform, argv] as const)
+    ),
+    [tap![0], 'ios', tap![1]] as const,
+    [type![0], 'ios', type![1]] as const,
+  ])('%s refuses an app that ran no bundle (--%s)', async (_name, platform, argv) => {
+    const result = await runOnAsync(platform, argv, appRuntime({}));
+
+    expect(result.exitCode).toBe(22);
+    const { error } = JSON.parse(result.stdout);
+    expect(error.code).toBe('APP_NOT_LOADED');
+    expect(error.data.debuggerTargets).toBe(1);
+    expect(error.suggestedCommand).toBe(`npx @expo/agent-cli navigate / --${platform}`);
+  });
+
+  // `runtime:eval` reports a value and makes no claim about the app, so it reads the empty runtime.
+  it.each(['ios', 'android'] as const)(
+    'runtime:eval evaluates in an app that ran no bundle, and says so (--%s)',
+    async (platform) => {
+      const result = await runOnAsync(platform, evaluate![1], appRuntime({}));
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(result.stderr).toContain('ran no JavaScript bundle');
+    }
+  );
+
+  it.each(['ios', 'android'] as const)(
+    'waits for a bundle that runs inside the wait (--%s)',
+    async (platform) => {
+      const result = await runOnAsync(
+        platform,
+        ['runtime:eval', 'typeof globalThis.__r'],
+        appRuntime({}, { loadedAfterAsks: 2 })
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout).value).toBe('function');
+    }
+  );
+
+  // The bundle ran: the Metro `require` is defined. React Native says "not ready" after the crash.
+  it('reads an app whose bundle crashed at the top level', async () => {
+    const crashed = appRuntime({ __r() {}, RN$isRuntimeReady: () => false });
+
+    const result = await runOnAsync('ios', errors![1], crashed);
+
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout).error).toBeUndefined();
+  });
+
+  // `runtime:stop` reads which app runs, not what its runtime answers.
+  it('runtime:stop stops an app that ran no bundle', async () => {
+    await installStatefulXcrunAsync(projectRoot, {
+      simulators: [{ udid: 'PREFLIGHT-SIM', name: 'iPhone 17 Pro', state: 'Booted' }],
+      runningAppIds: ['host.exp.Exponent'],
+    });
+
+    const result = await runOnAsync('ios', ['runtime:stop'], appRuntime({}));
+
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ bundleId: 'host.exp.Exponent' });
   });
 });
 
