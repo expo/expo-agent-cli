@@ -6,6 +6,7 @@
 // on with the stub `adb` of a fake Android SDK, so they run on every OS and never touch this
 // machine's devices.
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   executeAgentCliAsync,
@@ -15,6 +16,7 @@ import {
   setupFixtureAsync,
   spawnAgentCli,
   stubExpoEnv,
+  waitForAsync,
   waitForDevLockAsync,
 } from '../utils';
 import {
@@ -151,4 +153,94 @@ describe('@expo/agent-cli dev, with devices on', () => {
       }
     });
   });
+});
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
+  const DEV_CLIENT_ID = 'dev.e2e.devclient';
+
+  /** A development build with a scheme, installed on the bound stub emulator. */
+  async function setupDevClientAsync() {
+    const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
+    await installStubFingerprintAsync(projectRoot);
+    const file = path.join(projectRoot, 'app.json');
+    const appJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+    appJson.expo.scheme = 'devclient';
+    appJson.expo.android = { package: DEV_CLIENT_ID };
+    await fs.promises.writeFile(file, JSON.stringify(appJson, null, 2));
+    const adb = await installStubAdbAsync(projectRoot, DEV_CLIENT_ID, { bound: false });
+    await fs.promises.writeFile(stubEmulatorStatePath(projectRoot), `${BOUND_SERIAL}\n`);
+    await androidBindingFixture(projectRoot, BOUND_SERIAL);
+    await installStubXcrunAsync(projectRoot);
+    const env = { ...stubExpoEnv(projectRoot), ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
+    return { projectRoot, adb, env };
+  }
+
+  /** Every URL the stub `adb` was asked to open, in order. */
+  function openedUrls(adb: { calls: () => string[][] }): string[] {
+    return adb
+      .calls()
+      .filter((args) => args.includes('am') && args.includes('start'))
+      .map((args) => args.at(-1)!.replace(/^'|'$/g, ''));
+  }
+
+  async function stopAsync(projectRoot: string, env: Record<string, string>) {
+    await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { env, reject: false });
+  }
+
+  it('opens a development build with the launcher URL, and --wait-ready exits 22 when it does not attach', async () => {
+    const { projectRoot, adb, env } = await setupDevClientAsync();
+    const runEnv = {
+      ...env,
+      STUB_EXPO_LISTEN: '1',
+      STUB_EXPO_DELAY_MS: '30000',
+      AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+    };
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--android', '--detach', '--wait-ready', '--port', '8623', '--json'],
+        { env: runEnv, reject: false }
+      );
+
+      // The app the stub dev server lists is none, so the run is not ready.
+      expect(result.exitCode).toBe(22);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --android');
+      // The dev server runs on after the failed wait.
+      expect((await fetch('http://127.0.0.1:8623/status')).ok).toBe(true);
+      // A development build with no app attached gets the URL that loads it, not the bare route.
+      expect(await waitForAsync(() => openedUrls(adb).length > 0, 10_000)).toBe(true);
+      expect(openedUrls(adb)[0]).toMatch(/^devclient:\/\/\?__expo_url=/);
+    } finally {
+      await stopAsync(projectRoot, env);
+    }
+  }, 60_000);
+
+  it('--wait-ready waits for no app when the run opens none', async () => {
+    const { projectRoot, env } = await setupAsync('go-app');
+    const startedAt = Date.now();
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--android', '--no-open', '--detach', '--wait-ready', '--port', '8624', '--json'],
+        {
+          env: {
+            ...env,
+            STUB_EXPO_LISTEN: '1',
+            STUB_EXPO_DELAY_MS: '30000',
+            AGENT_CLI_DEV_APP_WAIT_MS: '60000',
+          },
+        }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout).app).toBeNull();
+      // No app wait ran: an empty target list would have held the run for the whole budget.
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+    } finally {
+      await stopAsync(projectRoot, env);
+    }
+  }, 60_000);
 });

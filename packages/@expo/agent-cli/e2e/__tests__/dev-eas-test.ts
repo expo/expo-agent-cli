@@ -36,6 +36,7 @@ import {
   freePortAsync,
   waitForDevLockAsync,
 } from '../utils';
+import { runtimeTarget } from '../runtimeTargetFixtures';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
@@ -404,6 +405,13 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   /** How long the stub dev server stays up: long enough for the child's open to reach the stub eas. */
   const STUB_ALIVE_MS = '20000';
   const TUNNEL_HOST = 'abc.tunnel.example';
+  /**
+   * One app on the session's simulator, listed once the stub `eas` opened it. No local device
+   * claims it, so the session scope reads it.
+   */
+  const SESSION_APP_TARGETS = JSON.stringify([
+    runtimeTarget('cloud-app', { appId: 'host.exp.Exponent', deviceName: 'iPhone 17 Pro' }),
+  ]);
 
   /** A stub dev server that binds, advertises a tunnel, and stays up; and a stub eas with no session. */
   function easRunEnv(projectRoot: string, port: number): Record<string, string> {
@@ -415,6 +423,9 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       STUB_EXPO_TUNNEL_HOST: TUNNEL_HOST,
       STUB_EXPO_TUNNEL_DELAY_MS: '200',
       STUB_SIM_SESSIONS: '0',
+      // The app of the session, attached: `--wait-ready` waits for it (llp/0004 §Daemonization).
+      STUB_EXPO_TARGETS: SESSION_APP_TARGETS,
+      STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
     };
   }
 
@@ -1087,6 +1098,83 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       const open = invocations.find((args) => args[0] === 'simulator:exec')!;
       expect(open.slice(0, 4)).toEqual(['simulator:exec', 'npx', 'agent-device@latest', 'open']);
       expect(open[4]).toMatch(new RegExp(`^exp://${TUNNEL_HOST.replace(/\./g, '\\.')}/--/\\??$`));
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+  it('--wait-ready waits for the app of the session', async () => {
+    const projectRoot = await setupAsync('go-app');
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        { env: easRunEnv(projectRoot, 8534) }
+      );
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ready: true,
+        app: { attached: true, loaded: null },
+      });
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  it('--wait-ready exits 22 when no app of the session attaches', async () => {
+    const projectRoot = await setupAsync('go-app');
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        {
+          env: {
+            ...easRunEnv(projectRoot, 8535),
+            STUB_EXPO_TARGETS: '[]',
+            AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+          },
+          reject: false,
+        }
+      );
+      expect(result.exitCode).toBe(22);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --eas --ios');
+      // The dev server and the session stay up: only the app is missing.
+      const { port } = (await waitForDevLockAsync(projectRoot))!;
+      expect((await fetch(`http://127.0.0.1:${port}/status`)).ok).toBe(true);
+      expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(true);
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  it('a re-run that opens the app on a running server waits for it', async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+    const env = {
+      ...easRunEnv(projectRoot, 8536),
+      STUB_SIM_SESSIONS: '1',
+      STUB_EXPO_TARGETS: '[]',
+      AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+    };
+    try {
+      const first = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--json'],
+        { env }
+      );
+      expect(first.exitCode).toBe(0);
+      await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
+
+      const again = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        { env, reject: false }
+      );
+      expect(again.exitCode).toBe(22);
+      expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
     } finally {
       await cleanUpAsync(projectRoot);
     }

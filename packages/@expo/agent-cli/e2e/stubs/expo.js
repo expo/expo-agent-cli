@@ -40,6 +40,9 @@
 //   single-line double made the parse look correct on the only case it never had to read.
 // - STUB_EXPO_TARGETS: with STUB_EXPO_LISTEN, the JSON array `GET /json/list` answers instead of
 //   the empty one, for a run that needs an app attached to the dev server it started.
+// - STUB_EXPO_TARGETS_AFTER_EAS_OPEN: with STUB_EXPO_TARGETS, list them only once the stub `eas`
+//   opened an app on a session (`stub-eas-app-opened` under the cwd), as an app attaches after its
+//   open. Before that `GET /json/list` answers the empty list.
 // - STUB_EXPO_RUN_LAUNCH_FAILS: `run:ios` / `run:android` print what the real CLI prints for a
 //   build that compiled and installed the app, then fail at the *launch* the way F121's own run
 //   did. Nothing else is affected, which is the point: `prebuild` in the same plan still exits 0.
@@ -328,7 +331,10 @@ function listen(port) {
     // stub a dev server other commands can find.
     if (route === '/json/list') {
       response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(process.env.STUB_EXPO_TARGETS || '[]');
+      const opened =
+        !process.env.STUB_EXPO_TARGETS_AFTER_EAS_OPEN ||
+        fs.existsSync(path.join(cwd, 'stub-eas-app-opened'));
+      response.end((opened && process.env.STUB_EXPO_TARGETS) || '[]');
       return;
     }
     // The Expo Updates manifest, which is the only thing that knows this project's entry bundle

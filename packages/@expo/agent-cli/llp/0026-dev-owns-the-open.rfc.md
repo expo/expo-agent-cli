@@ -19,6 +19,8 @@ The dev server's port is only knowable after the spawn, and the subprocess does 
 
 The open is fire-and-forget from the dev server's point of view. It narrates each slow act on stderr (a boot, an Expo Go download), reports the outcome the same way, and a failure is a warning with `navigate /` in it — the dev server is still doing its job, and taking it down over a failed open would invert their importance. `stillWanted` stops the staging when the server dies mid-open.
 
+A development build with no attached app gets the launcher URL alone, which loads the app at its first route. The bare route link only moves an app that is already loaded ([[0005-runtime-loop-tools]] §Pointing an app at this dev server), and `dev`'s route is `/`, so the launcher URL is the whole open. An open on an EAS session sends the same URL. The open does not wait for the app: `dev --detach --wait-ready` has its own app wait ([[0004-smart-start-and-project-state]] §Daemonization).
+
 For a person at a terminal, the Simulator window is surfaced with `open -a Simulator` (DeviceHub on Xcode 27) — LaunchServices, not AppleScript, so still no grant. Headless runs skip it; `simctl openurl` needs no window.
 
 ## What it displaced

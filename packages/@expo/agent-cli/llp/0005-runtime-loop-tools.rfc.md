@@ -290,7 +290,9 @@ Where the fact is read:
 - The `runtime` phase of `smoke` (§The device that can open the app).
 - The proof of a reload by a new JavaScript context (§What proves a reload).
 
-`status` and `dev` do not read the fact: they make no claim about the bundle.
+- The app wait of `dev --detach --wait-ready` ([[0004-smart-start-and-project-state]] §Daemonization). It uses the poll loop of the `navigate` attach wait, and `--json` has `app.loaded`.
+
+`status` does not read the fact: it makes no claim about the bundle.
 
 Contracts:
 
@@ -305,6 +307,10 @@ Contracts:
 | `navigate` waits inside `--attach-timeout` and exits 0 when the bundle runs.                                                                                                                                          | same file, "waits inside --attach-timeout and exits 0 when the bundle runs"                                                                                                                            |
 | `smoke` is never `passed` for an app that ran no bundle: the `runtime` phase is `inconclusive`, exit 22.                                                                                                              | `e2e/__tests__/smoke-app-loaded-test.ts` "smoke is inconclusive"                                                                                                                                       |
 | A command does not refuse and does not wait because a runtime cannot answer the question.                                                                                                                             | `runtime-preflight-test.ts` "%s gets past the preflight"; `navigate-test.ts` "an app whose runtime cannot be asked is attached"; `runtime-test.ts` "exits 0 for the same window without the gate flag" |
+| `dev --detach --wait-ready` exits 0 only after an app of the run's scope is attached, and reports `app`. With none attached in the app wait it exits 22 `DEV_DETACH_APP_NOT_ATTACHED` and the dev server runs on.     | `e2e/__tests__/dev-eas-test.ts` "--wait-ready waits for the app of the session", "--wait-ready exits 22 when no app of the session attaches"                                                           |
+| An EAS re-run on a running dev server waits for the app the same way.                                                                                                                                                 | same file, "a re-run that opens the app on a running server waits for it"                                                                                                                              |
+| `dev --detach --wait-ready` with no app to open waits for no app: `app` is `null`.                                                                                                                                    | `e2e/__tests__/dev-device-test.ts` "--wait-ready waits for no app when the run opens none"                                                                                                             |
+| `dev` opens a development build that is not attached with the launcher URL.                                                                                                                                           | same file, "opens a development build with the launcher URL, and --wait-ready exits 22 when it does not attach"                                                                                        |
 | A bundle that ran and crashed at module top level is loaded.                                                                                                                                                          | `runtime-preflight-test.ts` "reads an app whose bundle crashed at the top level"                                                                                                                       |
 | A new JavaScript context in which no bundle ran does not prove a reload.                                                                                                                                              | `e2e/__tests__/runtime-reload-test.ts` "does not prove a reload by a context with no bundle"                                                                                                           |
 
