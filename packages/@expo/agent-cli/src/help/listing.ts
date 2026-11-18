@@ -33,7 +33,7 @@ export interface HelpSection {
 export const helpSections: HelpSection[] = [
   {
     title: 'Develop',
-    commands: ['dev', 'dev:logs', 'dev:stop', 'start', 'stop', 'install', 'typecheck'],
+    commands: ['dev', 'dev:logs', 'dev:stop', 'start', 'stop', 'install', 'patch', 'typecheck'],
     note: 'dev blocks this terminal; dev --detach does not, and dev:logs reads what it printed. dev --plan --ios (or --android, --web) prints a plan without running it; add --json for JSON.',
   },
   {

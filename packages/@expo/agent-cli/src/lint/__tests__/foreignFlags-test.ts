@@ -121,6 +121,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // of `installExpoGo.ts` in the same change, which is why that file no longer has a row for it:
     // the approval is not about installs, it is about every local iOS open.
     //
+    // The five `src/patch/backends.ts` rows are `git diff --no-index`'s, which writes the npm
+    // backend's patch in patch-package's format. git is not a package, so the run the rule asks for
+    // is the e2e itself [observed — 2026-11-17, git on macOS: `e2e/__tests__/patch-test.ts` diffs a
+    // real package, and `git apply` of the result onto a fresh `npm install` restores the edit].
+    //
     // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
     // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
     // Expo-Go-54.0.8.apk` printed `Performing Streamed Install` then `Success` and exited 0 — over
@@ -142,6 +147,7 @@ describe('the flags this CLI writes onto a command line', () => {
         [
           "--detach  src/smoke/deps/startArgs.ts",
           "--device  src/device/installDevBuild.ts",
+          "--dst-prefix=  src/patch/backends.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
           "--is-inside-work-tree  src/new/git.ts",
@@ -153,7 +159,10 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/impact/runtimeVersion.ts",
           "--json  src/install/resolveOptions.ts",
           "--no-bundler  src/device/installDevBuild.ts",
+          "--no-color  src/patch/backends.ts",
+          "--no-ext-diff  src/patch/backends.ts",
           "--no-followups  src/docs/autoSync.ts",
+          "--no-index  src/patch/backends.ts",
           "--no-install  src/new/createExpo.ts",
           "--no-open  src/smoke/deps/startArgs.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
@@ -165,6 +174,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",
           "--sdk  src/docs/autoSync.ts",
+          "--src-prefix=  src/patch/backends.ts",
           "--template  src/new/createExpo.ts",
           "--type  src/config/introspectAsync.ts",
           "--type  src/impact/runtimeVersion.ts",
