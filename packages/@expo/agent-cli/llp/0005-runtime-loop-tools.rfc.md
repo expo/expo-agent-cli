@@ -6,7 +6,7 @@
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
 **Revised:** 2026-08-30 · 2026-09-08 · 2026-11-16
-**Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0004-smart-start-and-project-state]], [[0006-agent-native-cli-surface]], [[0008-guardrails]], [[0010-agent-conventions]], [[0015-backend-selection-and-config]], [[0016-v1-scope]], [[0017-deferred-commands]], [[0018-interaction-commands]], [[0021-honest-reports]], [[0022-live-tier]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]], [[0035-one-device-per-worktree]]
+**Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0004-smart-start-and-project-state]], [[0006-agent-native-cli-surface]], [[0008-guardrails]], [[0010-agent-conventions]], [[0015-backend-selection-and-config]], [[0016-v1-scope]], [[0018-interaction-commands]], [[0021-honest-reports]], [[0022-live-tier]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]], [[0035-one-device-per-worktree]]
 
 ## Summary
 
@@ -33,7 +33,7 @@ App output is fenced as untrusted ([[0008-guardrails]] §Untrusted-content marki
 
 ## What ships
 
-The space forms (`runtime eval`) are the same commands as the Summary's colon forms. `runtime:network` is deferred ([[0017-deferred-commands]] §runtime:network).
+The space forms (`runtime eval`) are the same commands as the Summary's colon forms. `runtime:network` is deferred.
 
 Every CDP connection sends a same-origin `Origin` header. Metro's inspector proxy refuses the handshake without it (HTTP 401).
 

@@ -23,15 +23,13 @@ vi.unmock('node:fs');
 /**
  * Every `.ts` file of the CLI that a command can reach, relative to `src`.
  *
- * `deferred` is out for the reason llp/0016 §Deferred is a place gives: nothing there is loaded by
- * a registry entry, and `build:wait` — the one command whose outcomes reached exit 21 — lives in
- * it. The tests are out because a test naming a constant is not a command emitting it.
+ * The tests are out because a test naming a constant is not a command emitting it.
  *
  * Walked here rather than through `src/lint/sweep.ts`, which pulls the event logger in with it and
  * would need this suite's `2g` double to be the whole module.
  */
 function sourceFilesUnder(root: string, prefix = ''): string[] {
-  const skipped = new Set(['__tests__', '__mocks__', 'node_modules', 'build', 'deferred']);
+  const skipped = new Set(['__tests__', '__mocks__', 'node_modules', 'build']);
   return fs
     .readdirSync(path.join(root, prefix), { withFileTypes: true })
     .flatMap((entry) => {

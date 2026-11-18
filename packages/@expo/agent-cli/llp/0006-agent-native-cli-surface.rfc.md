@@ -106,7 +106,7 @@ The package ships as a model-free CLI.
 | `help`                                                | the workflow on-ramp ([[0024-cli-ui]])                                                  |
 | `docs:sync\|search`                                   | the Expo docs as local Markdown files, versioned by SDK ([[0030-local-docs]])           |
 
-Names that are not in this table are not in v1. See [[0017-deferred-commands]].
+Names that are not in this table are not in v1.
 
 ### Naming rule
 

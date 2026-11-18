@@ -1,6 +1,6 @@
 // @ref llp/0009-smart-followups.rfc.md §Examples per command — `install`.
-// @ref llp/0017-deferred-commands.reference.md §Not built — teachable warnings: a mismatch the command
-// detected is attached as the correction, instead of failing later on a device.
+// A mismatch the command detected is attached as the correction, instead of failing later on a
+// device.
 
 import { PROGRAM_PREFIX } from '../programName';
 import { devCommand, hostPlatform } from '../smoke/suggest';

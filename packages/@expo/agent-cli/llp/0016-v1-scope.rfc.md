@@ -2,15 +2,15 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** `src/commandRegistry.ts`; `src/deferred/`; `src/lint/`; `--help`; `README.md`; `src/agents/content.ts`
+**Systems:** `src/commandRegistry.ts`; `src/lint/`; `--help`; `README.md`; `src/agents/content.ts`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-26
 **Revised:** 2026-08-30
-**Related:** [[0017-deferred-commands]], [[0006-agent-native-cli-surface]], [[0010-agent-conventions]], [[0024-cli-ui]]
+**Related:** [[0006-agent-native-cli-surface]], [[0010-agent-conventions]], [[0024-cli-ui]]
 
 ## Summary
 
-The first release is the commands a first user should try. Everything else lives in [[0017-deferred-commands]].
+The first release is the commands a first user should try. Everything else is not in v1.
 
 ## Commands
 
@@ -35,7 +35,7 @@ The first release is the commands a first user should try. Everything else lives
 | `help`                                           | the workflow on-ramp                                                        |
 | forwarded `expo` set                             | the fixed list in [[0006-agent-native-cli-surface]]                         |
 
-Names that used to exist and now wait: `dev:wait`, `checkpoint`, `build:wait`, `runtime:network`, `doctor:fix`. See [[0017-deferred-commands]].
+Names that used to exist and are not in v1: `dev:wait`, `checkpoint`, `build:wait`, `runtime:network`, `doctor:fix`.
 
 `@expo/agent-cli build` is a name this CLI does not have. Starting a build is the EAS CLI's job. `Try: npx eas build`. Source for the inspect commands stays `src/builds/` and `src/config/`.
 
@@ -59,9 +59,9 @@ A forwarded exit code is handed back verbatim only where this CLI adds no verdic
 
 ## Deferred is a place
 
-Deferred code lives in `src/deferred/<area>/`. Nothing imports it. No registry entry loads it. No help line names it. No follow-up suggests it.
+Deferred code is not in the tree. It is at the git tag `agent-cli-deferred-v1`, under `packages/@expo/agent-cli/src/deferred/<area>/`. Restore an area with `git checkout agent-cli-deferred-v1 -- packages/@expo/agent-cli/src/deferred/<area>`. No registry entry, help line, follow-up or event declaration names a deferred command. Agents read the tree, and code in the tree reads as live.
 
-vitest `exclude`, tsc `exclude`, and the suggested-command lint `SKIPPED_DIRECTORIES` hold that property. JSONL event declarations stay in `src/events.ts`. Library internals that live callers still use stay where they are (`waitReady`, `bundleCheck`, `src/utils/git.ts`).
+Library internals that live callers still use stay where they are (`waitReady`, `bundleCheck`, `src/utils/git.ts`).
 
 A suggestion is a command the reader runs ([[0009-smart-followups]]). Follow-ups name commands that exist.
 
@@ -69,7 +69,7 @@ A suggestion is a command the reader runs ([[0009-smart-followups]]). Follow-ups
 
 - A wait that only needs the bundler is a whole `smoke` run. A CI job with no device has no cheaper gate than `typecheck`.
 - `web` has no bundle gate. `smoke --platform web` is refused.
-- The reference shelf is unverified. Nothing type-checks it and nothing runs its tests.
+- The tagged code is unverified. A command that returns must be connected again to the tree as it is then.
 
 ## Testing
 

@@ -51,5 +51,3 @@ the subsystem contracts; follow the `@ref llp/...` comments in code for the rele
 | Process boundaries              | [`e2e/`](packages/@expo/agent-cli/e2e), which runs the built CLI against fixtures and subprocess stubs                           |
 | npm alias                       | [`packages/expo-agent-cli/src/`](packages/expo-agent-cli/src); run `bun run bundle` after edits                                  |
 | Releases or CI                  | [`scripts/`](scripts) and [`.github/workflows/`](.github/workflows)                                                              |
-
-`src/deferred/` is reference material outside the shipped command surface.

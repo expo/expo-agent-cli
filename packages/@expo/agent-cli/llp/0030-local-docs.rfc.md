@@ -5,7 +5,7 @@
 **Systems:** the docs group (`src/docs/index.ts`); the bundle format and unpack safety (`src/docs/bundle.ts`); the local cache, its lock and its swap (`src/docs/cache.ts`); the download (`src/docs/sync.ts`); SDK version selection (`src/docs/version.ts`); ranking (`src/docs/search.ts`); the follow-up (`src/followups/docs.ts`); the Expo home directory (`src/utils/expoHome.ts`); the `AGENTS.md` block (`src/agents/content.ts`)
 **Author:** Vojtech Novak (drafted with Claude agent)
 **Date:** 2026-09-30
-**Related:** [[0003-knowledge-tools-and-skills]], [[0006-agent-native-cli-surface]], [[0009-smart-followups]], [[0010-agent-conventions]], [[0017-deferred-commands]]
+**Related:** [[0003-knowledge-tools-and-skills]], [[0006-agent-native-cli-surface]], [[0009-smart-followups]], [[0010-agent-conventions]]
 
 ## Summary
 

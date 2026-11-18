@@ -14,7 +14,7 @@ Make Expo the best framework to develop through an agent.
 
 **Shape 1:** Expo ships the tool layer, not the model. [confirmed, Kudo, 2026-08-18] The product is deterministic, agent-facing tools plus official skills. The intelligence comes from whatever agent the user already runs: Claude Code, Cursor, the Claude mobile app. No model, no API key, and no billing anywhere in the product. Models appear only in CI, to run the eval suite.
 
-The `@expo/agent-cli` bin ships as a thin, model-free launcher. Shipping is gated on heavy tests and evals. What is not in this release lives in [[0017-deferred-commands]].
+The `@expo/agent-cli` bin ships as a thin, model-free launcher. Shipping is gated on heavy tests and evals.
 
 ## Motivation
 
@@ -37,7 +37,7 @@ An Expo-built tool layer lets any driving agent read structured CLI state, encod
 
 ## Status convention
 
-See [[0000-expo-monorepo]] §Status convention. This corpus uses Draft, Active, Open, Deferred - reference, Superseded, and Tombstoned. This document is Active.
+See [[0000-expo-monorepo]] §Status convention. This corpus uses Draft, Active, Open, Superseded, and Tombstoned. This document is Active.
 
 ## Naming
 
@@ -64,7 +64,6 @@ packages/@expo/agent-cli/       # model-free CLI (Shape 1). No agent loop.
 │   ├── impact/                 # the change classifier the status command runs
 │   ├── runtime/                # eval, errors, reload, stop, tree/tap/type
 │   ├── inspect via builds/, config/
-│   ├── deferred/               # reference shelf. Not a live command ([[0017-deferred-commands]])
 │   ├── project/                # project-state probe
 │   └── new/, deploy/           # headless creation and shipping ([[0007-deploy-and-headless]])
 ├── e2e/
@@ -95,4 +94,4 @@ Three layers, all machine-readable:
 
 ## Design documents
 
-Feature areas live in child LLPs. [confirmed, Kudo, 2026-08-20] The living index is [[0000-expo-monorepo]] §Index. What is not in v1 is [[0017-deferred-commands]].
+Feature areas live in child LLPs. [confirmed, Kudo, 2026-08-20] The living index is [[0000-expo-monorepo]] §Index.
