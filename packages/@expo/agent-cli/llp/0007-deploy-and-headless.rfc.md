@@ -10,7 +10,7 @@
 
 ## Summary
 
-`deploy` ships a web or native app. `new` creates a project with no TTY. Cloudflare Workers tools, chat-driven development, and device-code auth are not in v1. See [[0017-deferred-commands]].
+`deploy` ships a web or native app. `new` creates a project with no TTY. Cloudflare Workers tools, chat-driven development, and device-code auth are not in v1.
 
 ## deploy
 
@@ -49,4 +49,4 @@ After successful scaffolding, `new` writes the same project-root `AGENTS.md` ins
 
 The JSON report adds `agentsMd` (created/updated/skipped, or null) and `errors`. An instruction failure preserves `created: true` and the scaffold, reports the error, and exits 20. A failed scaffold does not write instructions and retains the scaffolder's exit code. [observed]
 
-EAS init, a first-boot check, and the one-line-description form are not in v1. See [[0017-deferred-commands]].
+EAS init, a first-boot check, and the one-line-description form are not in v1.

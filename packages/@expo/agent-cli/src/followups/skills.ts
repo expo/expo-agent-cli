@@ -1,6 +1,5 @@
 // @ref llp/0009-smart-followups.rfc.md §Examples per command — `skills:sync`.
-// @ref llp/0017-deferred-commands.reference.md §Not built — agent-aware rendering: a detected agent gets
-// the note that it does not have to load these files itself.
+// A detected agent gets the note that it does not have to load these files itself.
 
 import { PROGRAM_PREFIX } from '../programName';
 import { capFollowUps, type FollowUp } from './types';

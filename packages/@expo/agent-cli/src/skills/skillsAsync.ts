@@ -96,8 +96,7 @@ export async function syncSkillsAsync(projectRoot: string, options: SkillsOption
   }
 
   const skillPackages = [...new Set(skills.map((skill) => skill.packageName))];
-  // @ref llp/0017-deferred-commands.reference.md §Not built — agent-aware rendering: a detected agent is
-  // told that it does not have to read these files itself.
+  // A detected agent is told that it does not have to read these files itself.
   const followups = followUpsEnabled(options.followups)
     ? buildSkillsSyncFollowUps({
         skillPackages,

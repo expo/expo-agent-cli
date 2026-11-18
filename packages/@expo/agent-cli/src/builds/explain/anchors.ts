@@ -6,8 +6,8 @@
 // does I/O and nothing here is fetched — the table ships in the repository, is capped at
 // {@link MAX_SIGNATURES}, and every entry has a fixture (`__tests__/fixtures/`) with a test.
 //
-// The cap is the decision, not an implementation detail. llp/0017 §Not built rules out *the
-// build-failure signature DB* — a hosted, growing, community-fed corpus — and llp/0010 records
+// The cap is the decision, not an implementation detail. A hosted, growing, community-fed
+// build-failure signature DB is out of scope, and llp/0010 records
 // that a bounded in-repo table is the opposite of that in every dimension that made it a
 // scope-out. A maintainer who wants to answer a field report by appending a rule has to argue
 // past the cap first, which is the point.

@@ -28,7 +28,7 @@ describe(`${buildReloadFollowUps.name} and the session's platform`, () => {
     );
   });
 
-  // @ref llp/0017-deferred-commands.reference.md §dev:wait. A `Try:` line has to be runnable,
+  // A `Try:` line has to be runnable,
   // and `xcrun simctl io <session-id>` is not: the device is not on this machine.
   it(`never names a platform tool for a cloud session`, () => {
     const followups = buildReloadFollowUps({

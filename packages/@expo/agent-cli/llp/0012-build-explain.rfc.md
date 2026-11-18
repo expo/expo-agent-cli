@@ -21,13 +21,11 @@ Two properties are the whole design:
 
 Two input sources ship: `--file <path>` and `--stdin`. The `<build-id>` form, which would read the log of an EAS build by its id, does not. eas-cli has no `build:logs` command ([[0010-agent-conventions]] §Upstream asks).
 
-The positional argument is reserved and reported rather than rejected as a stray. `@expo/agent-cli inspect:build-log <build-id>` is the command an agent will reach for. It has a code of its own, `BUILD_ID_UNSUPPORTED`. The message says the CLI cannot fetch a build's log, why, and the two spellings that work today. `Try: npx eas build:view <id>` prints where the log files are. Fetching by id is not in v1. See [[0017-deferred-commands]].
+The positional argument is reserved and reported rather than rejected as a stray. `@expo/agent-cli inspect:build-log <build-id>` is the command an agent will reach for. It has a code of its own, `BUILD_ID_UNSUPPORTED`. The message says the CLI cannot fetch a build's log, why, and the two spellings that work today. `Try: npx eas build:view <id>` prints where the log files are. Fetching by id is not in v1.
 
 `source.kind` is `'file' | 'stdin'`. There is no `build` key.
 
 Local logs are most of the value. `npx expo run:ios 2>&1 | npx @expo/agent-cli inspect:build-log --json` is the loop an agent driving a local build actually has.
-
-`build:wait`'s follow-up naming a file rather than a build id, and why, are in [[0017-deferred-commands]].
 
 ## Two layers of phase detection
 

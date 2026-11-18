@@ -6,7 +6,7 @@
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20
 **Revised:** 2026-09-06
-**Related:** [[0001-agentic-cli-on-expo-cli]], [[0004-smart-start-and-project-state]], [[0016-v1-scope]], [[0017-deferred-commands]]
+**Related:** [[0001-agentic-cli-on-expo-cli]], [[0004-smart-start-and-project-state]], [[0016-v1-scope]]
 
 ## Summary
 
@@ -16,7 +16,7 @@ Shipped: plan-with-cost dry runs, `dev --plan` as the dry run a caller asks for,
 
 `dev` itself has no consent gate. It prints the plan and runs it, in a terminal as much as out of one. The two gates that used to be here — a `? Run this plan? ›` prompt, then a `Nothing ran` stop that handed back the same line with `--yes` — are both gone, and so is `--yes` itself. §The plan is announced, not negotiated is the record of why.
 
-Checkpoints are deferred. See [[0017-deferred-commands]]. Nothing in the v1 surface takes a snapshot. `runGitAsync` and `resolveWorkTreeAsync` stayed live in `src/utils/git.ts` because `src/impact/` reads a diff through them.
+Checkpoints are deferred. Nothing in the v1 surface takes a snapshot. `runGitAsync` and `resolveWorkTreeAsync` stayed live in `src/utils/git.ts` because `src/impact/` reads a diff through them.
 
 MCP permission-tier metadata is not built. There is no MCP server. It is scoped out in [[0016-v1-scope]], not a v1 candidate.
 
@@ -40,7 +40,7 @@ Somebody did ask. `dev --ios` means get this app onto an iOS device, and on a pr
 
 So what remains is the dry run, and it is a command rather than a mode: **`--plan` prints the plan and exits, for every caller, terminal or not** (§Plan-with-cost dry run). A caller who wants to see before running says so. One that does not, does not.
 
-`--yes` is gone, not accepted-and-ignored. A no-op flag is a flag callers keep passing to get a behaviour they already have, and it would have outlived every reader of this document. `cli:start_plan_needs_consent` is off the event stream for the same reason. `dev` no longer refers to `src/utils/consent.ts`; the deferred `doctor:fix --apply` is its last caller, and that does not ship ([[0017-deferred-commands]]).
+`--yes` is gone, not accepted-and-ignored. A no-op flag is a flag callers keep passing to get a behaviour they already have, and it would have outlived every reader of this document. `cli:start_plan_needs_consent` is off the event stream for the same reason. `dev` no longer refers to `src/utils/consent.ts`; the deferred `doctor:fix --apply` is its last caller, and that does not ship.
 
 **Agent setup is an explicit exception.** `agents:setup` selects agents and home/project scope, displays the installation and project-write plan, and asks for confirmation. `--yes` accepts that plan for automation; without a terminal it is required. Cancellation before confirmation writes nothing. [confirmed, Kudo, 2026-09-08; [[0006-agent-native-cli-surface]]] Standalone `skills:sync` retains noninteractive selection and `--agent` overrides. Other commands keep the behavior described above.
 
@@ -54,10 +54,10 @@ App logs, network payloads, and screenshots flow into agent context. They can co
 
 ## A command whose targets are gitignored
 
-A command whose targets are gitignored must state that its recovery does not cover them, in the same output that names the recovery. Printing an id and letting the reader infer the guarantee is worse than printing no id at all. `node_modules`, `ios/Pods`, `.expo`, and the Metro caches are the files a snapshot of tracked content does not hold. Whatever the recovery mechanism of the day is, an artifact that names it must also name what it leaves out. The case that produced the rule was `doctor:fix` and the checkpoint it took. Both are deferred ([[0017-deferred-commands]]). The rule is not about snapshots and stays here.
+A command whose targets are gitignored must state that its recovery does not cover them, in the same output that names the recovery. Printing an id and letting the reader infer the guarantee is worse than printing no id at all. `node_modules`, `ios/Pods`, `.expo`, and the Metro caches are the files a snapshot of tracked content does not hold. Whatever the recovery mechanism of the day is, an artifact that names it must also name what it leaves out. The case that produced the rule was `doctor:fix` and the checkpoint it took. Both are deferred. The rule is not about snapshots and stays here.
 
 ## Testing
 
-Checkpoint/undo was deterministic. Its suites left the tree with the code ([[0017-deferred-commands]]). Plan-emission is covered by the smart start tests.
+Checkpoint/undo was deterministic. Its suites left the tree with the code. Plan-emission is covered by the smart start tests.
 
 That a plan which builds runs unasked is covered by `src/dev/__tests__/devAsync-test.ts` §a plan that builds, which runs the stale-dev-client case on both sides of the TTY check — the axis the old gate turned on, pinned so it cannot come back by accident. `src/dev/__tests__/resolveOptions-test.ts` pins that `--yes` is refused rather than ignored, and `e2e/__tests__/dev-test.ts` asserts that neither `Run this plan?` nor `Nothing ran` appears in a real run.

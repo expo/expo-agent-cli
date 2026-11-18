@@ -37,7 +37,6 @@ A document's `Status:` header takes one of these values.
 - **Draft:** still being written. Nothing in it is safe to build against.
 - **Active:** design of record, shipped and stable. An open question inside Active is follow-on work. A decision inside one is changed by amending the document, not by discovering the code disagrees.
 - **Open:** settled in part. The header names the unbuilt part.
-- **Deferred - reference:** left out of the release. Code is at the git tag `agent-cli-deferred-v1`. Only [[0017-deferred-commands]].
 - **Superseded:** replaced. The header names the replacement. The file stays put.
 - **Tombstoned:** do not believe its claims.
 
@@ -87,8 +86,6 @@ How every command behaves:
 - [[0028-command-telemetry]]: shared Expo ingestion, agent/sandbox context, and detached delivery.
 
 Left out:
-
-- [[0017-deferred-commands]]: everything that is not in v1. Shelf commands, and unbuilt product.
 
 Superseded (history only):
 
