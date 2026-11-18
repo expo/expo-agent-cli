@@ -196,6 +196,7 @@ describe('@expo/agent-cli patch — bun', () => {
       files: ['index.js'],
       native: [],
       buildFromSource: [],
+      upstream: false,
     });
     expect(path.dirname(fs.realpathSync.native(report.patchFile))).toBe(
       path.join(fs.realpathSync.native(projectRoot), 'patches')
@@ -223,10 +224,12 @@ describe('@expo/agent-cli patch — bun', () => {
       files: ['ios/FakeModule.swift'],
       native: ['ios'],
       buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
+      upstream: true,
     });
     const pkg = readJson(path.join(projectRoot, 'package.json'));
     expect(pkg.expo.autolinking).toEqual({ ios: { buildFromSource: ['fake-expo-module'] } });
-    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev']);
+    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev', 'patch-upstream']);
+    expect(report.followups[1].command).toMatch(/patch fake-expo-module --upstream-plan$/);
   });
 
   it(`keeps an existing buildFromSource entry that already covers the module`, async () => {
@@ -266,6 +269,270 @@ describe('@expo/agent-cli patch — bun', () => {
 
     expect(result.exitCode).toBe(1);
     expect(JSON.parse(result.stdout).error.code).toBe('PATCH_LINKED_STORE');
+  });
+});
+
+/**
+ * A stand-in for a clone of expo/expo: the fake package at `packages/fake-expo-module`, committed,
+ * and without `build/`, which expo/expo does not commit.
+ */
+function setupFakeExpoRepo(): string {
+  const repo = path.join(getTemporaryPath(), 'expo');
+  const target = path.join(repo, 'packages', 'fake-expo-module');
+  fs.mkdirSync(target, { recursive: true });
+  fs.cpSync(path.join(fixturesDir, 'patch-packages', 'fake-expo-module'), target, {
+    recursive: true,
+  });
+  fs.rmSync(path.join(target, 'build'), { recursive: true, force: true });
+  run('git', ['init', '-q'], repo);
+  run('git', ['add', '.'], repo);
+  run(
+    'git',
+    ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.com', 'commit', '-qm', 'init'],
+    repo
+  );
+  return repo;
+}
+
+/** Run the plan's `applyCommand`, which is a shell line, in the fake clone. */
+function applyInRepo(applyCommand: string, repo: string): void {
+  run('sh', ['-c', applyCommand], repo);
+}
+
+/**
+ * PATH for a run that has gh, or not: the node directory, plus a stand-in gh when asked. The plan
+ * only looks gh up on PATH; it never runs it.
+ */
+function pathWithGh(present: boolean): Record<string, string> {
+  const dirs = [path.dirname(process.execPath)];
+  if (present) {
+    const ghDir = getTemporaryPath();
+    fs.mkdirSync(ghDir, { recursive: true });
+    for (const name of isWindows ? ['gh.cmd'] : ['gh']) {
+      fs.writeFileSync(path.join(ghDir, name), '', { mode: 0o755 });
+    }
+    dirs.unshift(ghDir);
+  }
+  return { PATH: dirs.join(path.delimiter) };
+}
+
+describe('@expo/agent-cli patch --upstream-plan', () => {
+  async function patchedProjectAsync(manager: Manager = 'bun'): Promise<string> {
+    const projectRoot = await setupProjectAsync(manager);
+    edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '// fix\n');
+    edit(projectRoot, 'fake-expo-module/build/index.js', '// fix\n');
+    await executeAgentCliAsync(projectRoot, ['patch', 'fake-expo-module', '--json', '--yes']);
+    return projectRoot;
+  }
+
+  it(`prints the facts and the steps, links the expo/expo guides, and stops for the user`, async () => {
+    const projectRoot = await patchedProjectAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+      { reject: false, env: pathWithGh(true) }
+    );
+
+    expect(result.exitCode).toBe(7);
+    const { upstream } = JSON.parse(result.stdout);
+    expect(upstream).toMatchObject({
+      package: 'fake-expo-module',
+      repository: 'expo/expo',
+      base: '0123456789abcdef0123456789abcdef01234567',
+      files: [
+        {
+          file: 'build/index.js',
+          target: null,
+          portTo: 'packages/fake-expo-module/src/index.ts (or .tsx)',
+        },
+        {
+          file: 'ios/FakeModule.swift',
+          target: 'packages/fake-expo-module/ios/FakeModule.swift',
+          portTo: null,
+        },
+      ],
+      platforms: ['[iOS]'],
+      repro: null,
+      gh: true,
+    });
+    expect(upstream.missing).toHaveLength(2);
+    // With no repro, the plan says how to make one: minimal, complete, reproducible, and uploaded.
+    expect(upstream.steps[2]).toMatch(/^Make a minimal repro and upload it to a public GitHub/);
+    const guide = upstream.reproGuide.join('\n');
+    // The repro follows expo/expo's bug report form, and is named for the bug, not the package.
+    expect(upstream.issueTemplate).toBe(
+      'https://github.com/expo/expo/blob/main/.github/ISSUE_TEMPLATE/0-bug_report.yml'
+    );
+    expect(upstream.reproGuide[0]).toContain(upstream.issueTemplate);
+    expect(guide).toContain('npx create-expo-app@latest <name> --template blank');
+    expect(guide).not.toContain('fake-expo-module-repro');
+    expect(guide).toContain('"Expo Doctor Diagnostics"');
+    expect(guide).toContain('Do not apply the patch.');
+    expect(guide).toContain('gh repo create <name> --public --source . --push');
+    expect(guide).toContain('--repro <the repository URL>');
+    // The first step is the user's decision, and nothing in the plan runs on its own.
+    expect(upstream.steps[0]).toMatch(/^Ask the user first/);
+    expect(upstream.steps.join('\n')).toContain(
+      'git switch -c fix/fake-expo-module 0123456789abcdef'
+    );
+    expect(upstream.steps.join('\n')).toContain('Make the compiled-output changes in source');
+    // How to contribute is expo/expo's own guides and template, linked, not copied.
+    expect(upstream.steps[1]).toMatch(
+      /^Read https:\/\/github\.com\/expo\/expo\/blob\/main\/AGENTS\.md and https:\/\/github\.com\/expo\/expo\/blob\/main\/CONTRIBUTING\.md, and packages\/fake-expo-module\/AGENTS\.md if it exists\./
+    );
+    expect(upstream.guides).toEqual([
+      'https://github.com/expo/expo/blob/main/AGENTS.md',
+      'https://github.com/expo/expo/blob/main/CONTRIBUTING.md',
+    ]);
+    expect(upstream.prTemplate).toBe(
+      'https://github.com/expo/expo/blob/main/.github/PULL_REQUEST_TEMPLATE'
+    );
+    expect(upstream.steps.join('\n')).toContain('et check-packages fake-expo-module');
+    expect(upstream.steps.join('\n')).toContain(upstream.prTemplate);
+    expect(upstream.steps.join('\n')).toContain('gh pr create --draft --repo expo/expo');
+    expect(upstream.steps.join('\n')).not.toContain('CHANGELOG.md');
+    expect(upstream).not.toHaveProperty('rerun');
+  });
+
+  it(`takes the repro as a GitHub repository URL, and checks it first`, async () => {
+    const projectRoot = await patchedProjectAsync();
+    const repro = 'https://github.com/someone/fake-expo-module-repro';
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--repro', repro],
+      { reject: false, env: pathWithGh(true) }
+    );
+    const json = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--repro', repro, '--json'],
+      { reject: false, env: pathWithGh(true) }
+    );
+
+    expect(result.exitCode).toBe(7);
+    expect(result.stdout).toContain(`Repro:     ${repro}`);
+    expect(result.stdout).not.toContain('Repro guide:');
+    expect(result.stdout).toContain(
+      'Pull request template: https://github.com/expo/expo/blob/main/.github/PULL_REQUEST_TEMPLATE'
+    );
+    expect(result.stdout).toContain('Nothing was opened or pushed.');
+    const { upstream } = JSON.parse(json.stdout);
+    expect(upstream.repro).toBe(repro);
+    expect(upstream.missing).toHaveLength(1);
+    expect(upstream.steps[2]).toBe(
+      `Check the repro: clone ${repro}, run it without the patch, and see the bug. If you do not see it, fix the repro first (see the repro guide).`
+    );
+  });
+
+  it(`refuses a repro that is not a GitHub repository URL`, async () => {
+    const projectRoot = await patchedProjectAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--repro', 'repro.md', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    const { error } = JSON.parse(result.stdout);
+    expect(error.code).toBe('BAD_ARGS');
+    expect(error.message).toContain('--repro takes the URL of a GitHub repository');
+  });
+
+  it(`uses git and github.com pages when gh is not installed`, async () => {
+    const projectRoot = await patchedProjectAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+      { reject: false, env: pathWithGh(false) }
+    );
+
+    expect(result.exitCode).toBe(7);
+    const { upstream } = JSON.parse(result.stdout);
+    expect(upstream.gh).toBe(false);
+    const steps = upstream.steps.join('\n');
+    for (const command of ['gh repo fork', 'gh pr create', 'gh issue create']) {
+      expect(steps).not.toContain(command);
+    }
+    expect(steps).toContain('https://github.com/expo/expo/fork');
+    expect(steps).toContain(
+      'https://github.com/expo/expo/compare/main...<fork owner>:fix/fake-expo-module?expand=1'
+    );
+    expect(steps).toContain('https://github.com/expo/expo/issues/new?template=0-bug_report.yml');
+    expect(steps).toContain('"Minimal reproducible example" (the repository URL)');
+    const guide = upstream.reproGuide.join('\n');
+    expect(guide).not.toContain('gh repo create');
+    expect(guide).toContain('https://github.com/new');
+  });
+
+  it.skipIf(isWindows)(
+    `gives an apply command that applies the bun patch inside expo/expo, without build/`,
+    async () => {
+      const projectRoot = await patchedProjectAsync('bun');
+      const { stdout } = await executeAgentCliAsync(
+        projectRoot,
+        ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+        { reject: false }
+      );
+      const repo = setupFakeExpoRepo();
+
+      applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
+
+      expect(
+        fs.readFileSync(path.join(repo, 'packages/fake-expo-module/ios/FakeModule.swift'), 'utf8')
+      ).toContain('// fix');
+      expect(fs.existsSync(path.join(repo, 'packages/fake-expo-module/build'))).toBe(false);
+    }
+  );
+
+  it.skipIf(isWindows)(
+    `gives an apply command that applies the patch-package patch inside expo/expo`,
+    async () => {
+      const projectRoot = await patchedProjectAsync('npm');
+      const { stdout } = await executeAgentCliAsync(
+        projectRoot,
+        ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+        { reject: false }
+      );
+      const repo = setupFakeExpoRepo();
+
+      applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
+
+      expect(
+        fs.readFileSync(path.join(repo, 'packages/fake-expo-module/ios/FakeModule.swift'), 'utf8')
+      ).toContain('// fix');
+      expect(fs.existsSync(path.join(repo, 'packages/fake-expo-module/build'))).toBe(false);
+    }
+  );
+
+  it(`refuses --yes, because the plan opens nothing`, async () => {
+    const projectRoot = await patchedProjectAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--yes', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('BAD_ARGS');
+  });
+
+  it(`refuses a package that does not come from expo/expo`, async () => {
+    const projectRoot = await setupProjectAsync('bun');
+    edit(projectRoot, 'fake-js-lib/index.js', '// fix\n');
+    await executeAgentCliAsync(projectRoot, ['patch', 'fake-js-lib']);
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-js-lib', '--upstream-plan', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('PATCH_NOT_UPSTREAM');
   });
 });
 

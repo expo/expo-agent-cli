@@ -38,6 +38,8 @@ export interface PatchReport {
   files: string[];
   native: NativePlatform[];
   buildFromSource: BuildFromSourceChange[];
+  /** The package's source is `expo/expo`, so the fix can be sent there. */
+  upstream: boolean;
   followups: FollowUp[];
 }
 
@@ -64,6 +66,13 @@ export function resolveInstalledPackage(
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} install ${packageName}`;
   throw error;
+}
+
+/** Whether a package manifest says its source is the `expo/expo` repository. */
+export function isExpoRepoPackage(manifest: Record<string, any>): boolean {
+  const repository = manifest.repository;
+  const url = typeof repository === 'string' ? repository : repository?.url;
+  return typeof url === 'string' && /github\.com[/:]expo\/expo(?:\.git)?\/?$/i.test(url.trim());
 }
 
 /** Refuse a package whose files are hard links into the store: no clean copy is left to diff. */
@@ -117,7 +126,7 @@ export async function patchAsync(
   options: PatchOptions
 ): Promise<void> {
   const packageManager = detectPackageManager(projectRoot);
-  const { packageDir, version } = resolveInstalledPackage(projectRoot, packageName, [
+  const { packageDir, version, manifest } = resolveInstalledPackage(projectRoot, packageName, [
     projectRoot,
     packageManager.root,
   ]);
@@ -138,6 +147,7 @@ export async function patchAsync(
   }
 
   const native = nativePlatformsOfFiles(result.files);
+  const upstream = isExpoRepoPackage(manifest);
 
   if (result.status === 'needs-consent') {
     // Work the caller did not ask for (llp/0008 §The plan is announced, not negotiated): the call
@@ -165,6 +175,7 @@ export async function patchAsync(
     ? buildPatchFollowUps({
         packageName,
         native: native.length > 0,
+        upstream,
         hashedByFingerprint: isUnder(result.patchFile, path.join(packageManager.root, 'patches')),
       })
     : [];
@@ -178,6 +189,7 @@ export async function patchAsync(
     files: result.files,
     native,
     buildFromSource,
+    upstream,
     followups,
   };
 
