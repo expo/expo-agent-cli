@@ -145,7 +145,7 @@ Not built yet: the `dev` follow-up names Expo Go in its text, but does not read 
 | No edits and hard-linked files are refused                                                                                    | `patch — bun`                                                                  |
 | `--upstream-plan` opens nothing, exits 7, and refuses `--yes` and a package not from `expo/expo`                              | `patch --upstream-plan`                                                        |
 | `applyCommand` applies both patch formats inside an `expo/expo` clone, without `build/`                                       | `patch --upstream-plan` (a stand-in git repository)                            |
-| `--repro` takes only a GitHub repository URL; the steps work without `gh`                                                     | `patch --upstream-plan`                                                        |
+| `--repro` takes only a GitHub repository URL; the plan says whether `gh` is installed                                         | `patch --upstream-plan`                                                        |
 
 ## Open questions
 
