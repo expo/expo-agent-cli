@@ -8,6 +8,7 @@ import { hostPlatform } from '../../src/smoke/suggest';
 import {
   executeAgentCliAsync,
   holdLockForAsync,
+  NO_ANSWER,
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
@@ -33,6 +34,41 @@ const SECOND_TARGET = {
   reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'device-2' },
 };
 const SENTINEL = 'bundle-state-sentinel';
+
+/** A second page of the same device: `capabilities` overrides what it can do. */
+function sideTarget(id: string, capabilities: Record<string, boolean>) {
+  return {
+    ...EXPO_GO_TARGET,
+    id,
+    webSocketDebuggerUrl: `ws://127.0.0.1:8081/inspector/debug?device=${id}&page=1`,
+    reactNative: { capabilities, logicalDeviceId: 'device-1' },
+  };
+}
+
+/**
+ * One loading app, and what makes it look attached when a reader does not ask the same question as
+ * the debugger client: a page the client never reads beside it, or a probe answer that comes late.
+ */
+const LOADING_SHAPES: [string, Partial<StubDevServerOptions>][] = [
+  [
+    'a hidden page beside it',
+    {
+      targets: [EXPO_GO_TARGET, sideTarget('9', { nativePageReloads: true })],
+      requireType: (device) => (device === '9' ? 'hidden' : 'undefined'),
+    },
+  ],
+  [
+    'a page that does not reload natively beside it',
+    {
+      targets: [EXPO_GO_TARGET, sideTarget('8', {})],
+      requireType: (device) => (device === '8' ? 'function' : 'undefined'),
+    },
+  ],
+  [
+    'a probe answer that takes 400 ms',
+    { targets: [EXPO_GO_TARGET], requireType: () => 'undefined', requireTypeDelayMs: 400 },
+  ],
+];
 
 const loading: StubDevServerOptions['requireType'] = () => 'undefined';
 
@@ -81,6 +117,15 @@ describe('an app whose bundle has not run', () => {
         });
       }
     );
+  });
+
+  it.each(LOADING_SHAPES)('runtime:errors exits 22 with %s', async (_, options) => {
+    await withStubAsync({ inspectorEvaluate: () => undefined, ...options }, async (url) => {
+      const result = await runAsync(['runtime:errors', '--duration', '100ms'], url);
+
+      expect(result.exitCode, result.all).toBe(22);
+      expect(JSON.parse(result.stdout).error.code).toBe('APP_BUNDLE_NOT_RUN');
+    });
   });
 
   it('runtime:tree exits 22 with APP_BUNDLE_NOT_RUN, not RUNTIME_TREE_UNSUPPORTED', async () => {
@@ -147,6 +192,42 @@ describe('an app whose bundle has not run', () => {
         expect(result.stdout).toMatch(
           /App loading · 1 ios debugger target, bundle not run after \d+ms/
         );
+      }
+    );
+  });
+
+  it.each(LOADING_SHAPES)('navigate reports App loading with %s', async (_, options) => {
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    await withStubAsync({ projectRoot, ...options }, async (url) => {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'navigate',
+          '/',
+          '--ios',
+          '--no-followups',
+          '--attach-timeout',
+          '2s',
+          '--dev-server-url',
+          url,
+        ],
+        { reject: false, env: stubExpoEnv(projectRoot) }
+      );
+
+      expect(result.exitCode, result.all).toBe(22);
+      expect(result.stdout).toContain('App loading');
+    });
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state — a runtime that opens its socket and
+  // never answers cannot say, and is read like one that has no evaluate.
+  it('runtime:errors reads an app that accepts the socket and never answers the probe', async () => {
+    await withStubAsync(
+      { targets: [EXPO_GO_TARGET], requireType: () => NO_ANSWER },
+      async (url) => {
+        const result = await runAsync(['runtime:errors', '--duration', '100ms'], url);
+
+        expect(result.exitCode, result.all).toBe(0);
       }
     );
   });

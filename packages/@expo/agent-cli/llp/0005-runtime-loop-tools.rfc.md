@@ -252,24 +252,26 @@ A lease lasts 60 minutes ([[0035-one-device-per-worktree]] §Lease). A dev serve
 
 A development build lists its debugger target, and answers `Runtime.evaluate`, before its bundle runs. While the bundle downloads, `typeof globalThis.__r` is `"undefined"`. After the bundle runs, it is `"function"` [observed: iOS simulator, React Native 0.88, the bundle request held by a proxy]. A bundle request that answers HTTP 500 leaves the same state for as long as the app stays open [observed: same setup]. So a listed target is not a loaded app.
 
-The probe is one `Runtime.evaluate` per target, over a one-shot connection. The same expression also asks whether the page asks to be hidden from the inspector, so the debugger client's choice of target opens one connection per target, as before. It has these answers:
+The probe is one `Runtime.evaluate` per page, over a one-shot connection. The same expression also asks whether the page asks to be hidden from the inspector. Every reader that asks takes its answer from one rule, so the attach waits, the preflight and the debugger client's choice of target agree on which pages are apps:
 
-| Answer                                          | Bundle state | The app is                                         |
-| ----------------------------------------------- | ------------ | -------------------------------------------------- |
-| `"function"`                                    | `ran`        | attached                                           |
-| `"hidden"`                                      | —            | attached; the client never picks the page          |
-| any other string                                | `not-run`    | loading                                            |
-| `-32601`, or a value that is not a string       | `unknown`    | attached; the client picks it when no target `ran` |
-| an error, a closed socket, or no answer in time | `unknown`    | attached; the client skips it                      |
+| Page                                                                                    | Probe result  | Waits and preflight          | Debugger client |
+| --------------------------------------------------------------------------------------- | ------------- | ---------------------------- | --------------- |
+| no `nativePageReloads`; answers `"hidden"`; socket refused, closed, or not open in time | not an app    | neither attached nor loading | never reads it  |
+| answers `"function"`                                                                    | `ran`         | attached                     | first choice    |
+| answers any other string                                                                | `not-run`     | loading                      | never reads it  |
+| answers `-32601`, or a value that is not a string                                       | `no-evaluate` | attached                     | fallback        |
+| socket open, and no answer in the whole probe time (2 s)                                | `silent`      | attached                     | last fallback   |
 
-`unknown` counts as attached. Expo Go for Android answers every evaluate with `-32601` (§Android), and a runtime that cannot answer must not stop a command that can work without an evaluate. The probe keeps no cache: `Page.reload` keeps the page id and replaces the context (§What proves a reload), so an earlier answer can be stale.
+A page that cannot say counts as attached. Expo Go for Android answers every evaluate with `-32601` (§Android), and a runtime can accept the socket and say nothing. Such a runtime must not stop a command that can work without an evaluate. A hidden page belongs to the development build's own tools: `expo-dev-menu` hides its runtime, which the device lists beside the app. A socket that does not open is a stale registration.
+
+Each probe gets its whole time, also near a wait's deadline: a probe cut short answers nothing about the page, and "no answer in time" would read a loading app as attached. So a wait can end up to one probe time after its deadline. The probe keeps no cache: `Page.reload` keeps the page id and replaces the context (§What proves a reload), so an earlier answer can be stale.
 
 `not-run` means the app still loads its bundle, or the load failed. The probe cannot tell the two apart, so a refusal on `not-run` is exit 22: asking again can change the answer.
 
 Only the readers that need a running bundle ask:
 
-- The preflight, for a command that needs a debugger target (§One preflight for the runtime family). When every own app is loading, it asks again until the reconnect wait ends. The empty-list wait and this wait share one budget of 3 s. Then it refuses `APP_BUNDLE_NOT_RUN`, exit 22, with every `error.data` key, and `smoke --<platform>` as the suggested command. The message says how long the app was seen loading.
-- The debugger client's choice of target, on every read of the list. It picks a target whose bundle ran, then one that cannot say, and never a loading one. So with two own apps, one loading, a command reads the attached one. Every command that opens a debugger client gets this rule.
+- The preflight, for a command that needs a debugger target (§One preflight for the runtime family). It stops at the first page that is attached, so a silent page beside an attached app costs no probe time. When every own app is loading, it asks again until the reconnect wait ends. The empty-list wait and this wait share one budget of 3 s. Then it refuses `APP_BUNDLE_NOT_RUN`, exit 22, with every `error.data` key, and `smoke --<platform>` as the suggested command. The message says how long the app was seen loading.
+- The debugger client's choice of target, on every read of the list. It follows the table above. So with two own apps, one loading, a command reads the attached one. Every command that opens a debugger client gets this rule.
 - The attach wait of `smoke`'s `app` phase and of `dev:wait --require-app`. It counts attached apps only. When the `app` phase ends with no attached app and a loading one, its reason says that the app is loading.
 - `navigate`'s attach wait (§Loading the app is not navigating it). A loading app is not force-stopped: a stop throws the download away. The open dialog step of an EAS session is also skipped: a loading app took the link.
 

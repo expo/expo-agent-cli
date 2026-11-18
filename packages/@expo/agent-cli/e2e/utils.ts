@@ -798,6 +798,8 @@ export type StubDevServerOptions = {
    * is still loading its bundle, and {@link NO_ANSWER} sends no reply.
    */
   requireType?: (device: string) => unknown;
+  /** How long the app takes to answer {@link requireType}, as a busy JavaScript thread does. */
+  requireTypeDelayMs?: number;
   /**
    * Clients `getpeers` reports before any reload. Defaults to one that looks like an iOS app.
    *
@@ -938,6 +940,7 @@ export async function startStubDevServerAsync({
   targetsAppearWithFile = null,
   inspectorEvaluate,
   requireType = () => 'function',
+  requireTypeDelayMs = 0,
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
   const bundlePlatforms: string[] = [];
@@ -1181,7 +1184,11 @@ export async function startStubDevServerAsync({
         if (expression.includes('typeof globalThis.__r')) {
           const type = requireType(device);
           if (type !== NO_ANSWER) {
-            reply({ result: { type: 'string', value: type } });
+            setTimeout(() => {
+              if (socket.readyState === socket.OPEN) {
+                reply({ result: { type: 'string', value: type } });
+              }
+            }, requireTypeDelayMs);
           }
           return;
         }
