@@ -77,7 +77,8 @@ export interface ReloadOptions {
   /**
    * Build the project's entry bundle before reloading, cleared by `--no-bundle-check`.
    *
-   * The same gate and the same flag as `smoke`, for the same reason: a reload makes the app
+   * The same gate as `smoke`, and the same flag as `runtime:tree`, `runtime:tap` and
+   * `runtime:type`. The reason: a reload makes the app
    * fetch the served bundle again, so reloading onto a bundle that does not compile puts the app
    * back on the screen it was already on (llp/0010 §Other gates, in brief).
    */

@@ -776,8 +776,9 @@ function buildReport({
       timedOut: connection.timedOut,
       timeoutMs: options.timeoutMs,
     }),
-    // The same flag as `smoke`'s, so the reason a null bundle carries is the same sentence
-    // whichever command asked the question (llp/0010 §Other gates, in brief).
+    // The same flag as `runtime:tree`, `runtime:tap` and `runtime:type`, so the reason a null
+    // bundle carries is the same sentence whichever command skipped the check (llp/0010 §Other
+    // gates, in brief).
     bundle: bundleToJson(bundle, { skippedByFlag: !options.bundleCheck }),
     bundlesAfterReload: {
       observed: bundleObservation ? bundleObservation.observed : null,

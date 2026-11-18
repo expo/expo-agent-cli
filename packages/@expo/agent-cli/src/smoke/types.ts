@@ -315,7 +315,7 @@ export interface SmokeResultJson {
   appsConnected: number | null;
   /** Apps attached that the run skipped as another worktree's or another device's: name, group, worktrees. */
   skippedApps: SkippedApp[];
-  /** The same `bundle` object `runtime:reload` prints, from the same check. */
+  /** The `bundle` object every caller builds with `bundleToJson`, from the same check. */
   bundle: BundleCheckJson;
   /** Route the run opened, or null when none was asked for. */
   route: string | null;

@@ -42,8 +42,8 @@ export function smokeResultToJson(
     environment: run.environment,
     appsConnected: run.appsConnected,
     skippedApps: run.skippedApps,
-    // The same object `runtime:reload` prints, from the same function: one question
-    // asked in two commands must not have two shapes (llp/0010 §Other gates, in brief).
+    // Every caller builds this object with `bundleToJson`, so one question has one shape
+    // (llp/0010 §Other gates, in brief).
     bundle: bundleToJson(run.bundle),
     route: run.route,
     routeCheck:
