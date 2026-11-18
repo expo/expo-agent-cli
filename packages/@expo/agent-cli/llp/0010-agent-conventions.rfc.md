@@ -34,7 +34,7 @@ Why the codes sit where they do:
 
 A unit test fails when loadable source starts to use `21`. `dev --plan` runs nothing on purpose, which is a success: exit `0`.
 
-The one exception to the `125` ceiling is `dev`, which follows the shell's convention for signals. A signal before, between or during a step other than the dev server exits `128` plus the signal number (`DEV_INTERRUPTED`). A signal that ends the dev-server step is the stop the caller asked for: exit `0`.
+The one exception to the `125` ceiling is `dev`, which follows the shell's convention for signals. A signal at any other time exits `128` plus the signal number. During a step, the error is `DEV_INTERRUPTED`. A signal that ends the dev-server step is the stop the caller asked for: exit `0`.
 
 A command ends in one of two ways:
 
@@ -60,7 +60,7 @@ A wrapper's own failures use the table above. A forwarded `7` is the child's own
 
 The exception to forwarding is `doctor`, which adds a verdict of its own ([[0016-v1-scope]] §Doctor's exit code).
 
-A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's plain install. It runs in the workspace root or the project, as `@expo/package-manager` resolves it, never in an unrelated parent folder. It is not frozen, because `npm ci` deletes every workspace member's `node_modules`. The other states:
+A bare `install` in an Expo app whose `expo` package does not resolve runs the package manager's plain install. It runs in the workspace root or the project, as `@expo/package-manager` resolves it, never in an unrelated parent folder. It is not frozen, because `npm ci` deletes the workspace root's `node_modules`, which every member shares. The other states:
 
 | State                                               | Stop                                                  |
 | --------------------------------------------------- | ----------------------------------------------------- |
@@ -91,7 +91,7 @@ A compiler that failed and printed nothing readable is `1`, not `20`: there is n
 
 ### Other gates, in brief
 
-A command that reports on the app does not fail because of what it reports: `runtime:errors` exits `0` whatever it collects. A flag makes a report a gate. Every `--assert` or `--fail-on-*` flag answers a measured failure with `20` and a state it cannot measure with `22`.
+A command that reports on the app does not fail because of what it reports: without a flag, `runtime:errors` exits `0` whatever it collects. A flag makes a report a gate. Every `--assert` or `--fail-on-*` flag answers a measured failure with `20` and a state it cannot measure with `22`.
 
 | Command                    | Codes                                                                                                                             |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -129,8 +129,8 @@ Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)
 
 The registry is a data table of scenarios. Callers never match output strings themselves.
 
-- Most rows have a signature: a pattern that layer 3 matches against a child's output.
-- The generic rows `expo-prompt` and `eas-prompt` sort last, so a specific row always wins.
+- A row can have a signature: a pattern that layer 3 matches against a child's output.
+- The generic rows `expo-prompt` and `eas-prompt` sort last, so a specific row that matches always wins.
 - A row with no signature is never matched against output. Only a caller that names the row raises it, and no v1 caller does.
 
 Two words in the layers below:
@@ -153,7 +153,7 @@ Four layers, in priority order:
 3. **Classify the output.** Match the captured output against the registry. The patterns that matter most: eas-cli's `Either log in with … EXPO_TOKEN`, `@expo/cli`'s `is in non-interactive mode`, and the `in non-interactive mode` fragment that eas-cli's prompts share.
 4. **Generic prompt fallback.** Only for a captured child, and only when the caller opts in. If the child writes nothing for `AGENT_CLI_PROMPT_TIMEOUT_MS` (default 20 s), _and_ its last non-empty line looks like a prompt, the CLI kills the child. The line is quoted as untrusted text.
 
-A busy port, and this project's own running dev server, are recognised before the classifier runs. Neither is needs-human: this CLI can run the recovery itself ([[0004-smart-start-and-project-state]] §A busy port). Neither is a negative signature, so `expo-prompt` still catches every other prompt.
+A busy port, and this project's own running dev server, are recognised before the classifier runs. Neither is needs-human: no account, permission or click is involved, so the caller or this CLI can recover ([[0004-smart-start-and-project-state]] §A busy port). Neither is a negative signature, so `expo-prompt` still catches every other prompt.
 
 A failed `dev` plan step raises an error. The plan object prints only when every step worked.
 
@@ -161,7 +161,7 @@ A failed `dev` plan step raises an error. The plan object prints only when every
 - Any other failure is `PLAN_STEP_FAILED`, with the step's own exit code and `needsHuman: null`. This holds even at exit `7`, which Node also uses for an unhandled rejection.
 - Under `--json`, the error also holds the tail of the step's output. Without `--json`, the run already showed it.
 
-`dev` captures its steps when nobody watches a terminal (`--json`, or a run without a TTY), and inherits the terminal when somebody does. Forwarded passthrough commands inherit the terminal and are not classified.
+`dev` captures its steps under `--json` or without a TTY, and inherits the terminal otherwise. Forwarded passthrough commands inherit the terminal and are not classified.
 
 ## The `--json` error envelope
 
@@ -206,12 +206,12 @@ A group with a default action gives that action every option, so `doctor --json`
 
 A command that shares a name with an `expo` command behaves like that command ([[0006-agent-native-cli-surface]]). No v1 group has such a name. A unit test checks the rule with a synthetic `config` group:
 
-| Argv                   | Result                                  |
-| ---------------------- | --------------------------------------- |
-| `config --type public` | forwards: `expo config --type public`   |
-| `config:doctor`        | the group's own action                  |
-| `config:nope`          | `UNKNOWN_ACTION`, never a forward       |
-| `config doctor`        | forwards two arguments to `expo config` |
+| Argv                   | Result                                |
+| ---------------------- | ------------------------------------- |
+| `config --type public` | forwards: `expo config --type public` |
+| `config:doctor`        | the group's own action                |
+| `config:nope`          | `UNKNOWN_ACTION`, never a forward     |
+| `config doctor`        | forwards: `expo config doctor`        |
 
 So a group under a forwarded name has one spelling for its actions, not two, and its `--help` must show the colon form.
 
@@ -219,7 +219,7 @@ So a group under a forwarded name has one spelling for its actions, not two, and
 
 A group may declare the other CLI's command for its bare name. Then the error of rule (a) names that command, and the `Try:` line is that command with the caller's own flags (`Try: npx eas build --platform ios`). No v1 group declares one; the mechanism is tested.
 
-Rule (b) covers a name that `@expo/agent-cli` forwards and runs itself. Rule (c) covers a name owned by a CLI that `@expo/agent-cli` does not forward.
+Rule (b) covers a name that `@expo/agent-cli` forwards to `expo`. Rule (c) covers a name it does not forward, such as an `eas` verb.
 
 ### (d) An argument a command has no place for is an error, not a shrug
 
@@ -228,7 +228,7 @@ A command that drops an argument and reports success is a silent no-op: the one 
 Every command that parses arguments declares `positionalArgs: 'none' | 'own'`, with no default, so the type checker asks each command.
 
 - `'none'`: a positional is an error, `BAD_ARGS`, which names what was dropped. A command can add one sentence for what the caller probably meant.
-- `'own'`: the command reads its positionals itself. The parser also puts unrecognized options in that list, so a blanket rejection would reject flags the command reads.
+- `'own'`: the command reads its positionals itself. The parser also puts unrecognized options in that list, so a blanket rejection would reject flags that the command reads or forwards.
 
 ## Three names for the recovery
 
