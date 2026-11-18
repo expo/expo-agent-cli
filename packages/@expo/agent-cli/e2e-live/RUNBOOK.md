@@ -133,8 +133,8 @@ break-and-fix block reports `NO_APP_CONNECTED` at exit 1 if it starts inside tha
 or wait. It is not a finding.
 
 **`smoke --android` exits 22 on a working app _in Expo Go_, and the suite asserts that.** It is not a
-defect and not a flake. The `runtime` phase cannot read a runtime with no debugger, and `llp/0005` §Android
-forbids a gate that cannot measure from passing. Four phases `ok`, two `inconclusive`. A green
+defect and not a flake. The `runtime` phase cannot read a runtime with no debugger, and a gate that cannot measure
+exits 22, never 0 (`llp/0010` §Other gates, in brief; the Expo Go case is `llp/0005` §Android). Four phases `ok`, two `inconclusive`. A green
 `live-android` therefore does **not** mean `smoke --android` passes anywhere. It means it refuses
 correctly. It passes on a **development build**, which is `live-devclient`'s job to assert. The one
 Android gate that does return a verdict on the app is `runtime:errors --android --fail-on-error`, which
