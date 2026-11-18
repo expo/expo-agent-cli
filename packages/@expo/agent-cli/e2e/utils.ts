@@ -791,8 +791,8 @@ export type StubDevServerOptions = {
    */
   inspectorEvaluate?: (expression: string, device: string) => unknown;
   /**
-   * What a `live` socket answers to `typeof globalThis.__r`, the probe for whether the app's
-   * bundle ran (llp/0005 §The bundle state). The responder above never sees that expression.
+   * What a `live` socket answers to an expression that asks `typeof globalThis.__r`, the probe for
+   * whether the app's bundle ran (llp/0005 §The bundle state). The responder above never sees it.
    *
    * Unset answers `function`: the stub models an app whose bundle ran. `undefined` is an app that
    * is still loading its bundle, and {@link NO_ANSWER} sends no reply.
@@ -1178,7 +1178,7 @@ export async function startStubDevServerAsync({
           return;
         }
         const expression = message.params?.expression ?? '';
-        if (expression === 'typeof globalThis.__r') {
+        if (expression.includes('typeof globalThis.__r')) {
           const type = requireType(device);
           if (type !== NO_ANSWER) {
             reply({ result: { type: 'string', value: type } });

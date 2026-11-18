@@ -885,9 +885,17 @@ describe('runtime:reload --method runtime', () => {
       ],
       inspectorEvaluate: (expression, device) =>
         device.startsWith('stale') ? NO_ANSWER : RELOAD_CALL.test(expression) ? 'sent' : undefined,
+      requireType: (device) => (device.startsWith('stale') ? NO_ANSWER : 'function'),
     });
     expect(result.exitCode, result.all).toBe(0);
     expect(report.verifiedBy).toBe('debugger-context-replaced');
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state — a reload is an identity read.
+  it('reloads an app whose bundle has not run', async () => {
+    const { result, report } = await reloadAsync('ios', { requireType: () => 'undefined' });
+    expect(result.exitCode, result.all).toBe(0);
+    expect(report).toMatchObject({ reloaded: true, method: 'runtime' });
   });
 
   it('fails at once for an app with no expo global', async () => {

@@ -512,6 +512,48 @@ it('recovers an Expo Go run by stopping Expo Go, not the android.package of the 
   }
 });
 
+// @ref llp/0005-runtime-loop-tools.rfc.md §The bundle state — a stop throws the download away.
+it('does not stop an Android app whose bundle has not run', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  const device = await deviceFixture(root, {
+    name: 'loading',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+  });
+  const loading = makeTarget({
+    id: 'own',
+    appId: 'host.exp.exponent',
+    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+  });
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: () => [loading],
+    requireType: () => 'undefined',
+  });
+  const releaseLock = await holdDevLockAsync(root, {
+    url: server.url,
+    port: server.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot: root,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['navigate', '/profile/42', '--no-route-check', '--attach-timeout', '2s', '--json'],
+      { reject: false, env: { ...device.env, STUB_ADB_PIDOF: '4242' } }
+    );
+    expect(result.exitCode, result.all).toBe(22);
+    expect(JSON.parse(result.stdout)).toMatchObject({ attached: false, attachRecovered: false });
+    expect(device.forceStops!()).toEqual([]);
+    expect(result.stderr).toContain('was still loading after');
+  } finally {
+    await releaseLock();
+    await server.close();
+  }
+});
+
 it('--print-url scopes to the bound EAS session like navigate, so an iOS Expo Go app does not count', async () => {
   const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
   const device = await deviceFixture(root, scenarios[0]!);

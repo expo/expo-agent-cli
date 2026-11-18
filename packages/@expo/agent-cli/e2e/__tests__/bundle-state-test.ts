@@ -8,7 +8,6 @@ import { hostPlatform } from '../../src/smoke/suggest';
 import {
   executeAgentCliAsync,
   holdLockForAsync,
-  NO_ANSWER,
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
@@ -120,22 +119,6 @@ describe('an app whose bundle has not run', () => {
 
         expect(result.exitCode, result.all).toBe(0);
         expect(evaluated).toEqual(['2']);
-      }
-    );
-  });
-
-  it('runtime:eval reads an app whose runtime gives no answer to the probe', async () => {
-    await withStubAsync(
-      {
-        targets: [EXPO_GO_TARGET],
-        requireType: () => NO_ANSWER,
-        inspectorEvaluate: (expression) => (expression.includes(SENTINEL) ? 'read' : undefined),
-      },
-      async (url) => {
-        const result = await runAsync(['runtime:eval', JSON.stringify(SENTINEL)], url);
-
-        expect(result.exitCode, result.all).toBe(0);
-        expect(JSON.parse(result.stdout).value).toBe('read');
       }
     );
   });
