@@ -5,9 +5,9 @@
 // that a fresh install applies the patch again. A stub would only prove the argv.
 //
 // The two packages are packed from `fixtures/patch-packages` into local tarballs and installed as
-// `file:` dependencies. pnpm, yarn 1 and yarn 4 are installed from the npm registry at pinned
-// versions into a cache directory before their tests, so they run on every machine and on CI;
-// bun is the runner's own. bun installs with `--backend=copyfile` so the edit in place is the same
+// `file:` dependencies. bun, pnpm, yarn 1 and yarn 4 are installed from the npm registry at pinned
+// versions into a cache directory before their tests, so they run on every machine and on CI.
+// bun installs with `--backend=copyfile` so the edit in place is the same
 // on Linux CI (whose default is hard links) as on macOS; the hard-link case has a test of its own.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -19,8 +19,10 @@ const isWindows = process.platform === 'win32';
 
 type Manager = 'bun' | 'pnpm' | 'npm' | 'yarn1' | 'yarn4';
 
-/** The npm package and version that provides each installed manager. bun and npm come with the runner. */
+/** The npm package and version that provides each installed manager. npm comes with node. */
 const PINNED: Partial<Record<Manager, string>> = {
+  // Not the runner's bun: bun 1.3.14 crashes in `bun patch --commit` for a `file:` package.
+  bun: 'bun@1.4.4',
   pnpm: 'pnpm@12.2.1',
   yarn1: 'yarn@1.22.22',
   yarn4: '@yarnpkg/cli-dist@4.18.1',
@@ -153,6 +155,8 @@ function reinstall(projectRoot: string, manager: Manager): void {
 }
 
 describe('@expo/agent-cli patch — bun', () => {
+  usePinnedManager('bun');
+
   it(`saves a JavaScript edit with bun's own patch, and a fresh install applies it`, async () => {
     const projectRoot = await setupProjectAsync('bun');
     edit(projectRoot, 'fake-js-lib/index.js', '// patched by e2e\n');
@@ -169,7 +173,9 @@ describe('@expo/agent-cli patch — bun', () => {
       native: [],
       buildFromSource: [],
     });
-    expect(path.dirname(report.patchFile)).toBe(path.join(fs.realpathSync(projectRoot), 'patches'));
+    expect(path.dirname(fs.realpathSync.native(report.patchFile))).toBe(
+      path.join(fs.realpathSync.native(projectRoot), 'patches')
+    );
     expect(fs.readFileSync(report.patchFile, 'utf8')).toContain('+// patched by e2e');
     expect(
       Object.keys(readJson(path.join(projectRoot, 'package.json')).patchedDependencies)
@@ -264,7 +270,9 @@ describe.each([
       native: ['android'],
       buildFromSource: [{ platform: 'android', added: ['fake-expo-module'] }],
     });
-    expect(path.relative(fs.realpathSync(projectRoot), report.patchFile)).toEqual(patchFile);
+    expect(
+      path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
+    ).toEqual(patchFile);
 
     reinstall(projectRoot, manager);
     expect(fs.readFileSync(path.join(projectRoot, 'node_modules', kotlin), 'utf8')).toContain(
@@ -318,9 +326,9 @@ describe.each(['npm' as const, 'yarn1' as const])(
         files: ['ios/FakeModule.swift'],
         buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
       });
-      expect(path.relative(fs.realpathSync(projectRoot), report.patchFile)).toBe(
-        path.join('patches', 'fake-expo-module+1.0.0.patch')
-      );
+      expect(
+        path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
+      ).toBe(path.join('patches', 'fake-expo-module+1.0.0.patch'));
       const patch = fs.readFileSync(report.patchFile, 'utf8');
       expect(patch).toContain(
         'diff --git a/node_modules/fake-expo-module/ios/FakeModule.swift b/node_modules/fake-expo-module/ios/FakeModule.swift'

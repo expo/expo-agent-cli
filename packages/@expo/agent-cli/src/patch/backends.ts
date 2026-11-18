@@ -5,13 +5,16 @@
 //
 // Observed on macOS, 2026-11-17:
 // - bun 1.4.4: `bun patch --commit node_modules/<pkg>` works with no `bun patch <pkg>` before it, and
-//   answers an unedited package with "No changes detected" and exit 0.
+//   answers an unedited package with "No changes detected" and exit 0. bun 1.3.14 crashes
+//   (segmentation fault) on `bun patch --commit` for a package installed from a `file:` tarball,
+//   also after `bun patch <pkg>`; for a registry package it works (2026-11-18).
 // - pnpm 12.2.1: `pnpm patch-commit node_modules/<pkg>` refuses ("is not a valid patch directory"),
 //   so the backend makes pnpm's own edit directory and copies the edits into it.
 // - patch-package 8.0.1 cannot make a patch for a package it cannot download again (a `file:`
 //   tarball): it reinstalls `<name>@<version>` from the registry. So the npm backend writes the patch
 //   itself, in patch-package's format, and patch-package only applies it at `postinstall`.
-// - yarn 4.18.1 follows pnpm's shape: `yarn patch <pkg>` prints an edit folder, `yarn patch-commit -s`
+// - yarn 4.18.1 follows pnpm's shape: `yarn patch <pkg> --json` reports an edit folder as a native
+//   path (its text output colors the path, so it is not parsed), `yarn patch-commit -s`
 //   saves it to `.yarn/patches/` and rewrites the dependency to a `patch:` spec.
 // - yarn 1.22.22 has no patch feature, so it takes the npm path; its clean copy comes from the
 //   `resolved` field of `yarn.lock`.
@@ -79,12 +82,35 @@ async function saveWithBunAsync(target: PatchTarget): Promise<BackendResult> {
   const root = target.packageManager.root;
   const before = snapshotPatchDirs(root);
   const relative = toPosix(path.relative(root, target.packageDir));
-  const result = await runToolAsync('bun', ['patch', '--commit', relative], root);
+  const result = await runToolAsync('bun', ['patch', '--commit', relative], root).catch(
+    (error: unknown) => {
+      throw bunCrashHint(error) ?? error;
+    }
+  );
   if (/No changes detected/i.test(`${result.stdout}\n${result.stderr}`)) {
     return { status: 'no-edits' };
   }
   const patchFile = findWrittenPatch(root, before);
   return { status: 'saved', patchFile, files: filesOfPatch(fs.readFileSync(patchFile, 'utf8')) };
+}
+
+/** A clearer error when bun itself crashed, which is a bun bug and not a problem with the edits. */
+function bunCrashHint(error: unknown): CommandError | null {
+  if (!(error instanceof CommandError) || !/Bun has crashed/.test(error.message)) {
+    return null;
+  }
+  const hint = new CommandError(
+    'PATCH_TOOL_FAILED',
+    [
+      'bun crashed in "bun patch --commit", so the patch was not saved. This is a bug in bun, not in your edits.',
+      'bun 1.3.14 crashes like this for a package installed from a file: tarball; bun 1.4.4 does not.',
+      'How: upgrade bun ("bun upgrade"), then run this again.',
+      '',
+      error.message,
+    ].join('\n')
+  );
+  hint.data = error.data;
+  return hint;
 }
 
 // ---- pnpm, yarn berry ----
@@ -105,8 +131,8 @@ async function saveWithEditDirAsync(
         root
       );
     } else {
-      const result = await runToolAsync('yarn', ['patch', target.packageName], root);
-      editDir = parseYarnEditDir(`${result.stdout}\n${result.stderr}`);
+      const result = await runToolAsync('yarn', ['patch', target.packageName, '--json'], root);
+      editDir = parseYarnEditDir(result.stdout);
     }
 
     // The edit directory is a clean copy: comparing against it is what finds the agent's edits.
@@ -128,16 +154,20 @@ async function saveWithEditDirAsync(
   }
 }
 
-/** The folder `yarn patch` prints, e.g. "➤ YN0000: You can now edit the following folder: /tmp/…". */
-export function parseYarnEditDir(output: string): string {
-  const match = /edit the following folder:\s*(\S+)/i.exec(output);
-  if (!match) {
-    throw new CommandError(
-      'PATCH_TOOL_OUTPUT',
-      `yarn patch did not print the folder to edit, so the patch cannot be saved.\nWhat it printed:\n${output.trim()}`
-    );
+/** The folder in the JSON line of `yarn patch --json`: `{"locator": "…", "path": "/tmp/xfs-…/user"}`. */
+export function parseYarnEditDir(stdout: string): string {
+  for (const line of stdout.split(/\r?\n/)) {
+    try {
+      const parsed = JSON.parse(line);
+      if (typeof parsed?.path === 'string') {
+        return parsed.path;
+      }
+    } catch {}
   }
-  return match[1]!;
+  throw new CommandError(
+    'PATCH_TOOL_OUTPUT',
+    `yarn patch did not report the folder to edit, so the patch cannot be saved.\nWhat it printed:\n${stdout.trim()}`
+  );
 }
 
 // ---- npm, yarn classic: patch-package's format ----
