@@ -10,9 +10,7 @@ import { buildSmokeDeps } from '../smokeAsync';
 import { buildSmokeTargetSelection } from '../targetSelection';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 
-vi.mock('../../runtime/bundleState', () => ({
-  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
-}));
+vi.mock('../../runtime/bundleState');
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 vi.mock('../../log');
 

@@ -17,9 +17,7 @@ import type { Mock } from 'vitest';
 import { printed } from '../../../utils/__tests__/printed';
 import { mockDevServer } from '../../__tests__/fakeDevServer';
 
-vi.mock('../../bundleState', () => ({
-  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
-}));
+vi.mock('../../bundleState');
 vi.mock('../../cdpClient', async () => ({
   ...(await vi.importActual('../../cdpClient')),
   CdpClient: vi.fn(),

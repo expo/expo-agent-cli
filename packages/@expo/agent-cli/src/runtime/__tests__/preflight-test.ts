@@ -13,9 +13,7 @@ import { makeDeviceInventory } from './targetSelectionFixtures';
 import { mockDevServer } from './fakeDevServer';
 
 vi.mock('../../log');
-vi.mock('../bundleState', () => ({
-  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
-}));
+vi.mock('../bundleState');
 // `xcrun simctl list devices` answers with these booted simulators, none by default, and
 // `adb get-state` with an emulator that is up; every other tool fails to run.
 let bootedSimulators: { udid: string; name: string }[] = [];
@@ -248,10 +246,7 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
       loading: [...read],
     }));
     onTestFinished(() => {
-      vi.mocked(attachedAppsAsync).mockImplementation(async (read) => ({
-        attached: [...read],
-        loading: [],
-      }));
+      vi.mocked(attachedAppsAsync).mockReset();
     });
     const started = Date.now();
 
@@ -266,6 +261,25 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
     const waited = Number(/still not (\d+)ms later/.exec(error.message)?.[1]);
     expect(waited).toBeGreaterThan(0);
     expect(waited).toBeLessThan(1000);
+  });
+
+  it(`should not claim a second look at a loading app it read once`, async () => {
+    vi.mocked(attachedAppsAsync).mockImplementation(async (read) => ({
+      attached: [],
+      loading: [...read],
+    }));
+    onTestFinished(() => {
+      vi.mocked(attachedAppsAsync).mockReset();
+    });
+
+    const error = await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      retryMs: 0,
+    }).catch((e) => e);
+
+    expect(error.code).toBe('APP_BUNDLE_NOT_RUN');
+    expect(error.message).not.toContain('later');
   });
 
   it(`should refuse only on the dev server for a command that starts an app itself`, async () => {

@@ -1,7 +1,7 @@
 {
   "extends": "expo-module-scripts/tsconfig.node",
   "include": ["./src"],
-  "exclude": ["./src/deferred", "./src/**/__tests__", "./src/__fixtures__"],
+  "exclude": ["./src/deferred", "./src/**/__tests__", "./src/**/__mocks__", "./src/__fixtures__"],
   "compilerOptions": {
     "noEmit": true,
     "declaration": false,

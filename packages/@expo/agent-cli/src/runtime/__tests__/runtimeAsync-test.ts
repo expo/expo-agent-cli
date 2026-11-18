@@ -15,9 +15,7 @@ import { printed } from '../../utils/__tests__/printed';
 import { mockDevServer } from './fakeDevServer';
 
 // The real error class and the real code are kept: the command branches on both.
-vi.mock('../bundleState', () => ({
-  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
-}));
+vi.mock('../bundleState');
 vi.mock('../cdpClient', async () => ({
   ...(await vi.importActual('../cdpClient')),
   CdpClient: vi.fn(),

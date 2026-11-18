@@ -25,14 +25,13 @@ import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErro
 import { event as cliEvent } from '../events';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
-import { attachedAppsAsync } from '../runtime/bundleState';
 import { probeDevServerAsync } from '../runtime/devServer';
 import {
   classifyTargets,
   deviceInventoryForSelectionAsync,
   withAndroidReverseAsync,
 } from '../runtime/targetSelection';
-import { scopedListClassifier } from '../runtime/waitReady';
+import { waitForAppConnectionAsync } from '../runtime/waitReady';
 import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
 import { openUrlOnDeviceAsync } from './deepLink';
 import {
@@ -501,17 +500,15 @@ async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDev
       const facts = reverse?.ok
         ? await withAndroidReverseAsync(targetSelection, inventory, devServerUrl)
         : inventory;
-      const classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
       return async (deadline) => {
-        for (;;) {
-          const probe = await probeDevServerAsync(devServerUrl);
-          const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
-          const { attached, loading } = await attachedAppsAsync(read, { deadline });
-          if (attached.length > 0 || Date.now() >= deadline) {
-            return { targets: attached.length, loading: loading.length };
-          }
-          await new Promise((resolve) => setTimeout(resolve, ATTACH_POLL_MS));
-        }
+        const { appsConnected, loadingApps } = await waitForAppConnectionAsync(devServerUrl, {
+          timeoutMs: Math.max(0, deadline - Date.now()),
+          intervalMs: ATTACH_POLL_MS,
+          targetSelection,
+          deviceInventory: facts,
+          inventoryTargets: first.targets,
+        });
+        return { targets: appsConnected, loading: loadingApps };
       };
     },
   };
@@ -603,12 +600,12 @@ async function launchDevClientFirstAsync({
     };
   }
 
-  const { targets } = await waitAsync(startedAt + budgetMs);
+  const seen = await waitAsync(startedAt + budgetMs);
   return {
     url: launcherUrl,
     command: opened.command,
     exitCode: opened.exitCode,
-    attached: targets > 0,
+    attached: attachStateOf(seen) === 'attached',
     waitedMs: Date.now() - startedAt,
   };
 }

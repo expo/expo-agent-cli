@@ -217,12 +217,12 @@ export async function preflightRuntimeAsync(
       }),
   });
   const found = { devServerUrl: url, devServerSource: discovery.source, named };
-  if (!observed.reachable) {
+  if (observed.kind === 'unreachable') {
     if (need === 'optional') {
       return {
         ...found,
         reachable: false,
-        unreachableReason: observed.unreachableReason,
+        unreachableReason: observed.reason,
         targets: [],
         classifiedTargets: { read: [], otherPlatform: [], undetermined: [], skipped: [] },
         targetSelection: READ_EVERY_TARGET,
@@ -231,7 +231,7 @@ export async function preflightRuntimeAsync(
     }
     throw noDevServerError({
       devServerUrl: url,
-      reason: observed.unreachableReason,
+      reason: observed.reason,
       named,
       cloud,
       platform,
@@ -239,41 +239,31 @@ export async function preflightRuntimeAsync(
     });
   }
 
-  const { targets, classifiedTargets, loading } = observed;
+  const { targets, classifiedTargets } = observed;
   const { targetSelection, deviceInventory } = observed.resolved;
-  const base: RuntimeConnection = {
-    ...found,
-    reachable: true,
-    unreachableReason: null,
-    targets,
-    classifiedTargets,
-    targetSelection,
-    deviceInventory,
-  };
-
-  if (need === 'debugger-target' && targets.length === 0) {
-    throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
-  }
-
-  // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
-  // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
-  // seventh and eighth calls a success.
-  if (need === 'debugger-target' && classifiedTargets.read.length === 0) {
-    throw withLiveSessionNote(
-      emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory),
-      targetSelection,
-      context.projectRoot
-    );
-  }
-  if (loading != null) {
-    throw bundleNotRunError({
-      devServerUrl: url,
-      loading: loading.count,
-      debuggerTargets: targets.length,
-      retryMs: Date.now() - loading.since,
-      cloud,
-      platform: targetSelection.platform?.value,
-    });
+  // Only a command that *requires* a runtime refuses on an empty list or an empty scope. For
+  // `reload` an empty scope is a rung of its ladder — it can start the app — and for `stop` it is
+  // the state llp/0010 §The seventh and eighth calls a success.
+  if (need === 'debugger-target') {
+    switch (observed.kind) {
+      case 'empty':
+        throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
+      case 'out-of-scope':
+        throw withLiveSessionNote(
+          emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory),
+          targetSelection,
+          context.projectRoot
+        );
+      case 'loading':
+        throw bundleNotRunError({
+          devServerUrl: url,
+          loading: observed.loading,
+          debuggerTargets: targets.length,
+          retryMs: observed.loadingMs,
+          cloud,
+          platform: targetSelection.platform?.value,
+        });
+    }
   }
   if (
     targetSelection.bound &&
@@ -288,14 +278,35 @@ export async function preflightRuntimeAsync(
   if (skipped.length > 0) {
     Log.progress(describeSkippedApps(skipped));
   }
-  return base;
+  return {
+    ...found,
+    reachable: true,
+    unreachableReason: null,
+    targets,
+    classifiedTargets,
+    targetSelection,
+    deviceInventory,
+  };
+}
+
+/** What one read of the dev server shows a command (llp/0005 §The bundle state). */
+type Observation =
+  | { kind: 'unreachable'; reason: string | null }
+  | ({ kind: 'empty' | 'out-of-scope' | 'ready' } & Listing)
+  /** Every own app is loading: how many, and for how long the reads saw them so. */
+  | ({ kind: 'loading'; loading: number; loadingMs: number } & Listing);
+
+interface Listing {
+  targets: CdpTarget[];
+  resolved: ResolvedTargetSelection;
+  classifiedTargets: ClassifiedTargets;
 }
 
 /**
- * Read the list until it is an answer, inside one budget. Two states are worth asking again about:
- * an empty list, and own apps that are all loading (llp/0005 §The bundle state). An unreachable dev
- * server does not become reachable by re-reading it within three seconds, and any other list is an
- * answer.
+ * Read the list until it is an answer, inside one budget. An empty list and all-loading own apps
+ * are worth asking again about. An unreachable dev server does not become reachable within three
+ * seconds, and any other list is an answer. Only `debugger-target` asks the bundle state, so only
+ * it can see `loading`.
  */
 async function observeAsync({
   need,
@@ -309,68 +320,55 @@ async function observeAsync({
   first: { reachable: boolean; targets: CdpTarget[]; reason?: string | null };
   deadline: number;
   resolveAsync: (targets: CdpTarget[]) => Promise<ResolvedTargetSelection>;
-}): Promise<
-  | { reachable: false; unreachableReason: string | null; targets: CdpTarget[] }
-  | {
-      reachable: true;
-      targets: CdpTarget[];
-      resolved: ResolvedTargetSelection;
-      classifiedTargets: ClassifiedTargets;
-      loading: { count: number; since: number } | null;
-    }
-> {
-  let reachable = first.reachable;
-  let targets = first.targets;
-  let unreachableReason = first.reason ?? null;
+}): Promise<Observation> {
+  let read = { reachable: first.reachable, targets: first.targets, reason: first.reason ?? null };
+  // The device tools are asked for the first list that names an app, not for an empty one.
   let resolved: ResolvedTargetSelection | null = null;
-  let classifiedTargets: ClassifiedTargets | null = null;
-  // Set while every own app is loading: how many, and since when.
-  let loading: { count: number; since: number } | null = null;
+  let loadingSince: number | null = null;
   for (;;) {
-    const loadingSince: number = loading?.since ?? Date.now();
-    loading = null;
-    classifiedTargets = null;
-    if (reachable && targets.length > 0) {
-      if (resolved == null) {
-        resolved = await resolveAsync(targets);
-        classifiedTargets = resolved.classifiedTargets;
-      } else {
-        classifiedTargets = classifyTargets(
-          targets,
-          resolved.targetSelection,
-          resolved.deviceInventory
-        );
-      }
-      const apps =
-        need === 'debugger-target' && classifiedTargets.read.length > 0
-          ? await attachedAppsAsync(classifiedTargets.read, { deadline })
-          : null;
-      if (apps != null && apps.attached.length === 0) {
-        loading = { count: apps.loading.length, since: loadingSince };
-      }
+    if (!read.reachable) {
+      return { kind: 'unreachable', reason: read.reason };
     }
-    const empty = reachable && targets.length === 0;
-    if ((!empty && loading == null) || Date.now() >= deadline) {
-      break;
+    const { targets } = read;
+    let listed: { resolved: ResolvedTargetSelection; classifiedTargets: ClassifiedTargets } | null =
+      null;
+    if (targets.length > 0) {
+      const fresh = resolved == null;
+      resolved ??= await resolveAsync(targets);
+      listed = {
+        resolved,
+        classifiedTargets: fresh
+          ? resolved.classifiedTargets
+          : classifyTargets(targets, resolved.targetSelection, resolved.deviceInventory),
+      };
     }
-    await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
-    const probe = await probeDevServerAsync(url);
-    reachable = probe.reachable;
-    targets = probe.targets;
-    unreachableReason = probe.reason ?? null;
+    const apps =
+      need === 'debugger-target' && listed != null && listed.classifiedTargets.read.length > 0
+        ? await attachedAppsAsync(listed.classifiedTargets.read, { deadline })
+        : null;
+    const loading = apps != null && apps.attached.length === 0 ? apps.loading.length : null;
+    const since: number | null = loading == null ? null : (loadingSince ?? Date.now());
+    loadingSince = since;
+
+    if ((listed == null || loading != null) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
+      const probe = await probeDevServerAsync(url);
+      read = { reachable: probe.reachable, targets: probe.targets, reason: probe.reason ?? null };
+      continue;
+    }
+    if (listed == null) {
+      resolved ??= await resolveAsync(targets);
+      const empty = classifyTargets(targets, resolved.targetSelection, resolved.deviceInventory);
+      return { kind: 'empty', targets, resolved, classifiedTargets: empty };
+    }
+    const listing = { targets, ...listed };
+    if (listed.classifiedTargets.read.length === 0) {
+      return { kind: 'out-of-scope', ...listing };
+    }
+    return loading != null && since != null
+      ? { kind: 'loading', loading, loadingMs: Date.now() - since, ...listing }
+      : { kind: 'ready', ...listing };
   }
-  if (!reachable) {
-    return { reachable, unreachableReason, targets };
-  }
-  // An empty list ends the loop with no read of the device tools; read them now, as for any list.
-  resolved ??= await resolveAsync(targets);
-  return {
-    reachable,
-    targets,
-    resolved,
-    classifiedTargets: classifiedTargets ?? resolved.classifiedTargets,
-    loading,
-  };
 }
 
 /** A local binding outranks a live session of this worktree; only --eas reads the session. */

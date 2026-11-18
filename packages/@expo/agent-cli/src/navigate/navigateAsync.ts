@@ -281,7 +281,7 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
   };
 }
 
-/** The human summary of a run: one line per fact, for stdout. */
+/** The `App` line of the summary. */
 function formatAttach({ attach, platform }: OpenRouteResult): string {
   switch (attach.state) {
     case 'attached':
@@ -300,6 +300,7 @@ function formatAttach({ attach, platform }: OpenRouteResult): string {
   }
 }
 
+/** The human summary of a run: one line per fact, for stdout. */
 function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
   // The backend, not only the platform: `Device ios <udid>` reads as a simulator on this desk,
   // and a run that drove an EAS session has to say so on the line a reader scans.
@@ -507,6 +508,11 @@ function reachLine(hostType: string | null): string {
   );
 }
 
+/** The command that waits for the bundle and shows the screen. */
+function look(opened: OpenRouteResult): string {
+  return `${PROGRAM_PREFIX} smoke --platform ${opened.platform}${opened.deviceBackend === 'cloud' ? ' --eas' : ''} --no-route-check`;
+}
+
 /**
  * The what / why / how for a link that was delivered and produced no connected app.
  *
@@ -522,11 +528,6 @@ function reachLine(hostType: string | null): string {
  * reason: `--platform ios` is a local flag, and a host that reached for a cloud session may have no
  * local device to run it against.
  */
-/** The command that waits for the bundle and shows the screen. */
-function look(opened: OpenRouteResult): string {
-  return `${PROGRAM_PREFIX} smoke --platform ${opened.platform}${opened.deviceBackend === 'cloud' ? ' --eas' : ''} --no-route-check`;
-}
-
 function attachNotConfirmed(opened: OpenRouteResult): string {
   if (opened.attach.state === 'loading') {
     return [

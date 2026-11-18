@@ -14,9 +14,7 @@ import { runtimeErrorsAsync, runtimeEvalAsync } from '../runtimeAsync';
 import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
 import { printed } from '../../utils/__tests__/printed';
 
-vi.mock('../bundleState', () => ({
-  attachedAppsAsync: vi.fn(async (read: unknown[]) => ({ attached: [...read], loading: [] })),
-}));
+vi.mock('../bundleState');
 vi.mock('../../log');
 vi.mock('../discoverDevServer', () => ({ discoverDevServerAsync: vi.fn() }));
 vi.mock('../cdpClient', async () => ({
