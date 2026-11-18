@@ -48,7 +48,8 @@ export type HelpLoader = () => Promise<CommandHelp>;
  * than as the default.
  *
  * **The mark comes off against a record, not against a feeling** (llp/0016-v1-scope.rfc.md §Experimental is per command).
- * One command carries it: `inspect:config-plugins`.
+ * Two commands carry it: `inspect:config-plugins`, and `patch` until its e2e covers all four
+ * package managers (llp/0037 §Open questions).
  */
 export type Unstable = true;
 
@@ -147,6 +148,13 @@ export const topLevelCommands: { [command: string]: TopLevelCommand } = {
     summary: 'Create a new Expo project without a terminal',
     load: () => import('./new').then((i) => i.agentCliNew),
     help: () => import('./new').then((i) => i.newHelp),
+  },
+  // @ref llp/0037-patch-command.rfc.md — one command: the agent edits node_modules, this saves it.
+  patch: {
+    summary: 'Save node_modules edits as a patch',
+    load: () => import('./patch').then((i) => i.agentCliPatch),
+    help: () => import('./patch').then((i) => i.patchHelp),
+    unstable: true,
   },
   // A capability only this CLI has, so it gets a verb of its own (llp/0006 naming rule).
   smoke: {

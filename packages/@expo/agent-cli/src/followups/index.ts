@@ -24,6 +24,7 @@ export {
   type NavigateFollowUpInput,
   type PrintUrlFollowUpInput,
 } from './navigate';
+export { buildPatchFollowUps, type PatchFollowUpInput } from './patch';
 export { resolveExpoGoLanUrl, resolveLanHost } from './network';
 export { dependsOnDevClientSync, easJsonExistsSync } from './projectFiles';
 export { buildReloadFollowUps, type ReloadFollowUpInput } from './reload';
