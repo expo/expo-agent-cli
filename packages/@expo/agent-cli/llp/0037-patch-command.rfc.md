@@ -149,6 +149,6 @@ Not built yet: the `dev` follow-up names Expo Go in its text, but does not read 
 
 ## Open questions
 
-1. Is `patch` a v1 command, or does it go in as `unstable`? Decided for now: `unstable`, until the e2e covers yarn berry and pnpm runs on CI.
+1. Is `patch` a v1 command, or does it go in as `unstable`? Decided (2026-11-18): a v1 command, with no `unstable` mark, because the e2e runs bun, pnpm, yarn 4, npm and yarn 1 on CI.
 2. Should `patch <pkg>` remove the `buildFromSource` entry when the last native patch for a package is removed? Recommendation: yes, but only entries that the CLI added. Record them in `.expo/agent-cli-patch.json`.
 3. Should `--upstream-plan` also support third-party repos (from `repository.url`)? Recommendation: not in the first version. Start with `expo/expo` only.
