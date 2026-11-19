@@ -431,7 +431,9 @@ export function buildApplyCommand(
   directory: string,
   hasBuild: boolean
 ): string {
-  const fromProject = /^diff --git a\/node_modules\//m.test(patchText);
+  // Git C-quotes a path with a quote, a backslash, a control character or (with core.quotepath)
+  // non-ASCII: `diff --git "a/node_modules/…"`. The prefix stays literal inside the quotes.
+  const fromProject = /^diff --git "?a\/node_modules\//m.test(patchText);
   const strip = fromProject ? 2 + packageName.split('/').length : 1;
   const args = [
     'git apply',
@@ -503,6 +505,19 @@ export function startCommands(base: string, branch: string): string[] {
     : [`git fetch upstream main ${base}`, `git switch -c ${branch} ${base}`];
 }
 
+/**
+ * The fix branch for a package. It goes into a shell line and a URL, so only characters of a
+ * published npm name that git accepts in a ref are kept: a scope `/` and anything else become `-`.
+ */
+export function upstreamBranch(packageName: string): string {
+  const name = packageName
+    .replace(/^@/, '')
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[.-]+|(?:\.lock|\.)+$/g, '');
+  return `fix/${name || 'package'}`;
+}
+
 function buildSteps({
   packageName,
   version,
@@ -522,7 +537,7 @@ function buildSteps({
   repro: string | null;
   gh: boolean;
 }): string[] {
-  const branch = `fix/${packageName.replace(/^@/, '').replace(/\//g, '-')}`;
+  const branch = upstreamBranch(packageName);
   const steps = [
     `Ask the user first. Show them this plan and the patch, and ask if they want a pull request to expo/expo, an issue with the repro instead, or nothing. A pull request, an issue and the repro repository are public, and the patch can hold code of their app. Stop here unless they say yes.`,
     `Read ${UPSTREAM_GUIDES.join(

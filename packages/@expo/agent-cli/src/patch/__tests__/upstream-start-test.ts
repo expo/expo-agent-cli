@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { startCommands } from '../upstream';
+import { startCommands, upstreamBranch } from '../upstream';
 
 // Real git in a real directory: memfs cannot hold a repository.
 vi.unmock('fs');
@@ -58,5 +58,21 @@ describe(startCommands, () => {
     );
     git(fork, ['rebase', 'upstream/main']);
     expect(git(fork, ['rev-parse', 'HEAD'])).toBe(git(upstream, ['rev-parse', 'HEAD']));
+  });
+});
+
+describe(upstreamBranch, () => {
+  // Published names, and names a local package can have.
+  it.each([
+    ['expo-image', 'fix/expo-image'],
+    ['@expo/config-plugins', 'fix/expo-config-plugins'],
+    ['foo;touch pwned', 'fix/foo-touch-pwned'],
+    ["a$(id)'b", 'fix/a-id-b'],
+    ['a..b~c', 'fix/a.b-c'],
+    ['x.lock', 'fix/x'],
+  ])('%s → %s, a branch git accepts', (name, expected) => {
+    const branch = upstreamBranch(name);
+    expect(branch).toBe(expected);
+    expect(git(root, ['check-ref-format', '--branch', branch])).toBe(branch);
   });
 });
