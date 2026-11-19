@@ -144,7 +144,7 @@ const OTHER_PLATFORM = CLOUD_PLATFORM === 'ios' ? 'android' : 'ios';
  * with `--expo-go`. `dev-build` reads the committed `apps/eas-example` in place — already linked to the
  * CI project, with an installed dev client — and starts the session on a real build via `--build-id`.
  * The build id is `AGENT_CLI_LIVE_CLOUD_BUILD_ID`, or the newest finished development build for the
- * platform. `eas-example` is minimal (root route, no `/lab`), so the route-reload test is expo-go only.
+ * platform. `eas-example` has no `/lab` screen, so the route-reload test is expo-go only.
  */
 const CLOUD_MODE = process.env.AGENT_CLI_LIVE_CLOUD_MODE === 'dev-build' ? 'dev-build' : 'expo-go';
 
@@ -752,7 +752,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   });
 
   // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
-  // dev-build app (`apps/eas-example`, root route only) does not.
+  // dev-build app (`apps/eas-example`) does not.
   onExpoGo('runtime:reload --eas --route puts the app on the route it names', async () => {
     // The reload above may have relaunched the app, and a broadcast into that landing is mistaken
     // for its own answer — see waitForCloudAppSettledAsync, which this wait exists for.
