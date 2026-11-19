@@ -26,7 +26,8 @@
 // run has already done; asking for it again from inside the install phase would start a second one.
 
 import { spawnCaptureAsync } from '../utils/spawnCapture';
-import { runAdbAsync } from './adb';
+import { modelOf, runAdbAsync } from './adb';
+import { isAdbDeviceStateUsable, parseAdbDeviceList } from './adbDeviceList';
 
 /** How long `adb` gets to name one device. It reads local state and answers. */
 const NAME_TIMEOUT_MS = 15_000;
@@ -60,15 +61,8 @@ export async function androidDeviceNameAsync(
   if (listed.notRunnable || listed.exitCode !== 0) {
     return null;
   }
-  const row = listed.stdout
-    .split('\n')
-    .find((line) => line.startsWith(`${serial}\t`) || line.startsWith(`${serial} `));
-  return (
-    row
-      ?.split(/\s+/)
-      .find((field) => field.startsWith('model:'))
-      ?.replace('model:', '') ?? null
-  );
+  const record = parseAdbDeviceList(listed.stdout).find((record) => record.serial === serial);
+  return record && isAdbDeviceStateUsable(record.state) ? modelOf(record.metadata) : null;
 }
 
 /**

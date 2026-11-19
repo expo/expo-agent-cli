@@ -307,6 +307,23 @@ it('binds a phone by the model adb lists, and refuses a model two devices list',
   });
 });
 
+it('binds a phone on Wi-Fi whose adb serial has a space, by model or by serial', async () => {
+  const serial = 'adb-ZY22KPLGQ9-AbCd (2)._adb-tls-connect._tcp';
+  const phone = { serial, state: 'device' as const, model: 'moto_g55_5G' };
+  for (const [root, query] of [
+    [ROOT, 'moto_g55_5G'],
+    [OTHER, serial],
+  ] as const) {
+    expect(
+      await acquireDeviceAsync(root, 'android', {
+        explicit: named(query),
+        tools: fakeTools({ emulators: [{ ...phone }] }),
+      })
+    ).toMatchObject({ action: 'explicit', device: { serial } });
+    await releaseWorktreeDevicesAsync(root, { tools: fakeTools({ emulators: [{ ...phone }] }) });
+  }
+});
+
 it('refreshes the AVD inventory if a USB binding is removed during discovery', async () => {
   const tools = fakeTools({ emulators: [{ serial: 'USB', state: 'device' }] });
   const file = bindingPathFor(ROOT, 'android', 'local-android');
