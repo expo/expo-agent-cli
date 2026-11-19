@@ -246,6 +246,13 @@ describe(findPatchFile, () => {
       code: 'PATCH_NOT_FOUND',
     },
     {
+      // pnpm 12.2.1 reads it as a prerelease and fails the install with ERR_PNPM_UNUSED_PATCH.
+      name: 'a hyphen key with no spaces, which is a version and not a range',
+      files: { 'patches/a.patch': '' },
+      pkg: { patchedDependencies: { '@fake/scoped-lib@2.2.0-3.1.0': 'patches/a.patch' } },
+      code: 'PATCH_NOT_FOUND',
+    },
+    {
       name: 'two files for the installed version',
       files: {
         'patches/a.patch': '',
