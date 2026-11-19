@@ -109,6 +109,12 @@ describe(filesOfPatch, () => {
       '--- a/index.js\t\n+++ b/index.js\t\n@@ -1,2 +1,2 @@\n x\n--- a/old\n+++ b/fix\n--- a/other.js\t\n+++ b/other.js\t\n@@ -1 +1,2 @@\n y\n+z\n',
       ['index.js', 'other.js'],
     ],
+    // Headers as git 2.54 wrote them with core.quotepath=true (the default).
+    [
+      'C-quoted paths: non-ASCII, and a quote with a space',
+      '--- "a/ios/caf\\303\\251.swift"\n+++ "b/ios/caf\\303\\251.swift"\n--- "a/ios/say \\"hi\\".swift"\t\n+++ "b/ios/say \\"hi\\".swift"\n',
+      ['ios/café.swift', 'ios/say "hi".swift'],
+    ],
   ])('%s', (_name, patch, files) => {
     expect(filesOfPatch(patch)).toEqual(files);
   });
