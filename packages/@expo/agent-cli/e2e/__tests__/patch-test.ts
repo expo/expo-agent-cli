@@ -7,7 +7,7 @@
 // The two packages are packed from `fixtures/patch-packages` into local tarballs and installed as
 // `file:` dependencies. Every manager, npm too, is installed from the npm registry at a pinned
 // version into a cache directory before its tests, so they run the same on every machine and on CI.
-// npm 12 refuses to patch a `file:` package, so its test patches a small registry package.
+// npm 12 refuses to patch a `file:` package, so its save test patches a small scoped registry package.
 // bun installs with `--backend=copyfile` so the edit in place is the same
 // on Linux CI (whose default is hard links) as on macOS; the hard-link case has a test of its own.
 import { spawnSync } from 'node:child_process';
@@ -53,8 +53,15 @@ function commandOf(manager: Manager): string {
 /** PATH with the pinned manager's bin directory first, or the runner's own PATH. */
 const pathFor: Partial<Record<Manager, string>> = {};
 
+/**
+ * yarn 1 keys its global cache of a `file:` tarball by name and version, so a changed fixture with
+ * the same version would install the old bytes; its tests get a cache of their own.
+ */
+const YARN1_CACHE = path.join(getTemporaryPath(), 'yarn1-cache');
+
 function envFor(manager: Manager): NodeJS.ProcessEnv {
-  const { npm_config_minimum_release_age, ...env } = process.env;
+  const { npm_config_minimum_release_age, ...rest } = process.env;
+  const env = manager === 'yarn1' ? { ...rest, YARN_CACHE_FOLDER: YARN1_CACHE } : rest;
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
   const bin = pathFor[manager];
   return bin ? { ...env, [pathKey]: `${bin}${path.delimiter}${env[pathKey] ?? ''}` } : env;
@@ -104,8 +111,17 @@ function run(command: string, args: string[], cwd: string, manager?: Manager): s
 }
 
 /** `patch <args>` in the project, with the manager's PATH. */
-function patchAsync(manager: Manager, projectRoot: string, args: string[], reject = true) {
-  return executeAgentCliAsync(projectRoot, ['patch', ...args], { env: envFor(manager), reject });
+function patchAsync(
+  manager: Manager,
+  projectRoot: string,
+  args: string[],
+  reject = true,
+  env: NodeJS.ProcessEnv = {}
+) {
+  return executeAgentCliAsync(projectRoot, ['patch', ...args], {
+    env: { ...envFor(manager), ...env },
+    reject,
+  });
 }
 
 /** A project with the two fake packages installed by `manager`. */
@@ -324,7 +340,20 @@ describe.each([
     fs.writeFileSync(path.join(pkgDir, 'ios/New File.swift'), '// new\n');
     fs.rmSync(path.join(pkgDir, 'src/index.ts'));
 
-    const result = await patchAsync(manager, projectRoot, ['fake-expo-module', '--json', '--yes']);
+    // Git variables of the caller that would change the patch, or the index it is checked in.
+    const callerGit = {
+      GIT_INDEX_FILE: path.join(projectRoot, 'no-such-dir', 'index'),
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'diff.noprefix',
+      GIT_CONFIG_VALUE_0: 'true',
+    };
+    const result = await patchAsync(
+      manager,
+      projectRoot,
+      ['fake-expo-module', '--json', '--yes'],
+      true,
+      callerGit
+    );
     const report = JSON.parse(result.stdout);
 
     expect(report).toMatchObject({
@@ -356,12 +385,21 @@ describe.each([
     expect(fs.existsSync(path.join(pkgDir, 'src/index.ts'))).toBe(false);
   });
 
-  it(`refuses a binary edit, which patch-package cannot apply`, async () => {
+  it.each([
+    {
+      kind: 'binary',
+      code: 'PATCH_BINARY',
+      make: (dir: string) =>
+        fs.writeFileSync(path.join(dir, 'data.bin'), Buffer.from([0, 1, 2, 0])),
+    },
+    {
+      kind: 'symlink',
+      code: 'PATCH_SYMLINK',
+      make: (dir: string) => fs.symlinkSync('index.js', path.join(dir, 'link.js')),
+    },
+  ])(`refuses a $kind edit, which patch-package cannot apply`, async ({ code, make }) => {
     const projectRoot = await setupProjectAsync(manager);
-    fs.writeFileSync(
-      path.join(projectRoot, 'node_modules/fake-js-lib/data.bin'),
-      Buffer.from([0, 1, 2, 0])
-    );
+    make(path.join(projectRoot, 'node_modules/fake-js-lib'));
 
     const result = await patchAsync(
       manager,
@@ -371,13 +409,15 @@ describe.each([
     );
 
     expect(result.exitCode).toBe(1);
-    expect(JSON.parse(result.stdout).error.code).toBe('PATCH_BINARY');
+    expect(JSON.parse(result.stdout).error.code).toBe(code);
     expect(fs.existsSync(path.join(projectRoot, 'patches'))).toBe(false);
   });
 });
 
 describe('@expo/agent-cli patch — npm 12 (npm patch)', () => {
   usePinnedManager('npm12');
+  /** A small scoped registry package: npm writes its patch to `patches/@isaacs/…`. */
+  const SCOPED = '@isaacs/string-locale-compare';
 
   it(`takes the patch-package path, behind --yes, for a package npm patch refuses`, async () => {
     // A `file:` tarball: npm patch refuses what is not from the registry (EPATCHNONREGISTRY).
@@ -395,8 +435,8 @@ describe('@expo/agent-cli patch — npm 12 (npm patch)', () => {
     );
   });
 
-  it(`saves an edit with npm patch, with no patch-package, and a fresh install applies it`, async () => {
-    // npm patch refuses a package that is not from the registry, so this one is.
+  /** A project with one registry package, which npm patch accepts. */
+  function registryProject(): string {
     const projectRoot = path.join(getTemporaryPath(), 'patch-npm12');
     fs.mkdirSync(projectRoot, { recursive: true });
     fs.writeFileSync(
@@ -405,26 +445,46 @@ describe('@expo/agent-cli patch — npm 12 (npm patch)', () => {
         name: 'patch-app',
         version: '1.0.0',
         private: true,
-        dependencies: { 'is-number': '7.0.0' },
+        dependencies: { [SCOPED]: '1.1.0' },
       }) + '\n'
     );
     run('npm', INSTALL.npm12, projectRoot, 'npm12');
-    edit(projectRoot, 'is-number/index.js', '// patched by e2e\n');
+    return projectRoot;
+  }
 
-    const result = await patchAsync('npm12', projectRoot, ['is-number', '--json']);
+  it(`saves a scoped package with npm patch, with no patch-package, and a fresh install applies it`, async () => {
+    const projectRoot = registryProject();
+    edit(projectRoot, `${SCOPED}/index.js`, '// patched by e2e\n');
+    // npm leaves the package's own package.json out of the patch, so the report does too.
+    edit(projectRoot, `${SCOPED}/package.json`, '\n');
+
+    const result = await patchAsync('npm12', projectRoot, [SCOPED, '--json']);
     const report = JSON.parse(result.stdout);
 
     expect(report).toMatchObject({ packageManager: 'npm', files: ['index.js'] });
+    expect(result.stderr).toContain('package.json');
     expect(
       path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
-    ).toBe(path.join('patches', 'is-number@7.0.0.patch'));
+    ).toBe(path.join('patches', '@isaacs', 'string-locale-compare@1.1.0.patch'));
     const pkg = readJson(path.join(projectRoot, 'package.json'));
-    expect(pkg.patchedDependencies).toEqual({ 'is-number@7.0.0': 'patches/is-number@7.0.0.patch' });
+    expect(pkg.patchedDependencies).toEqual({
+      [`${SCOPED}@1.1.0`]: `patches/${SCOPED}@1.1.0.patch`,
+    });
     expect(pkg.scripts).toBeUndefined();
 
     reinstall(projectRoot, 'npm12');
     expect(
-      fs.readFileSync(path.join(projectRoot, 'node_modules/is-number/index.js'), 'utf8')
+      fs.readFileSync(path.join(projectRoot, 'node_modules', SCOPED, 'index.js'), 'utf8')
     ).toContain('// patched by e2e');
+  });
+
+  it(`refuses when the only edit is one npm patch does not record`, async () => {
+    const projectRoot = registryProject();
+    edit(projectRoot, `${SCOPED}/package.json`, '\n');
+
+    const result = await patchAsync('npm12', projectRoot, [SCOPED, '--json'], false);
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('PATCH_NOT_PATCHABLE');
   });
 });
