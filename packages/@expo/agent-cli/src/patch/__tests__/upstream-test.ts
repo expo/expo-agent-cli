@@ -103,6 +103,12 @@ describe(filesOfPatch, () => {
     // npm 12.2.3 writes a plain unified diff with a tab after the name, and no `diff --git` line.
     ['npm 12', '--- a/index.js\t\n+++ b/index.js\t\n@@ -15,4 +15,5 @@\n', ['index.js']],
     ['a deleted file', '--- a/old.js\n+++ /dev/null\n', ['old.js']],
+    // Hunk lines that look like headers: an added `++ b/fix` and a removed `-- a/old`.
+    [
+      'header-like lines inside a hunk',
+      '--- a/index.js\t\n+++ b/index.js\t\n@@ -1,2 +1,2 @@\n x\n--- a/old\n+++ b/fix\n--- a/other.js\t\n+++ b/other.js\t\n@@ -1 +1,2 @@\n y\n+z\n',
+      ['index.js', 'other.js'],
+    ],
   ])('%s', (_name, patch, files) => {
     expect(filesOfPatch(patch)).toEqual(files);
   });
