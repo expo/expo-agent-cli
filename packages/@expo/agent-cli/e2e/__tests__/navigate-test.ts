@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { appRuntime, expoGoRuntimeTarget, runtimeTarget } from '../runtimeTargetFixtures';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
@@ -16,6 +17,7 @@ import {
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
+  type StubDevServerOptions,
 } from '../utils';
 import {
   appStartedMarkerPath,
@@ -448,6 +450,171 @@ describe('@expo/agent-cli navigate', () => {
     expect(error.suggestedCommand).toContain('--ios');
     // The `Try:` line is what an agent acts on, so the flag has to be on the stream too.
     expect(result.stderr).toContain('--ios');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
+describe('the bundle of the attached app', () => {
+  type Platform = 'ios' | 'android';
+
+  /** `navigate` on a stub device of `platform`, against a stub dev server. */
+  async function navigateAsync({
+    platform,
+    fixture = 'go-app',
+    stub: stubOptions,
+    flags = [],
+  }: {
+    platform: Platform;
+    fixture?: string;
+    stub: (projectRoot: string) => StubDevServerOptions;
+    flags?: string[];
+  }) {
+    const projectRoot = await setupFixtureAsync(fixture);
+    const xcrun = await installStubXcrunAsync(projectRoot, {
+      simulators: platform === 'ios' ? [BOOTED_SIMULATOR] : [],
+    });
+    const adbEnv =
+      platform === 'android'
+        ? (await installStubAdbAsync(projectRoot, expoGoRuntimeTarget('android').appId)).env
+        : {};
+    const stub = await startStubDevServerAsync({ projectRoot, ...stubOptions(projectRoot) });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'navigate',
+          fixture === 'go-app' ? '/' : '/profile/42',
+          `--${platform}`,
+          '--dev-server-url',
+          stub.url,
+          ...flags,
+        ],
+        { env: { ...stubExpoEnv(projectRoot), ...adbEnv }, reject: false }
+      );
+      const openedUrls = xcrun
+        .calls()
+        .filter((args) => args[1] === 'openurl')
+        .map((args) => args[3]);
+      return { result, openedUrls };
+    } finally {
+      await stub.close();
+    }
+  }
+
+  describe('an attached app that ran no bundle', () => {
+    it.each([
+      { name: 'ios', platform: 'ios' as const, launcher: false },
+      { name: 'android', platform: 'android' as const, launcher: false },
+      { name: 'ios, after a launcher open', platform: 'ios' as const, launcher: true },
+    ])('exits 22 when no bundle ran inside the attach wait ($name)', async (row) => {
+      const noBundle = appRuntime({});
+      const { result, openedUrls } = await navigateAsync(
+        row.launcher
+          ? {
+              platform: row.platform,
+              fixture: 'dev-client-app',
+              // The development build attaches only after the launcher open starts it.
+              stub: (projectRoot) => ({
+                targets: [
+                  runtimeTarget('ios', {
+                    appId: 'com.example.demo',
+                    deviceName: BOOTED_SIMULATOR.name,
+                  }),
+                ],
+                targetsAppearWithFile: appStartedMarkerPath(projectRoot),
+                inspectorEvaluate: noBundle.evaluate,
+              }),
+              flags: [
+                '--json',
+                '--scheme',
+                'demoapp',
+                '--app-id',
+                'com.example.demo',
+                '--attach-timeout',
+                '2s',
+              ],
+            }
+          : {
+              platform: row.platform,
+              stub: () => ({
+                targets: [expoGoRuntimeTarget(row.platform)],
+                inspectorEvaluate: noBundle.evaluate,
+              }),
+              flags: ['--json', '--attach-timeout', '2s'],
+            }
+      );
+
+      expect(result.exitCode).toBe(22);
+      const report = JSON.parse(result.stdout);
+      expect(report).toMatchObject({ attached: true, appLoaded: false, followups: [] });
+      expect(result.stderr).toContain('no JavaScript bundle');
+      if (row.launcher) {
+        expect(report.launch.attached).toBe(true);
+        // The launcher URL and the route link. The wait opens nothing more.
+        expect(openedUrls).toEqual([report.launch.url, 'demoapp://profile/42']);
+      }
+    });
+
+    it.each(['ios', 'android'] as const)(
+      'waits inside --attach-timeout and exits 0 when the bundle runs (%s)',
+      async (platform) => {
+        const loadsLater = appRuntime({}, { loadedAfterAsks: 4 });
+        const { result } = await navigateAsync({
+          platform,
+          stub: () => ({
+            targets: [expoGoRuntimeTarget(platform)],
+            inspectorEvaluate: loadsLater.evaluate,
+          }),
+          flags: ['--json', '--attach-timeout', '10s'],
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({ attached: true, appLoaded: true });
+        const noBundleAnswers = loadsLater.answers().filter((answer) => answer === 'bundle:none');
+        expect(noBundleAnswers.length).toBeGreaterThanOrEqual(2);
+      }
+    );
+
+    it('prints the App line as attached, not loaded', async () => {
+      const { result } = await navigateAsync({
+        platform: 'ios',
+        stub: () => ({
+          targets: [expoGoRuntimeTarget('ios')],
+          inspectorEvaluate: appRuntime({}).evaluate,
+        }),
+        flags: ['--attach-timeout', '2s'],
+      });
+
+      expect(result.stdout).toContain('App attached, not loaded');
+    });
+  });
+
+  it.each<{ name: string; platform: Platform; stub: StubDevServerOptions }>([
+    {
+      name: 'a target that the default target selector does not ask',
+      platform: 'ios',
+      stub: { targets: [EXPO_GO_TARGET] },
+    },
+    {
+      name: 'a runtime that sends no answer',
+      platform: 'ios',
+      stub: { targets: [expoGoRuntimeTarget('ios')] },
+    },
+    {
+      name: 'a runtime with no debugger',
+      platform: 'android',
+      stub: { targets: [expoGoRuntimeTarget('android')], inspectorSocket: 'no-debugger' },
+    },
+    {
+      name: 'an answer that is not about the bundle',
+      platform: 'ios',
+      stub: { targets: [expoGoRuntimeTarget('ios')], inspectorEvaluate: () => undefined },
+    },
+  ])('an app whose runtime cannot be asked is attached ($name)', async ({ platform, stub }) => {
+    const { result } = await navigateAsync({ platform, stub: () => stub, flags: ['--json'] });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ attached: true, appLoaded: null });
   });
 });
 

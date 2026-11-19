@@ -19,7 +19,7 @@ import {
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
-import { runtimeTarget } from '../runtimeTargetFixtures';
+import { appRuntime, runtimeTarget } from '../runtimeTargetFixtures';
 import {
   appStartedMarkerPath,
   BOOTED_SIMULATOR,
@@ -944,6 +944,36 @@ describe('runtime:reload --method runtime', () => {
     } finally {
       await stub.close();
     }
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
+  // iOS only: the proof reads the context on its open session and does not read the platform.
+  it('does not prove a reload by a context with no bundle', async () => {
+    const noBundle = appRuntime({});
+    const { result, report } = await reloadAsync('ios', {
+      inspectorEvaluate: (expression) =>
+        RELOAD_CALL.test(expression) ? 'sent' : noBundle.evaluate(expression),
+    });
+    expect(result.exitCode, result.all).toBe(22);
+    expect(report.attempts).toEqual([
+      expect.objectContaining({ method: 'runtime', ok: false, delivered: true }),
+    ]);
+    expect(report.attempts[0]!.reason).toContain('no JavaScript bundle');
+  });
+
+  // Each real reload takes this path: the new context answers before its bundle runs.
+  it('proves a reload when the new context runs a bundle after it answered that none ran', async () => {
+    let runtime = appRuntime({ __r() {} });
+    const { result, report } = await reloadAsync('ios', {
+      inspectorEvaluate: (expression) => {
+        if (!RELOAD_CALL.test(expression)) return runtime.evaluate(expression);
+        runtime = appRuntime({}, { loadedAfterAsks: 1 });
+        return 'sent';
+      },
+    });
+    expect(result.exitCode, result.all).toBe(0);
+    expect(report.verifiedBy).toBe('debugger-context-replaced');
+    expect(runtime.answers()).toContain('bundle:none');
   });
 
   // iOS only: the lost answer is decided in the driver, which does not read the platform.

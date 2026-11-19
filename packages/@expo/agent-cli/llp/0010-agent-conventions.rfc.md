@@ -36,7 +36,7 @@ Implementation [observed, `src/exitCodes.ts`]: a tool error throws a `CommandErr
 
 `1`'s promise is that running the same line again changes nothing. After a reload, `/json/list` is empty for about half a second while the runtime comes back.
 
-The wait belongs to the question. Every command whose `need` is `debugger-target` waits out `APP_RECONNECT_GRACE_MS` ([[0005-runtime-loop-tools]]). Commands that can work without a runtime skip it. What is left after the wait is `22`. The tool worked and could not conclude. It is reported only after the window, so the code says "asked for as long as it was worth asking".
+The wait belongs to the question. Every command whose `need` is `debugger-target` waits out `APP_RECONNECT_GRACE_MS` ([[0005-runtime-loop-tools]]). Commands that can work without a runtime skip it. What is left after the wait is `22`. The tool worked and could not conclude. It is reported only after the window, so the code says "asked for as long as it was worth asking". An attached app that ran no JavaScript bundle is the same question: the same wait, then `22`, with `APP_NOT_LOADED` ([[0005-runtime-loop-tools]] §A loaded app).
 
 No-dev-server and wrong-platform stay `1`. Neither becomes different within a second. The fix for the first is to start a dev server. The fix for the second is to change the flag. "Fix the call" is exactly what `1` says.
 
@@ -72,7 +72,7 @@ Both output forms are parsed. `--pretty false` is asked for, and `pretty` is als
 
 ### Other gates, in brief
 
-A command that reports on the app does not gate on what it reported. `runtime:errors` exits 0 whatever it collects. `--fail-on-error` exits 20 on a non-empty window, and 22 on a runtime that cannot answer ([[0005-runtime-loop-tools]]).
+A command that reports on the app does not gate on what it reported. `runtime:errors` exits 0 whatever it collects. `--fail-on-error` exits 20 on a non-empty window, and 22 on a runtime that cannot answer ([[0005-runtime-loop-tools]]). A preflight refusal comes before the collection and keeps its own code.
 
 `runtime:reload` uses both codes of the band: 0 observed, 20 did not happen, 22 a mechanism ran and nothing was seen, 1 not attempted. Mechanism is [[0005-runtime-loop-tools]] §Reloading the app.
 
