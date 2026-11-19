@@ -138,9 +138,30 @@ export function mapUpstreamFile(file: string, directory: string): UpstreamFile {
 export function filesOfPatch(patch: string): string[] {
   const files = new Set<string>();
   // `+++ b/<file>` names the file; for a deleted file it is /dev/null and `--- a/<file>` does.
-  // git-style patches and npm 12's plain unified diffs both have these lines.
+  // git-style patches and npm 12's plain unified diffs both have these lines. Inside a hunk, an
+  // added `++ b/x` is the line `+++ b/x`, so the hunk's line counts from `@@` say where it ends.
   let removed: string | null = null;
+  let oldLeft = 0;
+  let newLeft = 0;
   for (const line of patch.split(/\r?\n/)) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith('-')) {
+        oldLeft--;
+      } else if (line.startsWith('+')) {
+        newLeft--;
+      } else if (!line.startsWith('\\')) {
+        // Context, or an empty line for an empty context line.
+        oldLeft--;
+        newLeft--;
+      }
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
+      newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      continue;
+    }
     const from = /^--- (?:a\/)?(.+?)\t?$/.exec(line);
     if (from) {
       removed = from[1] === '/dev/null' ? null : from[1]!;
