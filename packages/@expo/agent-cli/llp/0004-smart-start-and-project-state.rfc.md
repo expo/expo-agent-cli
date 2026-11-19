@@ -232,6 +232,11 @@ The lock proves the wrapper is alive; only an HTTP probe of its URL proves the d
 
 **The parent waits for the lock, not for the child.** A detached start is finished when the child's lock answers. With `--wait-ready` the parent also waits until `/status` answers for this project; a port change moves the wait to the new URL within the same budget, and another project's answer never ends it. Without the flag `ready` is `null`. The budget is 120 s (`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
 
+A new detached run prints the absolute live log path and resolved plan on stderr. With `--wait-ready`,
+it announces native work before the build and reports the Metro readiness wait when Metro reports its
+port or starts serving. The iOS and Android cases in `dev-detach-test` observe both messages before
+letting Metro answer `/status`.
+
 **One dev server per project.** A local `dev --detach` beside a live lock stops as a foreground `dev` does (§A busy port). A detached run whose device is on EAS goes on to the running server and opens its session there ([[0035-one-device-per-worktree]] §Preserved sessions), and `smoke`'s bootstrap reuses the running server. Reuse adds no wait for the app to open. A lock that another run takes after the parent's read is not the child's: the parent compares the lock's pid with the child's, and relays the child's `DEV_SERVER_RUNNING` refusal.
 
 **A run that builds says so.** A detached run never says "the dev server started" while the plan compiles; the lock's `phase` is the one source ([[0021-honest-reports]]). Without `--wait-ready`, the parent reports its child as soon as the lock says `building`: exit 0, `phase: "building"`, the pid and the URL the dev server will take. With `--wait-ready` it waits, and at the deadline, with the child alive and still `building`, it exits 22 `DEV_DETACH_STILL_BUILDING` with the pid, the log file, and the same command as the next step. An EAS or `smoke` re-run beside a `building` lock spawns nothing: it reports that run, or follows it with the same wait and the same 22. A local re-run stops with `DEV_SERVER_RUNNING`, exit 20, and names `dev:logs`.

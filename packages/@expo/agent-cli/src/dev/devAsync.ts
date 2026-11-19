@@ -35,6 +35,7 @@ import {
 } from '../toolchain/runsOn';
 import { CommandError } from '../utils/errors';
 import { detachedPidLine } from './childVerdict';
+import { sendDetachedPlan } from './detachProgress';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import {
   findUntrackedDevServerAsync,
@@ -164,6 +165,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     print: options.json ? 'none' : 'text',
     followups: [],
   });
+  if (options.detachedChild) sendDetachedPlan(plan);
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Where a build runs
   // On stderr, and before the first step, because this is the one thing that decides whether the
