@@ -421,6 +421,7 @@ describe(navigateAsync, () => {
       // Null rather than false: this run passed --no-wait-attach, so nothing looked
       // (llp/0005-runtime-loop-tools.rfc.md §Android, F50).
       attached: null,
+      appLoaded: null,
       attachWaitedMs: 0,
       attachRecovered: false,
       // Null on a local device: the dialog this field is about is what an unattended cloud session
@@ -468,6 +469,7 @@ describe(navigateAsync, () => {
 
     expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
       'appId',
+      'appLoaded',
       'attachAlert',
       'attachRecovered',
       'attachWaitedMs',
@@ -1021,6 +1023,7 @@ describe(navigateAsync, () => {
       });
       expect(Object.keys(report).sort()).toEqual([
         'appId',
+        'appLoaded',
         'attachAlert',
         'attachRecovered',
         'attachWaitedMs',

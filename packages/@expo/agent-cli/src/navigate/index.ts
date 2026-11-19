@@ -64,6 +64,7 @@ export const navigateHelp: CommandHelp = {
       'routeCheck',
       'reversedPort',
       'attached',
+      'appLoaded',
       'attachWaitedMs',
       'attachRecovered',
       'attachAlert',

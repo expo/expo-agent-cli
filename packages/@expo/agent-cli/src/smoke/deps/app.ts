@@ -2,6 +2,8 @@ import { isExpoGoAppId } from '../../navigate/target';
 import { openRouteAsync } from '../../navigate/openRoute';
 import { PROGRAM_PREFIX } from '../../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../../project/expoGo';
+import { APP_LOADED_EXPRESSION, appLoadedFromAnswer } from '../../runtime/appLoaded';
+import { NO_BUNDLE_STATES } from '../../runtime/appLoadedText';
 import { CdpClient, isMethodNotFoundError } from '../../runtime/cdpClient';
 import { probeDevServerAsync } from '../../runtime/devServer';
 import { markBundleSignalSync } from '../../runtime/reload/bundleSignal';
@@ -15,15 +17,6 @@ import { firstLine } from '../../utils/text';
 import type { SmokeDeps } from '../contract';
 import { expoGoVersionMismatch } from './device';
 import type { SmokeDepsContext } from './shared';
-
-/**
- * The expression the runtime is asked to evaluate.
- *
- * `1` and nothing else. The question is only "does this runtime answer the debugger at all", and
- * anything that touched the app's own state would fail for reasons that are the app's rather than
- * the runtime's — which is the distinction this phase exists to draw.
- */
-const LIVENESS_EXPRESSION = '1';
 
 /** How long the liveness evaluation gets before it is called unanswered. */
 const LIVENESS_TIMEOUT_MS = 5_000;
@@ -223,14 +216,23 @@ async function evaluate(
 ): ReturnType<SmokeDeps['evaluate']> {
   try {
     const { targetSelection, deviceInventory } = await ctx.targetSelectionAsync(devServerUrl);
-    await new CdpClient({
+    // The bundle question is also the liveness question: each answer shows a runtime that answers
+    // the debugger, and only "no bundle ran" is not readable (llp/0005 §A loaded app).
+    const answer = await new CdpClient({
       metroUrl: devServerUrl,
       targetSelection,
       deviceInventory,
-    }).evaluateAsync(LIVENESS_EXPRESSION, {
+    }).evaluateAsync(APP_LOADED_EXPRESSION, {
       awaitPromise: false,
       timeoutMs: LIVENESS_TIMEOUT_MS,
     });
+    if (appLoadedFromAnswer(answer.value) === false) {
+      return {
+        ok: false,
+        unsupported: false,
+        reason: `the app's runtime answers the debugger, and no JavaScript bundle ran in it: ${NO_BUNDLE_STATES}`,
+      };
+    }
     return { ok: true, unsupported: false, reason: null };
   } catch (error: unknown) {
     // The Expo Go Android case: the engine was built without a CDP debugger, so nothing can be

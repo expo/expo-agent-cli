@@ -1,6 +1,7 @@
 import { runInNewContext } from 'vm';
 import { WebSocket } from 'ws';
 
+import { APP_LOADED_EXPRESSION } from '../appLoaded';
 import { MockWebSocket } from './MockWebSocket';
 
 /**
@@ -15,6 +16,8 @@ export function serveInspectorApp({
   onReload = 'clears',
   reloadAnswer = 'answers',
   evaluate = 'answers',
+  newContext = () => ({ __r() {} }),
+  bundleAnswerMs = 0,
 }: {
   /**
    * What a `Page.reload` does to the app's globals: a new context at once, a new context that also
@@ -26,6 +29,10 @@ export function serveInspectorApp({
   reloadAnswer?: 'answers' | 'drops';
   /** `method-not-found` is a runtime with no debugger to evaluate in, as Expo Go for Android has. */
   evaluate?: 'answers' | 'method-not-found';
+  /** The globals of the context after a reload. The default is a context in which a bundle ran. */
+  newContext?: () => Record<string, unknown>;
+  /** How long the answer to the bundle question takes. `Infinity` sends no answer. */
+  bundleAnswerMs?: number;
 } = {}): { reloaded(): string[] } {
   let globals: Record<string, unknown> = {};
   const reloaded: string[] = [];
@@ -43,7 +50,7 @@ export function serveInspectorApp({
       if (request.method === 'Page.reload') {
         reloaded.push(url);
         if (onReload !== 'nothing') {
-          globals = {};
+          globals = newContext();
         }
         if (reloadAnswer === 'drops') {
           sockets.forEach((each) => each.close());
@@ -68,7 +75,12 @@ export function serveInspectorApp({
           ? answer({ error: { code: -32000, message: 'Execution context was destroyed.' } })
           : value(true);
       }
-      return value(runInNewContext(expression, { globalThis: globals }));
+      const result: unknown = runInNewContext(expression, { globalThis: globals });
+      if (expression === APP_LOADED_EXPRESSION && bundleAnswerMs > 0) {
+        if (Number.isFinite(bundleAnswerMs)) setTimeout(() => value(result), bundleAnswerMs);
+        return;
+      }
+      return value(result);
     });
     sockets.push(opened);
     return opened;

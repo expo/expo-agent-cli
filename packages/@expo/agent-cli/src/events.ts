@@ -546,6 +546,8 @@ declare module '2g' {
        * (llp/0005-runtime-loop-tools.rfc.md §Android, F50). `exitCode` only ever answered the first.
        */
       attached: boolean | null;
+      /** Whether the attached app's runtime answered that a bundle ran (llp/0005 §A loaded app). */
+      appLoaded: boolean | null;
       /**
        * The dev launcher URL this run opened **before** `url`, or null when it opened none.
        *

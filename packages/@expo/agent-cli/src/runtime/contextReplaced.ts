@@ -3,6 +3,7 @@
 import { randomBytes } from 'crypto';
 
 import { firstLine } from '../utils/text';
+import { APP_LOADED_EXPRESSION, appLoadedFromAnswer, type AppLoaded } from './appLoaded';
 import {
   CdpClient,
   CdpRequestError,
@@ -30,7 +31,10 @@ const NO_DEBUGGER =
 export class ActionRefusedError extends Error {}
 
 export type ContextReplaced =
-  /** An evaluate answered on the same target, and the marker was gone. */
+  /**
+   * An evaluate answered on the same target, the marker was gone, and the new context did not
+   * answer that no bundle ran.
+   */
   | { kind: 'replaced' }
   /** The budget ran out with no such answer. */
   | { kind: 'not-replaced'; reason: string }
@@ -39,15 +43,28 @@ export type ContextReplaced =
   /** The app answered and did not keep the marker, so nothing could prove the action: not taken. */
   | { kind: 'unmarkable'; reason: string };
 
+const NO_BUNDLE_REASON = 'a new JavaScript context answered, and no JavaScript bundle ran in it';
+
+type Ask = (expression: string) => Promise<{
+  open: CdpSession;
+  read: Awaited<ReturnType<typeof runtimeEvaluateAsync>>;
+}>;
+
+/** The answer of a new context to the bundle question. `undefined`: the question got no answer. */
+async function bundleAnswerAsync(ask: Ask): Promise<AppLoaded | undefined> {
+  try {
+    return appLoadedFromAnswer((await ask(APP_LOADED_EXPRESSION)).read.value);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Set the marker. A context that does not keep it, or a CDP error answer, is `unmarkable`; a mark
  * that gets no answer throws.
  */
 async function markAsync(
-  ask: (expression: string) => Promise<{
-    open: CdpSession;
-    read: Awaited<ReturnType<typeof runtimeEvaluateAsync>>;
-  }>,
+  ask: Ask,
   marker: string,
   nonce: string
 ): Promise<{ kind: 'marked'; session: CdpSession } | { kind: 'unmarkable'; reason: string }> {
@@ -68,7 +85,10 @@ async function markAsync(
  * Set a marker on the target, take the action, and read the marker until it is gone.
  *
  * A read that fails, and a read that still finds the marker, are "not yet": a reloading context
- * refuses requests for a moment, and the old one can answer once more after the action.
+ * refuses requests for a moment, and the old one can answer once more after the action. A new
+ * context that answers that no JavaScript bundle ran is also "not yet": the app is between the old
+ * bundle and the new one (llp/0005 §A loaded app). Each other answer to that question is the proof.
+ * A question with no answer is the proof too, unless the context answered "no bundle ran" before.
  *
  * A mark that gets no answer (an abort, the deadline, a lost connection) throws, and the action is
  * not taken. An action whose answer is lost (the socket drops, its time runs out, or the phase is
@@ -149,14 +169,27 @@ export async function jsContextReplacedAsync(
     );
 
     clock.limit(timeoutMs);
+    let noBundle = false;
     for (let last = false; ;) {
       let reason: string;
       try {
         const { read } = await ask(`${marker} === ${JSON.stringify(nonce)}`);
-        if (read.value === false) return { kind: 'replaced' };
-        reason = 'the marker set before it was still there, so the JavaScript context was the same';
+        const markerGone = read.value === false;
+        const bundle = markerGone ? await bundleAnswerAsync(ask) : false;
+        // An answer other than "no bundle ran" is the proof. A question with no answer is the
+        // proof too, unless this context answered "no bundle ran" before.
+        if (markerGone && bundle !== false && (bundle !== undefined || !noBundle)) {
+          return { kind: 'replaced' };
+        }
+        noBundle ||= markerGone;
+        reason = markerGone
+          ? NO_BUNDLE_REASON
+          : 'the marker set before it was still there, so the JavaScript context was the same';
       } catch (error: unknown) {
-        reason = `the last read of the marker failed: ${describe(error)}`;
+        // A read that the deadline cut does not replace the answer of the new context.
+        reason = noBundle
+          ? NO_BUNDLE_REASON
+          : `the last read of the marker failed: ${describe(error)}`;
       }
       if (last || !clock.open()) return notReplaced(reason, lost);
       // Less than an interval left still covers one more read, taken at once.

@@ -105,6 +105,7 @@ function opened(overrides: Partial<OpenRouteResult> = {}): OpenRouteResult {
       confirmed: null,
       waitedMs: 0,
       targets: 0,
+      loaded: null,
       recovery: null,
       alert: null,
       reason: 'this run did not wait for the app to attach',

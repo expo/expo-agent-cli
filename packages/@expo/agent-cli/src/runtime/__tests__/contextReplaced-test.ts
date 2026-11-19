@@ -89,6 +89,34 @@ describe('the proof of a Page.reload', () => {
     expect(served.reloaded()).toHaveLength(reloads);
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
+  it.each([
+    {
+      name: 'does not prove a reload when a later bundle question gets no answer',
+      // Poll 1 gets "no bundle ran" at 100 ms. Poll 2 asks with 50 ms left and gets no answer.
+      app: { newContext: () => ({}), bundleAnswerMs: 100 },
+      timeoutMs: 150,
+      outcome: { kind: 'not-replaced', reason: expect.stringContaining('no JavaScript bundle') },
+    },
+    {
+      name: 'proves a reload when the bundle question never gets an answer',
+      app: { newContext: () => ({}), bundleAnswerMs: Infinity },
+      timeoutMs: 1500,
+      outcome: { kind: 'replaced' },
+    },
+  ])('$name', async ({ app, timeoutMs, outcome }) => {
+    serveInspectorApp(app);
+
+    await expect(
+      jsContextReplacedAsync('http://127.0.0.1:8081', TARGET, {
+        act: async (client) => {
+          await client.sendAsync('Page.reload', {}, 1000);
+        },
+        timeoutMs,
+      })
+    ).resolves.toEqual(outcome);
+  });
+
   it('reads once more without sleeping when less than a poll interval is left', async () => {
     serveInspectorApp({ onReload: 'clears-late' });
 

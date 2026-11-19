@@ -24,6 +24,7 @@ import {
 import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErrors';
 import { event as cliEvent } from '../events';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
+import { readAppLoadedAsync, type AppLoaded } from '../runtime/appLoaded';
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
 import { probeDevServerAsync } from '../runtime/devServer';
 import {
@@ -201,6 +202,13 @@ export interface AttachCheck {
   waitedMs: number;
   /** How many debugger targets this platform had when the wait ended. */
   targets: number;
+  /**
+   * Whether the runtime that a read command reads answered that a JavaScript bundle ran. Null when
+   * this run did not ask, when no app attached, and when the runtime cannot be asked.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
+   */
+  loaded: AppLoaded;
   /** What the recovery did when no app attached. */
   recovery: AttachRecovery;
   /**
@@ -209,7 +217,7 @@ export interface AttachCheck {
    * @see AlertCheck — and llp/0005 §Cloud simulator.
    */
   alert: AlertCheck | null;
-  /** Why it is not confirmed, or null when it is. */
+  /** Why it is not confirmed or not loaded, or null. */
   reason: string | null;
 }
 
@@ -355,6 +363,7 @@ export async function openRouteAsync(
     exitCode: result.exitCode,
     reversedPort: reverse?.port ?? null,
     attached: attach.confirmed,
+    appLoaded: attach.loaded,
     launchUrl: launch?.url ?? null,
   });
 
@@ -450,11 +459,13 @@ const ATTACH_POLL_MS = 500;
 const ROUTE_ATTACH_FLOOR_MS = 2_000;
 
 /**
- * Wait until an app of this scope holds a debugger target, or the deadline.
+ * Wait until an app of this scope holds a debugger target and its runtime does not answer that no
+ * bundle ran, or the deadline.
  *
- * @returns how many targets this scope had when the wait ended: zero means the deadline won.
+ * @returns how many targets this scope had when the wait ended, and the last answer to the bundle
+ * question. Zero targets, or `loaded: false`, means the deadline won.
  */
-type AttachWaiter = (deadline: number) => Promise<number>;
+type AttachWaiter = (deadline: number) => Promise<{ targets: number; loaded: AppLoaded }>;
 
 /**
  * Read this device's apps: once now, for the decisions before the link, and again on each poll.
@@ -482,12 +493,17 @@ async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDev
         : inventory;
       const classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
       return async (deadline) => {
+        // An app that a poll saw stays the answer when the list is empty for the last read: a
+        // short gap in the list must not start a recovery that stops a loading app.
+        let seen: { targets: number; loaded: AppLoaded } | null = null;
         for (;;) {
           const probe = await probeDevServerAsync(devServerUrl);
-          const count = probe.reachable ? (await classify(probe.targets, deadline)).read.length : 0;
-          if (count > 0 || Date.now() >= deadline) {
-            return count;
-          }
+          const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
+          const targets = read.length;
+          const loaded = targets > 0 ? await readAppLoadedAsync(read, deadline) : null;
+          if (targets > 0) seen = { targets, loaded };
+          if (targets > 0 && loaded !== false) return { targets, loaded };
+          if (Date.now() >= deadline) return seen ?? { targets, loaded };
           await new Promise((resolve) => setTimeout(resolve, ATTACH_POLL_MS));
         }
       };
@@ -581,7 +597,7 @@ async function launchDevClientFirstAsync({
     };
   }
 
-  const targets = await waitAsync(startedAt + budgetMs);
+  const { targets } = await waitAsync(startedAt + budgetMs);
   return {
     url: launcherUrl,
     command: opened.command,
@@ -662,7 +678,7 @@ async function confirmAttachAsync({
 
   const startedAt = Date.now();
 
-  let targets = await waitAsync(startedAt + budgetMs);
+  let { targets, loaded } = await waitAsync(startedAt + budgetMs);
   let recovery: AttachRecovery = null;
   let alert: AlertCheck | null = null;
 
@@ -677,7 +693,7 @@ async function confirmAttachAsync({
     });
     debugEvent('attach_alert', { found: alert.found, accepted: alert.accepted });
     if (alert.accepted) {
-      targets = await waitAsync(Date.now() + budgetMs);
+      ({ targets, loaded } = await waitAsync(Date.now() + budgetMs));
     }
   }
 
@@ -718,7 +734,7 @@ async function confirmAttachAsync({
         projectRoot,
       });
       recovery = { wasRunning: stopped.wasRunning, reopened: again.exitCode === 0 };
-      if (recovery.reopened) targets = await waitAsync(Date.now() + budgetMs);
+      if (recovery.reopened) ({ targets, loaded } = await waitAsync(Date.now() + budgetMs));
     }
   }
 
@@ -728,11 +744,14 @@ async function confirmAttachAsync({
     confirmed: targets > 0,
     waitedMs,
     targets,
+    loaded,
     recovery,
     alert,
     reason:
       targets > 0
-        ? null
+        ? loaded === false
+          ? `the ${device.platform} app is attached to ${devServerUrl}, and its runtime ran no JavaScript bundle in ${waitedMs}ms`
+          : null
         : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${attachRecoveryText(recovery).reason}${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
   };
 }
@@ -744,6 +763,7 @@ function uncheckedAttach(reason: string): AttachCheck {
     confirmed: null,
     waitedMs: 0,
     targets: 0,
+    loaded: null,
     recovery: null,
     alert: null,
     reason,

@@ -20,6 +20,9 @@
 //   Why   no app is connected, **or** no dev server is running there — never the two conflated
 //   How   the ladder out, with `--eas` kept on every command in it when the caller passed it
 //
+// The same shape serves an attached app whose runtime answered that no JavaScript bundle ran
+// (llp/0005 §A loaded app): `22` after the same wait.
+//
 // **Two exit codes, and the difference is whether asking again can help** (llp/0010 §Exit codes).
 // No dev server is `1`: nothing answered, and nothing this CLI can do in a second changes that, so
 // `1`'s promise — "running the same line again changes nothing" — holds. An empty *target* list is
@@ -36,6 +39,8 @@ import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
+import { readAppLoadedAsync } from './appLoaded';
+import { emptyRuntimeWarning } from './appLoadedText';
 import type { CdpTarget } from './cdpClient';
 import {
   APP_RECONNECT_GRACE_MS,
@@ -45,7 +50,13 @@ import {
   type DevServerSource,
 } from './devServer';
 import { discoverDevServerAsync } from './discoverDevServer';
-import { emptyScopeError, noAppConnectedError, reachTheAppLadder, withData } from './scopeRefusal';
+import {
+  appNotLoadedError,
+  emptyScopeError,
+  noAppConnectedError,
+  reachTheAppLadder,
+  withData,
+} from './scopeRefusal';
 import {
   skippedAppsOf,
   describeSkippedApps,
@@ -130,6 +141,11 @@ export interface RuntimePreflightOptions {
   /** Require an app on this platform instead of any app. */
   platform?: NavigatePlatform;
   /**
+   * Continue with a warning when the app ran no bundle after the wait, in place of the refusal.
+   * `runtime:eval` reports a value and makes no claim about the app (llp/0005 §A loaded app).
+   */
+  readsEmptyRuntime?: boolean;
+  /**
    * The caller passed `--eas`, so every command in the ladder keeps the flag.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — F5x and S5. A
@@ -168,7 +184,8 @@ const APP_RECONNECT_POLL_MS = 250;
  * Resolve the connection a runtime command needs, or refuse in the family's one shape.
  *
  * @throws {CommandError} `NO_DEV_SERVER` when nothing answers and the command needs one,
- * `NO_APP_CONNECTED` when the dev server runs and names no runtime this command may read.
+ * `NO_APP_CONNECTED` when the dev server runs and names no runtime this command may read,
+ * `APP_NOT_LOADED` when the runtime that the command reads answered that no bundle ran.
  */
 export async function preflightRuntimeAsync(
   {
@@ -177,6 +194,7 @@ export async function preflightRuntimeAsync(
     platform,
     cloud = false,
     retryMs,
+    readsEmptyRuntime = false,
     deviceInventory: knownDeviceInventory,
   }: RuntimePreflightOptions,
   context: RuntimeContext = {}
@@ -190,6 +208,9 @@ export async function preflightRuntimeAsync(
     projectRoot: context.projectRoot ?? undefined,
   });
   const url = normalizeDevServerUrl(discovery.devServerUrl);
+  // The empty-list wait and the bundle wait share one budget. The device reads between them do
+  // not use it.
+  const deadline = Date.now() + retryBudgetMs;
 
   let reachable = discovery.reachable;
   let targets = discovery.targets;
@@ -198,7 +219,6 @@ export async function preflightRuntimeAsync(
   // Only an empty list is worth asking again about: an unreachable dev server does not become
   // reachable by re-reading it within three seconds, and a list with something in it is an answer.
   if (reachable && targets.length === 0 && retryBudgetMs > 0) {
-    const deadline = Date.now() + retryBudgetMs;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
       const probe = await probeDevServerAsync(url);
@@ -210,6 +230,7 @@ export async function preflightRuntimeAsync(
       }
     }
   }
+  const unspentMs = Math.max(0, deadline - Date.now());
 
   const found = {
     devServerUrl: url,
@@ -269,6 +290,33 @@ export async function preflightRuntimeAsync(
       context.projectRoot
     );
   }
+  if (need === 'debugger-target') {
+    const refusal = { devServerUrl: url, cloud, platform, debuggerTargets: targets.length };
+    const bundleDeadline = Date.now() + unspentMs;
+    await bundleStepAsync(classifiedTargets.read, bundleDeadline, readsEmptyRuntime, refusal);
+  }
+  reportScope(targetSelection, classifiedTargets);
+  return base;
+}
+
+/**
+ * Wait for the bundle. With none at the deadline: refuse, or warn for a command that reads an empty
+ * runtime (llp/0005 §A loaded app).
+ */
+async function bundleStepAsync(
+  read: readonly CdpTarget[],
+  deadline: number,
+  readsEmptyRuntime: boolean,
+  refusal: Omit<Parameters<typeof appNotLoadedError>[0], 'waitedMs'>
+): Promise<void> {
+  const waitedMs = await noBundleAtDeadlineAsync(read, deadline);
+  if (waitedMs == null) return;
+  if (!readsEmptyRuntime) throw appNotLoadedError({ ...refusal, waitedMs });
+  Log.warn(emptyRuntimeWarning(refusal.devServerUrl));
+}
+
+/** Say on stderr which device the command reads, and which apps it skips. */
+function reportScope(targetSelection: TargetSelection, classifiedTargets: ClassifiedTargets): void {
   if (
     targetSelection.bound &&
     targetSelection.device != null &&
@@ -282,7 +330,27 @@ export async function preflightRuntimeAsync(
   if (skipped.length > 0) {
     Log.progress(describeSkippedApps(skipped));
   }
-  return base;
+}
+
+/**
+ * Ask the runtime that a command reads whether a bundle ran, until the answer is not "no bundle
+ * ran" or the deadline.
+ *
+ * @returns null when the wait ended on another answer; else the time since the first "no bundle
+ * ran" answer, which is zero when the question was asked one time.
+ */
+async function noBundleAtDeadlineAsync(
+  read: readonly CdpTarget[],
+  deadline: number
+): Promise<number | null> {
+  let firstNoBundleAt: number | null = null;
+  while ((await readAppLoadedAsync(read, deadline)) === false) {
+    const now = Date.now();
+    firstNoBundleAt ??= now;
+    if (now >= deadline) return now - firstNoBundleAt;
+    await new Promise((resolve) => setTimeout(resolve, APP_RECONNECT_POLL_MS));
+  }
+  return null;
 }
 
 /** A local binding outranks a live session of this worktree; only --eas reads the session. */

@@ -7,6 +7,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
+import { deviceFlags, NO_BUNDLE_WHY, noBundleRemedy } from './appLoadedText';
 import type { RuntimePreflightData } from './preflight';
 import {
   skippedAppsOf,
@@ -106,8 +107,43 @@ export function noAppConnectedError({
   );
   // 22 rather than 1: the CLI worked and could not *conclude*, which is what this band is for.
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
-  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /${platform == null ? '' : ` --${platform}`}${cloud ? ' --eas' : ''}`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /${deviceFlags({ platform, cloud })}`;
   return withData(error, { devServerUrl, devServerReachable: true, platform });
+}
+
+/**
+ * An app is attached and its runtime answered that no JavaScript bundle ran.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app. Exit 22: the app can be in the middle of a
+ * load, so the same command can succeed later.
+ */
+export function appNotLoadedError({
+  devServerUrl,
+  waitedMs,
+  cloud = false,
+  platform,
+  debuggerTargets,
+}: {
+  devServerUrl: string;
+  /** The time since the first "no bundle" answer. Zero when the fact was read one time. */
+  waitedMs: number;
+  cloud?: boolean;
+  platform?: NavigatePlatform;
+  debuggerTargets: number;
+}): CommandError {
+  const flags = deviceFlags({ platform, cloud });
+  const navigate = `${PROGRAM_PREFIX} navigate /${flags}`;
+  const error = new CommandError(
+    'APP_NOT_LOADED',
+    [
+      `The app connected to ${devServerUrl} ran no JavaScript bundle.`,
+      `Why: the dev server lists the app's debugger target and the app's runtime answers, but no bundle ran in it${waitedMs > 0 ? `, and none had run ${waitedMs}ms later` : ''}. ${NO_BUNDLE_WHY}`,
+      `How: run this command again when the bundle has loaded. "${navigate}" waits for the bundle inside --attach-timeout. ${noBundleRemedy(flags)}`,
+    ].join('\n')
+  );
+  error.exitCode = EXIT_OUTCOME_TIMEOUT;
+  error.suggestedCommand = navigate;
+  return withData(error, { devServerUrl, devServerReachable: true, debuggerTargets, platform });
 }
 
 /**

@@ -85,7 +85,7 @@ function describeOutcome({ deviceName, outcome, reason }: TargetReloadOutcome): 
     case 'context-replaced':
       return contextReplacedClause(name, 'runtime');
     case 'delivered-unproved':
-      return `${name} was asked to reload with expo.reloadAppAsync, and no new JavaScript context was seen: ${reason}`;
+      return `${name} was asked to reload with expo.reloadAppAsync, and the reload was not proved: ${reason}`;
     case 'unmarkable':
       return `nothing could prove a reload of ${name}, so expo.reloadAppAsync was not called: ${reason}`;
     // `unsupported` and `stopped` do not occur: one target, no stop, and no capability check.
