@@ -315,12 +315,13 @@ describe('@expo/agent-cli patch — bun', () => {
 });
 
 /**
- * A stand-in for a clone of expo/expo: the fake package at `packages/fake-expo-module`, committed,
+ * A stand-in for a clone of expo/expo: the fake package at `packages/expo-fake-module-src` (its
+ * `repository.directory`, which is not its npm name, as in expo/expo), committed,
  * and without `build/`, which expo/expo does not commit.
  */
 function setupFakeExpoRepo(): string {
   const repo = path.join(getTemporaryPath(), 'expo');
-  const target = path.join(repo, 'packages', 'fake-expo-module');
+  const target = path.join(repo, 'packages', 'expo-fake-module-src');
   fs.mkdirSync(target, { recursive: true });
   fs.cpSync(path.join(fixturesDir, 'patch-packages', 'fake-expo-module'), target, {
     recursive: true,
@@ -381,13 +382,16 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
       { reject: false, env: pathWithGh(gh) }
     );
 
-    expect(result.exitCode).toBe(7);
+    expect(result.exitCode).toBe(0);
     expect(JSON.parse(result.stdout).upstream).toMatchObject({
       package: 'fake-expo-module',
       repository: 'expo/expo',
       files: [
         { file: 'build/index.js', target: null },
-        { file: 'ios/FakeModule.swift', target: 'packages/fake-expo-module/ios/FakeModule.swift' },
+        {
+          file: 'ios/FakeModule.swift',
+          target: 'packages/expo-fake-module-src/ios/FakeModule.swift',
+        },
       ],
       repro: null,
       gh,
@@ -407,7 +411,7 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
     const accepted = await plan(repro);
     const refused = await plan('repro.md');
 
-    expect(accepted.exitCode).toBe(7);
+    expect(accepted.exitCode).toBe(0);
     expect(JSON.parse(accepted.stdout).upstream.repro).toBe(repro);
     expect(refused.exitCode).toBe(1);
     expect(JSON.parse(refused.stdout).error.code).toBe('BAD_ARGS');
@@ -427,9 +431,12 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
       applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
 
       expect(
-        fs.readFileSync(path.join(repo, 'packages/fake-expo-module/ios/FakeModule.swift'), 'utf8')
+        fs.readFileSync(
+          path.join(repo, 'packages/expo-fake-module-src/ios/FakeModule.swift'),
+          'utf8'
+        )
       ).toContain('// fix');
-      expect(fs.existsSync(path.join(repo, 'packages/fake-expo-module/build'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/build'))).toBe(false);
     }
   );
 
@@ -447,9 +454,12 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
       applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
 
       expect(
-        fs.readFileSync(path.join(repo, 'packages/fake-expo-module/ios/FakeModule.swift'), 'utf8')
+        fs.readFileSync(
+          path.join(repo, 'packages/expo-fake-module-src/ios/FakeModule.swift'),
+          'utf8'
+        )
       ).toContain('// fix');
-      expect(fs.existsSync(path.join(repo, 'packages/fake-expo-module/build'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/build'))).toBe(false);
     }
   );
 

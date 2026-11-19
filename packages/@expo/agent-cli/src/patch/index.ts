@@ -54,7 +54,7 @@ export const patchHelp: CommandHelp = {
     `bun patch, pnpm patch, yarn patch or npm patch (npm 12) when the project has one, and in`,
     `patch-package's format otherwise (that one exits 1 until --yes allows the postinstall script).`,
     `A native change to a precompiled module also adds it to expo.autolinking.<platform>.buildFromSource.`,
-    `--upstream-plan stops with exit 7: the agent asks the user, then does the steps with git and gh.`,
+    `--upstream-plan exits 0 and opens nothing: the agent asks the user, then does the steps with git and gh.`,
   ],
 };
 
@@ -80,8 +80,6 @@ export const agentCliPatch: Command = async (argv) => {
   }
 
   const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
-  const { exitWithCodeAsync, EXIT_NEEDS_HUMAN } =
-    require('../exitCodes') as typeof import('../exitCodes');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
 
@@ -120,7 +118,6 @@ export const agentCliPatch: Command = async (argv) => {
         require('./upstream') as typeof import('./upstream');
       const plan = planUpstream(projectRoot, packageName, { repro: args['--repro'] ?? null });
       printUpstreamPlan(plan, { json });
-      await exitWithCodeAsync(EXIT_NEEDS_HUMAN);
       return;
     }
 

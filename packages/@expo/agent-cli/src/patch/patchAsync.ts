@@ -51,7 +51,14 @@ export interface PatchReport {
 export function isExpoRepoPackage(manifest: Record<string, any>): boolean {
   const repository = manifest.repository;
   const url = typeof repository === 'string' ? repository : repository?.url;
-  return typeof url === 'string' && /github\.com[/:]expo\/expo(?:\.git)?\/?$/i.test(url.trim());
+  // A boundary before the host, so `notgithub.com/expo/expo` and `evil.example/github.com/expo/expo`
+  // do not match, while `git+https://github.com/expo/expo.git` and `git@github.com:expo/expo.git` do.
+  return (
+    typeof url === 'string' &&
+    /^(?:[a-z+]+:\/\/(?:[^@/]+@)?|[^@/:]+@)?github\.com[/:]expo\/expo(?:\.git)?\/?$/i.test(
+      url.trim()
+    )
+  );
 }
 
 /** Refuse a package whose files are hard links into the store: no clean copy is left to diff. */
