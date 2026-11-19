@@ -57,7 +57,7 @@ import { isProcessAlive } from './processLiveness';
 import { recordLastDevRequest } from './lastRequest';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
-import { devAppWaitError, waitForDevAppAsync, type DevAppWait } from './waitForDevApp';
+import { appWaitOf, waitForDevAppAsync, type DevAppOpen, type DevAppReport } from './waitForDevApp';
 
 /** The argv of the detached child, as a value a test can assert without spawning anything. */
 export interface DetachSpawn {
@@ -194,6 +194,7 @@ async function reportBuildingRunAsync(
   return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning,
+    app: null,
     startedAt,
     print,
     smokePlatform,
@@ -246,11 +247,19 @@ async function reuseRunningAsync(
   // Read the verdict and PID after all probes: any can outlast the running server.
   await checkReuseFailureAsync(context, hasExited, lock, statusAnswering);
   if (context.onRunning === 'reopen-eas') recordLastDevRequest(projectRoot, options);
-  // Only a re-run that opened the app on its session has an app to wait for.
-  const app =
-    context.onRunning === 'reopen-eas' && easSessionId != null
-      ? await appWaitAsync(context, lock, 'eas', () => !hasExited())
-      : null;
+  // Only a re-run that opened the app on its session has an app to wait for; `smoke` opens none.
+  const sessionPlatform = easOpenPlatform(options);
+  const app = await appWaitAsync(context, lock, {
+    opened:
+      context.onRunning === 'reopen-eas' && sessionPlatform != null && easSessionId != null
+        ? { on: 'eas', platform: sessionPlatform }
+        : null,
+    stillWanted: () => !hasExited(),
+    serverGoneAsync: async () => {
+      await checkReuseFailureAsync(context, hasExited, lock);
+      return reuseGoneError(context, lock);
+    },
+  });
   return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning: true,
@@ -432,26 +441,19 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
       hasExited: childIsGone,
       callerArgv: options.callerArgv,
     });
-    if (sessionId == null) {
-      const stopped = await waitFailureAsync(projectRoot, true);
-      throw detachFailureError(stopped?.failure ?? 'child-exited', {
-        projectRoot,
-        lock,
-        logFile,
-        verdict: stopped?.verdict ?? null,
-        childExit: child.exit,
-        platform: options.platform,
-        eas,
-      });
-    }
+    if (sessionId == null) throw await childGoneErrorAsync(context, lock, child, eas);
     eas = { sessionId };
   }
 
-  const opensOn = easPlatform ? 'eas' : options.open && device ? 'local' : null;
-  const app =
-    ready === true && opensOn
-      ? await spawnedAppWaitAsync(context, lock, child, childIsGone, opensOn, eas)
-      : null;
+  const app = await appWaitAsync(context, lock, {
+    opened: easPlatform
+      ? { on: 'eas', platform: easPlatform }
+      : options.open && device
+        ? { on: 'local', platform: device.platform }
+        : null,
+    stillWanted: () => !childIsGone(),
+    serverGoneAsync: async () => childGoneErrorAsync(context, lock, child, eas),
+  });
 
   return reportDetached(projectRoot, options, {
     lock,
@@ -503,56 +505,68 @@ async function followForeignLockAsync(
 
 /**
  * The app wait of `--wait-ready`, after the bundler and the session binding. Throws when it ends
- * with no loaded app; the dev server keeps running.
+ * with no loaded app; the dev server keeps running. A dev server that dies during the wait ends it
+ * with `serverGoneAsync`.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
  */
 async function appWaitAsync(
   context: DetachContext,
   lock: DevServerLockInfo,
-  opensOn: 'eas' | 'local',
-  stillWanted: () => boolean
-): Promise<DevAppWait> {
-  const { projectRoot, options } = context;
-  const platform = options.platform === 'ios' ? 'ios' : 'android';
-  const eas = opensOn === 'eas';
-  const wait = await waitForDevAppAsync(projectRoot, {
-    devServerUrl: lock.url,
-    platform,
-    eas,
+  {
+    opened,
+    stillWanted,
+    serverGoneAsync,
+  }: {
+    opened: DevAppOpen | null;
+    stillWanted: () => boolean;
+    serverGoneAsync: () => Promise<CommandError>;
+  }
+): Promise<DevAppReport | null> {
+  const app = appWaitOf({ waitReady: context.options.waitReady, opened });
+  if (app == null) return null;
+  const report = await waitForDevAppAsync(context.projectRoot, {
+    lock,
+    opened: app,
     budgetMs: env.AGENT_CLI_DEV_APP_WAIT_MS,
     stillWanted,
   });
-  const error = devAppWaitError(wait, { lock, platform, eas });
-  if (error) throw error;
-  return wait;
+  if (report === 'abandoned') throw await serverGoneAsync();
+  return report;
 }
 
-/** The app wait of a spawned run. A child that died during it is reported as dead. */
-async function spawnedAppWaitAsync(
+/** The failure of a spawned child that is gone: its verdict, else `child-exited`. */
+async function childGoneErrorAsync(
   context: DetachContext,
   lock: DevServerLockInfo,
   child: DetachedChild,
-  childIsGone: () => boolean,
-  opensOn: 'eas' | 'local',
   eas: DetachEas | null
-): Promise<DevAppWait> {
+): Promise<CommandError> {
   const { projectRoot, options } = context;
-  try {
-    return await appWaitAsync(context, lock, opensOn, () => !childIsGone());
-  } catch (error: unknown) {
-    if (!childIsGone()) throw error;
-    const stopped = await waitFailureAsync(projectRoot, true);
-    throw detachFailureError(stopped?.failure ?? 'child-exited', {
-      projectRoot,
-      lock,
-      logFile: child.logFile,
-      verdict: stopped?.verdict ?? null,
-      childExit: child.exit,
-      platform: options.platform,
-      eas,
-    });
-  }
+  const stopped = await waitFailureAsync(projectRoot, true);
+  return detachFailureError(stopped?.failure ?? 'child-exited', {
+    projectRoot,
+    lock,
+    logFile: child.logFile,
+    verdict: stopped?.verdict ?? null,
+    childExit: child.exit,
+    platform: options.platform,
+    eas,
+  });
+}
+
+/** The failure of a reused dev server that is gone and left no verdict. */
+function reuseGoneError(context: DetachContext, lock: DevServerLockInfo): CommandError {
+  const { projectRoot, options } = context;
+  return detachFailureError('child-exited', {
+    projectRoot,
+    lock,
+    logFile: detachedLogPath(projectRoot),
+    verdict: null,
+    childExit: null,
+    platform: options.platform,
+    eas: detachEas(projectRoot, options),
+  });
 }
 
 async function checkSpawnedReadinessAsync(

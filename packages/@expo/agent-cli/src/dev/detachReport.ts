@@ -8,7 +8,7 @@ import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { smokeCommand } from '../smoke/suggest';
 import { parseDetachedChildPort } from './childVerdict';
-import type { DevAppWait } from './waitForDevApp';
+import type { DevAppReport } from './waitForDevApp';
 import { readDetachedLogSync, type DetachedLogRead } from './logFile';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 
@@ -73,7 +73,7 @@ export interface DevDetachResultJson {
    *
    * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
    */
-  app: DevAppWait | null;
+  app: DevAppReport | null;
   /** How long the whole thing took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -97,10 +97,10 @@ export function reportDetached(
     log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
     eas,
-    app = null,
+    app,
   }: {
     lock: DevServerLockInfo;
-    app?: DevAppWait | null;
+    app: DevAppReport | null;
     alreadyRunning: boolean;
     /** Set when this run opens the app on EAS; `sessionId` when the command reached a session. */
     eas: DetachEas | null;
@@ -203,7 +203,7 @@ function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): 
   }
   if (report.app) {
     lines.push(
-      `${label('App')}attached${report.app.loaded === true ? ' · loaded' : ''} · ${report.app.waitedMs}ms`
+      `${label('App')}attached${report.app.loaded ? ' · loaded' : ''} · ${report.app.waitedMs}ms`
     );
   }
   if (report.tunnelUrl) {

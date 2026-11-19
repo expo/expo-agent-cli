@@ -50,31 +50,56 @@ export async function readAppLoadedAsync(
 const LOADED_APP_POLL_MS = 500;
 
 /**
+ * How a wait for a loaded app ended.
+ *
+ * - `loaded`: the scope holds `targets`, and the runtime did not answer that no bundle ran.
+ * - `not-loaded`: the scope held `targets`, and the runtime answered that no bundle ran.
+ * - `not-attached`: the scope held no target at the deadline.
+ * - `abandoned`: the caller's `stillWanted` said no first.
+ */
+export type LoadedAppWait =
+  | { kind: 'loaded'; targets: number; loaded: true | null }
+  | { kind: 'not-loaded'; targets: number }
+  | { kind: 'not-attached' }
+  | { kind: 'abandoned' };
+
+/** The targets of the scope when the wait ended: zero unless an app was attached. */
+export function loadedAppWaitTargets(wait: LoadedAppWait): number {
+  return wait.kind === 'loaded' || wait.kind === 'not-loaded' ? wait.targets : 0;
+}
+
+/** The last answer to the bundle question, as {@link AppLoaded}. */
+export function loadedAppWaitLoaded(wait: LoadedAppWait): AppLoaded {
+  if (wait.kind === 'loaded') return wait.loaded;
+  return wait.kind === 'not-loaded' ? false : null;
+}
+
+/**
  * Wait until the scope holds a debugger target and its runtime does not answer that no bundle ran,
  * until the deadline, or until `stillWanted` says no. The one poll for a loaded app: `navigate`
  * and `dev --wait-ready` both wait with it.
  *
  * @param classify places a target list in the caller's scope.
- * @returns how many targets the scope had when the wait ended, and the last answer to the bundle
- * question. Zero targets, or `loaded: false`, means the wait ended without a loaded app.
  */
 export async function waitForLoadedAppAsync(
   devServerUrl: string,
   classify: (targets: CdpTarget[], deadline: number) => Promise<{ read: CdpTarget[] }>,
   deadline: number,
   stillWanted: () => boolean = () => true
-): Promise<{ targets: number; loaded: AppLoaded }> {
+): Promise<LoadedAppWait> {
   // An app that a poll saw stays the answer when the list is empty for the last read: a short gap
   // in the list must not start a recovery that stops a loading app.
-  let seen: { targets: number; loaded: AppLoaded } | null = null;
+  let seen: LoadedAppWait | null = null;
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
     const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
-    const targets = read.length;
-    const loaded = targets > 0 ? await readAppLoadedAsync(read, deadline) : null;
-    if (targets > 0) seen = { targets, loaded };
-    if (targets > 0 && loaded !== false) return { targets, loaded };
-    if (Date.now() >= deadline || !stillWanted()) return seen ?? { targets, loaded };
+    if (read.length > 0) {
+      const loaded = await readAppLoadedAsync(read, deadline);
+      if (loaded !== false) return { kind: 'loaded', targets: read.length, loaded };
+      seen = { kind: 'not-loaded', targets: read.length };
+    }
+    if (!stillWanted()) return { kind: 'abandoned' };
+    if (Date.now() >= deadline) return seen ?? { kind: 'not-attached' };
     await new Promise((resolve) => setTimeout(resolve, LOADED_APP_POLL_MS));
   }
 }
