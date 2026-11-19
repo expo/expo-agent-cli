@@ -48,7 +48,7 @@ The claimants of a device decide where its ownership record lives. Only processe
 - **Registry**: the directory `<expo home>/agent-cli/bindings` and its lock. **Binding**: one JSON file in it per worktree, platform and backend. **Backend**: `local-ios`, `local-android` or `cloud`.
 - **Lease**: the binding's `expiresAt`. **Live**: not past. **Expired**: past. **Stale**: expired, or the root is deleted (Decision 6).
 - **Park**: set a binding's `expiresAt` to now and keep the file.
-- **Inventory**: what the platform tool lists: `simctl list devices -j`, or `adb devices -l` and `emulator -list-avds`.
+- **Inventory**: what the platform tool lists: `simctl list devices -j`, or `adb devices -l` and `emulator -list-avds`. Every `adb devices` output goes through `src/device/adbDeviceList.ts`, an unchanged copy of Expo CLI's parser, so agent-cli and `expo run:android` read the same serials, states and models.
 - **Section**: one hold of the registry lock.
 - **Let go**: what happens to a binding's device when its worktree, or a reap, is done with it (§Records).
 - **Reap**: let go of other worktrees' stale bindings. **Release**: let go of the own bindings (`dev:stop --release`, smoke's cleanup).
@@ -200,24 +200,24 @@ A reap reports device cleanup only (`devServerCleanup: 'not-checked'`). A delete
 - The `dev` command of a How line is `<cli> dev --<platform> --detach --wait-ready`, with `--eas` for a cloud binding.
 - The agent guide has a `## Devices` heading: run `dev` before a device verb, and never boot, shut down or delete an `agent-cli …` simulator yourself.
 
-| Code                     | Reason                    | Exit | How                                                                                                          |
-| ------------------------ | ------------------------- | ---- | ------------------------------------------------------------------------------------------------------------ |
-| `NO_BOUND_DEVICE`        | `none`, `gone`, `not-up`  | 20   | the `dev` command; a queued EAS session: retry in a minute                                                   |
-| `NO_BOUND_DEVICE`        | `unknown` (timeout)       | 22   | run the command again                                                                                        |
-| `NO_BOUND_DEVICE`        | `unreadable`              | 7    | `rm -f '<path>'`, then the `dev` command                                                                     |
-| `DEVICE_UNAVAILABLE`     | `unreadable`              | 7    | `rm -f '<path>'`, then the same command                                                                      |
-| `DEVICE_UNAVAILABLE`     | `no-ios-runtime`          | 7    | `xcodebuild -downloadPlatform iOS`                                                                           |
-| `DEVICE_UNAVAILABLE`     | `no-avd`                  | 7    | create one in Android Studio's Device Manager                                                                |
-| `DEVICE_UNAVAILABLE`     | `no-free-port`            | 20   | `<cli> dev:stop --release` in one of the listed worktrees                                                    |
-| `DEVICE_UNAVAILABLE`     | `explicit-bound`          | 20   | the caller's `dev` without `--device`                                                                        |
-| `DEVICE_UNAVAILABLE`     | `explicit-not-found`      | 1    | the same command with `--device <first match>`; none: `xcrun simctl list devices available` or `adb devices` |
-| `DEVICE_UNAVAILABLE`     | `explicit-not-ready`      | 7    | allow USB debugging or reconnect, then the same command                                                      |
-| `DEVICE_UNAVAILABLE`     | `own-explicit-over-owned` | 1    | `<cli> dev:stop --release`                                                                                   |
-| `DEVICE_UNAVAILABLE`     | `create-timeout`          | 22   | run the command again                                                                                        |
-| `DEVICE_UNAVAILABLE`     | `binding-changed` (iOS)   | 22   | run the command again                                                                                        |
-| `DEVICE_UNAVAILABLE`     | `spawn-failed`            | 22   | run the command again                                                                                        |
-| `DEVICE_UNAVAILABLE`     | `boot-failed`             | 20   | run the command again                                                                                        |
-| `DEVICE_REGISTRY_LOCKED` | `locked`                  | 22   | run the command again, or `kill <pid>` when it repeats                                                       |
+| Code                     | Reason                    | Exit | How                                                                                                             |
+| ------------------------ | ------------------------- | ---- | --------------------------------------------------------------------------------------------------------------- |
+| `NO_BOUND_DEVICE`        | `none`, `gone`, `not-up`  | 20   | the `dev` command; a queued EAS session: retry in a minute                                                      |
+| `NO_BOUND_DEVICE`        | `unknown` (timeout)       | 22   | run the command again                                                                                           |
+| `NO_BOUND_DEVICE`        | `unreadable`              | 7    | `rm -f '<path>'`, then the `dev` command                                                                        |
+| `DEVICE_UNAVAILABLE`     | `unreadable`              | 7    | `rm -f '<path>'`, then the same command                                                                         |
+| `DEVICE_UNAVAILABLE`     | `no-ios-runtime`          | 7    | `xcodebuild -downloadPlatform iOS`                                                                              |
+| `DEVICE_UNAVAILABLE`     | `no-avd`                  | 7    | create one in Android Studio's Device Manager                                                                   |
+| `DEVICE_UNAVAILABLE`     | `no-free-port`            | 20   | `<cli> dev:stop --release` in one of the listed worktrees                                                       |
+| `DEVICE_UNAVAILABLE`     | `explicit-bound`          | 20   | the caller's `dev` without `--device`                                                                           |
+| `DEVICE_UNAVAILABLE`     | `explicit-not-found`      | 1    | the same command with `--device <first match>`; none: `xcrun simctl list devices available` or `adb devices -l` |
+| `DEVICE_UNAVAILABLE`     | `explicit-not-ready`      | 7    | allow USB debugging or reconnect, then the same command                                                         |
+| `DEVICE_UNAVAILABLE`     | `own-explicit-over-owned` | 1    | `<cli> dev:stop --release`                                                                                      |
+| `DEVICE_UNAVAILABLE`     | `create-timeout`          | 22   | run the command again                                                                                           |
+| `DEVICE_UNAVAILABLE`     | `binding-changed` (iOS)   | 22   | run the command again                                                                                           |
+| `DEVICE_UNAVAILABLE`     | `spawn-failed`            | 22   | run the command again                                                                                           |
+| `DEVICE_UNAVAILABLE`     | `boot-failed`             | 20   | run the command again                                                                                           |
+| `DEVICE_REGISTRY_LOCKED` | `locked`                  | 22   | run the command again, or `kill <pid>` when it repeats                                                          |
 
 ## How `dev` uses it
 
