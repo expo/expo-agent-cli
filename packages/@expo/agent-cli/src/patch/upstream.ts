@@ -134,6 +134,36 @@ export function mapUpstreamFile(file: string, directory: string): UpstreamFile {
   return { file, target: `${directory}/${file}`, portTo: null };
 }
 
+const C_ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+
+/**
+ * The path of a `---` or `+++` header, or null for /dev/null. Git puts a path in C quotes when it
+ * holds a quote, a backslash or a control character, and also non-ASCII unless core.quotepath is
+ * false (`"a/ios/caf\303\251.swift"`). The octal escapes are the bytes of UTF-8.
+ */
+function headerPath(text: string, prefix: string): string | null {
+  if (text === '/dev/null') {
+    return null;
+  }
+  let file = text;
+  if (text.length > 1 && text.startsWith('"') && text.endsWith('"')) {
+    // With a capture group, split gives the text between escapes and each escape.
+    const parts = text.slice(1, -1).split(/(\\(?:[0-7]{3}|.))/);
+    file = Buffer.concat(
+      parts.map((part, index) => {
+        if (index % 2 === 0) {
+          return Buffer.from(part, 'utf8');
+        }
+        const escape = part.slice(1);
+        return Buffer.from([
+          escape.length === 3 ? parseInt(escape, 8) : (C_ESCAPES[escape] ?? escape.charCodeAt(0)),
+        ]);
+      })
+    ).toString('utf8');
+  }
+  return file.startsWith(prefix) ? file.slice(prefix.length) : file;
+}
+
 /** The files a patch changes, relative to the package root. */
 export function filesOfPatch(patch: string): string[] {
   const files = new Set<string>();
@@ -162,14 +192,14 @@ export function filesOfPatch(patch: string): string[] {
       newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
       continue;
     }
-    const from = /^--- (?:a\/)?(.+?)\t?$/.exec(line);
+    const from = /^--- (.+?)\t?$/.exec(line);
     if (from) {
-      removed = from[1] === '/dev/null' ? null : from[1]!;
+      removed = headerPath(from[1]!, 'a/');
       continue;
     }
-    const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(line);
+    const to = /^\+\+\+ (.+?)\t?$/.exec(line);
     if (to) {
-      const file = to[1] === '/dev/null' ? removed : to[1]!;
+      const file = to[1] === '/dev/null' ? removed : headerPath(to[1]!, 'b/');
       if (file) {
         files.add(file.trim().replace(/^node_modules\/(?:@[^/]+\/)?[^/]+\//, ''));
       }
@@ -463,6 +493,16 @@ function buildReproGuide({
   ];
 }
 
+/**
+ * The commands that make the fix branch at `base`. They always fetch main as well, so
+ * `upstream/main` exists for the rebase step: a fetch of a sha alone updates only FETCH_HEAD.
+ */
+export function startCommands(base: string, branch: string): string[] {
+  return base === 'main'
+    ? ['git fetch upstream main', `git switch -c ${branch} upstream/main`]
+    : [`git fetch upstream main ${base}`, `git switch -c ${branch} ${base}`];
+}
+
 function buildSteps({
   packageName,
   version,
@@ -494,9 +534,9 @@ function buildSteps({
     gh
       ? `Get the repository: "gh repo fork expo/expo --clone=false", then clone the fork ("git clone --filter=blob:none" keeps it small) and add expo/expo as the "upstream" remote.`
       : `Get the repository. gh is not installed, so ask the user to fork expo/expo at https://github.com/expo/expo/fork (or to install gh from https://cli.github.com and run "gh auth login"). Then clone the fork ("git clone --filter=blob:none" keeps it small) and add https://github.com/expo/expo.git as the "upstream" remote.`,
-    `Start from the version the patch was made against: "git fetch upstream ${
-      base === 'main' ? 'main' : base
-    }" and "git switch -c ${branch} ${base === 'main' ? 'upstream/main' : base}". ${
+    `Start from the version the patch was made against: ${startCommands(base, branch)
+      .map((command) => `"${command}"`)
+      .join(' and ')}. ${
       base === 'main'
         ? `The package has no gitHead commit, so this starts at main and the patch can need changes to apply.`
         : `This is the commit ${packageName}@${version} was published from.`
