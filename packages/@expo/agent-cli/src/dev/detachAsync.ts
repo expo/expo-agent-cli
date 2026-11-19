@@ -369,7 +369,7 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
 
   const child = spawnDetachedChild(projectRoot, options);
   const { logFile, hasExited } = child;
-  if (print) Log.progress(`Live log: ${logFile}`);
+  if (print) Log.progress(`Log: ${logFile} (read it with "${PROGRAM_PREFIX} dev:logs")`);
   const wait = await waitForDetachedStartupAsync(projectRoot, options, startedAt, hasExited);
   if ('lock' in wait && wait.lock.pid !== child.pid) {
     return await followForeignLockAsync(context, child, wait.lock);

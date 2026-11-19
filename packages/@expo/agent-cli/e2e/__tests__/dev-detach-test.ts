@@ -44,7 +44,7 @@ function isAlive(pid: number): boolean {
 }
 
 describe('@expo/agent-cli dev --detach', () => {
-  it('prints the live log path while the native build runs', async () => {
+  it('prints the log path while the native build runs', async () => {
     const projectRoot = fs.realpathSync.native(await setupFixtureAsync('bare-app'));
     // The stub keeps `expo run:ios` alive, so the parent is still waiting when the test reads stderr.
     const child = spawnAgentCli(
@@ -71,7 +71,10 @@ describe('@expo/agent-cli dev --detach', () => {
         )
       ).toBe(true);
       const logFile = path.join(projectRoot, DETACHED_LOG_PATH);
-      expect(output.stderr, output.all).toContain(`Live log: ${logFile}`);
+      expect(
+        await waitForAsync(() => output.stderr.includes(`Log: ${logFile} (read it with`), 10_000),
+        output.all
+      ).toBe(true);
       expect(fs.existsSync(logFile)).toBe(true);
       expect(output.stdout).toBe('');
     } finally {
