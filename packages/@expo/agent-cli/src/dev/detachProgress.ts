@@ -30,7 +30,7 @@ export function reportDetachedProgress(child: ChildProcess, logFile: string, wai
     planPrinted = true;
     Log.progress(formatStartPlan(message.plan));
     if (waitReady && message.plan.steps.some((step) => step.runsOn != null)) {
-      Log.progress('Native build or install in progress. Metro readiness comes next.');
+      Log.progress('Next: native build or install, then the Metro readiness wait.');
     }
     if (waitingForMetro) Log.progress('Waiting for Metro readiness…');
   });

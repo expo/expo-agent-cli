@@ -84,7 +84,7 @@ describe('@expo/agent-cli dev --detach', () => {
         )
       ).toBe(true);
       expect(
-        await waitForAsync(() => output.stderr.includes('Native build or install'), 3_000),
+        await waitForAsync(() => output.stderr.includes('Next: native build or install'), 3_000),
         output.all
       ).toBe(true);
       const logFile = path.join(projectRoot, DETACHED_LOG_PATH);
