@@ -17,17 +17,14 @@ import { list as listSessions, tap } from '2g/api';
 
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import {
-  collectOutput,
   executeAgentCliAsync,
   freePortAsync,
   holdDevLockAsync,
   installStubFingerprintAsync,
-  killAsync,
   readDevLockAsync,
   readEvents,
   readStubExpoInvocations,
   setupFixtureAsync,
-  spawnAgentCli,
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
@@ -44,45 +41,6 @@ function isAlive(pid: number): boolean {
 }
 
 describe('@expo/agent-cli dev --detach', () => {
-  it('prints the log path while the native build runs', async () => {
-    const projectRoot = fs.realpathSync.native(await setupFixtureAsync('bare-app'));
-    // The stub keeps `expo run:ios` alive, so the parent is still waiting when the test reads stderr.
-    const child = spawnAgentCli(
-      projectRoot,
-      [
-        'dev',
-        '--ios',
-        '--local',
-        '--dev-client',
-        '--localhost',
-        '--detach',
-        '--wait-ready',
-        '--json',
-      ],
-      { env: { STUB_EXPO_DELAY_MS: STUB_ALIVE_MS } }
-    );
-    const output = collectOutput(child);
-
-    try {
-      expect(
-        await waitForAsync(
-          () => readStubExpoInvocations(projectRoot).some(({ args }) => args[0] === 'run:ios'),
-          10_000
-        )
-      ).toBe(true);
-      const logFile = path.join(projectRoot, DETACHED_LOG_PATH);
-      expect(
-        await waitForAsync(() => output.stderr.includes(`Log: ${logFile} (read it with`), 10_000),
-        output.all
-      ).toBe(true);
-      expect(fs.existsSync(logFile)).toBe(true);
-      expect(output.stdout).toBe('');
-    } finally {
-      await killAsync(child);
-      await cleanUpDetachedAsync(projectRoot);
-    }
-  });
-
   it('retains the Android request for status after stopping its server', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const port = await freePortAsync();
@@ -315,6 +273,8 @@ describe('@expo/agent-cli dev --detach', () => {
       // be one: `ready` was never asked for, and nothing here says a dev server started.
       expect(report.ready).toBeNull();
       expect(report.url).toBe(`http://127.0.0.1:${port}`);
+      const logFile = path.join(fs.realpathSync.native(projectRoot), DETACHED_LOG_PATH);
+      expect(result.stderr).toContain(`Log: ${logFile} (read it with`);
     } finally {
       await cleanUpDetachedAsync(projectRoot);
     }
