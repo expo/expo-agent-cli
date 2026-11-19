@@ -1,18 +1,10 @@
 // @ref llp/0037-patch-command.rfc.md §`patch --upstream-plan`: a brief for the PR to `expo/expo`
-// The plan for sending a saved patch to `expo/expo`, and nothing more: this CLI never forks, pushes
-// or opens anything. The hard part of an upstream fix is moving it to `main` and testing it in the
-// monorepo, which an agent does with `git` and `gh` and this CLI cannot do for it. What only this
-// CLI knows is the mapping — the commit the package came from, where each patched file lives in the
-// repository, which hunks are compiled output — so the plan is those facts and the steps. How to
-// contribute (checks, changesets, the PR body) is the repository's own AGENTS.md, CONTRIBUTING.md and
-// PR template: the plan links them instead of copying rules that change there.
-//
-// Opening a pull request publishes the diff, which can hold code of the user's app, so the first step
-// is to ask the user. The run itself exits 0: the steps after that are agent work, and llp/0010 keeps
-// exit 7 for a step only a person can finish.
+// The plan for sending a saved patch to `expo/expo`; it opens nothing. The run exits 0: the steps
+// are agent work after the user says yes, and llp/0010 keeps exit 7 for a step only a person can finish.
 
 import fs from 'fs';
 import path from 'path';
+import semver from 'semver';
 
 import * as Log from '../log';
 import { quoteArgument } from '../utils/consent';
@@ -102,14 +94,28 @@ export function assertReproUrl(repro: string): string {
 }
 
 /**
+ * The commit to start the fix from: `gitHead` when it is a commit sha, else `main`. Nothing else is
+ * accepted, because the value goes into a shell line, and a branch name would not check out.
+ */
+export function upstreamBase(manifest: Record<string, any>): string {
+  const gitHead: unknown = manifest.gitHead;
+  return typeof gitHead === 'string' && /^[0-9a-f]{40}$/.test(gitHead) ? gitHead : 'main';
+}
+
+/**
  * Map a file of the published package to `expo/expo`.
  *
- * Native files and `src/` are the same files in the repository. `build/` is compiled from `src/`, and
+ * Native files and `src/` are the same files in the repository. `build/` is compiled from the `src/` beside it, and
  * a PR that changes `build/` alone is not a fix anyone can merge, so it names the source to port to.
  */
 export function mapUpstreamFile(file: string, directory: string): UpstreamFile {
-  if (file.startsWith('build/')) {
-    const source = file.replace(/^build\//, 'src/').replace(/\.d\.ts$|\.js$/, '.ts');
+  // A `build/` directory at any depth (`build/`, `plugin/build/`): expo/expo ignores
+  // `/packages/**/build/`. `android/build.gradle` is not one.
+  const compiled = /(^|\/)build\//.exec(file);
+  if (compiled) {
+    const source = `${file.slice(0, compiled.index)}${compiled[1]}src/${file.slice(
+      compiled.index + compiled[0].length
+    )}`.replace(/\.d\.ts$|\.js$/, '.ts');
     return { file, target: null, portTo: `${directory}/${source} (or .tsx)` };
   }
   return { file, target: `${directory}/${file}`, portTo: null };
@@ -199,36 +205,68 @@ function registeredPatches(root: string, packageName: string, version: string): 
       }
     }
   }
+  const registered = found.filter((entry) => fs.existsSync(entry.file));
+  // patch-package keeps no registration, only the file name. A leftover file must not win over a
+  // patch the package manager registered, so it counts only when there is none.
   const patchPackageFile = path.join(
     root,
     'patches',
     `${packageName.replace(/\//g, '+')}+${version}.patch`
   );
-  if (fs.existsSync(patchPackageFile)) {
-    found.push({ spec: version, file: patchPackageFile });
+  if (!registered.length && fs.existsSync(patchPackageFile)) {
+    registered.push({ spec: version, file: patchPackageFile });
   }
-  return found.filter((entry) => fs.existsSync(entry.file));
+  return registered;
+}
+
+/**
+ * How well a registration fits the installed version: 0 an exact match, 1 a range that contains it,
+ * 2 a spec that is not a version (yarn's descriptor, a pnpm key with no version, a bun `file:`
+ * locator). null for a version or a range the installed one is not: the manager does not apply it.
+ */
+function fitOf(spec: string | null, version: string): number | null {
+  if (spec === null || spec === '') {
+    return 2;
+  }
+  if (semver.valid(spec)) {
+    return semver.eq(spec, version) ? 0 : null;
+  }
+  if (semver.validRange(spec)) {
+    return semver.satisfies(version, spec) ? 1 : null;
+  }
+  return 2;
 }
 
 /** The one registered patch file of this package at this version. */
 export function findPatchFile(root: string, packageName: string, version: string): string {
   const all = registeredPatches(root, packageName, version);
-  const candidates = all.length > 1 ? all.filter((entry) => entry.spec === version) : all;
-  const files = [...new Set(candidates.map((entry) => entry.file))];
+  const fitting = all
+    .map((entry) => ({ ...entry, fit: fitOf(entry.spec, version) }))
+    .filter((entry): entry is Registration & { fit: number } => entry.fit !== null);
+  const best = Math.min(...fitting.map((entry) => entry.fit));
+  const files = [
+    ...new Set(fitting.filter((entry) => entry.fit === best).map((entry) => entry.file)),
+  ];
   if (files.length === 1) {
     return files[0]!;
   }
-  if (!all.length) {
+  const listed = (entries: Registration[]) =>
+    [...new Set(entries.map((entry) => path.relative(root, entry.file)))].join(', ');
+  if (!files.length) {
     throw new CommandError(
       'PATCH_NOT_FOUND',
-      `No saved patch for ${packageName} is registered in this project. Save one first with "patch ${packageName}".`
+      all.length
+        ? `No saved patch for ${packageName} is registered for the installed ${version}, only for other versions: ${listed(
+            all
+          )}. Save one for ${version} first with "patch ${packageName}".`
+        : `No saved patch for ${packageName} is registered in this project. Save one first with "patch ${packageName}".`
     );
   }
   throw new CommandError(
     'PATCH_AMBIGUOUS',
-    `More than one saved patch is registered for ${packageName}, and not exactly one is for the installed ${version}: ${[
-      ...new Set(all.map((entry) => path.relative(root, entry.file))),
-    ].join(', ')}. Remove the ones that are not in use, then run this again.`
+    `More than one saved patch is registered for ${packageName} at the installed ${version}: ${listed(
+      fitting.filter((entry) => entry.fit === best)
+    )}. Remove the ones that are not in use, then run this again.`
   );
 }
 
@@ -261,7 +299,7 @@ export function planUpstream(
   const platforms = nativePlatformsOfFiles(changed).map((p) =>
     p === 'ios' ? '[iOS]' : '[Android]'
   );
-  const base = typeof manifest.gitHead === 'string' ? manifest.gitHead : 'main';
+  const base = upstreamBase(manifest);
 
   const missing: string[] = [];
   const unported = files.filter((file) => file.portTo);
@@ -323,7 +361,8 @@ export function planUpstream(
  *
  * bun, pnpm and yarn write paths from the package root (`a/ios/…`); patch-package writes them from
  * the project (`a/node_modules/<pkg>/ios/…`), so its prefix is stripped by the extra segments.
- * Compiled output is left out: `build/` is not in the repository (expo/expo CONTRIBUTING.md).
+ * Compiled output is left out: no `build/` directory is in the repository. `git apply` 2.54 does not
+ * match a top-level `build/` with the nested pattern, so that one has a pattern of its own.
  */
 export function buildApplyCommand(
   patchText: string,
@@ -340,7 +379,10 @@ export function buildApplyCommand(
     quoteArgument(`--directory=${directory}`),
   ];
   if (hasBuild) {
-    args.push(quoteArgument(`--exclude=${directory}/build/*`));
+    args.push(
+      quoteArgument(`--exclude=${directory}/build/**`),
+      quoteArgument(`--exclude=${directory}/**/build/**`)
+    );
   }
   args.push(quoteArgument(patchFile));
   return args.join(' ');
@@ -426,7 +468,7 @@ function buildSteps({
       base === 'main' ? 'main' : base
     }" and "git switch -c ${branch} ${base === 'main' ? 'upstream/main' : base}". ${
       base === 'main'
-        ? `The package has no gitHead, so this starts at main and the patch can need changes to apply.`
+        ? `The package has no gitHead commit, so this starts at main and the patch can need changes to apply.`
         : `This is the commit ${packageName}@${version} was published from.`
     }`,
     `Apply the patch from the repository root: ${applyCommand}`,
