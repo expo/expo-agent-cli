@@ -12,7 +12,17 @@ import { CommandError } from '../utils/errors';
 export interface DevAppOpen {
   on: 'eas' | 'local';
   platform: NativePlatform;
+  /** Targets listed before an open that reloads an attached app: the app from before it. */
+  staleTargetIds: readonly string[];
 }
+
+/** How an EAS re-run got its session on the running dev server. */
+export type ReuseSession =
+  | { kind: 'none' }
+  /** The running child still starts the session; this run waited for its id. */
+  | { kind: 'followed'; sessionId: string | null }
+  /** This run opened the app on the session again, which reloads an attached app. */
+  | { kind: 'reopened'; sessionId: string | null; staleTargetIds: readonly string[] };
 
 /** What a `dev --detach` run did that decides whether it opened an app. */
 export type DevRun =
@@ -26,10 +36,9 @@ export type DevRun =
     }
   | {
       kind: 'reused';
-      /** This run opened its EAS session on the running dev server; `smoke` reuse opens nothing. */
-      reopenedEas: boolean;
       easPlatform: NativePlatform | null;
-      sessionId: string | null;
+      /** `none` for a `smoke` reuse, which opens nothing. */
+      session: ReuseSession;
     };
 
 /** The `app` of the `--json` report: the app wait ended with a loaded app. */
@@ -47,13 +56,14 @@ export type DevServerGone = { gone: 'exited' | 'not-answering' };
 export function appWaitOf(waitReady: boolean, run: DevRun): DevAppOpen | null {
   if (!waitReady) return null;
   if (run.kind === 'reused') {
-    return run.reopenedEas && run.easPlatform != null && run.sessionId != null
-      ? { on: 'eas', platform: run.easPlatform }
-      : null;
+    const { session, easPlatform } = run;
+    if (session.kind === 'none' || session.sessionId == null || easPlatform == null) return null;
+    const staleTargetIds = session.kind === 'reopened' ? session.staleTargetIds : [];
+    return { on: 'eas', platform: easPlatform, staleTargetIds };
   }
-  if (run.easPlatform != null) return { on: 'eas', platform: run.easPlatform };
+  if (run.easPlatform != null) return { on: 'eas', platform: run.easPlatform, staleTargetIds: [] };
   return run.open && run.boundPlatform != null
-    ? { on: 'local', platform: run.boundPlatform }
+    ? { on: 'local', platform: run.boundPlatform, staleTargetIds: [] }
     : null;
 }
 
@@ -86,7 +96,10 @@ export async function waitForDevAppAsync(
   const reader = await scopedAppReaderAsync(lock.url, targetSelection, projectRoot);
   // The child ran `adb reverse` for a local Android open; an EAS session has no adb.
   const waitAsync = reader.waiter(opened.on === 'local' && opened.platform === 'android');
-  const wait = await waitAsync(startedAt + budgetMs, stillWanted);
+  const wait = await waitAsync(startedAt + budgetMs, {
+    stillWanted,
+    staleTargetIds: opened.staleTargetIds,
+  });
   const waitedMs = Date.now() - startedAt;
   switch (wait.kind) {
     case 'loaded':

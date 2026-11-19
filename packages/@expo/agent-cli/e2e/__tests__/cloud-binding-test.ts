@@ -52,9 +52,10 @@ function envFor(root: string, platform: 'ios' | 'android' = 'ios') {
     __UNSAFE_EXPO_HOME_DIRECTORY: expoHome,
     STUB_SIM_STORE: path.join(machine, 'sessions.json'),
     STUB_SIM_SESSIONS: '0',
-    // The app attaches once the session opens it, so `dev --wait-ready` finds it.
+    // The app attaches once the session opens it, so `dev --wait-ready` finds it. Each open
+    // reloads it, so its target id changes, as a reload's does.
     STUB_EXPO_TARGETS: JSON.stringify([
-      runtimeTarget('session-app', { deviceName: SESSION_DEVICE[platform] }),
+      runtimeTarget('session-app-{opens}', { deviceName: SESSION_DEVICE[platform] }),
     ]),
     STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
   };

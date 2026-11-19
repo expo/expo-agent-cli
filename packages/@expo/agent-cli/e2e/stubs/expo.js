@@ -42,7 +42,8 @@
 //   the empty one, for a run that needs an app attached to the dev server it started.
 // - STUB_EXPO_TARGETS_AFTER_EAS_OPEN: with STUB_EXPO_TARGETS, list them only once the stub `eas`
 //   opened an app on a session (`stub-eas-app-opened` under the cwd), as an app attaches after its
-//   open. Before that `GET /json/list` answers the empty list.
+//   open. Before that `GET /json/list` answers the empty list. `{opens}` in the list becomes how
+//   many opens the stub `eas` saw, so a target id can change with each open, as a reload does.
 // - STUB_EXPO_RUN_LAUNCH_FAILS: `run:ios` / `run:android` print what the real CLI prints for a
 //   build that compiled and installed the app, then fail at the *launch* the way F121's own run
 //   did. Nothing else is affected, which is the point: `prebuild` in the same plan still exits 0.
@@ -331,10 +332,13 @@ function listen(port) {
     // stub a dev server other commands can find.
     if (route === '/json/list') {
       response.writeHead(200, { 'Content-Type': 'application/json' });
-      const opened =
-        !process.env.STUB_EXPO_TARGETS_AFTER_EAS_OPEN ||
-        fs.existsSync(path.join(cwd, 'stub-eas-app-opened'));
-      response.end((opened && process.env.STUB_EXPO_TARGETS) || '[]');
+      const openedFile = path.join(cwd, 'stub-eas-app-opened');
+      const opens = fs.existsSync(openedFile)
+        ? fs.readFileSync(openedFile, 'utf8').split('\n').filter(Boolean).length
+        : 0;
+      const opened = !process.env.STUB_EXPO_TARGETS_AFTER_EAS_OPEN || opens > 0;
+      const targets = (process.env.STUB_EXPO_TARGETS || '[]').replaceAll('{opens}', String(opens));
+      response.end(opened ? targets : '[]');
       return;
     }
     // The Expo Updates manifest, which is the only thing that knows this project's entry bundle

@@ -10,10 +10,10 @@ import {
 } from './targetSelection';
 import { scopedListClassifier } from './waitReady';
 
-/** Wait for a loaded app of one scope until `deadline`, or until `stillWanted` says no. */
+/** Wait for a loaded app of one scope until `deadline`. @see waitForLoadedAppAsync */
 export type LoadedAppWaiter = (
   deadline: number,
-  stillWanted?: () => boolean
+  options?: Parameters<typeof waitForLoadedAppAsync>[3]
 ) => Promise<LoadedAppWait>;
 
 /**
@@ -46,14 +46,14 @@ export async function scopedAppReaderAsync(
     waiter: (readReverse) => {
       // Read once, on the first wait: a run that never waits asks no device tool.
       let classify: ReturnType<typeof scopedListClassifier> | null = null;
-      return async (deadline, stillWanted) => {
+      return async (deadline, options) => {
         if (classify == null) {
           const facts = readReverse
             ? await withAndroidReverseAsync(targetSelection, inventory, devServerUrl)
             : inventory;
           classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
         }
-        return await waitForLoadedAppAsync(devServerUrl, classify, deadline, stillWanted);
+        return await waitForLoadedAppAsync(devServerUrl, classify, deadline, options);
       };
     },
   };

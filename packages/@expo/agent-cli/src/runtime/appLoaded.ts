@@ -80,19 +80,26 @@ export function loadedAppWaitLoaded(wait: LoadedAppWait): AppLoaded {
  * and `dev --wait-ready` both wait with it.
  *
  * @param classify places a target list in the caller's scope.
+ * @param staleTargetIds targets listed before an open that reloads the app: they are the app from
+ * before the reload, so only another target counts (the rule of `waitForFreshAppConnectionAsync`).
  */
 export async function waitForLoadedAppAsync(
   devServerUrl: string,
   classify: (targets: CdpTarget[], deadline: number) => Promise<{ read: CdpTarget[] }>,
   deadline: number,
-  stillWanted: () => boolean = () => true
+  {
+    stillWanted = () => true,
+    staleTargetIds = [],
+  }: { stillWanted?: () => boolean; staleTargetIds?: readonly string[] } = {}
 ): Promise<LoadedAppWait> {
+  const stale = new Set(staleTargetIds);
   // An app that a poll saw stays the answer when the list is empty for the last read: a short gap
   // in the list must not start a recovery that stops a loading app.
   let seen: Extract<LoadedAppWait, { kind: 'not-loaded' }> | null = null;
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
+    const scoped = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
+    const read = scoped.filter((target) => !stale.has(target.id));
     if (read.length > 0) {
       const loaded = await readAppLoadedAsync(read, deadline);
       if (loaded !== false) return { kind: 'loaded', targets: read.length, loaded };

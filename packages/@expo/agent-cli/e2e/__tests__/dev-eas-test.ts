@@ -1194,6 +1194,45 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
+  // An EAS re-run opens the app again, which reloads an attached app: the old target can still be
+  // listed, so only a target that appears after the reopen proves the app.
+  it.each([
+    ['passes on the target the reload adds', 'cloud-app-{opens}', 0],
+    ['exits 22 when only the target from before the reopen is listed', 'cloud-app', 22],
+  ])('an EAS re-run with --wait-ready %s', async (_case, targetId, exitCode) => {
+    const projectRoot = await setupAsync('go-app');
+    await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+    const env = {
+      ...easRunEnv(projectRoot, 8537),
+      STUB_SIM_SESSIONS: '1',
+      STUB_EXPO_TARGETS: JSON.stringify([
+        runtimeTarget(targetId, { appId: 'host.exp.Exponent', deviceName: 'iPhone 17 Pro' }),
+      ]),
+      AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+    };
+    try {
+      const first = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--json'],
+        { env }
+      );
+      expect(first.exitCode).toBe(0);
+      await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
+
+      const again = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        { env, reject: false }
+      );
+      expect(again.exitCode).toBe(exitCode);
+      if (exitCode === 22) {
+        expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+      }
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
   it('rests on a finished EAS build of this fingerprint and skips the build', async () => {
     const projectRoot = await setupAsync('dev-client-fresh-app');
     const hash = 'feedfacefeedfacefeedfacefeedfacefeedface';

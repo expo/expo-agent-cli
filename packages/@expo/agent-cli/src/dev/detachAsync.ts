@@ -35,6 +35,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, statedSmokePlatform } from '../smoke/suggest';
 import { requestsTunnel } from '../start/followUps';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
+import { probeDevServerAsync } from '../runtime/devServer';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
@@ -63,6 +64,7 @@ import {
   type DevAppReport,
   type DevRun,
   type DevServerGone,
+  type ReuseSession,
 } from './waitForDevApp';
 
 /** The argv of the detached child, as a value a test can assert without spawning anything. */
@@ -246,7 +248,8 @@ async function reuseRunningAsync(
   const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a child still starting
   // its session is followed: a reopen would start a second one, or exit 1 on a queued one.
-  const easSessionId = await sessionForExistingRunAsync(context, lock, tunnelUrl, hasExited);
+  const session = await sessionForExistingRunAsync(context, lock, tunnelUrl, hasExited);
+  const easSessionId = session.kind === 'none' ? null : session.sessionId;
   const device = await boundDeviceAsync(projectRoot, options);
   const statusAnswering =
     checked?.result.ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
@@ -256,9 +259,8 @@ async function reuseRunningAsync(
   const app = await appWaitAsync(context, lock, {
     run: {
       kind: 'reused',
-      reopenedEas: context.onRunning === 'reopen-eas',
       easPlatform: easOpenPlatform(options),
-      sessionId: easSessionId,
+      session,
     },
     stillWanted: () => !hasExited(),
     serverGoneAsync: async (gone) => {
@@ -312,14 +314,12 @@ async function sessionForExistingRunAsync(
   lock: DevServerLockInfo,
   tunnelUrl: string | null,
   hasExited: () => boolean
-): Promise<string | null> {
+): Promise<ReuseSession> {
   const { projectRoot, options } = context;
-  const reopenEasSession = context.onRunning === 'reopen-eas';
-  const sessionPlatform = reopenEasSession ? easOpenPlatform(options) : null;
-  const followsSession =
-    sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
-  return followsSession
-    ? options.waitReady
+  if (context.onRunning !== 'reopen-eas') return { kind: 'none' };
+  const sessionPlatform = easOpenPlatform(options);
+  if (sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform)) {
+    const sessionId = options.waitReady
       ? await waitForEasSessionAsync(projectRoot, {
           platform: sessionPlatform,
           lock,
@@ -329,10 +329,15 @@ async function sessionForExistingRunAsync(
           hasExited,
           callerArgv: options.callerArgv,
         })
-      : null
-    : reopenEasSession
-      ? await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl)
       : null;
+    return { kind: 'followed', sessionId };
+  }
+  // Read before the open: it reloads an attached app, whose old target stays listed for a while.
+  const staleTargetIds = options.waitReady
+    ? (await probeDevServerAsync(lock.url)).targets.map((target) => target.id)
+    : [];
+  const sessionId = await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl);
+  return { kind: 'reopened', sessionId, staleTargetIds };
 }
 
 function spawnDetachedChild(projectRoot: string, options: DevOptions) {
