@@ -17,16 +17,20 @@ import { list as listSessions, tap } from '2g/api';
 
 import { PORT_WATCH_TIMEOUT_MS } from '../../src/devLock/port';
 import {
+  collectOutput,
   executeAgentCliAsync,
   freePortAsync,
   holdDevLockAsync,
   installStubFingerprintAsync,
+  killAsync,
   readDevLockAsync,
   readEvents,
   readStubExpoInvocations,
   setupFixtureAsync,
+  spawnAgentCli,
   stubExpoEnv,
   waitForAsync,
+  waitForExitAsync,
 } from '../utils';
 import { DETACHED_LOG_PATH, cleanUpDetachedAsync, detachEnv, STUB_ALIVE_MS } from '../detachUtils';
 
@@ -41,6 +45,80 @@ function isAlive(pid: number): boolean {
 }
 
 describe('@expo/agent-cli dev --detach', () => {
+  it.each(['ios', 'android'])('reports the %s build plan and Metro wait live', async (platform) => {
+    const projectRoot = fs.realpathSync.native(await setupFixtureAsync('bare-app'));
+    const port = await freePortAsync();
+    const eventLog = path.join(projectRoot, 'events.jsonl');
+    // Keep the Expo subprocess alive in its native step. The test releases Metro startup and
+    // readiness separately, so neither assertion depends on how quickly the machine runs.
+    const child = spawnAgentCli(
+      projectRoot,
+      [
+        'dev',
+        `--${platform}`,
+        '--local',
+        '--dev-client',
+        '--port',
+        String(port),
+        '--localhost',
+        '--detach',
+        '--wait-ready',
+        '--json',
+      ],
+      { env: { LOG_EVENTS: eventLog, STUB_EXPO_DELAY_MS: STUB_ALIVE_MS } }
+    );
+    const output = collectOutput(child);
+    const exited = waitForExitAsync(child, output);
+    const metro = http.createServer((_request, response) => {
+      response.setHeader('X-React-Native-Project-Root', projectRoot);
+      response.end('packager-status:running');
+    });
+    const metroWait = 'Waiting for Metro readiness';
+
+    try {
+      expect(
+        await waitForAsync(
+          () =>
+            readStubExpoInvocations(projectRoot).some(({ args }) => args[0] === `run:${platform}`),
+          10_000
+        )
+      ).toBe(true);
+      expect(
+        await waitForAsync(() => output.stderr.includes('Native build or install'), 3_000),
+        output.all
+      ).toBe(true);
+      const logFile = path.join(projectRoot, DETACHED_LOG_PATH);
+      expect(output.stderr).toContain(`Live log: ${logFile}`);
+      expect(fs.existsSync(logFile)).toBe(true);
+      expect(output.stderr).toContain('Smart start plan');
+      expect(output.stderr).toContain(`expo run:${platform}`);
+      expect(output.stderr).not.toContain(metroWait);
+      expect(output.stdout).toBe('');
+
+      fs.appendFileSync(
+        eventLog,
+        `${JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port })}\n`
+      );
+      expect(await waitForAsync(() => output.stderr.includes(metroWait), 3_000), output.all).toBe(
+        true
+      );
+      expect(output.stdout).toBe('');
+
+      await new Promise<void>((resolve, reject) => {
+        metro.once('error', reject);
+        metro.listen(port, '127.0.0.1', resolve);
+      });
+      const result = await exited;
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ ready: true, port });
+    } finally {
+      await killAsync(child);
+      await cleanUpDetachedAsync(projectRoot);
+      metro.closeAllConnections();
+      await new Promise<void>((resolve) => metro.close(() => resolve()));
+    }
+  });
+
   it('retains the Android request for status after stopping its server', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const port = await freePortAsync();
