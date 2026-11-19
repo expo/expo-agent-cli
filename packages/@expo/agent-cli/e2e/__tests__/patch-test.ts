@@ -32,6 +32,9 @@ const PINNED: Record<Manager, string> = {
   yarn4: '@yarnpkg/cli-dist@4.18.1',
 };
 
+/** The patch-package that a `postinstall` of the patch-package path runs. */
+const PATCH_PACKAGE = 'patch-package@8.0.1';
+
 const INSTALL: Record<Manager, string[]> = {
   bun: ['install', '--backend=copyfile'],
   pnpm: ['install', '--config.package-import-method=copy'],
@@ -57,28 +60,29 @@ function envFor(manager: Manager): NodeJS.ProcessEnv {
   return bin ? { ...env, [pathKey]: `${bin}${path.delimiter}${env[pathKey] ?? ''}` } : env;
 }
 
-/** Install the pinned manager once per machine, and put it first on PATH for its tests. */
+/**
+ * Install a pinned npm package once per machine, and return the path of its command.
+ * Every tool of these tests, the managers and patch-package, comes from here.
+ */
+function installPinnedTool(spec: string, command: string): string {
+  const prefix = path.join(TEMP_DIR, 'agent-cli-e2e-package-managers', spec.replace(/[@/]/g, '_'));
+  const bin = path.join(prefix, 'node_modules', '.bin', isWindows ? `${command}.cmd` : command);
+  if (!fs.existsSync(bin)) {
+    fs.mkdirSync(prefix, { recursive: true });
+    run(
+      'npm',
+      ['install', '--prefix', prefix, '--no-save', '--no-audit', '--no-fund', spec],
+      prefix,
+      'npm'
+    );
+  }
+  return bin;
+}
+
+/** Install the pinned manager, and put it first on PATH for its tests. */
 function usePinnedManager(manager: Manager): void {
   beforeAll(() => {
-    const spec = PINNED[manager];
-    const prefix = path.join(
-      TEMP_DIR,
-      'agent-cli-e2e-package-managers',
-      spec.replace(/[@/]/g, '_')
-    );
-    const bin = path.join(prefix, 'node_modules', '.bin');
-    if (
-      !fs.existsSync(path.join(bin, isWindows ? `${commandOf(manager)}.cmd` : commandOf(manager)))
-    ) {
-      fs.mkdirSync(prefix, { recursive: true });
-      run(
-        'npm',
-        ['install', '--prefix', prefix, '--no-save', '--no-audit', '--no-fund', spec],
-        prefix,
-        'npm'
-      );
-    }
-    pathFor[manager] = bin;
+    pathFor[manager] = path.dirname(installPinnedTool(PINNED[manager], commandOf(manager)));
   }, 180_000);
 }
 
@@ -288,6 +292,10 @@ describe.each([
   { manager: 'yarn1' as const, hooks: ['patch-package', 'postinstall-postinstall'] },
 ])('@expo/agent-cli patch — $manager (patch-package format)', ({ manager, hooks }) => {
   usePinnedManager(manager);
+  let patchPackageBin: string;
+  beforeAll(() => {
+    patchPackageBin = installPinnedTool(PATCH_PACKAGE, 'patch-package');
+  }, 180_000);
 
   it(`exits 1 with the --yes line before it sets up patch-package, and writes nothing`, async () => {
     const projectRoot = await setupProjectAsync(manager);
@@ -308,41 +316,44 @@ describe.each([
     expect(fs.existsSync(path.join(projectRoot, 'patches'))).toBe(false);
   });
 
-  it(`writes a patch, from a clean copy of the installed tarball, that applies to a fresh install`, async () => {
+  it(`writes a patch, from a clean copy of the installed tarball, that patch-package applies to a fresh install`, async () => {
     const projectRoot = await setupProjectAsync(manager);
-    edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '// fix\n');
+    const pkgDir = path.join(projectRoot, 'node_modules/fake-expo-module');
+    // A changed, an added and a removed file, and an added line that looks like a file header.
+    edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '++ b/fix\n');
+    fs.writeFileSync(path.join(pkgDir, 'ios/New File.swift'), '// new\n');
+    fs.rmSync(path.join(pkgDir, 'src/index.ts'));
 
     const result = await patchAsync(manager, projectRoot, ['fake-expo-module', '--json', '--yes']);
     const report = JSON.parse(result.stdout);
 
     expect(report).toMatchObject({
       packageManager: manager === 'npm' ? 'npm' : 'yarn-classic',
-      files: ['ios/FakeModule.swift'],
       buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
     });
+    expect([...report.files].sort()).toEqual([
+      'ios/FakeModule.swift',
+      'ios/New File.swift',
+      'src/index.ts',
+    ]);
     expect(
       path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
     ).toBe(path.join('patches', 'fake-expo-module+1.0.0.patch'));
-    const patch = fs.readFileSync(report.patchFile, 'utf8');
-    expect(patch).toContain(
-      'diff --git a/node_modules/fake-expo-module/ios/FakeModule.swift b/node_modules/fake-expo-module/ios/FakeModule.swift'
-    );
     const pkg = readJson(path.join(projectRoot, 'package.json'));
     expect(pkg.scripts.postinstall).toBe('patch-package --error-on-fail');
     expect(Object.keys(pkg.devDependencies)).toEqual(hooks);
 
-    // patch-package itself comes from the registry, so the fresh install leaves it out and is
-    // checked with `git apply`, which reads the same format from the same directory.
+    // The project's install of patch-package would come from the registry, so the fresh install
+    // leaves it out, and the pinned patch-package applies the patch the way postinstall would.
     delete pkg.devDependencies;
     fs.writeFileSync(path.join(projectRoot, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
     reinstall(projectRoot, manager);
-    run('git', ['apply', report.patchFile], projectRoot);
-    expect(
-      fs.readFileSync(
-        path.join(projectRoot, 'node_modules/fake-expo-module/ios/FakeModule.swift'),
-        'utf8'
-      )
-    ).toContain('// fix');
+    run(patchPackageBin, ['--error-on-fail'], projectRoot);
+    expect(fs.readFileSync(path.join(pkgDir, 'ios/FakeModule.swift'), 'utf8')).toMatch(
+      /\n\+\+ b\/fix\n$/
+    );
+    expect(fs.readFileSync(path.join(pkgDir, 'ios/New File.swift'), 'utf8')).toBe('// new\n');
+    expect(fs.existsSync(path.join(pkgDir, 'src/index.ts'))).toBe(false);
   });
 
   it(`refuses a binary edit, which patch-package cannot apply`, async () => {
@@ -367,6 +378,22 @@ describe.each([
 
 describe('@expo/agent-cli patch — npm 12 (npm patch)', () => {
   usePinnedManager('npm12');
+
+  it(`takes the patch-package path, behind --yes, for a package npm patch refuses`, async () => {
+    // A `file:` tarball: npm patch refuses what is not from the registry (EPATCHNONREGISTRY).
+    const projectRoot = await setupProjectAsync('npm12');
+    edit(projectRoot, 'fake-js-lib/index.js', '// fix\n');
+
+    const result = await patchAsync('npm12', projectRoot, ['fake-js-lib', '--json'], false);
+    const { error } = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(error.code).toBe('PATCH_NEEDS_CONSENT');
+    expect(error.message).toContain('EPATCHNONREGISTRY');
+    expect(error.data.pendingChanges[0]).toBe(
+      'scripts.postinstall: "patch-package --error-on-fail"'
+    );
+  });
 
   it(`saves an edit with npm patch, with no patch-package, and a fresh install applies it`, async () => {
     // npm patch refuses a package that is not from the registry, so this one is.

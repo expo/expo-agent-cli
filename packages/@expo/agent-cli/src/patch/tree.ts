@@ -43,11 +43,7 @@ export function diffTrees(cleanRoot: string, editedRoot: string): TreeDiff {
   for (const file of edited) {
     if (!clean.has(file)) {
       diff.added.push(file);
-    } else if (
-      !fs
-        .readFileSync(path.join(cleanRoot, file))
-        .equals(fs.readFileSync(path.join(editedRoot, file)))
-    ) {
+    } else if (!sameEntry(path.join(cleanRoot, file), path.join(editedRoot, file))) {
       diff.changed.push(file);
     }
   }
@@ -59,6 +55,19 @@ export function diffTrees(cleanRoot: string, editedRoot: string): TreeDiff {
   return diff;
 }
 
+/**
+ * Whether two entries hold the same thing. A symlink is compared by where it points, and never
+ * read through: a link to a directory cannot be read as a file.
+ */
+function sameEntry(a: string, b: string): boolean {
+  const linkA = fs.lstatSync(a).isSymbolicLink();
+  const linkB = fs.lstatSync(b).isSymbolicLink();
+  if (linkA || linkB) {
+    return linkA && linkB && fs.readlinkSync(a) === fs.readlinkSync(b);
+  }
+  return fs.readFileSync(a).equals(fs.readFileSync(b));
+}
+
 export function isEmptyDiff(diff: TreeDiff): boolean {
   return !diff.changed.length && !diff.added.length && !diff.removed.length;
 }
@@ -66,13 +75,42 @@ export function isEmptyDiff(diff: TreeDiff): boolean {
 /** Make `targetRoot` hold the edits of `diff`, copied from `editedRoot`. */
 export function applyTreeDiff(diff: TreeDiff, editedRoot: string, targetRoot: string): void {
   for (const file of [...diff.changed, ...diff.added]) {
-    const target = path.join(targetRoot, file);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(editedRoot, file), target);
+    copyEntry(path.join(editedRoot, file), path.join(targetRoot, file));
   }
   for (const file of diff.removed) {
     fs.rmSync(path.join(targetRoot, file), { force: true });
   }
+}
+
+/** Copy one file, or one symlink as a symlink. */
+function copyEntry(from: string, to: string): void {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.rmSync(to, { force: true });
+  if (fs.lstatSync(from).isSymbolicLink()) {
+    fs.symlinkSync(fs.readlinkSync(from), to);
+  } else {
+    fs.copyFileSync(from, to);
+  }
+}
+
+/** Copy a whole directory, nested `node_modules` included, with symlinks kept as symlinks. */
+export function copyTree(from: string, to: string): void {
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name);
+    const target = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      copyTree(source, target);
+    } else {
+      copyEntry(source, target);
+    }
+  }
+}
+
+/** Replace `dir` with the copy in `backup`. `dir` may be a symlink; it becomes a directory. */
+export function restoreTree(backup: string, dir: string): void {
+  fs.rmSync(dir, { recursive: true, force: true });
+  copyTree(backup, dir);
 }
 
 /**
