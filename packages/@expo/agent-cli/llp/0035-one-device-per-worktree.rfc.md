@@ -244,6 +244,8 @@ A reap reports device cleanup only (`devServerCleanup: 'not-checked'`). A delete
 - `dev:stop --release` lets go of the local bindings only when this worktree's own server stopped or is absent. It checks the own dev-server lock again first: a remaining or replacement server keeps the devices, and so does a dev server that answers on `--port` but holds no lock of this worktree, because a missing lock proves nothing. A listener on `--port` that is not an Expo dev server does not keep them. A `finishing` lock ([[0004-smart-start-and-project-state]]) counts as no server.
 - A refused stop reports the listener's measured state; what it cannot identify is `null`.
 
+- To hand off an explicitly bound iOS simulator, run `dev:stop --release` from its owning worktree, then rerun `dev --ios --device <id>` from the receiving worktree. A refusal names the owner and gives the release command. Release leaves the simulator and its installed apps in place. The receiving worktree still claims it under the registry lock. The `device-lifecycle` e2e test verifies refusal before release, a read-only plan after release, and exclusive ownership after the receiving run.
+
 ## Lifecycle smoke
 
 - Smoke binds through the same acquire as `dev`, and skips it under `AGENT_CLI_NO_DEVICE`. It installs onto a device the run just created or spawned without reading it first.

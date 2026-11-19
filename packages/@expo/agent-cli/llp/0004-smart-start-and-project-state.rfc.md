@@ -58,6 +58,8 @@ The question is asked only where the answer is acted on:
 
 The install step is pinned to the bound device with `--device` before the plan is printed. A non-zero exit after output that shows the app reached the device is a warning, not a stopped plan: the launch can fail on the macOS Automation grant that the install does not need. The plan runner treats the `--no-bundler` step as a build step, not a dev-server step.
 
+For local iOS, a worktree with no iOS build record can serve a build that is already installed on the simulator it names with `--device`. The installed app ID must match the project and the embedded fingerprint must equal a fresh, iOS-only project fingerprint. A mismatch or unavailable fingerprint keeps the usual build plan. The plan names the simulator that supplied the proof, and the run acquires that simulator by ID through the normal binding rules. The `device-lifecycle` e2e test covers the match and mismatch through both plan and run.
+
 ### A stale build is two questions
 
 "Something moved" and "what moved" are two questions; the hash answers only the first. Row 10 exists for a fingerprint that moved without changing anything `prebuild` writes from, such as an `eas.json` edit or a `package.json` `scripts` entry: a prebuild there writes the same `ios/` again.

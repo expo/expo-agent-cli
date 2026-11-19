@@ -1,5 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Choice
 import { rerunDevCommand } from '../plan/rerun';
+import { quoteArgument } from '../utils/consent';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { EXIT_NEEDS_HUMAN } from '../exitCodes';
 import { CommandError } from '../utils/errors';
@@ -37,9 +38,13 @@ type ExplicitReason =
   | 'explicit-not-ready'
   | 'explicit-bound'
   | 'own-explicit-over-owned';
-type RefusalFacts = { matches?: string[]; root?: string; state?: string; rerun: readonly string[] };
+type RefusalFacts = {
+  matches?: string[];
+  owner?: Binding;
+  state?: string;
+  rerun: readonly string[];
+};
 
-/** Pure choice; refusing never changes the current binding. */
 export function chooseExplicitDevice(
   own: Binding | null,
   others: Foreign[],
@@ -78,7 +83,7 @@ export function chooseExplicitDevice(
   );
   if (blocked)
     throw explicitError('explicit-bound', deviceNameOf(device), platform, {
-      root: blocked.binding.projectRoot,
+      owner: blocked.binding,
       rerun,
     });
   if (
@@ -91,8 +96,6 @@ export function chooseExplicitDevice(
     throw explicitError('own-explicit-over-owned', own.device.serial, platform, { rerun });
   return { device, reused: false, transfer: holders.map(({ file }) => file) };
 }
-
-/** Read under the lock when acquiring; read-only callers can use the same choice for a plan. */
 export function readExplicitChoice(
   projectRoot: string,
   platform: DevicePlatform,
@@ -129,7 +132,6 @@ export function readExplicitChoice(
   };
 }
 
-/** The own created simulator a new explicit choice deletes, or null. */
 export function replacedByExplicit(own: Binding | null, choice: Choice): Binding | null {
   return !choice.reused && own?.device.backend === 'local-ios' && own.device.origin === 'created'
     ? own
@@ -171,15 +173,19 @@ function explicitError(
   reason: ExplicitReason,
   name: string,
   platform: DevicePlatform,
-  { matches = [], root, state, rerun }: RefusalFacts
+  { matches = [], owner, state, rerun }: RefusalFacts
 ): CommandError {
-  const { what, how, line } = refusalText(reason, name, platform, { matches, root, state, rerun });
+  const { what, how, line } = refusalText(reason, name, platform, { matches, owner, state, rerun });
   const error = new CommandError('DEVICE_UNAVAILABLE', `${what}\nHow: ${line}`);
   error.exitCode =
     reason === 'explicit-not-ready' ? EXIT_NEEDS_HUMAN : reason === 'explicit-bound' ? 20 : 1;
   error.suggestedCommand = how;
-  error.data = { reason, ...(matches.length ? { matches } : {}), ...(root ? { root } : {}) };
-  if (state) error.data.state = state;
+  error.data = {
+    reason,
+    ...(matches.length ? { matches } : {}),
+    ...(owner ? { root: owner.projectRoot } : {}),
+    ...(state ? { state } : {}),
+  };
   return error;
 }
 
@@ -187,7 +193,7 @@ function refusalText(
   reason: ExplicitReason,
   name: string,
   platform: DevicePlatform,
-  { matches = [], root, state, rerun }: RefusalFacts
+  { matches = [], owner, state, rerun }: RefusalFacts
 ): { what: string; how: string; line: string } {
   if (reason === 'explicit-not-ready') {
     const how = rerunDevCommand(platform, rerun, name);
@@ -197,10 +203,21 @@ function refusalText(
       line: `${state === 'unauthorized' ? 'allow USB debugging on the device' : 'reconnect the device'}, then run "${how}".`,
     };
   }
-  if (reason === 'explicit-bound') {
+  if (reason === 'explicit-bound' && owner) {
+    const { projectRoot: root, device } = owner;
+    const what = `${name} is bound to the worktree ${root}.`;
+    if (device.backend === 'local-ios' && device.origin === 'explicit') {
+      const how = `(cd ${quoteArgument(root)} && ${PROGRAM_PREFIX} dev:stop --release)`;
+      const retry = rerunDevCommand(platform, rerun, device.udid);
+      return {
+        what,
+        how,
+        line: `when the owning worktree is done, run "${how}", then run "${retry}" from this worktree.`,
+      };
+    }
     const how = rerunDevCommand(platform, rerun);
     return {
-      what: `${name} is bound to the worktree ${root}.`,
+      what,
       how,
       line: `remove --device, then run "${how}".`,
     };

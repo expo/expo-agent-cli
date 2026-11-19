@@ -36,6 +36,7 @@ import {
 import { CommandError } from '../utils/errors';
 import { detachedPidLine } from './childVerdict';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
+import { findInstalledIosBuildAsync } from './installedIosBuild';
 import {
   findUntrackedDevServerAsync,
   planDevServerPortAsync,
@@ -107,7 +108,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     plan: forwardedPlan,
     acquired: boundEarly,
     dropped,
-  } = await resolveDevPlanAsync(projectRoot, state, options, acquireDevice);
+  } = await resolveDevPlanAsync(projectRoot, state, options, acquireDevice, lock);
 
   let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options, orphan.claim);
   warnDroppedExpoArgs(plan, dropped);
@@ -203,13 +204,17 @@ async function resolveDevPlanAsync(
   projectRoot: string,
   state: ProjectState,
   options: DevOptions,
-  acquireDevice: (draft: StartPlan) => Promise<AcquireResult | null>
+  acquireDevice: (draft: StartPlan, deviceId?: string) => Promise<AcquireResult | null>,
+  lock: DevServerLockInfo | null
 ) {
   const { plan: resolvedPlan, acquired: boundEarly } = await resolveStartPlanAsync(
     projectRoot,
     state,
     {
       acquireDevice,
+      findInstalledIosBuild: lock
+        ? undefined
+        : () => findInstalledIosBuildAsync(projectRoot, options),
       platform: options.platform,
       requestedPlatform: options.platform,
       open: options.open,
@@ -301,8 +306,8 @@ function deviceCallbackFor(
   options: DevOptions,
   lock: DevServerLockInfo | null,
   claimedPort: number | null // a killed run's dev server's port, busy until this run replaces it
-): (draft: StartPlan) => Promise<AcquireResult | null> {
-  return async (draft) => {
+): (draft: StartPlan, deviceId?: string) => Promise<AcquireResult | null> {
+  return async (draft, deviceId) => {
     if (lock) {
       return null;
     }
@@ -322,7 +327,7 @@ function deviceCallbackFor(
       }
     }
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
-      explicit: explicitRequestOf(options.device, options.callerArgv),
+      explicit: explicitRequestOf(deviceId ?? options.device, options.callerArgv),
     });
     Log.progress(acquireLine(acquired));
     return acquired;

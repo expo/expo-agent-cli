@@ -52,7 +52,10 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
    * platform without `--eas`, and before the `--no-open` exit, because the install step must be
    * pinned whether or not this run opens the app. Null means the run bound nothing.
    */
-  acquireDevice?: (draft: StartPlan) => Promise<AcquireResult | null>;
+  acquireDevice?: (draft: StartPlan, deviceId?: string) => Promise<AcquireResult | null>;
+  /** Read a compatible build from the explicitly selected local simulator, if one exists. */
+  findInstalledIosBuild?: () => Promise<DecideStartPlanOptions['installedIosBuild']>;
+
   /**
    * Injected by tests, and by `status`: whether EAS has a
    * finished simulator build of this fingerprint.
@@ -97,6 +100,7 @@ export async function resolveStartPlanAsync(
     hostPlatform,
     probeAppPresence = probeAppPresenceAsync,
     acquireDevice,
+    findInstalledIosBuild,
     lookUpEasBuild = (root, platform) =>
       lookUpEasSimulatorBuildAsync(root, platform, { fingerprintCache: options.fingerprintCache }),
     hasSimulatorProfile = (root) => hasBuildProfileSync(root, EAS_SIMULATOR_PROFILE),
@@ -124,6 +128,21 @@ export async function resolveStartPlanAsync(
   const { platform } = draft.buildLocation;
   const configured = settingsBuildBackend(settings, platform);
   const explicit = requestedBackend ?? configured;
+  if (
+    platform === 'ios' &&
+    draft.rule !== 'needs-dev-client' &&
+    planOptions.deviceBackend !== 'eas' &&
+    explicit !== 'eas' &&
+    planOptions.lastBuild?.ios == null
+  ) {
+    const installedIosBuild = await findInstalledIosBuild?.();
+    if (installedIosBuild) {
+      const plan = decideStartPlan(state, { ...planOptions, runTarget, installedIosBuild });
+      const acquired = (await acquireDevice?.(plan, installedIosBuild.identifier)) ?? null;
+      return { plan, acquired };
+    }
+  }
+
   const probe: ToolchainProbe | null =
     explicit === 'eas' ? null : await detectToolchainAsync(platform);
 

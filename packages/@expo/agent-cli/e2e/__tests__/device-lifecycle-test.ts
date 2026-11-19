@@ -8,12 +8,13 @@ import type { Binding } from '../../src/deviceBinding/types';
 import {
   executeAgentCliAsync,
   getTemporaryPath,
+  installStubFingerprintAsync,
   pathEnvVars,
   readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
 } from '../utils';
-import { installStubXcrunAsync } from './installedAppStubs';
+import { installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
 const SIMULATORS = [
   { udid: 'E2E-CLAIM-SIM-A', name: 'iPhone 17' },
@@ -82,6 +83,60 @@ describe('device lifecycle across two worktrees', () => {
       runDevice: run?.args[run.args.indexOf('--device') + 1],
     };
   }
+
+  it.skipIf(process.platform !== 'darwin')(
+    'hands off an explicit simulator and reuses only a matching installed build',
+    async () => {
+      const hash = 'installed-ios-fingerprint';
+      await installStubXcrunAsync(machine, { booted: { fingerprint: hash }, bind: false });
+      const [owner, worker] = await Promise.all(
+        [0, 1].map(async () => {
+          const root = await setupFixtureAsync('dev-client-fresh-app');
+          projects.push(root);
+          await installStubFingerprintAsync(root);
+          await fs.promises.rm(path.join(root, '.expo/agent-cli-last-build.json'), { force: true });
+          await fs.promises.writeFile(
+            path.join(root, 'app.json'),
+            JSON.stringify({ expo: { ios: { bundleIdentifier: 'dev.test.worktree' } } })
+          );
+          return root;
+        })
+      );
+      const flags = ['dev', '--ios', '--local', '--device', SIMULATOR_UDID, '--no-open', '--json'];
+      const options = (root: string, fingerprint = hash) => ({
+        env: { ...envFor(root), STUB_FINGERPRINT_HASH: fingerprint },
+      });
+      await executeAgentCliAsync(owner!, flags, options(owner!));
+      const blocked = await executeAgentCliAsync(worker!, [...flags, '--plan'], options(worker!));
+      expect(JSON.parse(blocked.stdout).explicitDevice).toMatchObject({
+        refuses: true,
+        how: expect.stringContaining('dev:stop --release'),
+      });
+      const released = await executeAgentCliAsync(
+        owner!,
+        ['dev:stop', '--release', '--json'],
+        options(owner!)
+      );
+      expect(JSON.parse(released.stdout).devices).toEqual([
+        expect.objectContaining({ id: SIMULATOR_UDID, released: true, shutDown: false }),
+      ]);
+      const stale = await executeAgentCliAsync(
+        worker!,
+        [...flags, '--plan'],
+        options(worker!, 'changed-native-fingerprint')
+      );
+      expect(JSON.parse(stale.stdout)).toMatchObject({ rule: 'dev-client-stale' });
+      const preview = await executeAgentCliAsync(worker!, [...flags, '--plan'], options(worker!));
+      expect(JSON.parse(preview.stdout)).toMatchObject({
+        rule: 'dev-client-fresh',
+        steps: [{ id: 'start' }],
+      });
+      expect(bindings().map(({ projectRoot }) => projectRoot)).toEqual([canonicalRoot(owner!)]);
+      await executeAgentCliAsync(worker!, flags, options(worker!));
+      expect(readStubExpoInvocations(worker!).map(({ args }) => args[0])).toEqual(['start']);
+      expect(bindings().map(({ projectRoot }) => projectRoot)).toEqual([canonicalRoot(worker!)]);
+    }
+  );
 
   // Off macOS the toolchain probe settles iOS as impossible, so the plan never runs `expo run:ios`.
   it.skipIf(process.platform !== 'darwin')(

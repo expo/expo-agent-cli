@@ -111,6 +111,8 @@ export interface DecideStartPlanOptions {
    * table falls back to planning a prebuild — the answer it always gave.
    */
   lastBuild?: LastBuildRecord;
+  /** A build whose embedded fingerprint matched on the selected iOS simulator. */
+  installedIosBuild?: { identifier: string; name: string };
   /**
    * Whether the device this run would open has the development build already.
    *

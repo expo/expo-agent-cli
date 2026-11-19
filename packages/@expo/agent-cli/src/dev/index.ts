@@ -62,9 +62,10 @@ export const devRunHelp: CommandHelp = {
     ],
   },
   notes: [
-    `One command, whatever the project needs: the plan decides whether to prebuild, build, or just`,
-    `serve. The platform flag is required; once the dev server is up, the app is opened on that`,
-    `platform's simulator bound to this worktree, with Expo Go installed when missing. --no-open skips that step.`,
+    `The plan decides whether to build or serve. A platform is required. Once Metro is ready,`,
+    `the app opens on this worktree’s device unless you pass --no-open. Expo Go is installed if missing.`,
+    `On iOS, --device can reuse an installed build with a matching fingerprint in a fresh worktree.`,
+    `If another worktree explicitly bound that simulator, run dev:stop --release there before claiming it here.`,
     `This command blocks: without --detach it holds this terminal until the dev server stops, so`,
     `the "Suggested next" commands cannot run in it. --detach starts the same server and exits.`,
     `A build runs in one of two places, and the plan picks before it prints. A local build`,
@@ -74,8 +75,7 @@ export const devRunHelp: CommandHelp = {
     `a development-simulator build when needed, and an EAS Simulator session (bills until stopped).`,
     `The project can choose, in package.json under expo.agent-cli: buildBackend, deviceBackend`,
     `(local or eas, per platform too) and target. deviceBackend "eas" acts like --eas; a flag wins.`,
-    `The options of expo start are accepted and passed on. For expo start with nothing decided`,
-    `for you, run "${PROGRAM_PREFIX} start" instead.`,
+    `For a server without build planning, run "${PROGRAM_PREFIX} start".`,
   ],
 };
 
