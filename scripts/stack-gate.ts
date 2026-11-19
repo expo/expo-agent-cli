@@ -35,9 +35,8 @@ export type GateIo = {
 type Pull = {
   number: number;
   head: { ref: string; sha: string; repo: { full_name: string } | null };
+  base: { ref: string; repo: { default_branch: string } };
 };
-
-type PullBase = { head: { sha: string }; base: { ref: string; repo: { default_branch: string } } };
 
 type StackCover = { kind: 'covered'; by: number } | { kind: 'uncovered'; note: string };
 
@@ -80,7 +79,9 @@ export async function decide(input: GateInput, io: GateIo): Promise<GateDecision
 }
 
 async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision> {
-  const stack = await stackCover(input, io);
+  let pull: Promise<Pull> | undefined;
+  const fetchPull = () => (pull ??= github(input, io, `/pulls/${input.prNumber}`) as Promise<Pull>);
+  const stack = await stackCover(input, io, fetchPull);
   if (stack.kind === 'covered') {
     return {
       scope: 'none',
@@ -89,7 +90,7 @@ async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision
   }
   // A stack layer lists only its own files against the layer below, so an LLP-only top layer could
   // hide the code of a lower layer that it covers.
-  const { head, base } = (await github(input, io, `/pulls/${input.prNumber}`)) as PullBase;
+  const { head, base } = await fetchPull();
   // The file list is the PR's as of now; it must be the event's commit.
   if (head.sha !== input.headSha) {
     return {
@@ -113,16 +114,20 @@ async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision
   return { scope: 'all', reason: `${stack.note} CI runs here.` };
 }
 
-async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
+async function stackCover(
+  input: GateInput,
+  io: GateIo,
+  fetchPull: () => Promise<Pull>
+): Promise<StackCover> {
   let { headRef, headSha, headRepo } = input;
   if (!headRef || !headSha || !headRepo) {
-    const pull = (await github(input, io, `/pulls/${input.prNumber}`)) as Pull;
+    const pull = await fetchPull();
     headRef = pull.head.ref;
     headSha = pull.head.sha;
     headRepo = pull.head.repo?.full_name ?? null;
   }
   // The base filter matches branch names in this repo, so a fork's branch matches an unrelated one.
-  if (headRepo !== input.repo) {
+  if (!sameRepo(headRepo, input.repo)) {
     return { kind: 'uncovered', note: `The head branch is in ${headRepo ?? 'a deleted fork'}.` };
   }
 
@@ -137,7 +142,7 @@ async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
         io,
         `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
       )) as Pull[]
-    ).filter((pull) => pull.head.repo?.full_name === input.repo);
+    ).filter((pull) => sameRepo(pull.head.repo?.full_name ?? null, input.repo));
     if (above.length > 0) {
       for (const pull of above) {
         const comparison = (await github(input, io, `/compare/${headSha}...${pull.head.sha}`)) as {
@@ -159,6 +164,11 @@ async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
     await io.sleep(POLL_MS);
     waited += POLL_MS;
   }
+}
+
+// GitHub owner and repo names ignore case.
+function sameRepo(a: string | null, b: string): boolean {
+  return a !== null && a.toLowerCase() === b.toLowerCase();
 }
 
 // A rename lists its old path in previous_filename; a move out of src/ into llp/ is not LLP-only.

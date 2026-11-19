@@ -50,7 +50,11 @@ function stack(
     if (path.startsWith('/compare/')) return { status: compare };
     if (path.startsWith('/pulls/1/files')) return files;
     if (path === '/pulls/1') {
-      return { head: { sha: head }, base: { ref: base, repo: { default_branch: 'main' } } };
+      return {
+        number: 1,
+        head: { ref: 'feature', sha: head, repo: { full_name: 'o/r' } },
+        base: { ref: base, repo: { default_branch: 'main' } },
+      };
     }
     throw new Error(`unexpected ${path}`);
   };
@@ -108,6 +112,22 @@ describe('decide', () => {
     }
   );
 
+  it('reads a missing head repo from the PR once and matches it without case', async () => {
+    const route = stack([], llpFiles);
+    const io = fakeIo((path) =>
+      path === '/pulls/1'
+        ? {
+            number: 1,
+            head: { ref: 'feature', sha: 'aaa', repo: { full_name: 'O/R' } },
+            base: { ref: 'main', repo: { default_branch: 'main' } },
+          }
+        : route(path)
+    );
+    expect((await decide({ ...input, headRepo: null }, io)).scope).toBe('llp');
+    expect(io.paths.filter((path) => path === '/pulls/1')).toHaveLength(1);
+    expect(io.paths.some((path) => path.startsWith('/pulls?'))).toBe(true);
+  });
+
   it('runs the LLP scope when every file is an LLP', async () => {
     expect(await decide(input, fakeIo(stack([], llpFiles)))).toEqual({
       scope: 'llp',
@@ -133,7 +153,11 @@ describe('decide', () => {
 
   it('runs everything when the event names no head commit', async () => {
     const decision = await decide({ ...input, headSha: null }, fakeIo(stack([], llpFiles)));
-    expect(decision.scope).toBe('all');
+    expect(decision).toEqual({
+      scope: 'all',
+      reason:
+        'No open PR from this repo is based on this branch. The PR head aaa is not the event commit (none). CI runs here.',
+    });
   });
 
   it('runs everything when a file moves into llp/ from outside it', async () => {
@@ -260,6 +284,7 @@ describe('outputs', () => {
           PR_NUMBER: '1',
           PR_HEAD_REF: 'feature',
           PR_HEAD_SHA: 'aaa',
+          PR_HEAD_REPO: 'o/r',
         },
         stdout: 'pipe',
         stderr: 'pipe',
