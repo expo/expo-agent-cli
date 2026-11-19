@@ -102,6 +102,8 @@ describe('the on-ramp', () => {
     const positions = titles.map((title) => topic.stdout.indexOf(title));
     expect(positions).not.toContain(-1);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(topic.stdout).toContain('npx @expo/agent-cli dev --ios --local --dev-client --detach');
+    expect(topic.stdout).toContain('npx @expo/agent-cli dev --ios --local --dev-client --plan');
   });
 });
 
