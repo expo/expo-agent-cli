@@ -44,8 +44,20 @@ it(`refuses at once next to a Metro with no tunnel`, async () => {
   expect(openAppOnEasAsync).not.toHaveBeenCalled();
 });
 
+it.each([
+  ['dev-build', true],
+  ['expo-go', false],
+] as const)(`a %s open reloads the app: %s`, async (target, reloadsApp) => {
+  vi.mocked(resolveStartPlanAsync).mockResolvedValue({ plan: { target } } as any);
+
+  await expect(reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL)).resolves.toEqual({
+    sessionId: 'sess-1',
+    reloadsApp,
+  });
+});
+
 it(`hands the plan's build to the open`, async () => {
-  await expect(reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL)).resolves.toBe('sess-1');
+  await reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL);
 
   expect(openAppOnEasAsync).toHaveBeenCalledWith(projectRoot, {
     platform: 'ios',

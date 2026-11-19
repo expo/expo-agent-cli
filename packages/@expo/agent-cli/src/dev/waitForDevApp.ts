@@ -21,7 +21,7 @@ export type ReuseSession =
   | { kind: 'none' }
   /** The running child still starts the session; this run waited for its id. */
   | { kind: 'followed'; sessionId: string | null }
-  /** This run opened the app on the session again, which reloads an attached app. */
+  /** This run opened the app on the session again; `staleTargetIds` is empty unless that reloads it. */
   | { kind: 'reopened'; sessionId: string | null; staleTargetIds: readonly string[] };
 
 /** What a `dev --detach` run did that decides whether it opened an app. */

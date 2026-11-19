@@ -332,12 +332,17 @@ async function sessionForExistingRunAsync(
       : null;
     return { kind: 'followed', sessionId };
   }
-  // Read before the open: it reloads an attached app, whose old target stays listed for a while.
-  const staleTargetIds = options.waitReady
+  // Read before the open: an open that reloads an attached app leaves its old target listed for a
+  // while. An open that only moves a loaded app keeps its target, so that target still counts.
+  const before = options.waitReady
     ? (await probeDevServerAsync(lock.url)).targets.map((target) => target.id)
     : [];
-  const sessionId = await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl);
-  return { kind: 'reopened', sessionId, staleTargetIds };
+  const reopen = await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl);
+  return {
+    kind: 'reopened',
+    sessionId: reopen?.sessionId ?? null,
+    staleTargetIds: reopen?.reloadsApp ? before : [],
+  };
 }
 
 function spawnDetachedChild(projectRoot: string, options: DevOptions) {

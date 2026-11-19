@@ -7,9 +7,19 @@ import { CommandError } from '../utils/errors';
 import { openAppOnEasAsync } from './openAppEas';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 
+/** The session a reopen used, and whether its open reloads an app that is already attached. */
+export interface EasReopen {
+  sessionId: string | null;
+  /**
+   * A development build gets the launcher URL, which loads the app again. Expo Go gets its route
+   * link, which only moves an app that is already loaded: no new debugger target appears.
+   */
+  reloadsApp: boolean;
+}
+
 /**
- * Open the app on this worktree's EAS session for a running Metro, and return the session id.
- * Null when the run opens nothing. Throws the refusal of the open.
+ * Open the app on this worktree's EAS session for a running Metro. Null when the run opens
+ * nothing. Throws the refusal of the open.
  *
  * @param tunnelUrl the running Metro's current tunnel, or null when it has none.
  */
@@ -18,7 +28,7 @@ export async function reopenEasAsync(
   options: DevOptions,
   devServerUrl: string,
   tunnelUrl: string | null
-): Promise<string | null> {
+): Promise<EasReopen | null> {
   const platform = easOpenPlatform(options);
   if (!platform) return null;
   if (!tunnelUrl) throw noTunnelError(platform);
@@ -35,9 +45,10 @@ export async function reopenEasAsync(
     lastBuild: readLastBuildRecord(projectRoot),
     fingerprintCache: options.fingerprintCache,
   });
+  const expoGo = plan.target === 'expo-go';
   const result = await openAppOnEasAsync(projectRoot, {
     platform,
-    expoGo: plan.target === 'expo-go',
+    expoGo,
     devServerUrl,
     buildId: plan.easBuild?.id ?? null,
     fingerprintCache: options.fingerprintCache,
@@ -49,7 +60,7 @@ export async function reopenEasAsync(
       'DEVICE_UNAVAILABLE',
       result.reason ?? 'The EAS app could not be opened.'
     );
-  return result.sessionId;
+  return { sessionId: result.sessionId, reloadsApp: !expoGo };
 }
 
 /** A Metro with no tunnel cannot serve an EAS session, which runs off this machine. */
