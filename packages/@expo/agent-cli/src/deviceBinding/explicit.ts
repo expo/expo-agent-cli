@@ -31,7 +31,9 @@ export type ExplicitCandidate = Extract<BoundDevice, { backend: 'local-ios' | 'l
 export type ExplicitRequest = { query: string; rerun: readonly string[] };
 type Foreign = { file: string; binding: Binding; stale: boolean };
 type Choice = { device: ExplicitCandidate; reused: boolean; transfer: string[] };
-type Unready = AndroidInventory['unready'];
+/** What `adb devices -l` adds to the candidates: the serials not ready, and the model of each. */
+type AdbListing = Pick<AndroidInventory, 'unready' | 'models'>;
+const NO_ADB_LISTING: AdbListing = { unready: [], models: [] };
 type ExplicitReason =
   | 'explicit-not-found'
   | 'explicit-not-ready'
@@ -46,14 +48,18 @@ export function chooseExplicitDevice(
   candidates: ExplicitCandidate[],
   { query, rerun }: ExplicitRequest,
   platform: DevicePlatform,
-  unready: Unready = []
+  adb: AdbListing = NO_ADB_LISTING
 ): Choice {
+  const wanted = query.toLowerCase();
+  const nameOf = (device: ExplicitCandidate) =>
+    device.backend === 'local-ios'
+      ? device.name
+      : adb.models.find(({ serial }) => serial === device.serial)?.model;
   const matches = candidates.filter(
     (device) =>
-      deviceIdOf(device).toLowerCase() === query.toLowerCase() ||
-      (device.backend === 'local-ios' && device.name.toLowerCase() === query.toLowerCase())
+      deviceIdOf(device).toLowerCase() === wanted || nameOf(device)?.toLowerCase() === wanted
   );
-  const listed = unready.find(({ serial }) => serial.toLowerCase() === query.toLowerCase());
+  const listed = adb.unready.find(({ serial }) => serial.toLowerCase() === wanted);
   if (matches.length === 0 && listed)
     throw explicitError('explicit-not-ready', listed.serial, platform, {
       state: listed.state,
@@ -99,7 +105,7 @@ export function readExplicitChoice(
   candidates: ExplicitCandidate[],
   explicit: ExplicitRequest,
   tools: DeviceTools,
-  unready: Unready = []
+  adb: AdbListing = NO_ADB_LISTING
 ) {
   const backend = localBackendOf(platform);
   const file = bindingPathFor(projectRoot, platform, backend);
@@ -125,7 +131,7 @@ export function readExplicitChoice(
   return {
     file,
     own,
-    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, unready),
+    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, adb),
   };
 }
 
@@ -143,7 +149,7 @@ export function bindExplicitSection(
   explicit: ExplicitRequest,
   tools: DeviceTools,
   actions: Cleanup[],
-  unready: Unready = []
+  adb: AdbListing = NO_ADB_LISTING
 ) {
   const { file, own, choice } = readExplicitChoice(
     projectRoot,
@@ -151,7 +157,7 @@ export function bindExplicitSection(
     candidates,
     explicit,
     tools,
-    unready
+    adb
   );
   const binding: Binding = {
     version: 1,
@@ -221,8 +227,8 @@ function refusalText(
       line: `run "${how}", or pass another match to --device.`,
     };
   }
-  const how = platform === 'ios' ? 'xcrun simctl list devices available' : 'adb devices';
-  const listed = platform === 'ios' ? 'name or UDID' : 'serial';
+  const how = platform === 'ios' ? 'xcrun simctl list devices available' : 'adb devices -l';
+  const listed = platform === 'ios' ? 'name or UDID' : 'serial or model';
   return {
     what: `No device uniquely matches "${name}".`,
     how,

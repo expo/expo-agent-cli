@@ -79,7 +79,11 @@ export async function readAndroidInventoryAsync(
     throw adbNotRunnableError(resolveAdb(), devices.spawnError.message);
   }
   assertAnswered(devices, 'adb devices -l', adbFailedError);
-  const runningSerials = parseAndroidDevices(devices.stdout).map((device) => device.deviceId);
+  const running = parseAndroidDevices(devices.stdout);
+  const runningSerials = running.map((device) => device.deviceId);
+  const models = running.flatMap(({ deviceId, model }) =>
+    model ? [{ serial: deviceId, model }] : []
+  );
   const listedSerials = devices.stdout
     .split('\n')
     .slice(1)
@@ -93,7 +97,7 @@ export async function readAndroidInventoryAsync(
       return serial && state && state !== 'device' ? [{ serial, state }] : [];
     });
   if (!listAvds || (reuseSerial !== undefined && listedSerials.includes(reuseSerial)))
-    return { avd: null, runningSerials, listedSerials, unready };
+    return { avd: null, runningSerials, listedSerials, unready, models };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);
@@ -104,6 +108,7 @@ export async function readAndroidInventoryAsync(
     runningSerials,
     listedSerials,
     unready,
+    models,
   };
 }
 

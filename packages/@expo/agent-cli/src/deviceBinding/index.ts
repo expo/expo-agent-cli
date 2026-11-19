@@ -152,7 +152,7 @@ async function acquireAndroidAsync(
         explicit,
         tools,
         actions,
-        inventory.unready
+        inventory
       ),
       handle: null,
     };

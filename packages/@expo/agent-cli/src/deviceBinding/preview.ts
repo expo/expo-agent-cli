@@ -46,7 +46,7 @@ export async function previewExplicitDeviceAsync(
     candidates,
     explicit,
     tools,
-    android?.unready ?? []
+    android ?? undefined
   );
   const label = `${deviceNameOf(choice.device)} (${deviceIdOf(choice.device)})`;
   const parts = [
