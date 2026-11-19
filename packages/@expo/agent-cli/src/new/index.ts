@@ -75,13 +75,15 @@ export const agentCliNew: Command = async (argv) => {
 
   // Load modules after the help prompt so `npx @expo/agent-cli new -h` shows as fast as possible.
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
+  const { exitWithAnyCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   const { resolveNewOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
   const { createNewProjectAsync } = require('./newAsync') as typeof import('./newAsync');
 
   return (async () => {
     // No project root is resolved here: `new` is the one command that runs before a project
     // exists, so the working directory is only the place the new directory goes.
-    const exitCode = await createNewProjectAsync(process.cwd(), resolveNewOptions(argv ?? []));
-    process.exitCode = exitCode;
+    await exitWithAnyCodeAsync(
+      await createNewProjectAsync(process.cwd(), resolveNewOptions(argv ?? []))
+    );
   })().catch(logCmdError);
 };

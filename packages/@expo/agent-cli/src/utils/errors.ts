@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { execSync } from 'child_process';
 
 import { event as cliEvent } from '../events';
-import { EXIT_ERROR, EXIT_NEEDS_HUMAN, exitWithCodeAsync } from '../exitCodes';
+import { EXIT_ERROR, EXIT_NEEDS_HUMAN, exitWithAnyCodeAsync } from '../exitCodes';
 import { error as printToStderr, exception, hasWrittenToStdout, log, warn } from '../log';
 import { renderForInvoker } from './invoker';
 import { isJsonRequested } from './jsonMode';
@@ -293,7 +293,7 @@ export function logCmdError(error: any): never {
     // LOG_EVENTS), so `exitWithCodeAsync` flushes first. It never settles, which keeps the
     // process alive until the exit fires and gives the `.catch(logCmdError)` callers nothing
     // further to run. An error that names no code is a tool error, so it exits 1 (llp/0010).
-    return exitWithCodeAsync(exitCode) as unknown as never;
+    return exitWithAnyCodeAsync(exitCode) as unknown as never;
   }
 
   // Any other `Error` is a defect that reached the top through a command's `.catch`: the same
@@ -306,7 +306,7 @@ export function logCmdError(error: any): never {
     suggestedCommand: null,
     needsHuman: false,
   });
-  return exitWithCodeAsync(EXIT_ERROR) as unknown as never;
+  return exitWithAnyCodeAsync(EXIT_ERROR) as unknown as never;
 }
 
 /**

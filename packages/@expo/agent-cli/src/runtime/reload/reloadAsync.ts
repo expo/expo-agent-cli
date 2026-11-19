@@ -69,6 +69,7 @@ import {
 import { reloadOverRuntimeAsync } from './runtimeReload';
 import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
 import { printHumanReport, explainReloadFailure } from './report';
+import type { OutcomeExitCode } from '../../exitCodes';
 
 /**
  * Machine shape of `@expo/agent-cli runtime:reload --json`.
@@ -276,7 +277,10 @@ interface Observation {
  * @returns the exit code: `0` reloaded and reconnected, `20` not reloaded, `22` reloaded but the
  * app had not reconnected when the budget ran out (llp/0010 §Exit codes).
  */
-export async function reloadAsync(projectRoot: string, options: ReloadOptions): Promise<number> {
+export async function reloadAsync(
+  projectRoot: string,
+  options: ReloadOptions
+): Promise<OutcomeExitCode> {
   const startedAt = Date.now();
   const { route, json, followups: wantFollowUps } = options;
   const remainingMs = () => Math.max(0, options.timeoutMs - (Date.now() - startedAt));
@@ -720,7 +724,7 @@ function exitCodeOf(
   refusal: Preflight['refusal'],
   method: ReloadResultJson['method'],
   observed: boolean
-): number {
+): OutcomeExitCode {
   return refusal === 'bundle-broken'
     ? EXIT_OUTCOME_FAILED
     : refusal === 'bundle-timeout'

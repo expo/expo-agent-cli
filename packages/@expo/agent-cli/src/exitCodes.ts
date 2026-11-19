@@ -18,8 +18,9 @@
 // - `20`–`29` — the tool worked and the outcome was not success. Retrying is meaningful; the
 //   payload says what went wrong with the *subject*, not with the CLI.
 //
-// Nothing outside this file spells an exit code as a literal, and nothing leaves the process with
-// one except through `exitWithCodeAsync` or a `CommandError` carrying an `exitCode`.
+// A command leaves with an outcome (`0`, `20`, `22`) through `exitWithCodeAsync`, whose type
+// refuses `1`. A tool error is a throw, so `logCmdError` prints the `--json` envelope and flushes
+// the events. `src/__tests__/exitCodes-test.ts` keeps every other exit path out of the commands.
 
 import { flushEventLogger } from '2g';
 
@@ -79,7 +80,16 @@ export const EXIT_OUTCOME_CANCELED = 21;
 export const EXIT_OUTCOME_TIMEOUT = 22;
 
 /**
- * Leave the process with one of the codes above, without losing the events of the run.
+ * The codes a command may return: the tool worked. A tool error (`1`) and a step for a person
+ * (`7`) are a thrown `CommandError`, so the `--json` envelope reports them.
+ */
+export type OutcomeExitCode =
+  | typeof EXIT_OK
+  | typeof EXIT_OUTCOME_FAILED
+  | typeof EXIT_OUTCOME_TIMEOUT;
+
+/**
+ * Leave the process with an outcome, without losing the events of the run.
  *
  * `process.exit` drops whatever the event logger has buffered, so an agent reading `LOG_EVENTS`
  * would lose the very events that explain the code it just read. It also aborts Node on Windows
@@ -91,7 +101,16 @@ export const EXIT_OUTCOME_TIMEOUT = 22;
  * A command reporting a *tool* error throws a `CommandError` instead — with an `exitCode` when it
  * is not {@link EXIT_ERROR} — so the error is printed and put on the event stream first.
  */
-export function exitWithCodeAsync(code: number): Promise<never> {
+export function exitWithCodeAsync(code: OutcomeExitCode): Promise<never> {
+  return exitWithAnyCodeAsync(code);
+}
+
+/**
+ * {@link exitWithCodeAsync} for any code. Only `logCmdError`, and a command that passes on the exit
+ * code of the child it ran (`expo start`, `expo install`, ...), call it. The sweep in
+ * `src/__tests__/exitCodes-test.ts` names those files.
+ */
+export function exitWithAnyCodeAsync(code: number): Promise<never> {
   process.exitCode = code;
   flushEventLogger()
     .catch(() => {})
