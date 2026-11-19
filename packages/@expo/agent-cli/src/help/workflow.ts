@@ -63,8 +63,8 @@ export const workflow: WorkflowStep[] = [
     title: 'Start the app',
     rungs: [
       {
-        run: 'dev --ios --local --dev-client --detach',
-        gets: 'run a development build on a local iOS simulator',
+        run: 'dev --ios --local --detach',
+        gets: 'run the app on a local iOS simulator',
       },
       { run: 'navigate /', gets: 'open a route in the app on a device' },
     ],
@@ -176,7 +176,7 @@ ${workflow.map((step, index) => stepLines(step, index + 1)).join('\n')}
   ${color.heading('Nothing here asks you a question')}
     No command opens a prompt, so nothing can block waiting for a keystroke. A command that
     costs minutes prints the plan it decided on, then runs it. Preview the local iOS plan with
-    ${color.command(`${PROGRAM_PREFIX} dev --ios --local --dev-client --plan`)}
+    ${color.command(`${PROGRAM_PREFIX} dev --ios --local --plan`)}
 
   ${color.heading('Errors are prompts — the recovery is on the last lines, under one of three names')}
     Try: <command>        the tool did not work (1, and any failure it raised itself)
