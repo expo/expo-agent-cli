@@ -224,12 +224,12 @@ describe('the rules the fixtures exist to prove', () => {
   it('strips ANSI before matching, so a coloured log answers like a plain one', async () => {
     const coloured = fs.readFileSync(path.join(FIXTURES, 'metro-syntax-error.log'), 'utf8');
     // The captured log really is coloured: this is the recording, not a construction.
-    expect(coloured).toMatch(/\[/);
+    expect(coloured).toMatch(/\u001b\[/);
 
     const { failure } = await runFixtureAsync('metro-syntax-error.log');
     expect(failure?.signature).toBe('bundle.syntax-error');
-    expect(failure?.matchedLine).not.toMatch(/\[/);
-    expect(failure?.context.after.join('\n')).not.toMatch(/\[/);
+    expect(failure?.matchedLine).not.toMatch(/\u001b\[/);
+    expect(failure?.context.after.join('\n')).not.toMatch(/\u001b\[/);
   });
 
   it('carries the caller’s context window, before and after the match', async () => {

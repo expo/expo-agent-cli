@@ -94,13 +94,13 @@ describe('readLogStreamAsync', () => {
   });
 
   it('strips ANSI, so a rule never has to know about colour', async () => {
-    const read = await readLogStreamAsync(streamOf(['[31merror: nope[39m\n']));
+    const read = await readLogStreamAsync(streamOf(['\u001b[31merror: nope\u001b[39m\n']));
     expect(read.lines).toEqual(['error: nope']);
   });
 
   it('counts the bytes it read, not the bytes it kept', async () => {
-    const read = await readLogStreamAsync(streamOf(['[31mabc[39m\n']));
-    expect(read.bytes).toBe(Buffer.byteLength('[31mabc[39m\n', 'utf8'));
+    const read = await readLogStreamAsync(streamOf(['\u001b[31mabc\u001b[39m\n']));
+    expect(read.bytes).toBe(Buffer.byteLength('\u001b[31mabc\u001b[39m\n', 'utf8'));
     expect(read.lines[0]).toBe('abc');
   });
 
@@ -199,7 +199,7 @@ describe('whether the input is a log at all', () => {
   it('reads an ANSI-coloured log as text', async () => {
     const coloured = Array.from(
       { length: 40 },
-      (_, index) => `[31m[1mERROR[22m[39m line ${index}`
+      (_, index) => `\u001b[31m\u001b[1mERROR\u001b[22m\u001b[39m line ${index}`
     ).join('\n');
 
     expect(await readLogStreamAsync(streamOf([coloured]))).toMatchObject({ looksLikeText: true });
@@ -217,7 +217,7 @@ describe('whether the input is a log at all', () => {
   });
 
   it('does not read a NUL-padded binary as a log', async () => {
-    const binary = ' '.repeat(400) + 'BUILD FAILED';
+    const binary = '\u0000'.repeat(400) + 'BUILD FAILED';
 
     expect(await readLogStreamAsync(streamOf([binary]))).toMatchObject({ looksLikeText: false });
   });

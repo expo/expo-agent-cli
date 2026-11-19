@@ -867,7 +867,7 @@ export const STUB_TRANSFORM_ERROR = {
   filename: 'src/app/index.tsx',
   name: 'SyntaxError',
   message:
-    "SyntaxError: /project/src/app/index.tsx: Unexpected keyword 'const'. (101:2)\n\n[0m [90m 100 |[39m function broken( {\n[31m[1m>[22m[39m[90m 101 |[39m   [36mconst[39m x [33m=[39m[0m",
+    "SyntaxError: /project/src/app/index.tsx: Unexpected keyword 'const'. (101:2)\n\n\u001b[0m \u001b[90m 100 |\u001b[39m function broken( {\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 101 |\u001b[39m   \u001b[36mconst\u001b[39m x \u001b[33m=\u001b[39m\u001b[0m",
   errors: [{ description: 'Unexpected keyword', filename: 'src/app/index.tsx', lineNumber: 101 }],
 };
 
