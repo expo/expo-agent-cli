@@ -248,45 +248,52 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
     }
   }, 60_000);
 
-  it('opens an iOS development build with the launcher URL, and --wait-ready exits 22 when it does not attach', async () => {
-    const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
-    await installStubFingerprintAsync(projectRoot);
-    const file = path.join(projectRoot, 'app.json');
-    const appJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-    appJson.expo.scheme = 'devclient';
-    appJson.expo.ios = { bundleIdentifier: DEV_CLIENT_ID };
-    await fs.promises.writeFile(file, JSON.stringify(appJson, null, 2));
-    const xcrun = await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
-    await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
-    const env = { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' };
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--ios', '--detach', '--wait-ready', '--port', '8625', '--json'],
-        {
-          env: {
-            ...env,
-            STUB_EXPO_LISTEN: '1',
-            STUB_EXPO_DELAY_MS: '30000',
-            AGENT_CLI_DEV_APP_WAIT_MS: '1500',
-          },
-          reject: false,
-        }
-      );
+  // `dev` binds an iOS simulator on macOS only.
+  it.skipIf(process.platform !== 'darwin')(
+    'opens an iOS development build with the launcher URL, and --wait-ready exits 22 when it does not attach',
+    async () => {
+      const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
+      await installStubFingerprintAsync(projectRoot);
+      const file = path.join(projectRoot, 'app.json');
+      const appJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      appJson.expo.scheme = 'devclient';
+      appJson.expo.ios = { bundleIdentifier: DEV_CLIENT_ID };
+      await fs.promises.writeFile(file, JSON.stringify(appJson, null, 2));
+      const xcrun = await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
+      const env = { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' };
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--detach', '--wait-ready', '--port', '8625', '--json'],
+          {
+            env: {
+              ...env,
+              STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_DELAY_MS: '30000',
+              AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+            },
+            reject: false,
+          }
+        );
 
-      expect(result.exitCode).toBe(22);
-      expect(JSON.parse(result.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
-      const opened = xcrun.calls().filter((args) => args[0] === 'simctl' && args[1] === 'openurl');
-      expect(opened.map((args) => args.at(-1))).toEqual([
-        expect.stringMatching(/^devclient:\/\/\?__expo_url=/),
-      ]);
-    } finally {
-      await stopAsync(projectRoot, env);
-    }
-  }, 60_000);
+        expect(result.exitCode).toBe(22);
+        expect(JSON.parse(result.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+        const opened = xcrun
+          .calls()
+          .filter((args) => args[0] === 'simctl' && args[1] === 'openurl');
+        expect(opened.map((args) => args.at(-1))).toEqual([
+          expect.stringMatching(/^devclient:\/\/\?__expo_url=/),
+        ]);
+      } finally {
+        await stopAsync(projectRoot, env);
+      }
+    },
+    60_000
+  );
 
   // The runtime of the app on the bound simulator answers the bundle question.
-  it.each([
+  it.skipIf(process.platform !== 'darwin').each([
     ['exits 0 for an app that ran its bundle', { __r() {} }, 8626],
     ['exits 22 APP_NOT_LOADED for an app that ran no bundle', {}, 8627],
   ])(
