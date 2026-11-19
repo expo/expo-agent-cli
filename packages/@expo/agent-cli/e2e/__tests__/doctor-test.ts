@@ -31,7 +31,8 @@ const STUB_LOG_NAME = 'stub-expo-doctor-invocations.jsonl';
  * with the closing summary on stderr and a non-zero exit, exactly as `Log.exit` leaves it.
  *
  * Environment variables the tests steer it with:
- * - STUB_DOCTOR_MODE: `failing` (default), `passing`, or `garbage` for output nothing can parse
+ * - STUB_DOCTOR_MODE: `failing` (default), `passing`, `garbage` for output nothing can parse, or
+ *   `killed` for a run a signal stops
  */
 const STUB_DOCTOR = `#!/usr/bin/env node
 'use strict';
@@ -51,6 +52,11 @@ if (mode === 'not-found') {
   // What \`npx expo-doctor\` leaves behind on a machine that can neither find nor fetch it.
   process.stderr.write('sh: expo-doctor: command not found\\n');
   process.exit(127);
+}
+
+if (mode === 'killed') {
+  process.stdout.write('Running 3 checks on your project...\\n');
+  process.kill(process.pid, 'SIGKILL');
 }
 
 if (mode === 'garbage') {
@@ -266,6 +272,36 @@ describe('@expo/agent-cli doctor:check', () => {
     expect(result.all).toContain('command not found');
     expect(result.all).toContain('Try: npm install --save-dev expo-doctor');
   });
+
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a check a signal stopped said nothing about
+  // the project, so it is a tool error: the envelope, never a report with exit 20. The `.cmd` shim
+  // on Windows turns the signal into an exit code.
+  it.skipIf(process.platform === 'win32')(
+    'prints the error envelope when a signal stops expo-doctor',
+    async () => {
+      const projectRoot = await setupAsync('go-app');
+      const eventsFile = path.join(projectRoot, 'events.jsonl');
+
+      const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
+        env: { STUB_DOCTOR_MODE: 'killed', LOG_EVENTS: eventsFile },
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout)).toEqual({
+        error: {
+          code: 'EXPO_DOCTOR_KILLED',
+          message: expect.stringContaining('this project was not checked'),
+          suggestedCommand: null,
+          needsHuman: null,
+          data: { signal: 'SIGKILL' },
+        },
+      });
+      expect(readEvents(eventsFile).find((entry) => entry._e === 'cli:error')).toMatchObject({
+        code: 'EXPO_DOCTOR_KILLED',
+      });
+    }
+  );
 
   it('runs doctor:check for the bare group name', async () => {
     const projectRoot = await setupAsync('go-app');
