@@ -45,16 +45,18 @@ Both flush the event stream before the process exits.
 
 ### An empty target list is inconclusive
 
-After a reload, the debugger target list is empty for about half a second. So a command that needs a debugger target waits first ([[0005-runtime-loop-tools]] §One preflight for the runtime family). A list that is still empty after the wait is `22`.
+After a reload, the debugger target list is empty for about half a second. So a command that needs a debugger target waits first ([[0005-runtime-loop-tools]] §One preflight for the runtime family). A list that is still empty after the wait is `22`. An attached app that ran no JavaScript bundle is the same question: the same wait, then `22`, with `APP_NOT_LOADED` ([[0005-runtime-loop-tools]] §A loaded app).
 
 Two other states stay `1`, because neither changes within a second and the fix is a different call: no dev server (start one), and no app in the run's scope, such as an app on another platform, worktree or session (open the app in scope, or change the flag).
 
 ### Forwarded codes, and the exception
 
-`install`, `start`, `dev` and the `expo` passthrough return the subprocess's exit code unchanged. For a child that a signal ended, the CLI picks the code:
+`install`, `start` and the `expo` passthrough return the subprocess's exit code unchanged. For a child that a signal ended, the CLI picks the code:
 
 - An `expo` child ended by `SIGINT` or `SIGTERM` gives `0`. Any other signal gives `1`.
 - The bare install's package manager gives `1` for any signal.
+
+`dev` does not forward a signal code. It follows the signal rule of §Exit codes: `DEV_INTERRUPTED` and `128` plus the signal number, except a signal that ends the dev-server step, which is exit `0`. A failed step is §Needs-human protocol's `PLAN_STEP_FAILED`.
 
 A wrapper's own failures use the table above. A forwarded `7` is the child's own code: only a non-null `needsHuman`, or the `Needs a human` block, means a person must act.
 
@@ -91,7 +93,7 @@ A compiler that failed and printed nothing readable is `1`, not `20`: there is n
 
 ### Other gates, in brief
 
-A command that reports on the app does not fail because of what it reports: without a flag, `runtime:errors` exits `0` whatever it collects. A flag makes a report a gate. Every `--assert` or `--fail-on-*` flag answers a measured failure with `20` and a state it cannot measure with `22`.
+A command that reports on the app does not fail because of what it reports: without a flag, `runtime:errors` exits `0` whatever it collects. A preflight refusal comes before the collection and keeps its own code. A flag makes a report a gate. Every `--assert` or `--fail-on-*` flag answers a measured failure with `20` and a state it cannot measure with `22`.
 
 | Command                    | Codes                                                                                                                             |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -102,11 +104,15 @@ A command that reports on the app does not fail because of what it reports: with
 | `runtime:stop`             | `1` when the device tool refused                                                                                                  |
 | `dev:stop`                 | `20` when the dev server or EAS session did not stop or a device tool failed; `22` with `--eas` while the EAS session is starting |
 
-The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `runtime:tap` and `runtime:type`:
+The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `runtime:tap` and `runtime:type`. A broken bundle is `20` in all five. A check that does not finish depends on the command:
 
-- A broken bundle is `20`.
-- A cold first build that does not finish inside `--timeout` is `22`.
-- An unknown result is not a broken bundle. `bundle.checked` is exactly `bundle.ok != null`.
+| Command                                       | Wait                                                                                | A check that does not finish |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------- |
+| `runtime:reload`                              | the remaining `--timeout`                                                           | `22`                         |
+| `smoke`                                       | `--timeout`; on a dev server this run started, its own first-bundle budget of 180 s | `22`                         |
+| `runtime:tree`, `runtime:tap`, `runtime:type` | a fixed 20 s, not `--timeout`                                                       | `20`                         |
+
+An unknown result is not a broken bundle: `bundle.checked` is exactly `bundle.ok != null`.
 
 The check sends its HEAD request to the dev server it was given ([[0005-runtime-loop-tools]] §Where a device reaches the dev server), with the path and query that the manifest or web page names, never their host. `bundle.url` is that URL. The reason: a HEAD, or a GET cancelled after its headers, through the Expo tunnel closes every websocket on that tunnel, the app's debugger socket too.
 
