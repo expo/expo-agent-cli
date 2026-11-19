@@ -177,7 +177,7 @@ Every command of the family takes `--port <n>` as shorthand for `--dev-server-ur
 
 ## Which app a run reads
 
-A run reads only its own apps. An own app is an app that the run's scope reads, and an own target is its debugger target. An app is attached when it has a debugger target on the dev server and it is an own app. The scope comes from the caller's flags, from the device the run opens, and from the device bound to this worktree ([[0035-one-device-per-worktree]] §Readers). Every reader of the dev server's apps applies it: the preflight, the attach wait, and the debugger client's choice of target. The runtime reads and `smoke` resolve the scope by the same rules. An open (`navigate`, and the `app` phase of `smoke`) scopes to the device it opens and reads no other worktree's binding (§Target owner).
+A run reads only its own apps. An own app is an app that the run's scope reads, and an own target is its debugger target. An app is attached when it has a debugger target on the dev server and it is an own app. The scope comes from the caller's flags, from the device the run opens, and from the device bound to this worktree ([[0035-one-device-per-worktree]] §Readers). When the worktree has a live local binding and a live EAS session of one platform, the bound device is the one that the last `dev` opened its app on. Every reader of the dev server's apps applies it: the preflight, the attach wait, and the debugger client's choice of target. The runtime reads and `smoke` resolve the scope by the same rules. An open (`navigate`, and the `app` phase of `smoke`) scopes to the device it opens and reads no other worktree's binding (§Target owner).
 
 The dev server does not name a target's platform. The run places each target by evidence, strongest first:
 

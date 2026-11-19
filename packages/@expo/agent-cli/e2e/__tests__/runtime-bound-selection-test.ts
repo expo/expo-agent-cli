@@ -1,6 +1,7 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Readers
 // Exercise binding resolution, flag precedence and diagnostics through the published CLI.
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { runtimeTarget } from '../runtimeTargetFixtures';
 import { cloudBindingFile, writeCloudBindingAsync } from '../stubEas';
@@ -52,7 +53,14 @@ async function setupBoundAsync(
     shutdown = false,
     attached = binding === 'emulator',
     bound = binding === 'emulator',
-  }: { shutdown?: boolean; attached?: boolean; bound?: boolean } = {}
+    lastDev,
+  }: {
+    shutdown?: boolean;
+    attached?: boolean;
+    bound?: boolean;
+    /** The device backend of the last `dev` on iOS that `.expo/agent-cli-last-dev.json` records. */
+    lastDev?: 'local' | 'eas';
+  } = {}
 ) {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
   await installStubXcrunAsync(root, {
@@ -70,6 +78,20 @@ async function setupBoundAsync(
       platform: binding === 'android-cloud' ? 'android' : 'ios',
       id: binding === 'android-cloud' ? '01a15bf1' : '01a160c1',
     });
+  }
+  if (lastDev) {
+    await fs.promises.mkdir(path.join(root, '.expo'), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(root, '.expo', 'agent-cli-last-dev.json'),
+      JSON.stringify({
+        version: 1,
+        platform: 'ios',
+        port: null,
+        buildBackend: null,
+        runTarget: null,
+        deviceBackend: lastDev,
+      })
+    );
   }
   return { root, bindingFile, env: { ...adb.env, AGENT_CLI_NO_DEVICE: '0' } };
 }
@@ -89,6 +111,7 @@ const selectionCases: {
   flag?: 'ios' | 'android';
   /** List the local emulator beside an EAS Android session. */
   emulatorAttached?: boolean;
+  lastDev?: 'local' | 'eas';
   targets: AppId[];
   selected: AppId;
   line: string | null;
@@ -145,13 +168,37 @@ const selectionCases: {
     selected: 'a',
     line: simulatorLine,
   },
+  // Both bindings live: the last `dev` decides which device the readers read.
+  {
+    binding: 'simulator-and-ios-cloud',
+    lastDev: 'eas',
+    targets: ['a', 'cloud'],
+    selected: 'cloud',
+    line: sessionLine,
+  },
+  {
+    binding: 'simulator-and-ios-cloud',
+    lastDev: 'eas',
+    flag: 'ios',
+    targets: ['a', 'cloud'],
+    selected: 'cloud',
+    line: sessionLine,
+  },
+  {
+    binding: 'simulator-and-ios-cloud',
+    lastDev: 'local',
+    targets: ['a', 'cloud'],
+    selected: 'a',
+    line: simulatorLine,
+  },
 ];
 for (const row of selectionCases) {
-  it.skipIf(row.binding === 'simulator' && process.platform !== 'darwin')(
-    `eval with ${row.binding}, flag ${row.flag ?? 'none'}, reads ${row.selected}`,
+  it.skipIf(row.binding.startsWith('simulator') && process.platform !== 'darwin')(
+    `eval with ${row.binding}, flag ${row.flag ?? 'none'}${row.lastDev ? `, last dev ${row.lastDev}` : ''}, reads ${row.selected}`,
     async () => {
       const { root, env } = await setupBoundAsync(row.binding, {
         attached: row.emulatorAttached ?? row.binding === 'emulator',
+        lastDev: row.lastDev,
       });
       const evaluated: string[] = [];
       const server = await startStubDevServerAsync({
