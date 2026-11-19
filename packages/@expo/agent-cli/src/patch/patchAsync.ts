@@ -145,7 +145,7 @@ export async function patchAsync(
     const error = new CommandError(
       'PATCH_NEEDS_CONSENT',
       [
-        `${packageManager.name} has no patch feature of its own, so this uses patch-package, which needs these changes to package.json:`,
+        `${result.reason}, so this uses patch-package, which needs these changes to package.json:`,
         ...result.projectChanges.map((change) => `  - ${change}`),
         `Nothing was written. Run the same command with --yes to save the patch and make these changes.`,
       ].join('\n')

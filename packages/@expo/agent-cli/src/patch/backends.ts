@@ -30,7 +30,14 @@ import type { DetectedPackageManager } from '../utils/packageManager';
 import { CommandError } from '../utils/errors';
 import { findExecutableOnPath } from '../utils/pathLookup';
 import { spawnSubprocessAsync } from '../utils/subprocess';
-import { applyTreeDiff, diffTrees, isEmptyDiff, type TreeDiff } from './tree';
+import {
+  applyTreeDiff,
+  copyTree,
+  diffTrees,
+  isEmptyDiff,
+  restoreTree,
+  type TreeDiff,
+} from './tree';
 
 export interface PatchTarget {
   projectRoot: string;
@@ -52,6 +59,8 @@ export type BackendResult =
     }
   | {
       status: 'needs-consent';
+      /** Why the patch is saved with patch-package. */
+      reason: string;
       /** What this run would change in the project besides the patch file. */
       projectChanges: string[];
       files: string[];
@@ -74,12 +83,22 @@ export async function savePatchAsync(
     case 'yarn-berry':
       return saveWithEditDirAsync(target, 'yarn');
     case 'npm':
-      return (await hasNpmPatchAsync(target.packageManager.root)) &&
+      if (
+        (await hasNpmPatchAsync(target.packageManager.root)) &&
         !usesPatchPackage(target.packageManager.root)
-        ? saveWithEditDirAsync(target, 'npm')
-        : saveWithPatchPackageFormatAsync(target, options);
+      ) {
+        try {
+          return await saveWithEditDirAsync(target, 'npm');
+        } catch (error) {
+          if (!isNpmNonRegistryError(error)) {
+            throw error;
+          }
+          return saveWithPatchPackageFormatAsync(target, options, NPM_NON_REGISTRY_REASON);
+        }
+      }
+      return saveWithPatchPackageFormatAsync(target, options, NO_PATCH_COMMAND_REASON);
     case 'yarn-classic':
-      return saveWithPatchPackageFormatAsync(target, options);
+      return saveWithPatchPackageFormatAsync(target, options, NO_PATCH_COMMAND_REASON);
   }
 }
 
@@ -90,6 +109,9 @@ export async function savePatchAsync(
  * runs on a clean copy that holds only the agent's edits: the edited package is copied aside, `bun
  * patch <pkg>` replaces `node_modules/<pkg>` with a clean, unlinked copy (it also drops the edits,
  * observed with bun 1.4.4), and only the files that differ are copied back.
+ *
+ * After `bun patch <pkg>`, the copy aside is the only copy of the edits. So any failure puts it
+ * back before the copy is deleted.
  */
 async function saveWithBunAsync(target: PatchTarget): Promise<BackendResult> {
   const root = target.packageManager.root;
@@ -97,18 +119,28 @@ async function saveWithBunAsync(target: PatchTarget): Promise<BackendResult> {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-'));
   try {
     const edited = path.join(scratch, 'edited');
-    fs.cpSync(target.packageDir, edited, { recursive: true, dereference: false });
-    await runBunAsync(['patch', relative], root);
+    // The real directory: a copy of a symlinked `node_modules/<pkg>` would be one more link to it.
+    copyTree(fs.realpathSync(target.packageDir), edited);
+    try {
+      await runBunAsync(['patch', relative], root);
 
-    const diff = diffTrees(target.packageDir, edited);
-    if (isEmptyDiff(diff)) {
-      return { status: 'no-edits' };
+      const diff = diffTrees(target.packageDir, edited);
+      if (isEmptyDiff(diff)) {
+        return { status: 'no-edits' };
+      }
+      applyTreeDiff(diff, edited, target.packageDir);
+
+      const before = snapshotPatchDirs(root);
+      await runBunAsync(['patch', '--commit', relative], root);
+      return {
+        status: 'saved',
+        patchFile: findWrittenPatch(root, before),
+        files: filesOfDiff(diff),
+      };
+    } catch (error) {
+      restoreTree(edited, target.packageDir);
+      throw error;
     }
-    applyTreeDiff(diff, edited, target.packageDir);
-
-    const before = snapshotPatchDirs(root);
-    await runBunAsync(['patch', '--commit', relative], root);
-    return { status: 'saved', patchFile: findWrittenPatch(root, before), files: filesOfDiff(diff) };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -149,6 +181,19 @@ async function hasNpmPatchAsync(root: string): Promise<boolean> {
   });
   return result.exitCode === 0;
 }
+
+/**
+ * npm 12.2.3 refuses `npm patch add` for a `file:` or git dependency with this code (observed
+ * 2026-11-18). patch-package's format still works for those, because its clean copy comes from the
+ * lockfile.
+ */
+function isNpmNonRegistryError(error: unknown): boolean {
+  return error instanceof CommandError && /EPATCHNONREGISTRY/.test(error.message);
+}
+
+const NO_PATCH_COMMAND_REASON = 'has no patch command of its own';
+const NPM_NON_REGISTRY_REASON =
+  'patch refuses a package that is not from the npm registry (EPATCHNONREGISTRY)';
 
 /**
  * The project already applies patches with patch-package. A second patch system would apply its
@@ -244,7 +289,9 @@ const POSTINSTALL_POSTINSTALL_RANGE = '^2.1.0';
 
 async function saveWithPatchPackageFormatAsync(
   target: PatchTarget,
-  { yes }: BackendOptions
+  { yes }: BackendOptions,
+  /** Why patch-package, after the package manager's name: "<manager> <reason>". */
+  reason: string
 ): Promise<BackendResult> {
   const root = target.packageManager.root;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-'));
@@ -260,6 +307,7 @@ async function saveWithPatchPackageFormatAsync(
     if (setup.length && !yes) {
       return {
         status: 'needs-consent',
+        reason: `${target.packageManager.name} ${reason}`,
         projectChanges: setup.map((change) => change.description),
         files,
       };
@@ -375,8 +423,11 @@ function isGitSpec(spec: string): boolean {
 
 function parsePackFilename(stdout: string): string {
   try {
-    const parsed = JSON.parse(stdout.slice(stdout.indexOf('[')));
-    const filename: unknown = parsed[0]?.filename;
+    // npm 11 prints an array; npm 12.2.3 prints an object keyed by package name.
+    const start = stdout.search(/[[{]/);
+    const parsed = JSON.parse(stdout.slice(start));
+    const entry = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+    const filename: unknown = (entry as { filename?: unknown } | undefined)?.filename;
     if (typeof filename === 'string') {
       // npm names a scoped tarball `scope-name-1.0.0.tgz`, and reports `@scope/name-1.0.0.tgz`.
       return filename.replace(/^@/, '').replace(/\//g, '-');
@@ -391,11 +442,14 @@ function parsePackFilename(stdout: string): string {
 /**
  * The patch, as patch-package writes it: a git diff whose paths start at `node_modules/<pkg>/`.
  *
- * `git diff --no-index` over two copies of only the edited files, so the header paths are the
- * copies' paths and are rewritten to the package's. The user's git config does not change the bytes:
- * with `core.autocrlf=true` (the Windows default) a CRLF file would diff to LF context that no longer
- * applies. patch-package cannot apply a binary change, so one is refused, and the patch is checked
- * against the clean copy before it is saved.
+ * Git writes it, in a scratch repository where the edited files sit at `node_modules/<pkg>/…`: one
+ * tree from the clean copies, one from the edits, and `git diff` between them. So every header,
+ * also of an added or a removed file, has the real path, and no line is rewritten afterwards.
+ *
+ * The user's git config is not read, because it can change the bytes: `core.autocrlf=true` (the
+ * Windows default) turns CRLF context into LF that no longer applies, `diff.noprefix` drops `a/`,
+ * and `core.quotepath` quotes a non-ASCII path. patch-package cannot apply a binary change, so one
+ * is refused, and the exact patch is checked against the clean tree before it is saved.
  */
 async function unifiedDiffAsync(
   cleanDir: string,
@@ -405,75 +459,98 @@ async function unifiedDiffAsync(
 ): Promise<string> {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-diff-'));
   try {
-    const a = path.join(work, 'a');
-    const b = path.join(work, 'b');
+    const packageRoot = path.join(work, 'node_modules', ...packageName.split('/'));
+    const emptyConfig = path.join(work, 'empty.gitconfig');
+    fs.writeFileSync(emptyConfig, '');
+    const env: NodeJS.ProcessEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_'))
+    );
+    Object.assign(env, {
+      GIT_DIR: path.join(work, '.git'),
+      GIT_WORK_TREE: work,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: emptyConfig,
+    });
+    const config = [
+      '-c',
+      'core.autocrlf=false',
+      '-c',
+      'core.safecrlf=false',
+      '-c',
+      'core.quotepath=false',
+    ];
+    const git = requireTool('git');
+    const runGitAsync = async (args: string[]) => {
+      const result = await spawnSubprocessAsync(git, [...config, ...args], {
+        cwd: work,
+        env,
+        output: 'capture',
+      });
+      if (result.exitCode !== 0) {
+        throw toolFailure('git', args, result);
+      }
+      return result.stdout;
+    };
+
+    await runGitAsync(['init', '--quiet']);
     for (const file of [...diff.changed, ...diff.removed]) {
-      copyInto(cleanDir, a, file);
+      copyInto(cleanDir, packageRoot, file);
+    }
+    await runGitAsync(['add', '--all']);
+    const cleanTree = (await runGitAsync(['write-tree'])).trim();
+
+    for (const file of diff.removed) {
+      fs.rmSync(path.join(packageRoot, file), { force: true });
     }
     for (const file of [...diff.changed, ...diff.added]) {
-      copyInto(editedDir, b, file);
+      copyInto(editedDir, packageRoot, file);
     }
-    fs.mkdirSync(a, { recursive: true });
-    fs.mkdirSync(b, { recursive: true });
-    const git = requireTool('git');
-    const noConfig = ['-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false'];
-    const result = await spawnSubprocessAsync(
-      git,
-      [
-        ...noConfig,
-        'diff',
-        '--no-index',
-        '--no-color',
-        '--no-ext-diff',
-        '--src-prefix=',
-        '--dst-prefix=',
-        'a',
-        'b',
-      ],
-      { cwd: work, output: 'capture' }
-    );
-    // `git diff --no-index` exits 1 when the trees differ, which is the expected case.
-    if (result.exitCode !== 0 && result.exitCode !== 1) {
-      throw toolFailure('git', ['diff', '--no-index'], result);
-    }
-    // `Binary files a/x and b/x differ`, with /dev/null for an added or removed file.
-    const binary = [
-      ...result.stdout.matchAll(
-        /^Binary files (?:a\/(\S+)|\/dev\/null) and (?:b\/(\S+)|\/dev\/null) differ$/gm
-      ),
-    ];
+    await runGitAsync(['add', '--all']);
+    const editedTree = (await runGitAsync(['write-tree'])).trim();
+
+    const diffArgs = ['diff', '--no-renames', '--no-color', '--no-ext-diff', '--no-textconv'];
+    // `--numstat` marks a binary file with `-` for both counts.
+    const binary = (await runGitAsync([...diffArgs, '--numstat', '-z', cleanTree, editedTree]))
+      .split('\0')
+      .filter((entry) => entry.startsWith('-\t-\t'))
+      .map((entry) => entry.slice('-\t-\t'.length + `node_modules/${packageName}/`.length));
     if (binary.length) {
       throw new CommandError(
         'PATCH_BINARY',
-        `patch-package cannot apply a change to a binary file, so the patch was not saved: ${binary
-          .map((match) => match[1] ?? match[2])
-          .join(', ')}.\nHow: undo the change to the binary file, or patch it another way.`
+        `patch-package cannot apply a change to a binary file, so the patch was not saved: ${binary.join(
+          ', '
+        )}.\nHow: undo the change to the binary file, or patch it another way.`
       );
     }
-    // Apply the patch to the clean copy, as the next install will.
+    const patchText = await runGitAsync([
+      ...diffArgs,
+      '--src-prefix=a/',
+      '--dst-prefix=b/',
+      cleanTree,
+      editedTree,
+    ]);
+
+    // Apply the saved bytes to the clean tree, as the next install will.
     const patchFile = path.join(work, 'check.patch');
-    fs.writeFileSync(patchFile, result.stdout);
-    const check = result.stdout.trim()
-      ? await spawnSubprocessAsync(git, [...noConfig, 'apply', '--check', '-p1', patchFile], {
-          cwd: a,
+    fs.writeFileSync(patchFile, patchText);
+    await runGitAsync(['read-tree', cleanTree]);
+    const check = patchText.trim()
+      ? await spawnSubprocessAsync(git, [...config, 'apply', '--check', '--cached', patchFile], {
+          cwd: work,
+          env,
           output: 'capture',
         })
       : null;
     if (!check || check.exitCode !== 0) {
-      const error = new CommandError(
+      throw new CommandError(
         'PATCH_NOT_APPLICABLE',
         [
           `The patch that was made from the edits does not apply to a clean copy of the package, so it was not saved.`,
           check ? `${check.stderr}\n${check.stdout}`.trim() : 'The patch is empty.',
         ].join('\n')
       );
-      throw error;
     }
-    const prefix = `node_modules/${packageName}/`;
-    return result.stdout
-      .replace(/^diff --git a\/(\S+) b\/(\S+)$/gm, `diff --git a/${prefix}$1 b/${prefix}$2`)
-      .replace(/^--- a\//gm, `--- a/${prefix}`)
-      .replace(/^\+\+\+ b\//gm, `+++ b/${prefix}`);
+    return patchText;
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
