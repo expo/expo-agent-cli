@@ -7,6 +7,8 @@ import {
   assertRepositoryDirectory,
   filesOfPatch,
   findPatchFile,
+  mapUpstreamFile,
+  upstreamBase,
 } from '../upstream';
 
 describe(isExpoRepoPackage, () => {
@@ -56,6 +58,29 @@ describe(assertRepositoryDirectory, () => {
     } else {
       expect(run).toThrow(expect.objectContaining({ code: 'PATCH_BAD_REPOSITORY' }));
     }
+  });
+});
+
+describe(mapUpstreamFile, () => {
+  it.each([
+    ['ios/FakeModule.swift', 'packages/x/ios/FakeModule.swift', null],
+    ['android/build.gradle', 'packages/x/android/build.gradle', null],
+    ['build/index.js', null, 'packages/x/src/index.ts (or .tsx)'],
+    ['build/index.d.ts', null, 'packages/x/src/index.ts (or .tsx)'],
+    ['plugin/build/index.js', null, 'packages/x/plugin/src/index.ts (or .tsx)'],
+  ])('%s → %s, port to %s', (file, target, portTo) => {
+    expect(mapUpstreamFile(file, 'packages/x')).toEqual({ file, target, portTo });
+  });
+});
+
+describe(upstreamBase, () => {
+  it.each([
+    ['0123456789abcdef0123456789abcdef01234567', '0123456789abcdef0123456789abcdef01234567'],
+    ['main; touch pwned', 'main'],
+    ['sdk-54', 'main'],
+    [undefined, 'main'],
+  ])('gitHead %s → %s', (gitHead, expected) => {
+    expect(upstreamBase({ gitHead })).toBe(expected);
   });
 });
 
@@ -142,18 +167,48 @@ describe(findPatchFile, () => {
       expected: 'patches/@fake+scoped-lib+3.0.0.patch',
     },
     {
-      name: 'two versions registered: the installed one',
-      files: {
-        'patches/@fake%2Fscoped-lib@2.0.0.patch': '',
-        'patches/@fake%2Fscoped-lib@3.0.0.patch': '',
-      },
+      name: 'an exact version first, over a range and a spec that is not a version',
+      files: { 'patches/exact.patch': '', 'patches/range.patch': '', 'patches/bun.patch': '' },
       pkg: {
         patchedDependencies: {
-          '@fake/scoped-lib@2.0.0': 'patches/@fake%2Fscoped-lib@2.0.0.patch',
-          '@fake/scoped-lib@3.0.0': 'patches/@fake%2Fscoped-lib@3.0.0.patch',
+          '@fake/scoped-lib@^3.0.0': 'patches/range.patch',
+          '@fake/scoped-lib@./fake-scoped-lib-3.0.0.tgz': 'patches/bun.patch',
+          '@fake/scoped-lib@3.0.0': 'patches/exact.patch',
         },
       },
-      expected: 'patches/@fake%2Fscoped-lib@3.0.0.patch',
+      expected: 'patches/exact.patch',
+    },
+    {
+      name: 'a range that contains the installed version, over another version',
+      files: { 'patches/old.patch': '', 'patches/range.patch': '' },
+      pkg: {
+        patchedDependencies: {
+          '@fake/scoped-lib@2.0.0': 'patches/old.patch',
+          '@fake/scoped-lib@^3.0.0': 'patches/range.patch',
+        },
+      },
+      expected: 'patches/range.patch',
+    },
+    {
+      name: "bun's file: key, over another version",
+      files: { 'patches/old.patch': '', 'patches/bun.patch': '' },
+      pkg: {
+        patchedDependencies: {
+          '@fake/scoped-lib@2.0.0': 'patches/old.patch',
+          '@fake/scoped-lib@./fake-scoped-lib-3.0.0.tgz': 'patches/bun.patch',
+        },
+      },
+      expected: 'patches/bun.patch',
+    },
+    {
+      name: 'a registration, over a leftover patch-package file',
+      files: { 'patches/@fake+scoped-lib+3.0.0.patch': '', 'patches/bun.patch': '' },
+      pkg: {
+        patchedDependencies: {
+          '@fake/scoped-lib@./fake-scoped-lib-3.0.0.tgz': 'patches/bun.patch',
+        },
+      },
+      expected: 'patches/bun.patch',
     },
   ])('$name', ({ files, pkg, expected }) => {
     project(files, pkg);
@@ -168,14 +223,20 @@ describe(findPatchFile, () => {
       code: 'PATCH_NOT_FOUND',
     },
     {
-      name: 'two registered, neither for the installed version',
-      files: { 'patches/a.patch': '', 'patches/b.patch': '' },
-      pkg: {
-        patchedDependencies: {
-          '@fake/scoped-lib@1.0.0': 'patches/a.patch',
-          '@fake/scoped-lib@2.0.0': 'patches/b.patch',
-        },
+      name: 'only another version registered',
+      files: { 'patches/a.patch': '' },
+      pkg: { patchedDependencies: { '@fake/scoped-lib@2.0.0': 'patches/a.patch' } },
+      code: 'PATCH_NOT_FOUND',
+    },
+    {
+      name: 'two files for the installed version',
+      files: {
+        'patches/a.patch': '',
+        'patches/b.patch': '',
+        'pnpm-workspace.yaml':
+          "patchedDependencies:\n  '@fake/scoped-lib@3.0.0': patches/b.patch\n",
       },
+      pkg: { patchedDependencies: { '@fake/scoped-lib@3.0.0': 'patches/a.patch' } },
       code: 'PATCH_AMBIGUOUS',
     },
   ])('refuses: $name', ({ files, pkg, code }) => {

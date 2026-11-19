@@ -284,7 +284,9 @@ function setupFakeExpoRepo(): string {
   fs.cpSync(path.join(fixturesDir, 'patch-packages', 'fake-expo-module'), target, {
     recursive: true,
   });
+  // expo/expo ignores `/packages/**/build/`, so the clone has no compiled output.
   fs.rmSync(path.join(target, 'build'), { recursive: true, force: true });
+  fs.rmSync(path.join(target, 'plugin', 'build'), { recursive: true, force: true });
   run('git', ['init', '-q'], repo);
   run('git', ['add', '.'], repo);
   run(
@@ -324,6 +326,7 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
     const projectRoot = await setupProjectAsync(manager);
     edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '// fix\n');
     edit(projectRoot, 'fake-expo-module/build/index.js', '// fix\n');
+    edit(projectRoot, 'fake-expo-module/plugin/build/index.js', '// fix\n');
     await patchAsync(manager, projectRoot, ['fake-expo-module', '--json', '--yes']);
     return projectRoot;
   }
@@ -349,6 +352,11 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
         {
           file: 'ios/FakeModule.swift',
           target: 'packages/expo-fake-module-src/ios/FakeModule.swift',
+        },
+        {
+          file: 'plugin/build/index.js',
+          target: null,
+          portTo: 'packages/expo-fake-module-src/plugin/src/index.ts (or .tsx)',
         },
       ],
       repro: null,
@@ -376,7 +384,7 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
   });
 
   it.skipIf(isWindows)(
-    `gives an apply command that applies the bun patch inside expo/expo, without build/`,
+    `gives an apply command that applies the bun patch inside expo/expo, without any build/ directory`,
     async () => {
       const projectRoot = await patchedProjectAsync('bun');
       const { stdout } = await executeAgentCliAsync(
@@ -395,6 +403,9 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
         )
       ).toContain('// fix');
       expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/build'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/plugin/build'))).toBe(
+        false
+      );
     }
   );
 
@@ -418,6 +429,9 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
         )
       ).toContain('// fix');
       expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/build'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/plugin/build'))).toBe(
+        false
+      );
     }
   );
 
