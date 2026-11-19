@@ -1,8 +1,8 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §One preflight for the runtime family
 // @ref llp/0035-one-device-per-worktree.rfc.md §Readers
-import { readLastDevRequest } from '../dev/lastRequest';
 import { devicesDisabled, localBackendOf, noBoundDeviceError } from '../deviceBinding';
 import { live, readCloudBindings } from '../deviceBinding/cloud';
+import { lastDevSession } from '../dev/lastRequest';
 import { isExpired } from '../deviceBinding/lease';
 import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import type { Binding, BoundDevice, DevicePlatform } from '../deviceBinding/types';
@@ -117,23 +117,6 @@ async function boundDeviceAsync(
     (binding) => flags.platform == null || binding.device.platform === flags.platform
   );
   return sessions.length === 1 ? sessions[0]!.device : null;
-}
-
-/**
- * The live session that the last `dev` opened its app on, on the run's platform. A session file
- * that cannot be read gives none here: the local binding stays the scope.
- */
-function lastDevSession(
-  projectRoot: string,
-  platform: NavigatePlatform | null | undefined
-): Binding | null {
-  const last = readLastDevRequest(projectRoot);
-  if (last?.deviceBackend !== 'eas' || last.platform === 'web') return null;
-  if (platform != null && platform !== last.platform) return null;
-  const sessions = live(readCloudBindings(projectRoot).bindings, new Date()).filter(
-    (binding) => binding.device.platform === last.platform
-  );
-  return sessions.length === 1 ? sessions[0]! : null;
 }
 
 /** With no platform, iOS (on macOS) and Android; of two live bindings, the newer one. */

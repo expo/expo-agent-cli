@@ -17,17 +17,19 @@ import path from 'node:path';
 import {
   installStubEasAsync,
   stubEasArgs as easInvocations,
+  writeCloudBindingAsync,
   writeCloudSessionFileAsync as writeSessionFileAsync,
 } from '../stubEas';
 import {
   executeAgentCliAsync,
+  expoHomeOf,
   holdDevLockAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   type ExecuteResult,
 } from '../utils';
 import { makeTarget } from '../../src/runtime/__tests__/targetSelectionFixtures';
-import { BOOTED_SIMULATOR, installStubXcrunAsync } from './installedAppStubs';
+import { BOOTED_SIMULATOR, bindingFixture, installStubXcrunAsync } from './installedAppStubs';
 
 /** A debugger target that looks like Expo Go, which its app id alone places on iOS. */
 const EXPO_GO_TARGET = {
@@ -648,6 +650,46 @@ describe('@expo/agent-cli runtime:stop --eas', () => {
 
     expect(easInvocations(projectRoot)).toEqual([]);
   });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Readers — the last `dev` opened its app on the
+  // session, so a stop acts on the device that the readers read, beside a live local binding.
+  it.skipIf(process.platform !== 'darwin')(
+    `stops the app on the session that the last dev opened, beside a live local binding`,
+    async () => {
+      const projectRoot = await setupAsync('go-app');
+      await writeSessionFileAsync(projectRoot, 'sess-e2e');
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
+      await writeCloudBindingAsync(expoHomeOf(projectRoot), projectRoot, {
+        platform: 'ios',
+        id: 'sess-e2e',
+      });
+      await fs.promises.mkdir(path.join(projectRoot, '.expo'), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'),
+        JSON.stringify({
+          version: 1,
+          platform: 'ios',
+          port: null,
+          buildBackend: null,
+          runTarget: null,
+          deviceBackend: 'eas',
+        })
+      );
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:stop', '--ios', '--app-id', 'host.exp.Exponent', '--json', '--no-followups'],
+        { reject: false, env: { AGENT_CLI_NO_DEVICE: '0' } }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        deviceBackend: 'cloud',
+        deviceId: 'sess-e2e',
+      });
+    }
+  );
 
   it(`says how to start a session when --eas finds none`, async () => {
     const projectRoot = await setupAsync('go-app');

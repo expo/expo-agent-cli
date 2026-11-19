@@ -23,6 +23,7 @@ import {
 } from '../device/cloudSimulator';
 import { cloudSessionUnavailableError, cloudSessionUnknownError } from '../device/cloudErrors';
 import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
+import { lastDevSession } from '../dev/lastRequest';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { debugEvent } from './events';
@@ -93,7 +94,9 @@ function deviceRung<P extends CloudSessionProbe>(rung: CloudRung<P>): CloudDevic
  * else is looked at, because a caller that named a device meant that device. Otherwise the
  * **bound** local device wins: the rung loop of llp/0035 §Readers inspects this worktree's
  * bindings, any `up` one wins, and the winner's lease is extended. The cloud is the last rung,
- * taken only when every local rung passed and this project has a session on record.
+ * taken only when every local rung passed and this project has a session on record. One
+ * exception comes first: the live session that the last `dev` opened its app on, as for the
+ * readers ({@link lastDevSession}).
  *
  * @throws {CommandError} `NO_BOUND_DEVICE` when no local device is bound and no session serves,
  * and the tool error when a device tool could not run.
@@ -106,6 +109,13 @@ export async function resolveDeviceAsync(
   const startPlatform = platform ?? 'ios';
   if (context.cloud === 'required') {
     return await resolveCloudDeviceAsync(platform, context);
+  }
+
+  const session = lastDevSession(context.projectRoot, platform);
+  if (session) {
+    const device = navigateDeviceOf(session.device);
+    debugEvent('device_resolved', { platform: device.platform, deviceId: device.deviceId });
+    return device;
   }
 
   const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });
