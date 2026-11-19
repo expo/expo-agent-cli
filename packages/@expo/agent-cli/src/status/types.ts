@@ -11,6 +11,7 @@ import type { ConnectUrl } from '../navigate/connectUrl';
 import type { NativePlatform } from '../plan/types';
 import type { PlanStep, ProjectState, ProjectTarget } from '../project/types';
 import type { DevServerSource, ForeignDevServer } from '../runtime/devServer';
+import type { OutcomeExitCode } from '../exitCodes';
 import type { PlanBuildLocation } from '../toolchain/types';
 
 /** Whether the installed development build can be proven to match the project. */
@@ -493,7 +494,7 @@ export interface AssertStatus {
    * In the payload because an agent that captured stdout and lost the code can still read the
    * verdict, and because the three outcomes lead to three different next actions.
    */
-  exitCode: number;
+  exitCode: OutcomeExitCode;
   /** One sentence: what the gate found, and why that is or is not a pass. */
   reason: string;
 }

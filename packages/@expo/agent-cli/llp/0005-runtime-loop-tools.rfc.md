@@ -39,13 +39,13 @@ Every CDP connection sends a same-origin `Origin` header. Metro's inspector prox
 
 ## runtime:eval
 
-`runtime:eval` sends `Runtime.evaluate` with `returnByValue`. An exception in the app exits 1.
+`runtime:eval` sends `Runtime.evaluate` with `returnByValue`. An exception in the app exits 20 with the report: the tool worked, and the exception is the answer (e2e `runtime-test.ts`). Rejected: exit 1 with the error envelope, which tells an agent that the CLI broke when the app did.
 
 The app settles promises. The CLI wraps the expression, the app parks a thenable's outcome on a global under a per-run nonce, and the CLI polls it until it settles or `--timeout` ends:
 
 - A value that is not a thenable comes back unchanged in one round trip.
 - A settled value carries the `type` the app read.
-- A rejection is `promise.state: rejected`, not `threw`. It exits 1.
+- A rejection is `promise.state: rejected`, not `threw`. It exits 20.
 - A promise pending at the deadline, or lost to a reload, is `RUNTIME_PROMISE_PENDING` (exit 1).
 - `--no-await-promise` parks nothing and reports the pending promise at exit 0.
 

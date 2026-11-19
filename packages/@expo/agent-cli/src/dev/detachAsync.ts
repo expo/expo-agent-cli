@@ -65,6 +65,7 @@ import {
   type DevServerGone,
   type ReuseSession,
 } from './waitForDevApp';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /** The argv of the detached child, as a value a test can assert without spawning anything. */
 export interface DetachSpawn {
@@ -142,7 +143,7 @@ export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
   { print = true, reuseRunning = false }: DevDetachOptions = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const startedAt = Date.now();
   const onRunning: OnRunning = reuseRunning
     ? 'reuse'
@@ -168,7 +169,7 @@ function runningStopAsync(projectRoot: string, options: DevOptions, lock: DevSer
 async function followRunningAsync(
   context: DetachContext,
   lock: DevServerLockInfo
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { projectRoot, options, startedAt } = context;
   if (context.onRunning === 'stop') throw await runningStopAsync(projectRoot, options, lock);
   let running = lock;
@@ -196,7 +197,7 @@ async function reportBuildingRunAsync(
   context: DetachContext,
   lock: DevServerLockInfo,
   alreadyRunning: boolean
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { projectRoot, options, startedAt, print, smokePlatform } = context;
   return reportDetached(projectRoot, options, {
     lock,
@@ -216,7 +217,7 @@ async function reportBuildingRunAsync(
 async function reuseRunningAsync(
   context: DetachContext,
   running: DevServerLockInfo
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { projectRoot, options, startedAt, print, smokePlatform } = context;
   const runningPid = running.pid;
   const hasExited = () => !isProcessAlive(runningPid);
@@ -385,7 +386,7 @@ function spawnDetachedChild(projectRoot: string, options: DevOptions) {
   };
 }
 
-async function startDetachedAsync(context: DetachContext): Promise<number> {
+async function startDetachedAsync(context: DetachContext): Promise<OutcomeExitCode> {
   const { projectRoot, options, startedAt, print, smokePlatform } = context;
   // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
   // exit code. Reusing a running server delegates the same refusal to reopenEasAsync.
@@ -497,7 +498,7 @@ async function followForeignLockAsync(
   context: DetachContext,
   child: DetachedChild,
   lock: DevServerLockInfo
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { projectRoot, options, startedAt } = context;
   const verdict = await waitForChildVerdictAsync(projectRoot, startedAt);
   const device = relayedDeviceError(verdict);

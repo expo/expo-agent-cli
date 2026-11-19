@@ -33,6 +33,7 @@ import type { RouteCheckJson } from './routeCheck';
 import { resolveRouteUrlAsync } from './routeResolution';
 import { easCommandPrefix } from '../utils/easCli';
 import { CommandError } from '../utils/errors';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /**
  * Machine shape of `@expo/agent-cli navigate --json`.
@@ -191,7 +192,7 @@ export interface NavigateResultJson {
 export async function navigateAsync(
   projectRoot: string,
   options: NavigateOptions
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { route, platform, scheme, appId, json, followups: wantFollowUps } = options;
 
   if (options.printUrl) {
@@ -378,7 +379,10 @@ function openRefusedMessage(opened: OpenRouteResult): string {
  * anything then opens it is not this command's to know.
  * @see llp/0005-runtime-loop-tools.rfc.md §navigate
  */
-async function printRouteUrlAsync(projectRoot: string, options: NavigateOptions): Promise<number> {
+async function printRouteUrlAsync(
+  projectRoot: string,
+  options: NavigateOptions
+): Promise<OutcomeExitCode> {
   const { json, followups: wantFollowUps } = options;
 
   const resolved = await resolveRouteUrlAsync(projectRoot, {

@@ -107,6 +107,7 @@ export const agentCliNavigate: Command = async (argv) => {
 
   // Load modules after the help prompt so `npx @expo/agent-cli navigate -h` shows as fast as possible.
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
+  const { exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
   const { findUpExpoAppRootOrAssert } =
@@ -118,6 +119,6 @@ export const agentCliNavigate: Command = async (argv) => {
   return (async () => {
     const options = resolveNavigateOptions(argv ?? []);
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
-    process.exitCode = await navigateAsync(projectRoot, options);
+    await exitWithCodeAsync(await navigateAsync(projectRoot, options));
   })().catch(logCmdError);
 };

@@ -79,13 +79,6 @@ describe(runtimeEvalAsync, () => {
     expect(printed()).toContain('Result type: number');
   });
 
-  it(`should exit with 1 when the expression throws inside the app`, async () => {
-    mockEvaluate(async () => ({ exceptionText: 'TypeError: boom' }));
-
-    await expect(runtimeEvalAsync(evalOptions)).resolves.toBe(1);
-    expect(printed()).toContain('threw an exception');
-  });
-
   it(`should print the machine shape with --json`, async () => {
     mockEvaluate(async () => ({ value: { id: 7 }, type: 'object' }));
 
@@ -131,7 +124,9 @@ describe(runtimeEvalAsync, () => {
   it(`should print a stable set of top-level keys with --json for an exception`, async () => {
     mockEvaluate(async () => ({ exceptionText: 'TypeError: boom', exceptionStack: 'at <anon>' }));
 
-    await expect(runtimeEvalAsync({ ...evalOptions, json: true })).resolves.toBe(1);
+    await expect(runtimeEvalAsync({ ...evalOptions, json: true })).resolves.toBe(
+      EXIT_OUTCOME_FAILED
+    );
 
     expect(console.log).toHaveBeenCalledTimes(1);
     expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
@@ -188,7 +183,7 @@ describe(runtimeEvalAsync, () => {
 
   // F21: a rejected promise is the asynchronous form of a throw, so an agent gating on the exit
   // code must not read a failed `fetch` as a pass — but the two are different facts in the report.
-  it(`should exit with 1 when the promise the expression returned rejects`, async () => {
+  it(`should exit with 20 when the promise the expression returned rejects`, async () => {
     mockEvaluate(async () => ({
       promise: {
         state: 'rejected',
@@ -198,7 +193,9 @@ describe(runtimeEvalAsync, () => {
       },
     }));
 
-    await expect(runtimeEvalAsync({ ...evalOptions, json: true })).resolves.toBe(1);
+    await expect(runtimeEvalAsync({ ...evalOptions, json: true })).resolves.toBe(
+      EXIT_OUTCOME_FAILED
+    );
 
     const report = JSON.parse(printed());
     expect(report.threw).toBe(false);

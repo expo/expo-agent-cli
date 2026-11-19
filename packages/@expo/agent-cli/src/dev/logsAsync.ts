@@ -32,6 +32,7 @@ import {
 } from './advertisedUrl';
 import { detachedLogPath, readDetachedLogSync } from './logFile';
 import type { DevLogsOptions } from './resolveLogsOptions';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /**
  * Machine shape of `@expo/agent-cli dev:logs --json`.
@@ -65,7 +66,10 @@ export interface DevLogsResultJson {
  * @returns `0`. A log that exists is the answer, whatever is in it.
  * @throws {CommandError} `NO_DEV_LOG` when this project has no detached dev server log.
  */
-export async function devLogsAsync(projectRoot: string, options: DevLogsOptions): Promise<number> {
+export async function devLogsAsync(
+  projectRoot: string,
+  options: DevLogsOptions
+): Promise<OutcomeExitCode> {
   const read = readDetachedLogSync(projectRoot, options.tail);
   const [lock, smokePlatform] = await Promise.all([
     readDevServerLockAsync(projectRoot),

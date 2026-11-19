@@ -1,5 +1,7 @@
 import chalk from 'chalk';
 
+import type { EXIT_OK } from './exitCodes';
+
 // NOTE(@kitten): LogRespectingTerminal in instantiateMetro regressed on fatal errors and
 // logs may be swallowed before exiting. We redirect them to a direct write when we're about to exit
 let isExiting = false;
@@ -95,18 +97,13 @@ export function clear(): void {
   process.stdout.write(process.platform === 'win32' ? '\x1B[2J\x1B[0f' : '\x1B[2J\x1B[3J\x1B[H');
 }
 
-/** Log a message and exit the current process. If the `code` is non-zero then `console.error` will be used instead of `console.log`. */
-export function exit(message: string | Error, code: number = 1): never {
+/**
+ * Print a message, such as help, and exit 0. A failure throws a `CommandError` instead, so
+ * `--json` gets the error envelope.
+ */
+export function exit(message: string, code: typeof EXIT_OK): never {
   isExiting = true;
-  if (message instanceof Error) {
-    exception(message);
-  } else if (message) {
-    if (code === 0) {
-      log(message);
-    } else {
-      error(message);
-    }
-  }
+  log(message);
   process.exit(code);
 }
 

@@ -20,6 +20,13 @@ import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn() }));
+// The real exit never settles; this one records the forwarded code and lets the command finish.
+vi.mock('../../exitCodes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../exitCodes')>()),
+  exitWithAnyCodeAsync: vi.fn(async (code: number) => {
+    process.exitCode = code;
+  }),
+}));
 vi.mock('../../utils/inheritedRun', () => ({ runInheritedAsync: vi.fn() }));
 
 const projectRoot = path.resolve('/project');

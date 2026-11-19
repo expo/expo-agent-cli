@@ -33,6 +33,7 @@ export function agentCliPassthrough(command: string): Command {
 export function agentCliExpoPassthrough(command: string): Command {
   return async (argv) => {
     const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
+    const { exitWithAnyCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
     const { runExpoAsync } = require('../utils/expoCli') as typeof import('../utils/expoCli');
     const { findUpProjectRootOrCwd } =
       require('../utils/findUp') as typeof import('../utils/findUp');
@@ -43,7 +44,7 @@ export function agentCliExpoPassthrough(command: string): Command {
       // Not the asserting project-root lookup the other commands use: `expo login` and
       // `expo whoami` need no project, and the commands that do need one say so themselves.
       const projectRoot = findUpProjectRootOrCwd(process.cwd());
-      process.exitCode = await runExpoAsync(projectRoot, [command, ...args]);
+      await exitWithAnyCodeAsync(await runExpoAsync(projectRoot, [command, ...args]));
     })().catch(logCmdError);
   };
 }

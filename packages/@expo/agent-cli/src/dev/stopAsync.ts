@@ -65,6 +65,7 @@ import {
   stopUntrackedDevServerAsync,
 } from './untrackedDevServer';
 import type { DevStopOptions } from './resolveStopOptions';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /**
  * Why a dev server was not stopped.
@@ -225,7 +226,7 @@ export async function devStopAsync(
   projectRoot: string,
   options: DevStopOptions,
   { print = true, onReport }: DevStopReportOptions = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const startedAt = Date.now();
   const lock = await readDevServerLockAsync(projectRoot);
 
