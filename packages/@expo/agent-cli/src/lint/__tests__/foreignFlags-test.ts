@@ -121,10 +121,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // of `installExpoGo.ts` in the same change, which is why that file no longer has a row for it:
     // the approval is not about installs, it is about every local iOS open.
     //
-    // The five `src/patch/backends.ts` rows are `git diff --no-index`'s, which writes the npm
-    // backend's patch in patch-package's format. git is not a package, so the run the rule asks for
-    // is the e2e itself [observed — 2026-11-17, git on macOS: `e2e/__tests__/patch-test.ts` diffs a
-    // real package, and `git apply` of the result onto a fresh `npm install` restores the edit].
+    // The `src/patch/backends.ts` rows are git's, from the scratch repository that writes the
+    // patch-package patch (`diff`, `apply --check --cached`), and `npm patch --help`. git is not a
+    // package, so the run the rule asks for is the e2e itself [observed — 2026-11-19, git 2.54 on
+    // macOS: `e2e/__tests__/patch-test.ts` saves a real package, and patch-package 8.0.1 applies the
+    // patch to a fresh install; npm 11.20.0 exits 1 and npm 12.2.3 exits 0 on `npm patch --help`].
     //
     // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
     // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
