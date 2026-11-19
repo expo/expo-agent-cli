@@ -53,6 +53,7 @@ jobs:
           export PR_NUMBER='${{ github.event.pull_request.number }}'
           export PR_HEAD_REF='${{ github.event.pull_request.head.ref }}'
           export PR_HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          export PR_HEAD_REPO='${{ github.event.pull_request.head.repo.full_name }}'
           export EVENT_ACTION='${{ github.event.action }}'
           set-output full "$(bun scripts/stack-gate.ts || echo true)"
 

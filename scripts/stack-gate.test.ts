@@ -10,6 +10,7 @@ const input: GateInput = {
   prNumber: 1,
   headRef: 'feature',
   headSha: 'aaa',
+  headRepo: 'o/r',
   action: 'synchronize',
   waitSeconds: 0,
   apiUrl: 'https://api',
@@ -73,11 +74,28 @@ describe('decide', () => {
     expect(io.paths.some((path) => path.includes('/files'))).toBe(false);
   });
 
-  it('runs everything for a fork PR from main, which lists itself as based on its head ref', async () => {
-    const self = { number: 1, head: { ref: 'main', sha: 'aaa' } };
-    const io = fakeIo(stack([self], [{ filename: 'src/x.ts' }], 'identical'));
-    expect((await decide({ ...input, headRef: 'main' }, io)).scope).toBe('all');
-  });
+  it.each([['f/r'], [null]])(
+    'runs everything for a fork PR (head repo %p), even when a PR here on its branch name holds its commit',
+    async (headRepo) => {
+      const io = fakeIo((path) => {
+        if (path === '/pulls/1' && headRepo === null) {
+          return {
+            number: 1,
+            head: { ref: 'main', sha: 'aaa', repo: null },
+            base: { ref: 'main', repo: { default_branch: 'main' } },
+          };
+        }
+        return stack(
+          [{ number: 1, head: { ref: 'main', sha: 'aaa' } }],
+          [{ filename: 'src/x.ts' }],
+          'identical'
+        )(path);
+      });
+      const decision = await decide({ ...input, headRef: 'main', headRepo }, io);
+      expect(decision.scope).toBe('all');
+      expect(io.paths.some((path) => path.startsWith('/pulls?'))).toBe(false);
+    }
+  );
 
   it('runs the LLP scope when every file is an LLP', async () => {
     expect(await decide(input, fakeIo(stack([], llpFiles)))).toEqual({

@@ -10,6 +10,7 @@ export type GateInput = {
   prNumber: number;
   headRef: string | null;
   headSha: string | null;
+  headRepo: string | null;
   action: string;
   waitSeconds: number;
   apiUrl: string;
@@ -31,7 +32,10 @@ export type GateIo = {
   sleep: (ms: number) => Promise<void>;
 };
 
-type Pull = { number: number; head: { ref: string; sha: string } };
+type Pull = {
+  number: number;
+  head: { ref: string; sha: string; repo: { full_name: string } | null };
+};
 
 type PullBase = { head: { sha: string }; base: { ref: string; repo: { default_branch: string } } };
 
@@ -54,6 +58,7 @@ export function inputFromEnv(env: NodeJS.ProcessEnv): GateInput | null {
     prNumber,
     headRef: env.PR_HEAD_REF || null,
     headSha: env.PR_HEAD_SHA || null,
+    headRepo: env.PR_HEAD_REPO || null,
     action: env.EVENT_ACTION ?? '',
     waitSeconds: Number(env.STACK_GATE_WAIT_SECONDS ?? 60),
     apiUrl: env.GITHUB_API_URL || 'https://api.github.com',
@@ -109,25 +114,27 @@ async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision
 }
 
 async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
-  let { headRef, headSha } = input;
-  if (!headRef || !headSha) {
+  let { headRef, headSha, headRepo } = input;
+  if (!headRef || !headSha || !headRepo) {
     const pull = (await github(input, io, `/pulls/${input.prNumber}`)) as Pull;
     headRef = pull.head.ref;
     headSha = pull.head.sha;
+    headRepo = pull.head.repo?.full_name ?? null;
+  }
+  // The base filter matches branch names in this repo, so a fork's branch matches an unrelated one.
+  if (headRepo !== input.repo) {
+    return { kind: 'uncovered', note: `The head branch is in ${headRepo ?? 'a deleted fork'}.` };
   }
 
   // gh stack submit opens the PR above a few seconds after this one, so a fresh PR waits for it.
   const deadline = input.action === 'opened' ? input.waitSeconds * 1000 : 0;
   let waited = 0;
   for (;;) {
-    // A PR whose head ref is the default branch (a fork's main) lists itself here.
-    const above = (
-      (await github(
-        input,
-        io,
-        `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
-      )) as Pull[]
-    ).filter((pull) => pull.number !== input.prNumber);
+    const above = (await github(
+      input,
+      io,
+      `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
+    )) as Pull[];
     if (above.length > 0) {
       for (const pull of above) {
         const comparison = (await github(input, io, `/compare/${headSha}...${pull.head.sha}`)) as {
