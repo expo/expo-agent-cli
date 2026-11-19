@@ -5,8 +5,9 @@
 // that a fresh install applies the patch again. A stub would only prove the argv.
 //
 // The two packages are packed from `fixtures/patch-packages` into local tarballs and installed as
-// `file:` dependencies. bun, pnpm, yarn 1 and yarn 4 are installed from the npm registry at pinned
-// versions into a cache directory before their tests, so they run on every machine and on CI.
+// `file:` dependencies. Every manager, npm too, is installed from the npm registry at a pinned
+// version into a cache directory before its tests, so they run the same on every machine and on CI.
+// npm 12 refuses to patch a `file:` package, so its test patches a small registry package.
 // bun installs with `--backend=copyfile` so the edit in place is the same
 // on Linux CI (whose default is hard links) as on macOS; the hard-link case has a test of its own.
 import { spawnSync } from 'node:child_process';
@@ -17,13 +18,16 @@ import { executeAgentCliAsync, fixturesDir, getTemporaryPath, TEMP_DIR } from '.
 
 const isWindows = process.platform === 'win32';
 
-type Manager = 'bun' | 'pnpm' | 'npm' | 'yarn1' | 'yarn4';
+type Manager = 'bun' | 'pnpm' | 'npm' | 'npm12' | 'yarn1' | 'yarn4';
 
-/** The npm package and version that provides each installed manager. npm comes with node. */
-const PINNED: Partial<Record<Manager, string>> = {
+/** The npm package and version that provides each installed manager. */
+const PINNED: Record<Manager, string> = {
   // Not the runner's bun: bun 1.3.14 crashes in `bun patch --commit` for a `file:` package.
   bun: 'bun@1.4.4',
   pnpm: 'pnpm@12.2.1',
+  // npm 11 has no `npm patch`, so it takes the patch-package path; npm 12 has it.
+  npm: 'npm@11.20.0',
+  npm12: 'npm@12.2.3',
   yarn1: 'yarn@1.22.22',
   yarn4: '@yarnpkg/cli-dist@4.18.1',
 };
@@ -32,6 +36,7 @@ const INSTALL: Record<Manager, string[]> = {
   bun: ['install', '--backend=copyfile'],
   pnpm: ['install', '--config.package-import-method=copy'],
   npm: ['install', '--ignore-scripts', '--no-audit', '--no-fund'],
+  npm12: ['install', '--ignore-scripts', '--no-audit', '--no-fund'],
   yarn1: ['install', '--ignore-scripts', '--non-interactive'],
   // yarn 4 turns on `--immutable` under CI=1, and the first install writes the lockfile.
   yarn4: ['install', '--no-immutable'],
@@ -39,7 +44,7 @@ const INSTALL: Record<Manager, string[]> = {
 
 /** The command a manager runs as. */
 function commandOf(manager: Manager): string {
-  return manager.startsWith('yarn') ? 'yarn' : manager;
+  return manager.startsWith('yarn') ? 'yarn' : manager.startsWith('npm') ? 'npm' : manager;
 }
 
 /** PATH with the pinned manager's bin directory first, or the runner's own PATH. */
@@ -55,7 +60,7 @@ function envFor(manager: Manager): NodeJS.ProcessEnv {
 /** Install the pinned manager once per machine, and put it first on PATH for its tests. */
 function usePinnedManager(manager: Manager): void {
   beforeAll(() => {
-    const spec = PINNED[manager]!;
+    const spec = PINNED[manager];
     const prefix = path.join(
       TEMP_DIR,
       'agent-cli-e2e-package-managers',
@@ -168,7 +173,6 @@ describe('@expo/agent-cli patch — bun', () => {
       packageManager: 'bun',
       package: 'fake-js-lib',
       version: '2.1.0',
-      status: 'saved',
       files: ['index.js'],
       native: [],
       buildFromSource: [],
@@ -196,7 +200,6 @@ describe('@expo/agent-cli patch — bun', () => {
     const report = JSON.parse(result.stdout);
 
     expect(report).toMatchObject({
-      status: 'saved',
       files: ['ios/FakeModule.swift'],
       native: ['ios'],
       buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
@@ -265,7 +268,6 @@ describe.each([
 
     expect(report).toMatchObject({
       packageManager: manager === 'pnpm' ? 'pnpm' : 'yarn-berry',
-      status: 'saved',
       files: ['android/src/main/java/expo/modules/fake/FakeModule.kt'],
       native: ['android'],
       buildFromSource: [{ platform: 'android', added: ['fake-expo-module'] }],
@@ -281,74 +283,121 @@ describe.each([
   });
 });
 
-describe.each(['npm' as const, 'yarn1' as const])(
-  '@expo/agent-cli patch — %s (patch-package format)',
-  (manager) => {
-    if (manager !== 'npm') {
-      usePinnedManager(manager);
-    }
+describe.each([
+  { manager: 'npm' as const, hooks: ['patch-package'] },
+  { manager: 'yarn1' as const, hooks: ['patch-package', 'postinstall-postinstall'] },
+])('@expo/agent-cli patch — $manager (patch-package format)', ({ manager, hooks }) => {
+  usePinnedManager(manager);
 
-    it(`asks for --yes before it sets up patch-package, and writes nothing without it`, async () => {
-      const projectRoot = await setupProjectAsync(manager);
-      edit(projectRoot, 'fake-js-lib/index.js', '// fix\n');
-      const before = fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8');
+  it(`exits 1 with the --yes line before it sets up patch-package, and writes nothing`, async () => {
+    const projectRoot = await setupProjectAsync(manager);
+    edit(projectRoot, 'fake-js-lib/index.js', '// fix\n');
+    const before = fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8');
 
-      const result = await patchAsync(manager, projectRoot, ['fake-js-lib', '--json']);
-      const report = JSON.parse(result.stdout);
+    const result = await patchAsync(manager, projectRoot, ['fake-js-lib', '--json'], false);
+    const { error } = JSON.parse(result.stdout);
 
-      expect(report).toMatchObject({
-        packageManager: manager === 'npm' ? 'npm' : 'yarn-classic',
-        status: 'needs-consent',
-        patchFile: null,
-      });
-      expect(report.pendingChanges).toEqual([
-        'scripts.postinstall: "patch-package"',
-        expect.stringContaining('devDependencies.patch-package'),
-      ]);
-      expect(report.rerun).toMatch(/patch fake-js-lib --json --yes$/);
-      expect(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).toBe(before);
-      expect(fs.existsSync(path.join(projectRoot, 'patches'))).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(error.code).toBe('PATCH_NEEDS_CONSENT');
+    expect(error.suggestedCommand).toMatch(/patch fake-js-lib --json --yes$/);
+    expect(error.data.pendingChanges).toEqual([
+      'scripts.postinstall: "patch-package --error-on-fail"',
+      ...hooks.map((name) => expect.stringContaining(`devDependencies.${name}`)),
+    ]);
+    expect(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(projectRoot, 'patches'))).toBe(false);
+  });
+
+  it(`writes a patch, from a clean copy of the installed tarball, that applies to a fresh install`, async () => {
+    const projectRoot = await setupProjectAsync(manager);
+    edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '// fix\n');
+
+    const result = await patchAsync(manager, projectRoot, ['fake-expo-module', '--json', '--yes']);
+    const report = JSON.parse(result.stdout);
+
+    expect(report).toMatchObject({
+      packageManager: manager === 'npm' ? 'npm' : 'yarn-classic',
+      files: ['ios/FakeModule.swift'],
+      buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
     });
+    expect(
+      path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
+    ).toBe(path.join('patches', 'fake-expo-module+1.0.0.patch'));
+    const patch = fs.readFileSync(report.patchFile, 'utf8');
+    expect(patch).toContain(
+      'diff --git a/node_modules/fake-expo-module/ios/FakeModule.swift b/node_modules/fake-expo-module/ios/FakeModule.swift'
+    );
+    const pkg = readJson(path.join(projectRoot, 'package.json'));
+    expect(pkg.scripts.postinstall).toBe('patch-package --error-on-fail');
+    expect(Object.keys(pkg.devDependencies)).toEqual(hooks);
 
-    it(`writes a patch, from a clean copy of the installed tarball, that applies to a fresh install`, async () => {
-      const projectRoot = await setupProjectAsync(manager);
-      edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '// fix\n');
+    // patch-package itself comes from the registry, so the fresh install leaves it out and is
+    // checked with `git apply`, which reads the same format from the same directory.
+    delete pkg.devDependencies;
+    fs.writeFileSync(path.join(projectRoot, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
+    reinstall(projectRoot, manager);
+    run('git', ['apply', report.patchFile], projectRoot);
+    expect(
+      fs.readFileSync(
+        path.join(projectRoot, 'node_modules/fake-expo-module/ios/FakeModule.swift'),
+        'utf8'
+      )
+    ).toContain('// fix');
+  });
 
-      const result = await patchAsync(manager, projectRoot, [
-        'fake-expo-module',
-        '--json',
-        '--yes',
-      ]);
-      const report = JSON.parse(result.stdout);
+  it(`refuses a binary edit, which patch-package cannot apply`, async () => {
+    const projectRoot = await setupProjectAsync(manager);
+    fs.writeFileSync(
+      path.join(projectRoot, 'node_modules/fake-js-lib/data.bin'),
+      Buffer.from([0, 1, 2, 0])
+    );
 
-      expect(report).toMatchObject({
-        status: 'saved',
-        files: ['ios/FakeModule.swift'],
-        buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
-      });
-      expect(
-        path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
-      ).toBe(path.join('patches', 'fake-expo-module+1.0.0.patch'));
-      const patch = fs.readFileSync(report.patchFile, 'utf8');
-      expect(patch).toContain(
-        'diff --git a/node_modules/fake-expo-module/ios/FakeModule.swift b/node_modules/fake-expo-module/ios/FakeModule.swift'
-      );
-      const pkg = readJson(path.join(projectRoot, 'package.json'));
-      expect(pkg.scripts.postinstall).toBe('patch-package');
-      expect(pkg.devDependencies['patch-package']).toBeDefined();
+    const result = await patchAsync(
+      manager,
+      projectRoot,
+      ['fake-js-lib', '--json', '--yes'],
+      false
+    );
 
-      // patch-package itself comes from the registry, so the fresh install leaves it out and is
-      // checked with `git apply`, which reads the same format from the same directory.
-      delete pkg.devDependencies['patch-package'];
-      fs.writeFileSync(path.join(projectRoot, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
-      reinstall(projectRoot, manager);
-      run('git', ['apply', report.patchFile], projectRoot);
-      expect(
-        fs.readFileSync(
-          path.join(projectRoot, 'node_modules/fake-expo-module/ios/FakeModule.swift'),
-          'utf8'
-        )
-      ).toContain('// fix');
-    });
-  }
-);
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('PATCH_BINARY');
+    expect(fs.existsSync(path.join(projectRoot, 'patches'))).toBe(false);
+  });
+});
+
+describe('@expo/agent-cli patch — npm 12 (npm patch)', () => {
+  usePinnedManager('npm12');
+
+  it(`saves an edit with npm patch, with no patch-package, and a fresh install applies it`, async () => {
+    // npm patch refuses a package that is not from the registry, so this one is.
+    const projectRoot = path.join(getTemporaryPath(), 'patch-npm12');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, 'package.json'),
+      JSON.stringify({
+        name: 'patch-app',
+        version: '1.0.0',
+        private: true,
+        dependencies: { 'is-number': '7.0.0' },
+      }) + '\n'
+    );
+    run('npm', INSTALL.npm12, projectRoot, 'npm12');
+    edit(projectRoot, 'is-number/index.js', '// patched by e2e\n');
+
+    const result = await patchAsync('npm12', projectRoot, ['is-number', '--json']);
+    const report = JSON.parse(result.stdout);
+
+    expect(report).toMatchObject({ packageManager: 'npm', files: ['index.js'] });
+    expect(
+      path.relative(fs.realpathSync.native(projectRoot), fs.realpathSync.native(report.patchFile))
+    ).toBe(path.join('patches', 'is-number@7.0.0.patch'));
+    const pkg = readJson(path.join(projectRoot, 'package.json'));
+    expect(pkg.patchedDependencies).toEqual({ 'is-number@7.0.0': 'patches/is-number@7.0.0.patch' });
+    expect(pkg.scripts).toBeUndefined();
+
+    reinstall(projectRoot, 'npm12');
+    expect(
+      fs.readFileSync(path.join(projectRoot, 'node_modules/is-number/index.js'), 'utf8')
+    ).toContain('// patched by e2e');
+  });
+});

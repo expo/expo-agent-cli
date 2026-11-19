@@ -11,29 +11,39 @@ import path from 'path';
 export type NativePlatform = 'ios' | 'android';
 
 /**
- * Packages that are precompiled although they are not Expo modules, and the packages they must be
- * built together with. The docs: "Source-building only one produces a mixed precompiled/source
- * linkage that fails to resolve the matching framework at runtime."
+ * Packages that are precompiled for iOS although they are not Expo modules, and the packages they
+ * must be built together with. EAS downloads their XCFrameworks, and the prebuilt-modules guide
+ * says "Source-building only one produces a mixed precompiled/source linkage that fails to resolve
+ * the matching framework at runtime." It names `ios.buildFromSource` only, so the pair is an iOS
+ * rule: an Android patch adds only the patched package.
  */
-const PRECOMPILED_GROUPS: string[][] = [['react-native-reanimated', 'react-native-worklets']];
+const IOS_PRECOMPILED_GROUPS: string[][] = [['react-native-reanimated', 'react-native-worklets']];
 
-const APPLE_EXTENSIONS = new Set(['.swift', '.m', '.mm', '.h', '.hpp', '.podspec']);
+const APPLE_EXTENSIONS = new Set(['.swift', '.m', '.mm', '.podspec']);
 const ANDROID_EXTENSIONS = new Set(['.kt', '.kts', '.java', '.gradle']);
-const SHARED_NATIVE_EXTENSIONS = new Set(['.c', '.cc', '.cpp', '.cxx']);
+/** C and C++ sources and headers: the platform comes from the directory, else both. */
+const SHARED_NATIVE_EXTENSIONS = new Set(['.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp']);
 
-/** Which native platforms a file of a package belongs to. Empty for a JavaScript file. */
+/**
+ * Which native platforms a file of a package belongs to. Empty for a JavaScript file.
+ *
+ * The top directory decides first, so `android/src/main/cpp/NativeProxy.h` is Android. A header or
+ * a C++ file outside a platform directory (`Common/…`) is compiled into both platforms.
+ */
 export function nativePlatformsOfFile(file: string): NativePlatform[] {
   const normalized = file.replace(/\\/g, '/');
   const ext = path.posix.extname(normalized).toLowerCase();
   const top = normalized.split('/')[0];
-  if (top === 'ios' || top === 'apple' || top === 'macos' || APPLE_EXTENSIONS.has(ext)) {
+  if (top === 'ios' || top === 'apple' || top === 'macos') {
     return ['ios'];
   }
-  if (
-    top === 'android' ||
-    ANDROID_EXTENSIONS.has(ext) ||
-    path.posix.basename(normalized) === 'CMakeLists.txt'
-  ) {
+  if (top === 'android') {
+    return ['android'];
+  }
+  if (APPLE_EXTENSIONS.has(ext)) {
+    return ['ios'];
+  }
+  if (ANDROID_EXTENSIONS.has(ext) || path.posix.basename(normalized) === 'CMakeLists.txt') {
     return ['android'];
   }
   if (SHARED_NATIVE_EXTENSIONS.has(ext)) {
@@ -48,17 +58,28 @@ export function nativePlatformsOfFiles(files: string[]): NativePlatform[] {
   return (['ios', 'android'] as const).filter((platform) => found.has(platform));
 }
 
-/** Whether a package ships precompiled native code, i.e. whether `buildFromSource` applies to it. */
-export function isPrecompiledCandidate(packageName: string, packageDir: string): boolean {
+/**
+ * Whether a package ships precompiled native code for a platform, i.e. whether `buildFromSource`
+ * applies to it there. An Expo module does on both; the third-party groups do on iOS only.
+ */
+export function isPrecompiledOn(
+  packageName: string,
+  packageDir: string,
+  platform: NativePlatform
+): boolean {
   return (
     fs.existsSync(path.join(packageDir, 'expo-module.config.json')) ||
-    PRECOMPILED_GROUPS.some((group) => group.includes(packageName))
+    (platform === 'ios' && IOS_PRECOMPILED_GROUPS.some((group) => group.includes(packageName)))
   );
 }
 
-/** The package and the packages it has to be built from source together with. */
-export function buildFromSourceGroup(packageName: string): string[] {
-  return PRECOMPILED_GROUPS.find((group) => group.includes(packageName)) ?? [packageName];
+/** The package and the packages it has to be built from source together with, on a platform. */
+export function buildFromSourceGroup(packageName: string, platform: NativePlatform): string[] {
+  const group =
+    platform === 'ios'
+      ? IOS_PRECOMPILED_GROUPS.find((members) => members.includes(packageName))
+      : null;
+  return group ?? [packageName];
 }
 
 /**

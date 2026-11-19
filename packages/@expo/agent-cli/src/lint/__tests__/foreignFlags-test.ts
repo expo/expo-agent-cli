@@ -145,11 +145,13 @@ describe('the flags this CLI writes onto a command line', () => {
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
+          "--check  src/patch/backends.ts",
           "--detach  src/smoke/deps/startArgs.ts",
           "--device  src/device/installDevBuild.ts",
           "--dst-prefix=  src/patch/backends.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
+          "--help  src/patch/backends.ts",
           "--is-inside-work-tree  src/new/git.ts",
           "--json  src/config/introspectAsync.ts",
           "--json  src/deploy/launchCli.ts",
@@ -206,6 +208,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-o  src/device/installedApps.ts",
           "-p  src/device/screenshot.ts",
           "-p  src/toolchain/detect.ts",
+          "-p1  src/patch/backends.ts",
           "-ports  src/deviceBinding/android.ts",
           "-q  src/project/nativeCode.ts",
           "-r  src/device/installExpoGo.ts",

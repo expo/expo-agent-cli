@@ -16,7 +16,7 @@ import { savePatchAsync, type PatchTarget } from './backends';
 import {
   addBuildFromSource,
   buildFromSourceGroup,
-  isPrecompiledCandidate,
+  isPrecompiledOn,
   nativePlatformsOfFiles,
   type BuildFromSourceChange,
   type NativePlatform,
@@ -34,14 +34,10 @@ export interface PatchReport {
   packageManager: PackageManagerName;
   package: string;
   version: string;
-  status: 'saved' | 'needs-consent';
-  patchFile: string | null;
+  patchFile: string;
   files: string[];
   native: NativePlatform[];
   buildFromSource: BuildFromSourceChange[];
-  /** Project changes that wait for `--yes`. Empty unless `status` is `needs-consent`. */
-  pendingChanges: string[];
-  rerun: string | null;
   followups: FollowUp[];
 }
 
@@ -99,20 +95,9 @@ function printReport(report: PatchReport, json: boolean): void {
     Log.log(JSON.stringify(report, null, 2));
     return;
   }
-  if (report.status === 'needs-consent') {
-    Log.log(
-      [
-        `${report.packageManager} has no patch feature of its own, so this uses patch-package, which needs these changes to package.json:`,
-        ...report.pendingChanges.map((change) => `  - ${change}`),
-        `Nothing was written. To save the patch and make these changes, run:`,
-        `  ${report.rerun}`,
-      ].join('\n')
-    );
-    return;
-  }
   const lines = [
     `Saved the patch for ${report.package}@${report.version} with ${report.packageManager}: ${
-      path.relative(report.projectRoot, report.patchFile!) || report.patchFile
+      path.relative(report.projectRoot, report.patchFile) || report.patchFile
     }`,
     `Files: ${report.files.join(', ')}`,
   ];
@@ -155,32 +140,33 @@ export async function patchAsync(
   const native = nativePlatformsOfFiles(result.files);
 
   if (result.status === 'needs-consent') {
-    const rerun = consentRerunCommand(['patch', packageName]);
-    const report: PatchReport = {
-      projectRoot,
-      packageManager: packageManager.name,
-      package: packageName,
-      version,
-      status: 'needs-consent',
-      patchFile: null,
-      files: result.files,
-      native,
-      buildFromSource: [],
-      pendingChanges: result.projectChanges,
-      rerun,
-      followups: [],
-    };
-    printReport(report, options.json);
-    return;
+    // Work the caller did not ask for (llp/0008 §The plan is announced, not negotiated): the call
+    // is fixed by adding --yes, so it is exit 1 with a `Try:` line, not a success that saved nothing.
+    const error = new CommandError(
+      'PATCH_NEEDS_CONSENT',
+      [
+        `${packageManager.name} has no patch feature of its own, so this uses patch-package, which needs these changes to package.json:`,
+        ...result.projectChanges.map((change) => `  - ${change}`),
+        `Nothing was written. Run the same command with --yes to save the patch and make these changes.`,
+      ].join('\n')
+    );
+    error.suggestedCommand = consentRerunCommand(['patch', packageName]);
+    error.data = { pendingChanges: result.projectChanges, files: result.files };
+    throw error;
   }
 
-  const buildFromSource =
-    native.length && isPrecompiledCandidate(packageName, packageDir)
-      ? addBuildFromSource(projectRoot, buildFromSourceGroup(packageName), native)
-      : [];
+  const buildFromSource = native
+    .filter((platform) => isPrecompiledOn(packageName, packageDir, platform))
+    .flatMap((platform) =>
+      addBuildFromSource(projectRoot, buildFromSourceGroup(packageName, platform), [platform])
+    );
 
   const followups: FollowUp[] = followUpsEnabled(options.followups)
-    ? buildPatchFollowUps({ packageName, native: native.length > 0 })
+    ? buildPatchFollowUps({
+        packageName,
+        native: native.length > 0,
+        hashedByFingerprint: isUnder(result.patchFile, path.join(packageManager.root, 'patches')),
+      })
     : [];
 
   const report: PatchReport = {
@@ -188,16 +174,18 @@ export async function patchAsync(
     packageManager: packageManager.name,
     package: packageName,
     version,
-    status: 'saved',
     patchFile: result.patchFile,
     files: result.files,
     native,
     buildFromSource,
-    pendingChanges: [],
-    rerun: null,
     followups,
   };
 
   printReport(report, options.json);
   reportFollowUps('patch', followups, { json: options.json });
+}
+
+function isUnder(file: string, dir: string): boolean {
+  const relative = path.relative(dir, file);
+  return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
