@@ -37,6 +37,7 @@ import {
   waitForDevLockAsync,
 } from '../utils';
 import { runtimeTarget } from '../runtimeTargetFixtures';
+import { installStubXcrunAsync } from './installedAppStubs';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
@@ -75,6 +76,8 @@ async function setupAsync(
   const projectRoot = await setupFixtureAsync(fixtureName);
   await installStubFingerprintAsync(projectRoot);
   await installStubEasAsync(projectRoot, { script: easScript });
+  // No local simulator: a booted one named like the session's device would claim its app.
+  await installStubXcrunAsync(projectRoot, { bind: false });
   return projectRoot;
 }
 
