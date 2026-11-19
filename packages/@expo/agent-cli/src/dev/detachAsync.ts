@@ -21,7 +21,7 @@ import {
   watchOpenPlatformGraceAsync,
 } from './detachHealth';
 import { waitForDetachedStartupAsync } from './detachLockWait';
-import { DETACHED_PROGRESS_ENV, reportDetachedProgress } from './detachProgress';
+import { reportDetachedProgress } from './detachProgress';
 import { detachEas, reportDetached, WHOLE_LOG } from './detachReport';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
@@ -325,7 +325,6 @@ function spawnDetachedChild(projectRoot: string, options: DevOptions, print: boo
       ...detachedEventLogEnv(process.env),
       __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
       __EXPO_AGENT_CLI_DETACHED: '1',
-      [DETACHED_PROGRESS_ENV]: print ? '1' : undefined,
       [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
     },
   });

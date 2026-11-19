@@ -4,15 +4,13 @@ import { Log } from '../log';
 import { formatStartPlan } from '../plan/format';
 import type { StartPlan } from '../project/types';
 
-export const DETACHED_PROGRESS_ENV = '__EXPO_AGENT_CLI_DETACH_PROGRESS';
-
 interface PlanMessage {
   type: 'dev-plan';
   plan: StartPlan;
 }
 
 export function sendDetachedPlan(plan: StartPlan): void {
-  if (process.env[DETACHED_PROGRESS_ENV] === '1' && process.connected) {
+  if (process.connected) {
     process.send?.({ type: 'dev-plan', plan } satisfies PlanMessage, () => {
       // The detached child may outlive its parent.
       if (process.connected) process.disconnect?.();
