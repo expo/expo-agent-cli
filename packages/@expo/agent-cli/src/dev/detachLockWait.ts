@@ -20,13 +20,7 @@ async function waitForLockAsync(
     timeoutMs,
     hasExited,
     acceptBuilding = false,
-    onMetroStarting,
-  }: {
-    timeoutMs: number;
-    hasExited: () => boolean;
-    acceptBuilding?: boolean;
-    onMetroStarting?: (lock: DevServerLockInfo) => void;
-  }
+  }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
   // A run that ends in its build lets go of its lock; its last `building` answer says it built.
@@ -34,7 +28,6 @@ async function waitForLockAsync(
   for (;;) {
     const lock = await readDevServerLockAsync(projectRoot);
     if (lock?.phase === 'building') building = lock;
-    if (lock && (lock.phase === 'serving' || lock.portReported)) onMetroStarting?.(lock);
     // A `building` lock has no dev server yet. It ends the wait only for a caller that reports it.
     if (lock?.phase === 'building' && acceptBuilding) return lock;
     if (lock && lock.phase !== 'building') {
@@ -74,14 +67,12 @@ export async function waitForDetachedStartupAsync(
   projectRoot: string,
   options: DevOptions,
   startedAt: number,
-  hasExited: () => boolean,
-  onMetroStarting?: (lock: DevServerLockInfo) => void
+  hasExited: () => boolean
 ): Promise<DetachedStartup> {
   const lock = await waitForLockAsync(projectRoot, {
     timeoutMs: options.detachTimeoutMs,
     hasExited,
     acceptBuilding: !options.waitReady,
-    onMetroStarting,
   });
   if (!lock) return { kind: 'unobserved' };
   if (lock.phase !== 'building') return { kind: lock.phase, lock };

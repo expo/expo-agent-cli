@@ -232,10 +232,8 @@ The lock proves the wrapper is alive; only an HTTP probe of its URL proves the d
 
 **The parent waits for the lock, not for the child.** A detached start is finished when the child's lock answers. With `--wait-ready` the parent also waits until `/status` answers for this project; a port change moves the wait to the new URL within the same budget, and another project's answer never ends it. Without the flag `ready` is `null`. The budget is 120 s (`AGENT_CLI_DETACH_TIMEOUT_MS` overrides it).
 
-A new detached run prints the absolute live log path and resolved plan on stderr. With `--wait-ready`,
-it announces native work before the build and reports the Metro readiness wait when Metro reports its
-port or starts serving. The iOS and Android cases in `dev-detach-test` observe both messages before
-letting Metro answer `/status`.
+A new detached run prints the absolute live log path on stderr before it waits. A caller whose tool
+timeout ends the wait still has that path.
 
 **One dev server per project.** A local `dev --detach` beside a live lock stops as a foreground `dev` does (§A busy port). A detached run whose device is on EAS goes on to the running server and opens its session there ([[0035-one-device-per-worktree]] §Preserved sessions), and `smoke`'s bootstrap reuses the running server. Reuse adds no wait for the app to open. A lock that another run takes after the parent's read is not the child's: the parent compares the lock's pid with the child's, and relays the child's `DEV_SERVER_RUNNING` refusal.
 

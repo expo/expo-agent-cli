@@ -21,7 +21,6 @@ import {
   watchOpenPlatformGraceAsync,
 } from './detachHealth';
 import { waitForDetachedStartupAsync } from './detachLockWait';
-import { reportDetachedProgress } from './detachProgress';
 import { detachEas, reportDetached, WHOLE_LOG } from './detachReport';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
@@ -36,6 +35,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, statedSmokePlatform } from '../smoke/suggest';
 import { requestsTunnel } from '../start/followUps';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
+import { Log } from '../log';
 import { CommandError } from '../utils/errors';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
@@ -308,7 +308,7 @@ async function sessionForExistingRunAsync(
       : null;
 }
 
-function spawnDetachedChild(projectRoot: string, options: DevOptions, print: boolean) {
+function spawnDetachedChild(projectRoot: string, options: DevOptions) {
   const { logFile, fd } = openDetachedLogSync(projectRoot);
   const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);
 
@@ -318,7 +318,7 @@ function spawnDetachedChild(projectRoot: string, options: DevOptions, print: boo
     detached: true,
     // Both streams into the log. `ignore` on stdin, because a detached process has no terminal to
     // read one from, and an inherited stdin would keep this shell attached to it.
-    stdio: print ? ['ignore', fd, fd, 'ipc'] : ['ignore', fd, fd],
+    stdio: ['ignore', fd, fd],
     // The parent command owns usage telemetry; this child only continues its work. The second
     // variable makes the child's failures name their code in the log, which this process reads back.
     env: {
@@ -330,7 +330,6 @@ function spawnDetachedChild(projectRoot: string, options: DevOptions, print: boo
   });
   fs.closeSync(fd);
   child.unref();
-  const reportMetroWait = print ? reportDetachedProgress(child, logFile, options.waitReady) : null;
 
   let state: ChildState = { status: 'running' };
   const childGone = new AbortController();
@@ -346,7 +345,6 @@ function spawnDetachedChild(projectRoot: string, options: DevOptions, print: boo
     logFile,
     pid: child.pid ?? null,
     signal: childGone.signal,
-    reportMetroWait,
     hasExited: () => state.status === 'exited',
     get exit(): ChildExit | null {
       return state.status === 'exited' ? state.exit : null;
@@ -369,17 +367,10 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
   // The session bound before the spawn, expired or not, is the one the child reuses and renews.
   const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
-  const child = spawnDetachedChild(projectRoot, options, print);
+  const child = spawnDetachedChild(projectRoot, options);
   const { logFile, hasExited } = child;
-  const wait = await waitForDetachedStartupAsync(
-    projectRoot,
-    options,
-    startedAt,
-    hasExited,
-    (lock) => {
-      if (options.waitReady && lock.pid === child.pid) child.reportMetroWait?.();
-    }
-  );
+  if (print) Log.progress(`Live log: ${logFile}`);
+  const wait = await waitForDetachedStartupAsync(projectRoot, options, startedAt, hasExited);
   if ('lock' in wait && wait.lock.pid !== child.pid) {
     return await followForeignLockAsync(context, child, wait.lock);
   }
