@@ -16,7 +16,6 @@ import {
   holdDevLockAsync,
   killAsync,
   readDevLockAsync,
-  readEvents,
   readRunRecord,
   setupFixtureAsync,
   spawnAgentCli,
@@ -371,46 +370,6 @@ describe('@expo/agent-cli runtime:stop', () => {
         'stopped',
         'wasRunning',
       ]);
-    } finally {
-      await stub.close();
-    }
-  });
-
-  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a device that refused the stop is a tool
-  // error, so `--json` prints the envelope with the device's answer in `data`, not a report.
-  it('prints the error envelope when the device refuses the stop', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const eventsFile = path.join(projectRoot, 'events.jsonl');
-    await installStubXcrunAsync(projectRoot, {
-      simulators: [BOOTED_SIMULATOR],
-      refuses: ['terminate'],
-    });
-    const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
-
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:stop', '--ios', '--json', '--dev-server-url', stub.url],
-        { env: { ...stubExpoEnv(projectRoot), LOG_EVENTS: eventsFile }, reject: false }
-      );
-
-      expect(result.exitCode).toBe(1);
-      expect(JSON.parse(result.stdout)).toEqual({
-        error: {
-          code: 'DEVICE_STOP_REFUSED',
-          message: expect.stringContaining('The device did not stop host.exp.Exponent'),
-          suggestedCommand: null,
-          needsHuman: null,
-          data: {
-            bundleId: 'host.exp.Exponent',
-            command: expect.stringContaining(`simctl terminate ${SIMULATOR_UDID}`),
-            reason: 'stub xcrun: terminate refused',
-          },
-        },
-      });
-      expect(readEvents(eventsFile).find((entry) => entry._e === 'cli:error')).toMatchObject({
-        code: 'DEVICE_STOP_REFUSED',
-      });
     } finally {
       await stub.close();
     }

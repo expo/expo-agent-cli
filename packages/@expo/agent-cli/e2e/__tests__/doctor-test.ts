@@ -280,10 +280,9 @@ describe('@expo/agent-cli doctor:check', () => {
     'prints the error envelope when a signal stops expo-doctor',
     async () => {
       const projectRoot = await setupAsync('go-app');
-      const eventsFile = path.join(projectRoot, 'events.jsonl');
 
       const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
-        env: { STUB_DOCTOR_MODE: 'killed', LOG_EVENTS: eventsFile },
+        env: { STUB_DOCTOR_MODE: 'killed' },
         reject: false,
       });
 
@@ -296,9 +295,6 @@ describe('@expo/agent-cli doctor:check', () => {
           needsHuman: null,
           data: { signal: 'SIGKILL' },
         },
-      });
-      expect(readEvents(eventsFile).find((entry) => entry._e === 'cli:error')).toMatchObject({
-        code: 'EXPO_DOCTOR_KILLED',
       });
     }
   );

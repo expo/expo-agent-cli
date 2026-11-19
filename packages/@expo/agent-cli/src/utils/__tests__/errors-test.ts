@@ -8,7 +8,10 @@ import {
   isNeedsHumanError,
   logCmdError,
   type NeedsHuman,
+  UNCAUGHT_EXCEPTION_CODE,
 } from '../errors';
+import { flushEventLogger } from '2g';
+
 import { setJsonRequested } from '../jsonMode';
 import type { MockInstance } from 'vitest';
 import { mockPlatform } from './mockPlatform';
@@ -154,6 +157,19 @@ describe(logCmdError, () => {
       await exitCodeOfAsync(new CommandError('BAD_ARGS', 'nope'));
 
       expect(stdoutObject()).toBeNull();
+    });
+
+    // An `Error` that is not a `CommandError` is a defect: the crash report, then the event and the
+    // flush that only this asynchronous path can afford.
+    it('reports a plain Error as a crash, emits cli:error and flushes before the exit', async () => {
+      setJsonRequested(true);
+
+      expect(await exitCodeOfAsync(new Error('injected defect'))).toBe(EXIT_ERROR);
+      expect(stdoutObject().error.code).toBe(UNCAUGHT_EXCEPTION_CODE);
+      expect(emitted).toEqual([
+        { name: 'cli:error', payload: expect.objectContaining({ code: UNCAUGHT_EXCEPTION_CODE }) },
+      ]);
+      expect(flushEventLogger).toHaveBeenCalled();
     });
 
     it('prints one object with the stable key set', async () => {
