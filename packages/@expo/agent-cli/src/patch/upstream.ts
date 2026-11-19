@@ -7,17 +7,18 @@
 // contribute (checks, changesets, the PR body) is the repository's own AGENTS.md, CONTRIBUTING.md and
 // PR template: the plan links them instead of copying rules that change there.
 //
-// Opening a pull request publishes the diff, which can hold code of the user's app, so the run stops
-// with the needs-human code and the first step is to ask the user.
+// Opening a pull request publishes the diff, which can hold code of the user's app, so the first step
+// is to ask the user. The run itself exits 0: the steps after that are agent work, and llp/0010 keeps
+// exit 7 for a step only a person can finish.
 
 import fs from 'fs';
 import path from 'path';
 
 import * as Log from '../log';
+import { quoteArgument } from '../utils/consent';
 import { CommandError } from '../utils/errors';
 import { detectPackageManager } from '../utils/packageManager';
 import { findExecutableOnPath } from '../utils/pathLookup';
-import { filesOfPatch } from './backends';
 import { nativePlatformsOfFiles } from './buildFromSource';
 import { isExpoRepoPackage, resolveInstalledPackage } from './patchAsync';
 
@@ -68,8 +69,23 @@ export const UPSTREAM_ISSUE_TEMPLATE = `${UPSTREAM_BLOB}/.github/ISSUE_TEMPLATE/
 /** The fields of the `expo/expo` bug report form, in its order. */
 const ISSUE_FIELDS = `"Minimal reproducible example" (the repository URL), "Steps to reproduce" (the platforms, the environment, the package manager, what you expect and what happens), "Environment" (the output of "npx expo-env-info") and "Expo Doctor Diagnostics" (the output of "npx expo-doctor@latest")`;
 
-/** A repro is a repository people can clone: `expo/expo` bug reports ask for a link to one. */
-const GITHUB_REPO_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\/.*)?$/;
+/**
+ * A repro is a repository people can clone: `expo/expo` bug reports ask for a link to one. So only
+ * the repository URL, not an issue, a file or a pull request in it.
+ */
+const GITHUB_REPO_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+?(?:\.git)?\/?$/;
+
+/** `repository.directory` goes into a shell line, so it is a plain relative path or nothing. */
+const REPOSITORY_DIRECTORY = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@.+-]+(?:\/[\w@.+-]+)*$/;
+
+export function assertRepositoryDirectory(directory: string, packageName: string): void {
+  if (!REPOSITORY_DIRECTORY.test(directory)) {
+    throw new CommandError(
+      'PATCH_BAD_REPOSITORY',
+      `The "repository.directory" of ${packageName} is not a plain relative path ("${directory}"), so there is no safe place in expo/expo to apply the patch.`
+    );
+  }
+}
 
 export function assertReproUrl(repro: string): string {
   const url = repro.trim();
@@ -99,30 +115,121 @@ export function mapUpstreamFile(file: string, directory: string): UpstreamFile {
   return { file, target: `${directory}/${file}`, portTo: null };
 }
 
-/** Find the saved patch of a package among the files the package managers write. */
-export function findPatchFile(root: string, packageName: string): string | null {
-  const flat = packageName.replace(/\//g, '+');
-  const prefixes = [
-    `${packageName.replace(/\//g, '__')}@`, // pnpm, bun (scoped names are flattened)
-    `${packageName}@`,
-    `${flat}+`, // patch-package
-    `${packageName.replace(/^@/, '').replace(/\//g, '-')}-npm-`, // yarn berry
-  ];
-  for (const dir of ['patches', path.join('.yarn', 'patches')]) {
-    const full = path.join(root, dir);
-    if (!fs.existsSync(full)) {
+/** The files a patch changes, relative to the package root. */
+export function filesOfPatch(patch: string): string[] {
+  const files = new Set<string>();
+  // `+++ b/<file>` names the file; for a deleted file it is /dev/null and `--- a/<file>` does.
+  // git-style patches and npm 12's plain unified diffs both have these lines.
+  let removed: string | null = null;
+  for (const line of patch.split(/\r?\n/)) {
+    const from = /^--- (?:a\/)?(.+?)\t?$/.exec(line);
+    if (from) {
+      removed = from[1] === '/dev/null' ? null : from[1]!;
       continue;
     }
-    const match = fs
-      .readdirSync(full)
-      .find(
-        (name) => name.endsWith('.patch') && prefixes.some((prefix) => name.startsWith(prefix))
-      );
-    if (match) {
-      return path.join(full, match);
+    const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(line);
+    if (to) {
+      const file = to[1] === '/dev/null' ? removed : to[1]!;
+      if (file) {
+        files.add(file.trim().replace(/^node_modules\/(?:@[^/]+\/)?[^/]+\//, ''));
+      }
     }
   }
-  return null;
+  return [...files].sort();
+}
+
+interface Registration {
+  /** What the registration says after `<name>@`: a version, a spec, or null for any version. */
+  spec: string | null;
+  file: string;
+}
+
+/** `name@spec` → its name and spec; a bare `name` (pnpm: every version) has no spec. */
+function splitKey(key: string): { name: string; spec: string | null } {
+  const at = key.indexOf('@', 1);
+  return at < 0 ? { name: key, spec: null } : { name: key.slice(0, at), spec: key.slice(at + 1) };
+}
+
+/** The `patchedDependencies` map of `pnpm-workspace.yaml`: one `key: value` line per entry. */
+function pnpmWorkspacePatches(root: string): Record<string, string> {
+  const file = path.join(root, 'pnpm-workspace.yaml');
+  if (!fs.existsSync(file)) {
+    return {};
+  }
+  const entries: Record<string, string> = {};
+  let inside = false;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    if (/^\S/.test(line)) {
+      inside = /^patchedDependencies:\s*$/.test(line);
+      continue;
+    }
+    const entry = inside && /^\s+(['"]?)(.+?)\1:\s*(['"]?)(.+?)\3\s*$/.exec(line);
+    if (entry) {
+      entries[entry[2]!] = entry[4]!;
+    }
+  }
+  return entries;
+}
+
+/**
+ * Every patch file the project registers for a package, as its package manager recorded it:
+ * `patchedDependencies` (bun and npm 12 in package.json, pnpm in pnpm-workspace.yaml or
+ * package.json), a `patch:` descriptor (yarn berry), or patch-package's `<name>+<version>.patch`.
+ * File names are not guessed: each manager encodes a scoped name its own way (bun `%2F`, pnpm `__`,
+ * yarn `@scope-name-<protocol>-<hash>`).
+ */
+function registeredPatches(root: string, packageName: string, version: string): Registration[] {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const found: Registration[] = [];
+  const maps = [pkg.patchedDependencies, pkg.pnpm?.patchedDependencies, pnpmWorkspacePatches(root)];
+  for (const map of maps) {
+    for (const [key, file] of Object.entries<unknown>(map ?? {})) {
+      const { name, spec } = splitKey(key);
+      if (name === packageName && typeof file === 'string') {
+        found.push({ spec, file: path.resolve(root, file) });
+      }
+    }
+  }
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'resolutions']) {
+    for (const value of Object.values<unknown>(pkg[field] ?? {})) {
+      if (typeof value === 'string' && value.startsWith(`patch:${packageName}@`)) {
+        // `patch:<name>@<spec>#~/.yarn/patches/<file>.patch`, where `~` is the project root.
+        const source = value.slice(value.lastIndexOf('#') + 1).split('::')[0]!;
+        found.push({ spec: null, file: path.resolve(root, source.replace(/^~\//, '')) });
+      }
+    }
+  }
+  const patchPackageFile = path.join(
+    root,
+    'patches',
+    `${packageName.replace(/\//g, '+')}+${version}.patch`
+  );
+  if (fs.existsSync(patchPackageFile)) {
+    found.push({ spec: version, file: patchPackageFile });
+  }
+  return found.filter((entry) => fs.existsSync(entry.file));
+}
+
+/** The one registered patch file of this package at this version. */
+export function findPatchFile(root: string, packageName: string, version: string): string {
+  const all = registeredPatches(root, packageName, version);
+  const candidates = all.length > 1 ? all.filter((entry) => entry.spec === version) : all;
+  const files = [...new Set(candidates.map((entry) => entry.file))];
+  if (files.length === 1) {
+    return files[0]!;
+  }
+  if (!all.length) {
+    throw new CommandError(
+      'PATCH_NOT_FOUND',
+      `No saved patch for ${packageName} is registered in this project. Save one first with "patch ${packageName}".`
+    );
+  }
+  throw new CommandError(
+    'PATCH_AMBIGUOUS',
+    `More than one saved patch is registered for ${packageName}, and not exactly one is for the installed ${version}: ${[
+      ...new Set(all.map((entry) => path.relative(root, entry.file))),
+    ].join(', ')}. Remove the ones that are not in use, then run this again.`
+  );
 }
 
 export function planUpstream(
@@ -141,18 +248,13 @@ export function planUpstream(
       `${packageName} does not come from expo/expo (its package.json "repository" says otherwise), so there is no Expo pull request to plan.`
     );
   }
-  const patchFile = findPatchFile(packageManager.root, packageName);
-  if (!patchFile) {
-    throw new CommandError(
-      'PATCH_NOT_FOUND',
-      `No saved patch for ${packageName} was found in patches/ or .yarn/patches/. Save one first with "patch ${packageName}".`
-    );
-  }
+  const patchFile = findPatchFile(packageManager.root, packageName, version);
 
   const directory =
     typeof manifest.repository === 'object' && typeof manifest.repository.directory === 'string'
       ? manifest.repository.directory.replace(/\/$/, '')
       : `packages/${packageName}`;
+  assertRepositoryDirectory(directory, packageName);
   const patchText = fs.readFileSync(patchFile, 'utf8');
   const changed = filesOfPatch(patchText);
   const files = changed.map((file) => mapUpstreamFile(file, directory));
@@ -232,16 +334,16 @@ export function buildApplyCommand(
 ): string {
   const fromProject = /^diff --git a\/node_modules\//m.test(patchText);
   const strip = fromProject ? 2 + packageName.split('/').length : 1;
-  const args = ['git apply', ...(strip !== 1 ? [`-p${strip}`] : []), `--directory=${directory}`];
+  const args = [
+    'git apply',
+    ...(strip !== 1 ? [`-p${strip}`] : []),
+    quoteArgument(`--directory=${directory}`),
+  ];
   if (hasBuild) {
-    args.push(`--exclude='${directory}/build/*'`);
+    args.push(quoteArgument(`--exclude=${directory}/build/*`));
   }
-  args.push(quote(patchFile));
+  args.push(quoteArgument(patchFile));
   return args.join(' ');
-}
-
-function quote(value: string): string {
-  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The Expo SDK of the project, from its installed `expo` (the major version is the SDK). */

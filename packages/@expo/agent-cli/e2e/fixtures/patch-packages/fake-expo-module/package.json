@@ -5,7 +5,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/expo/expo.git",
-    "directory": "packages/fake-expo-module"
+    "directory": "packages/expo-fake-module-src"
   },
   "main": "build/index.js"
 }
