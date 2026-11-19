@@ -23,6 +23,7 @@ import {
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
+import { runtimeTarget } from '../runtimeTargetFixtures';
 
 let machine: string;
 let expoHome: string;
@@ -40,13 +41,21 @@ afterEach(async () => {
     });
   }
 });
-function envFor(root: string) {
+/** The device name of the app on a session of each platform, as Metro lists it. */
+const SESSION_DEVICE = { ios: 'iPhone 17 Pro', android: 'sdk_gphone64_arm64 - 15 - API 35' };
+
+function envFor(root: string, platform: 'ios' | 'android' = 'ios') {
   return {
     ...stubExpoEnv(root),
     AGENT_CLI_NO_DEVICE: '0',
     __UNSAFE_EXPO_HOME_DIRECTORY: expoHome,
     STUB_SIM_STORE: path.join(machine, 'sessions.json'),
     STUB_SIM_SESSIONS: '0',
+    // The app attaches once the session opens it, so `dev --wait-ready` finds it.
+    STUB_EXPO_TARGETS: JSON.stringify([
+      runtimeTarget('session-app', { deviceName: SESSION_DEVICE[platform] }),
+    ]),
+    STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
   };
 }
 async function project(fixture = 'go-app') {
@@ -147,7 +156,7 @@ it.each(['ios', 'android'] as const)(
     list([{ id: 'preserved-session', platform: platform.toUpperCase() }]);
     await writeCloudSessionFileAsync(root, 'preserved-session');
     const env = {
-      ...envFor(root),
+      ...envFor(root, platform),
       STUB_SIM_START_ID: 'preserved-session',
       STUB_EXPO_DEV_SERVER_PORT: platform === 'ios' ? '8754' : '8755',
       STUB_EXPO_LISTEN: '1',

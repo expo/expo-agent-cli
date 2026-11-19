@@ -1,6 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §A loaded app
 
 import { createDefaultTargetSelector, evaluateJsFromCdpAsync, type CdpTarget } from './cdpClient';
+import { probeDevServerAsync } from './devServer';
 
 /** true: a bundle ran. false: the runtime answered that no bundle ran. null: cannot ask. */
 export type AppLoaded = boolean | null;
@@ -42,5 +43,38 @@ export async function readAppLoadedAsync(
     );
   } catch {
     return null;
+  }
+}
+
+/** How often the debugger target list is read again while a wait for a loaded app runs. */
+const LOADED_APP_POLL_MS = 500;
+
+/**
+ * Wait until the scope holds a debugger target and its runtime does not answer that no bundle ran,
+ * until the deadline, or until `stillWanted` says no. The one poll for a loaded app: `navigate`
+ * and `dev --wait-ready` both wait with it.
+ *
+ * @param classify places a target list in the caller's scope.
+ * @returns how many targets the scope had when the wait ended, and the last answer to the bundle
+ * question. Zero targets, or `loaded: false`, means the wait ended without a loaded app.
+ */
+export async function waitForLoadedAppAsync(
+  devServerUrl: string,
+  classify: (targets: CdpTarget[], deadline: number) => Promise<{ read: CdpTarget[] }>,
+  deadline: number,
+  stillWanted: () => boolean = () => true
+): Promise<{ targets: number; loaded: AppLoaded }> {
+  // An app that a poll saw stays the answer when the list is empty for the last read: a short gap
+  // in the list must not start a recovery that stops a loading app.
+  let seen: { targets: number; loaded: AppLoaded } | null = null;
+  for (;;) {
+    const probe = await probeDevServerAsync(devServerUrl);
+    const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
+    const targets = read.length;
+    const loaded = targets > 0 ? await readAppLoadedAsync(read, deadline) : null;
+    if (targets > 0) seen = { targets, loaded };
+    if (targets > 0 && loaded !== false) return { targets, loaded };
+    if (Date.now() >= deadline || !stillWanted()) return seen ?? { targets, loaded };
+    await new Promise((resolve) => setTimeout(resolve, LOADED_APP_POLL_MS));
   }
 }

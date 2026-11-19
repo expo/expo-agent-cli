@@ -92,6 +92,15 @@ class Env {
   }
 
   /**
+   * How long `dev --detach --wait-ready` waits for the app after the bundler and the session.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   */
+  get AGENT_CLI_DEV_APP_WAIT_MS() {
+    return int('AGENT_CLI_DEV_APP_WAIT_MS', 120_000);
+  }
+
+  /**
    * How long `dev --detach` waits for its child before it reports.
    *
    * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization

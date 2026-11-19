@@ -29,6 +29,7 @@ import {
   readEvents,
   freePortAsync,
 } from '../utils';
+import { runtimeTarget } from '../runtimeTargetFixtures';
 import {
   EMULATOR_NAME,
   installStubAdbAsync,
@@ -1416,6 +1417,13 @@ describe('@expo/agent-cli dev', () => {
             STUB_EXPO_RUN_LAUNCH_FAILS: '1',
             STUB_EXPO_DELAY_MS: '20000',
             STUB_EXPO_DEV_SERVER_PORT: '8098',
+            // The app on the bound emulator, attached, which `--wait-ready` waits for.
+            STUB_EXPO_TARGETS: JSON.stringify([
+              runtimeTarget('emulator-app', {
+                appId: APP_ID,
+                deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+              }),
+            ]),
           },
           reject: false,
         }

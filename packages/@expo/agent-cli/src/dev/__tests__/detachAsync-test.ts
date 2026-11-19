@@ -38,6 +38,11 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../reopenEas', () => ({ reopenEasAsync: vi.fn() }));
+// The app wait reads a real dev server; these cases are about the session, so the app is there.
+vi.mock('../waitForDevApp', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../waitForDevApp')>()),
+  waitForDevAppAsync: vi.fn(async () => ({ attached: true, loaded: true, waitedMs: 0 })),
+}));
 vi.mock('../openAppEas', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../openAppEas')>()),
   otherPlatformSessionAsync: vi.fn(),

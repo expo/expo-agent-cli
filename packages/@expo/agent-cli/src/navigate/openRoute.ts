@@ -24,7 +24,7 @@ import {
 import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErrors';
 import { event as cliEvent } from '../events';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
-import { readAppLoadedAsync, type AppLoaded } from '../runtime/appLoaded';
+import { waitForLoadedAppAsync, type AppLoaded } from '../runtime/appLoaded';
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
 import { probeDevServerAsync } from '../runtime/devServer';
 import {
@@ -75,6 +75,14 @@ export interface OpenRouteOptions extends RouteUrlOptions {
    * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
    */
   device?: NavigateDevice;
+  /**
+   * With no attach budget, open a development build that has no attached app with its launcher URL
+   * alone, in place of the route link. `dev` passes it: its route is `/`, and the launcher loads the
+   * app at its first route. The bare route link only moves an app that is already loaded.
+   *
+   * @ref llp/0026-dev-owns-the-open.rfc.md §How it hangs together
+   */
+  launchDevClient?: boolean;
 }
 
 /** One open of a URL on a device, and what came of it. */
@@ -291,9 +299,11 @@ export async function openRouteAsync(
   // Whether the app is attached is asked of the device this run opens, not of the platform flag:
   // with no flag, an app of another platform on the same dev server is not this device's app.
   const launcherUrl =
-    budgetMs > 0 && !resolved.isExpoGo && reads.decisionTargets.length === 0
+    (budgetMs > 0 || options.launchDevClient === true) && reads.decisionTargets.length === 0
       ? devLauncherUrlOf(resolved)
       : null;
+  // With no budget, the launcher URL is the whole open: nothing waits for it to load.
+  const launchOnly = budgetMs === 0 ? launcherUrl : null;
 
   // @ref ./adbReverse — before the link, never after. `exp://127.0.0.1:<port>` means the *device's*
   // loopback, so an emulator resolves it to a port nothing listens on and Expo Go lands on its
@@ -327,11 +337,10 @@ export async function openRouteAsync(
     budgetMs,
   });
 
-  const result = await openUrlOnBackendAsync(device, {
-    projectRoot,
-    url: resolved.url,
-    appId,
-  });
+  const result = await openUrlOnBackendAsync(
+    device,
+    linkOpenOf({ projectRoot, options, device, appId, url: resolved.url, launchOnly })
+  );
 
   const attach = await confirmAttachAsync({
     projectRoot,
@@ -364,7 +373,7 @@ export async function openRouteAsync(
     reversedPort: reverse?.port ?? null,
     attached: attach.confirmed,
     appLoaded: attach.loaded,
-    launchUrl: launch?.url ?? null,
+    launchUrl: launch?.url ?? launchOnly,
   });
 
   return {
@@ -383,6 +392,32 @@ export async function openRouteAsync(
     stdout: result.stdout,
     stderr: result.stderr,
   };
+}
+
+/** The open after the launcher step: the route link, or the launcher URL when it is the whole open. */
+function linkOpenOf({
+  projectRoot,
+  options,
+  device,
+  appId,
+  url,
+  launchOnly,
+}: {
+  projectRoot: string;
+  options: OpenRouteOptions;
+  device: NavigateDevice;
+  appId: string | undefined;
+  url: string;
+  launchOnly: string | null;
+}) {
+  return launchOnly == null
+    ? { projectRoot, url, appId }
+    : {
+        projectRoot,
+        url: launchOnly,
+        appId,
+        launchActivity: androidLaunchActivityFor(projectRoot, device, options),
+      };
 }
 
 /**
@@ -445,9 +480,6 @@ async function openUrlOnBackendAsync(
   };
 }
 
-/** How often the debugger target list is re-read while the attach wait runs. */
-const ATTACH_POLL_MS = 500;
-
 /**
  * The least this run waits for the **route link** after a launcher open spent the whole budget.
  *
@@ -492,21 +524,7 @@ async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDev
         ? await withAndroidReverseAsync(targetSelection, inventory, devServerUrl)
         : inventory;
       const classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
-      return async (deadline) => {
-        // An app that a poll saw stays the answer when the list is empty for the last read: a
-        // short gap in the list must not start a recovery that stops a loading app.
-        let seen: { targets: number; loaded: AppLoaded } | null = null;
-        for (;;) {
-          const probe = await probeDevServerAsync(devServerUrl);
-          const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
-          const targets = read.length;
-          const loaded = targets > 0 ? await readAppLoadedAsync(read, deadline) : null;
-          if (targets > 0) seen = { targets, loaded };
-          if (targets > 0 && loaded !== false) return { targets, loaded };
-          if (Date.now() >= deadline) return seen ?? { targets, loaded };
-          await new Promise((resolve) => setTimeout(resolve, ATTACH_POLL_MS));
-        }
-      };
+      return (deadline) => waitForLoadedAppAsync(devServerUrl, classify, deadline);
     },
   };
 }
@@ -550,6 +568,7 @@ async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDev
  * @returns the launcher URL to open first, or null when this run opens only the route link.
  */
 function devLauncherUrlOf(resolved: ResolvedRoute): string | null {
+  if (resolved.isExpoGo) return null;
   return resolved.connect.find((entry) => entry.target === 'dev-build')?.url ?? null;
 }
 

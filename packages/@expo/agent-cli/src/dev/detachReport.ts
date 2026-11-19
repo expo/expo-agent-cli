@@ -8,6 +8,7 @@ import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { smokeCommand } from '../smoke/suggest';
 import { parseDetachedChildPort } from './childVerdict';
+import type { DevAppWait } from './waitForDevApp';
 import { readDetachedLogSync, type DetachedLogRead } from './logFile';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 
@@ -66,6 +67,13 @@ export interface DevDetachResultJson {
    * null while no session is bound; `--wait-ready` waits for it (llp/0035 §Preserved sessions).
    */
   eas: { sessionId: string | null } | null;
+  /**
+   * The app that `--wait-ready` waited for, or null for a run with no app wait: no `--wait-ready`,
+   * or a run that opens no app.
+   *
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   */
+  app: DevAppWait | null;
   /** How long the whole thing took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -89,8 +97,10 @@ export function reportDetached(
     log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
     eas,
+    app = null,
   }: {
     lock: DevServerLockInfo;
+    app?: DevAppWait | null;
     alreadyRunning: boolean;
     /** Set when this run opens the app on EAS; `sessionId` when the command reached a session. */
     eas: DetachEas | null;
@@ -121,6 +131,7 @@ export function reportDetached(
     tunnelUrl,
     device,
     eas,
+    app,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
@@ -189,6 +200,11 @@ function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): 
   }
   if (report.ready != null) {
     lines.push(`${label('Bundler')}${report.ready ? 'ready' : 'not ready'}`);
+  }
+  if (report.app) {
+    lines.push(
+      `${label('App')}attached${report.app.loaded === true ? ' · loaded' : ''} · ${report.app.waitedMs}ms`
+    );
   }
   if (report.tunnelUrl) {
     lines.push(`${label('Tunnel')}${report.tunnelUrl}`);
