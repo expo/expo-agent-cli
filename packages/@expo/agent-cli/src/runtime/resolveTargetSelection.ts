@@ -1,5 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §One preflight for the runtime family
 // @ref llp/0035-one-device-per-worktree.rfc.md §Readers
+import { readLastDevRequest } from '../dev/lastRequest';
 import { devicesDisabled, localBackendOf, noBoundDeviceError } from '../deviceBinding';
 import { live, readCloudBindings } from '../deviceBinding/cloud';
 import { isExpired } from '../deviceBinding/lease';
@@ -95,7 +96,8 @@ export async function resolveTargetSelectionAsync(
  * This worktree's local binding on the run's platform is the scope, whether or not its device is up
  * now. No inspection decides it: a device that is not up has no app, so the read finds none. With
  * no local binding, the one live cloud binding is the scope. With devices disabled, only `--eas`
- * reads a binding.
+ * reads a binding. When the last `dev` opened its app on an EAS session, that platform's live
+ * session outranks the local binding.
  *
  * @throws `NO_BOUND_DEVICE` when an own binding file cannot be read.
  */
@@ -106,7 +108,7 @@ async function boundDeviceAsync(
   // AGENT_CLI_NO_DEVICE keeps this machine's devices untouched; an EAS session is not one of them.
   if (!flags.eas && !devicesDisabled()) {
     const local = liveLocalBinding(projectRoot, flags.platform ?? undefined);
-    if (local) return local.device;
+    if (local) return (lastDevSession(projectRoot, flags.platform) ?? local).device;
   }
   const { bindings, unreadable } = readCloudBindings(projectRoot);
   const own = unreadable.find((each) => flags.platform == null || each.platform === flags.platform);
@@ -115,6 +117,23 @@ async function boundDeviceAsync(
     (binding) => flags.platform == null || binding.device.platform === flags.platform
   );
   return sessions.length === 1 ? sessions[0]!.device : null;
+}
+
+/**
+ * The live session that the last `dev` opened its app on, on the run's platform. A session file
+ * that cannot be read gives none here: the local binding stays the scope.
+ */
+function lastDevSession(
+  projectRoot: string,
+  platform: NavigatePlatform | null | undefined
+): Binding | null {
+  const last = readLastDevRequest(projectRoot);
+  if (last?.deviceBackend !== 'eas' || last.platform === 'web') return null;
+  if (platform != null && platform !== last.platform) return null;
+  const sessions = live(readCloudBindings(projectRoot).bindings, new Date()).filter(
+    (binding) => binding.device.platform === last.platform
+  );
+  return sessions.length === 1 ? sessions[0]! : null;
 }
 
 /** With no platform, iOS (on macOS) and Android; of two live bindings, the newer one. */

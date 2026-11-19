@@ -32,10 +32,12 @@ it('retains only the parsed recovery choices from a real invocation', () => {
     device: 'emulator-5556',
     buildBackend: 'local',
     runTarget: 'dev-build',
+    deviceBackend: 'local',
   });
   expect(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8'))).sort()).toEqual([
     'buildBackend',
     'device',
+    'deviceBackend',
     'platform',
     'port',
     'runTarget',

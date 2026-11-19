@@ -8,7 +8,13 @@ import type { DevOptions } from './resolveOptions';
 export type LastDevRequest = Pick<
   DevOptions,
   'platform' | 'port' | 'device' | 'buildBackend' | 'runTarget'
->;
+> & {
+  /**
+   * Where the run opened its app; absent in a record from before the field. The readers prefer
+   * the EAS session of this run (llp/0035 §Readers, Scope).
+   */
+  deviceBackend?: DevOptions['deviceBackend'];
+};
 
 const FILE = 'agent-cli-last-dev.json';
 
@@ -24,11 +30,12 @@ export function readLastDevRequest(projectRoot: string): LastDevRequest | null {
       ) ||
       ![null, 'local', 'eas'].includes(value.buildBackend) ||
       ![null, 'expo-go', 'dev-build'].includes(value.runTarget) ||
-      !(value.device === undefined || typeof value.device === 'string')
+      !(value.device === undefined || typeof value.device === 'string') ||
+      ![undefined, 'local', 'eas'].includes(value.deviceBackend)
     )
       return null;
-    const { platform, port, device, buildBackend, runTarget } = value;
-    return { platform, port, device, buildBackend, runTarget };
+    const { platform, port, device, buildBackend, runTarget, deviceBackend } = value;
+    return { platform, port, device, buildBackend, runTarget, deviceBackend };
   } catch {
     return null;
   }
@@ -43,7 +50,7 @@ export function recordLastDevRequest(projectRoot: string, options: DevOptions): 
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return;
     }
-    const { platform, port, device, buildBackend, runTarget } = options;
+    const { platform, port, device, buildBackend, runTarget, deviceBackend } = options;
     fs.writeFileSync(
       path.join(projectRoot, '.expo', FILE),
       JSON.stringify({
@@ -53,6 +60,7 @@ export function recordLastDevRequest(projectRoot: string, options: DevOptions): 
         device,
         buildBackend,
         runTarget,
+        deviceBackend,
       }) + '\n'
     );
   } catch {
