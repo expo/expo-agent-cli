@@ -4,6 +4,7 @@ import path from 'path';
 import { isExpoRepoPackage } from '../patchAsync';
 import {
   assertReproUrl,
+  buildApplyCommand,
   filesOfPatch,
   findPatchFile,
   mapUpstreamFile,
@@ -259,6 +260,27 @@ describe(findPatchFile, () => {
     project(files, pkg);
     expect(() => findPatchFile(root, '@fake/scoped-lib', '3.0.0')).toThrow(
       expect.objectContaining({ code })
+    );
+  });
+});
+
+describe(buildApplyCommand, () => {
+  // Headers as git 2.54 wrote them for patch-package; a quote in the name makes git quote the line.
+  it.each([
+    ['plain', 'diff --git a/ios/X.swift b/ios/X.swift\n', ''],
+    [
+      'patch-package',
+      'diff --git a/node_modules/@expo/image/ios/X.swift b/node_modules/@expo/image/ios/X.swift\n',
+      ' -p4',
+    ],
+    [
+      'patch-package, quoted line only',
+      'diff --git "a/node_modules/@expo/image/ios/say \\"hi\\".swift" "b/node_modules/@expo/image/ios/say \\"hi\\".swift"\n',
+      ' -p4',
+    ],
+  ])('%s', (_name, patch, strip) => {
+    expect(buildApplyCommand(patch, 'p.patch', '@expo/image', 'packages/expo-image', false)).toBe(
+      `git apply${strip} --directory=packages/expo-image p.patch`
     );
   });
 });
