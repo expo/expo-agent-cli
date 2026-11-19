@@ -42,20 +42,21 @@ jobs:
   stack:
     name: stack gate
     runs_on: linux-medium
+    # Values go through env, not into the script: a fork's branch name can hold ' and ;.
+    env:
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      EVENT_ACTION: ${{ github.event.action }}
     outputs:
       full: ${{ steps.stack.outputs.full }}
     steps:
       - uses: eas/checkout
       - name: Decide how much CI this PR runs
         id: stack
-        run: |
-          export GITHUB_REPOSITORY='${{ github.repository }}'
-          export PR_NUMBER='${{ github.event.pull_request.number }}'
-          export PR_HEAD_REF='${{ github.event.pull_request.head.ref }}'
-          export PR_HEAD_SHA='${{ github.event.pull_request.head.sha }}'
-          export PR_HEAD_REPO='${{ github.event.pull_request.head.repo.full_name }}'
-          export EVENT_ACTION='${{ github.event.action }}'
-          set-output full "$(bun scripts/stack-gate.ts || echo true)"
+        run: set-output full "$(bun scripts/stack-gate.ts || echo true)"
 
   cloud-e2e-expo-go-ios:
     name: live-cloud on EAS (iOS, Expo Go)

@@ -130,11 +130,14 @@ async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
   const deadline = input.action === 'opened' ? input.waitSeconds * 1000 : 0;
   let waited = 0;
   for (;;) {
-    const above = (await github(
-      input,
-      io,
-      `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
-    )) as Pull[];
+    // A fork PR's CI may wait for approval or not run at all, so it covers nothing.
+    const above = (
+      (await github(
+        input,
+        io,
+        `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
+      )) as Pull[]
+    ).filter((pull) => pull.head.repo?.full_name === input.repo);
     if (above.length > 0) {
       for (const pull of above) {
         const comparison = (await github(input, io, `/compare/${headSha}...${pull.head.sha}`)) as {
@@ -151,7 +154,7 @@ async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
       };
     }
     if (waited >= deadline) {
-      return { kind: 'uncovered', note: 'No open PR is based on this branch.' };
+      return { kind: 'uncovered', note: 'No open PR from this repo is based on this branch.' };
     }
     await io.sleep(POLL_MS);
     waited += POLL_MS;
