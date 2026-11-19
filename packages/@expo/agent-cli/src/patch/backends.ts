@@ -708,15 +708,21 @@ function symlinksOf(diff: TreeDiff, cleanDir: string, editedDir: string): string
 }
 
 /**
- * npm 12.2.3 leaves two kinds of change out of the patch and still exits 0 (`lib/utils/patch-diff.js`):
- * the root `package.json`, because npm resolves the manifest from before the patch, and anything
- * that is not a regular file, such as a symlink. They are taken out of the diff, so the report names
- * only what the patch holds; when nothing is left, the run fails and says why.
+ * npm 12.2.3 cannot record three kinds of change, and still exits 0 (`lib/utils/patch-diff.js`):
+ * the root `package.json`, because npm resolves the manifest from before the patch; anything that
+ * is not a regular file, such as a symlink; and a file that is not UTF-8 text, because npm reads
+ * both sides as UTF-8 and writes the decoded string back, which breaks a binary file. They are taken
+ * out of the diff before anything is copied into the edit directory, so the report names only what
+ * the patch holds; when nothing is left, the run fails and says why.
  */
 function dropNpmUnpatchable(diff: TreeDiff, cleanDir: string, editedDir: string): void {
+  const links = new Set(symlinksOf(diff, cleanDir, editedDir));
   const dropped = new Set([
     ...filesOfDiff(diff).filter((file) => file === 'package.json'),
-    ...symlinksOf(diff, cleanDir, editedDir),
+    ...links,
+    ...filesOfDiff(diff).filter(
+      (file) => !links.has(file) && !(isUtf8Text(cleanDir, file) && isUtf8Text(editedDir, file))
+    ),
   ]);
   if (!dropped.size) {
     return;
@@ -728,10 +734,28 @@ function dropNpmUnpatchable(diff: TreeDiff, cleanDir: string, editedDir: string)
   if (isEmptyDiff(diff)) {
     throw new CommandError(
       'PATCH_NOT_PATCHABLE',
-      `npm patch does not record a change to the package's own package.json or to a symlink, and those are the only edits: ${names}. Nothing was saved.`
+      `npm patch does not record a change to the package's own package.json, to a symlink or to a file that is not UTF-8 text, and those are the only edits: ${names}. Nothing was saved.`
     );
   }
   Log.warn(`npm patch does not record these edits, so the patch leaves them out: ${names}.`);
+}
+
+/** A missing file counts as text: it is the other side of an added or a removed file. */
+function isUtf8Text(dir: string, file: string): boolean {
+  const full = path.join(dir, file);
+  if (!fs.existsSync(full)) {
+    return true;
+  }
+  const bytes = fs.readFileSync(full);
+  if (bytes.includes(0)) {
+    return false;
+  }
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function filesOfDiff(diff: TreeDiff): string[] {

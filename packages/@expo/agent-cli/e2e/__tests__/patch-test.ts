@@ -478,9 +478,27 @@ describe('@expo/agent-cli patch — npm 12 (npm patch)', () => {
     ).toContain('// patched by e2e');
   });
 
-  it(`refuses when the only edit is one npm patch does not record`, async () => {
+  it.each([
+    {
+      kind: 'its own package.json',
+      make: (dir: string) => fs.appendFileSync(path.join(dir, 'package.json'), '\n'),
+    },
+    {
+      kind: 'a symlink',
+      make: (dir: string) => fs.symlinkSync('index.js', path.join(dir, 'link.js')),
+    },
+    {
+      // A PNG header: no NUL byte, and not UTF-8. npm would write back the decoded string.
+      kind: 'a file that is not UTF-8',
+      make: (dir: string) =>
+        fs.writeFileSync(
+          path.join(dir, 'icon.png'),
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+        ),
+    },
+  ])(`refuses when the only edit is one npm patch does not record: $kind`, async ({ make }) => {
     const projectRoot = registryProject();
-    edit(projectRoot, `${SCOPED}/package.json`, '\n');
+    make(path.join(projectRoot, 'node_modules', SCOPED));
 
     const result = await patchAsync('npm12', projectRoot, [SCOPED, '--json'], false);
 
