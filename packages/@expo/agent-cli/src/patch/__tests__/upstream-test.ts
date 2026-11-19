@@ -4,10 +4,10 @@ import path from 'path';
 import { isExpoRepoPackage } from '../patchAsync';
 import {
   assertReproUrl,
-  assertRepositoryDirectory,
   filesOfPatch,
   findPatchFile,
   mapUpstreamFile,
+  repositoryDirectory,
   upstreamBase,
 } from '../upstream';
 
@@ -43,18 +43,22 @@ describe(assertReproUrl, () => {
   });
 });
 
-describe(assertRepositoryDirectory, () => {
+describe(repositoryDirectory, () => {
+  const url = 'https://github.com/expo/expo';
   it.each([
-    ['packages/expo-image', true],
-    ['packages/@expo/config-plugins', true],
-    ["packages/x'; id; #", false],
-    ['packages/../../etc', false],
-    ['/packages/expo-image', false],
-    ['packages/a b', false],
-  ])('%s → %s', (directory, accepted) => {
-    const run = () => assertRepositoryDirectory(directory, 'pkg');
-    if (accepted) {
-      expect(run).not.toThrow();
+    [{ url, directory: 'packages/expo-image' }, 'packages/expo-image'],
+    [{ url, directory: 'packages/@expo/config-plugins/' }, 'packages/@expo/config-plugins'],
+    [{ url, directory: "packages/x'; id; #" }, null],
+    [{ url, directory: 'packages/../../etc' }, null],
+    [{ url, directory: '/packages/expo-image' }, null],
+    [{ url, directory: 'packages/a b' }, null],
+    // No guess from the npm name.
+    [{ url }, null],
+    [url, null],
+  ])('%j → %s', (repository, expected) => {
+    const run = () => repositoryDirectory({ repository }, 'pkg');
+    if (expected) {
+      expect(run()).toBe(expected);
     } else {
       expect(run).toThrow(expect.objectContaining({ code: 'PATCH_BAD_REPOSITORY' }));
     }

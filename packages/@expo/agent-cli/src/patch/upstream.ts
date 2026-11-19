@@ -70,13 +70,26 @@ const GITHUB_REPO_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+?(?:\.git)?\/?$
 /** `repository.directory` goes into a shell line, so it is a plain relative path or nothing. */
 const REPOSITORY_DIRECTORY = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@.+-]+(?:\/[\w@.+-]+)*$/;
 
-export function assertRepositoryDirectory(directory: string, packageName: string): void {
+/** Where the package lives in `expo/expo`: its `repository.directory`, checked. */
+export function repositoryDirectory(manifest: Record<string, any>, packageName: string): string {
+  const raw: unknown =
+    typeof manifest.repository === 'object' ? manifest.repository?.directory : undefined;
+  if (typeof raw !== 'string') {
+    // Not `packages/<npm name>`: the folder need not be the npm name, and a wrong guess applies
+    // the patch to another package.
+    throw new CommandError(
+      'PATCH_BAD_REPOSITORY',
+      `The package.json of ${packageName} has no "repository.directory", so the CLI does not know where in expo/expo the package lives.`
+    );
+  }
+  const directory = raw.replace(/\/$/, '');
   if (!REPOSITORY_DIRECTORY.test(directory)) {
     throw new CommandError(
       'PATCH_BAD_REPOSITORY',
       `The "repository.directory" of ${packageName} is not a plain relative path ("${directory}"), so there is no safe place in expo/expo to apply the patch.`
     );
   }
+  return directory;
 }
 
 export function assertReproUrl(repro: string): string {
@@ -288,11 +301,7 @@ export function planUpstream(
   }
   const patchFile = findPatchFile(packageManager.root, packageName, version);
 
-  const directory =
-    typeof manifest.repository === 'object' && typeof manifest.repository.directory === 'string'
-      ? manifest.repository.directory.replace(/\/$/, '')
-      : `packages/${packageName}`;
-  assertRepositoryDirectory(directory, packageName);
+  const directory = repositoryDirectory(manifest, packageName);
   const patchText = fs.readFileSync(patchFile, 'utf8');
   const changed = filesOfPatch(patchText);
   const files = changed.map((file) => mapUpstreamFile(file, directory));
