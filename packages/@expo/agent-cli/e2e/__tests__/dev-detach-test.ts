@@ -90,8 +90,10 @@ describe('@expo/agent-cli dev --detach', () => {
       const logFile = path.join(projectRoot, DETACHED_LOG_PATH);
       expect(output.stderr).toContain(`Live log: ${logFile}`);
       expect(fs.existsSync(logFile)).toBe(true);
-      expect(output.stderr).toContain('Smart start plan');
-      expect(output.stderr).toContain(`expo run:${platform}`);
+      expect(output.stderr).toContain(
+        `expo run:${platform} --port ${port}  (~many minutes, local)`
+      );
+      expect(output.stderr).not.toContain('Smart start plan');
       expect(output.stderr).not.toContain(metroWait);
       expect(output.stdout).toBe('');
 

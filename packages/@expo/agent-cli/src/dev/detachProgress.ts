@@ -1,8 +1,9 @@
 import type { ChildProcess } from 'child_process';
 
 import { Log } from '../log';
-import { formatStartPlan } from '../plan/format';
+import { formatTimeClass } from '../plan/format';
 import type { StartPlan } from '../project/types';
+import { RUNS_ON_LABELS } from '../toolchain/runsOn';
 
 interface PlanMessage {
   type: 'dev-plan';
@@ -26,7 +27,7 @@ export function reportDetachedProgress(child: ChildProcess, logFile: string, wai
   child.once('message', (message: PlanMessage) => {
     if (message?.type !== 'dev-plan') return;
     planPrinted = true;
-    Log.progress(formatStartPlan(message.plan));
+    Log.progress(formatPlanSteps(message.plan));
     if (waitReady && message.plan.steps.some((step) => step.runsOn != null)) {
       Log.progress('Next: native build or install, then the Metro readiness wait.');
     }
@@ -39,4 +40,13 @@ export function reportDetachedProgress(child: ChildProcess, logFile: string, wai
     waitingForMetro = true;
     if (planPrinted) Log.progress('Waiting for Metro readiness…');
   };
+}
+
+/** Steps only: the full plan, with its reasons, is at the top of the live log. */
+function formatPlanSteps(plan: StartPlan): string {
+  const steps = plan.steps.map((step, index) => {
+    const cost = [formatTimeClass(step.timeClass), step.runsOn && RUNS_ON_LABELS[step.runsOn]];
+    return `  ${index + 1}. ${step.argv.join(' ')}  (${cost.filter(Boolean).join(', ')})`;
+  });
+  return ['Plan (reasons in the live log):', ...steps].join('\n');
 }
