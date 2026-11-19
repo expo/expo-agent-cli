@@ -860,7 +860,7 @@ The report names the rung (`bundleIdSource`: `flag`, `dev-server`, `app-config`,
 
 An app that was not running is success. `wasRunning` says whether this command stopped it: on iOS from the `simctl terminate` refusal, on Android from `adb shell pidof <appId>` before the stop. A pid gives `true`, and exit 1 with no output gives `false`. A `pidof` that could not run or complained, a failed stop, and any session give `null`.
 
-A device tool that refused the stop is `DEVICE_STOP_REFUSED`, exit 1, with `bundleId`, `command` and the tool's `reason` in `error.data` (e2e `stop-test.ts`).
+A device tool that refused the stop is `DEVICE_STOP_REFUSED`, exit 1, with `bundleId`, `command` and the tool's `reason` in `error.data` (e2e `error-envelope-test.ts`).
 
 `--app-id` naming an app that was not running, while the dev server reports at least one debugger target and none with that id, exits 20. An agent reads the exit code before the output. A second run after a good stop exits 0. `--json` has `connectedAppIds` and `appIdMismatch`; the follow-up is the same command with the connected id.
 
