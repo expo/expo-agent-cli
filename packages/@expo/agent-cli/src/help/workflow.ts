@@ -64,7 +64,7 @@ export const workflow: WorkflowStep[] = [
     rungs: [
       {
         run: 'dev --ios --local --detach',
-        gets: 'run the app on a local iOS simulator',
+        gets: 'run the app on a local iOS simulator, keep this terminal',
       },
       { run: 'navigate /', gets: 'open a route in the app on a device' },
     ],
