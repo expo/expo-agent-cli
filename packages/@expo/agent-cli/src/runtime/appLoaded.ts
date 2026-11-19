@@ -54,13 +54,13 @@ const LOADED_APP_POLL_MS = 500;
  *
  * - `loaded`: the scope holds `targets`, and the runtime did not answer that no bundle ran.
  * - `not-loaded`: the scope held `targets`, and the runtime answered that no bundle ran.
- * - `not-attached`: the scope held no target at the deadline.
+ * - `not-attached`: the scope held no target at the deadline. `devServerAnswered` is the last read.
  * - `abandoned`: the caller's `stillWanted` said no first.
  */
 export type LoadedAppWait =
   | { kind: 'loaded'; targets: number; loaded: true | null }
   | { kind: 'not-loaded'; targets: number }
-  | { kind: 'not-attached' }
+  | { kind: 'not-attached'; devServerAnswered: boolean }
   | { kind: 'abandoned' };
 
 /** The targets of the scope when the wait ended: zero unless an app was attached. */
@@ -89,7 +89,7 @@ export async function waitForLoadedAppAsync(
 ): Promise<LoadedAppWait> {
   // An app that a poll saw stays the answer when the list is empty for the last read: a short gap
   // in the list must not start a recovery that stops a loading app.
-  let seen: LoadedAppWait | null = null;
+  let seen: Extract<LoadedAppWait, { kind: 'not-loaded' }> | null = null;
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
     const read = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
@@ -99,7 +99,9 @@ export async function waitForLoadedAppAsync(
       seen = { kind: 'not-loaded', targets: read.length };
     }
     if (!stillWanted()) return { kind: 'abandoned' };
-    if (Date.now() >= deadline) return seen ?? { kind: 'not-attached' };
+    if (Date.now() >= deadline) {
+      return seen ?? { kind: 'not-attached', devServerAnswered: probe.reachable };
+    }
     await new Promise((resolve) => setTimeout(resolve, LOADED_APP_POLL_MS));
   }
 }

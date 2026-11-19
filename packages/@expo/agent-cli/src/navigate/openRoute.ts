@@ -308,7 +308,7 @@ export async function openRouteAsync(
     device,
     plan.kind === 'route' ? resolved.url : devServerUrl
   );
-  const waitAsync = budgetMs > 0 ? await reads.waiterAsync(reverse?.ok === true) : null;
+  const waitAsync = reads.waiter(reverse?.ok === true);
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server — F123, and the
   // whole reason this call sits above the route link rather than beside it.
@@ -587,12 +587,11 @@ async function launchDevClientFirstAsync({
   projectRoot: string;
   options: OpenRouteOptions;
   device: NavigateDevice;
-  /** Null with no budget: then the plan is never `launcher-then-route`. */
-  waitAsync: LoadedAppWaiter | null;
+  waitAsync: LoadedAppWaiter;
   plan: OpenPlan;
   budgetMs: number;
 }): Promise<DevLauncherOpen | null> {
-  if (plan.kind !== 'launcher-then-route' || waitAsync == null) return null;
+  if (plan.kind !== 'launcher-then-route') return null;
   const { launcherUrl } = plan;
   const startedAt = Date.now();
   const opened = await openUrlOnBackendAsync(device, {
@@ -681,7 +680,7 @@ async function confirmAttachAsync({
   options: OpenRouteOptions;
   device: NavigateDevice;
   devServerUrl: string;
-  waitAsync: LoadedAppWaiter | null;
+  waitAsync: LoadedAppWaiter;
   url: string;
   /** The link this run opened targets Expo Go, whatever the app config names. */
   isExpoGo: boolean;
@@ -689,7 +688,7 @@ async function confirmAttachAsync({
   /** How long this check may wait. The caller's own budget, less whatever it has already spent. */
   budgetMs: number;
 }): Promise<AttachCheck> {
-  if (budgetMs <= 0 || waitAsync == null) {
+  if (budgetMs <= 0) {
     return uncheckedAttach('this run did not wait for the app to attach');
   }
   if (!openedOk) {

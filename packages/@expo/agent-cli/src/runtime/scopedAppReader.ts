@@ -30,7 +30,7 @@ export async function scopedAppReaderAsync(
   projectRoot: string | null
 ): Promise<{
   decisionTargets: CdpTarget[];
-  waiterAsync: (readReverse: boolean) => Promise<LoadedAppWaiter>;
+  waiter: (readReverse: boolean) => LoadedAppWaiter;
 }> {
   const first = await probeDevServerAsync(devServerUrl);
   const inventory = await deviceInventoryForSelectionAsync(
@@ -43,13 +43,18 @@ export async function scopedAppReaderAsync(
     decisionTargets: first.reachable
       ? classifyTargets(first.targets, targetSelection, inventory).read
       : [],
-    waiterAsync: async (readReverse) => {
-      const facts = readReverse
-        ? await withAndroidReverseAsync(targetSelection, inventory, devServerUrl)
-        : inventory;
-      const classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
-      return (deadline, stillWanted) =>
-        waitForLoadedAppAsync(devServerUrl, classify, deadline, stillWanted);
+    waiter: (readReverse) => {
+      // Read once, on the first wait: a run that never waits asks no device tool.
+      let classify: ReturnType<typeof scopedListClassifier> | null = null;
+      return async (deadline, stillWanted) => {
+        if (classify == null) {
+          const facts = readReverse
+            ? await withAndroidReverseAsync(targetSelection, inventory, devServerUrl)
+            : inventory;
+          classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
+        }
+        return await waitForLoadedAppAsync(devServerUrl, classify, deadline, stillWanted);
+      };
     },
   };
 }

@@ -24,6 +24,7 @@ import {
   waitForAsync,
 } from '../utils';
 import { runtimeTarget } from '../runtimeTargetFixtures';
+import { installStubXcrunAsync } from './installedAppStubs';
 
 let machine: string;
 let expoHome: string;
@@ -62,6 +63,8 @@ async function project(fixture = 'go-app') {
   const root = fs.realpathSync(await setupFixtureAsync(fixture));
   await installStubFingerprintAsync(root);
   await installStubEasAsync(root);
+  // No local simulator: a booted one named like the session's device would claim its app.
+  await installStubXcrunAsync(root, { bind: false });
   projects.push(root);
   return root;
 }

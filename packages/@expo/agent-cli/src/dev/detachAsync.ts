@@ -57,7 +57,13 @@ import { isProcessAlive } from './processLiveness';
 import { recordLastDevRequest } from './lastRequest';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
-import { appWaitOf, waitForDevAppAsync, type DevAppOpen, type DevAppReport } from './waitForDevApp';
+import {
+  appWaitOf,
+  waitForDevAppAsync,
+  type DevAppReport,
+  type DevRun,
+  type DevServerGone,
+} from './waitForDevApp';
 
 /** The argv of the detached child, as a value a test can assert without spawning anything. */
 export interface DetachSpawn {
@@ -247,16 +253,21 @@ async function reuseRunningAsync(
   // Read the verdict and PID after all probes: any can outlast the running server.
   await checkReuseFailureAsync(context, hasExited, lock, statusAnswering);
   if (context.onRunning === 'reopen-eas') recordLastDevRequest(projectRoot, options);
-  // Only a re-run that opened the app on its session has an app to wait for; `smoke` opens none.
-  const sessionPlatform = easOpenPlatform(options);
   const app = await appWaitAsync(context, lock, {
-    opened:
-      context.onRunning === 'reopen-eas' && sessionPlatform != null && easSessionId != null
-        ? { on: 'eas', platform: sessionPlatform }
-        : null,
+    run: {
+      kind: 'reused',
+      reopenedEas: context.onRunning === 'reopen-eas',
+      easPlatform: easOpenPlatform(options),
+      sessionId: easSessionId,
+    },
     stillWanted: () => !hasExited(),
-    serverGoneAsync: async () => {
-      await checkReuseFailureAsync(context, hasExited, lock);
+    serverGoneAsync: async (gone) => {
+      await checkReuseFailureAsync(
+        context,
+        hasExited,
+        lock,
+        gone === 'not-answering' ? false : null
+      );
       return reuseGoneError(context, lock);
     },
   });
@@ -441,18 +452,19 @@ async function startDetachedAsync(context: DetachContext): Promise<number> {
       hasExited: childIsGone,
       callerArgv: options.callerArgv,
     });
-    if (sessionId == null) throw await childGoneErrorAsync(context, lock, child, eas);
+    if (sessionId == null) throw await childGoneErrorAsync(context, lock, child, eas, 'exited');
     eas = { sessionId };
   }
 
   const app = await appWaitAsync(context, lock, {
-    opened: easPlatform
-      ? { on: 'eas', platform: easPlatform }
-      : options.open && device
-        ? { on: 'local', platform: device.platform }
-        : null,
+    run: {
+      kind: 'spawned',
+      easPlatform,
+      boundPlatform: device?.platform ?? null,
+      open: options.open,
+    },
     stillWanted: () => !childIsGone(),
-    serverGoneAsync: async () => childGoneErrorAsync(context, lock, child, eas),
+    serverGoneAsync: async (gone) => childGoneErrorAsync(context, lock, child, eas, gone),
   });
 
   return reportDetached(projectRoot, options, {
@@ -514,45 +526,49 @@ async function appWaitAsync(
   context: DetachContext,
   lock: DevServerLockInfo,
   {
-    opened,
+    run,
     stillWanted,
     serverGoneAsync,
   }: {
-    opened: DevAppOpen | null;
+    run: DevRun;
     stillWanted: () => boolean;
-    serverGoneAsync: () => Promise<CommandError>;
+    serverGoneAsync: (gone: DevServerGone['gone']) => Promise<CommandError>;
   }
 ): Promise<DevAppReport | null> {
-  const app = appWaitOf({ waitReady: context.options.waitReady, opened });
-  if (app == null) return null;
-  const report = await waitForDevAppAsync(context.projectRoot, {
+  const opened = appWaitOf(context.options.waitReady, run);
+  if (opened == null) return null;
+  const result = await waitForDevAppAsync(context.projectRoot, {
     lock,
-    opened: app,
+    opened,
     budgetMs: env.AGENT_CLI_DEV_APP_WAIT_MS,
     stillWanted,
   });
-  if (report === 'abandoned') throw await serverGoneAsync();
-  return report;
+  if ('gone' in result) throw await serverGoneAsync(result.gone);
+  return result;
 }
 
-/** The failure of a spawned child that is gone: its verdict, else `child-exited`. */
+/** The failure of a spawned child whose dev server is gone: its verdict, else the way it went. */
 async function childGoneErrorAsync(
   context: DetachContext,
   lock: DevServerLockInfo,
   child: DetachedChild,
-  eas: DetachEas | null
+  eas: DetachEas | null,
+  gone: DevServerGone['gone']
 ): Promise<CommandError> {
   const { projectRoot, options } = context;
-  const stopped = await waitFailureAsync(projectRoot, true);
-  return detachFailureError(stopped?.failure ?? 'child-exited', {
-    projectRoot,
-    lock,
-    logFile: child.logFile,
-    verdict: stopped?.verdict ?? null,
-    childExit: child.exit,
-    platform: options.platform,
-    eas,
-  });
+  const stopped = await waitFailureAsync(projectRoot, gone === 'exited');
+  return detachFailureError(
+    stopped?.failure ?? (gone === 'exited' ? 'child-exited' : 'not-answering'),
+    {
+      projectRoot,
+      lock,
+      logFile: child.logFile,
+      verdict: stopped?.verdict ?? null,
+      childExit: child.exit,
+      platform: options.platform,
+      eas,
+    }
+  );
 }
 
 /** The failure of a reused dev server that is gone and left no verdict. */
