@@ -213,6 +213,20 @@ describe('workflow conditions', () => {
     );
     expect(eas).toContain('set-output full "$(bun scripts/stack-gate.ts || echo true)"');
   });
+
+  // `${{ }}` is pasted into a script as text, and a fork's branch name can hold ' and ;.
+  it.each([...Object.keys(expected), '.github/workflows/stack-gate.yml'])(
+    '%s passes event data to scripts through env only',
+    (file) => {
+      const workflow = Bun.YAML.parse(readFileSync(path.join(root, file), 'utf8')) as {
+        jobs: Record<string, { steps?: { run?: string }[] }>;
+      };
+      const runs = Object.values(workflow.jobs).flatMap((job) =>
+        (job.steps ?? []).map((step) => step.run ?? '')
+      );
+      expect(runs.filter((run) => /\$\{\{[^}]*github\.(event|head_ref)/.test(run))).toEqual([]);
+    }
+  );
 });
 
 describe('outputs', () => {
