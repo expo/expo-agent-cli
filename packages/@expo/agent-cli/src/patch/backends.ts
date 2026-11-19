@@ -27,6 +27,7 @@ import os from 'os';
 import path from 'path';
 
 import type { DetectedPackageManager } from '../utils/packageManager';
+import * as Log from '../log';
 import { CommandError } from '../utils/errors';
 import { findExecutableOnPath } from '../utils/pathLookup';
 import { spawnSubprocessAsync } from '../utils/subprocess';
@@ -239,6 +240,9 @@ async function saveWithEditDirAsync(
     if (isEmptyDiff(diff)) {
       return { status: 'no-edits' };
     }
+    if (tool === 'npm') {
+      dropNpmUnpatchable(diff, editDir, target.packageDir);
+    }
     applyTreeDiff(diff, target.packageDir, editDir);
 
     const before = snapshotPatchDirs(root);
@@ -302,6 +306,16 @@ async function saveWithPatchPackageFormatAsync(
       return { status: 'no-edits' };
     }
     const files = filesOfDiff(diff);
+    const links = symlinksOf(diff, cleanDir, target.packageDir);
+    if (links.length) {
+      // patch-package 8.0.1 fails on a mode 120000 patch ("Patch file parse error", observed).
+      throw new CommandError(
+        'PATCH_SYMLINK',
+        `patch-package cannot apply a change to a symlink, so the patch was not saved: ${links.join(
+          ', '
+        )}.\nHow: undo the change to the symlink, or patch it another way.`
+      );
+    }
 
     const setup = patchPackageSetup(root, target.packageManager.name);
     if (setup.length && !yes) {
@@ -460,17 +474,7 @@ async function unifiedDiffAsync(
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-diff-'));
   try {
     const packageRoot = path.join(work, 'node_modules', ...packageName.split('/'));
-    const emptyConfig = path.join(work, 'empty.gitconfig');
-    fs.writeFileSync(emptyConfig, '');
-    const env: NodeJS.ProcessEnv = Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_'))
-    );
-    Object.assign(env, {
-      GIT_DIR: path.join(work, '.git'),
-      GIT_WORK_TREE: work,
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: emptyConfig,
-    });
+    const env = scratchGitEnv(work);
     const config = [
       '-c',
       'core.autocrlf=false',
@@ -554,6 +558,28 @@ async function unifiedDiffAsync(
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * The env of the scratch git repository: its own directory, index and objects, and no config of
+ * the user's. The child env is merged over process.env, so each GIT_ variable that could point git
+ * elsewhere is set here, not removed.
+ */
+function scratchGitEnv(work: string): NodeJS.ProcessEnv {
+  const emptyConfig = path.join(work, 'empty.gitconfig');
+  fs.writeFileSync(emptyConfig, '');
+  const gitDir = path.join(work, '.git');
+  return {
+    GIT_DIR: gitDir,
+    GIT_WORK_TREE: work,
+    GIT_INDEX_FILE: path.join(gitDir, 'index'),
+    GIT_OBJECT_DIRECTORY: path.join(gitDir, 'objects'),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: '',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: emptyConfig,
+    GIT_CONFIG_COUNT: '0',
+    GIT_CONFIG_PARAMETERS: '',
+  };
 }
 
 function copyInto(fromRoot: string, toRoot: string, file: string): void {
@@ -641,7 +667,8 @@ function snapshotPatchDirs(root: string): Snapshot {
     if (!fs.existsSync(full)) {
       continue;
     }
-    for (const name of fs.readdirSync(full)) {
+    // Nested: npm 12.2.3 writes a scoped patch to `patches/@scope/name@version.patch`.
+    for (const name of fs.readdirSync(full, { recursive: true }) as string[]) {
       const file = path.join(full, name);
       const stat = fs.statSync(file);
       if (stat.isFile()) {
@@ -666,6 +693,45 @@ function findWrittenPatch(root: string, before: Snapshot): string {
       ' or '
     )}.`
   );
+}
+
+/** Files of the diff that are a symlink in the clean or the edited tree. */
+function symlinksOf(diff: TreeDiff, cleanDir: string, editedDir: string): string[] {
+  const isLink = (dir: string, file: string) => {
+    try {
+      return fs.lstatSync(path.join(dir, file)).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+  return filesOfDiff(diff).filter((file) => isLink(cleanDir, file) || isLink(editedDir, file));
+}
+
+/**
+ * npm 12.2.3 leaves two kinds of change out of the patch and still exits 0 (`lib/utils/patch-diff.js`):
+ * the root `package.json`, because npm resolves the manifest from before the patch, and anything
+ * that is not a regular file, such as a symlink. They are taken out of the diff, so the report names
+ * only what the patch holds; when nothing is left, the run fails and says why.
+ */
+function dropNpmUnpatchable(diff: TreeDiff, cleanDir: string, editedDir: string): void {
+  const dropped = new Set([
+    ...filesOfDiff(diff).filter((file) => file === 'package.json'),
+    ...symlinksOf(diff, cleanDir, editedDir),
+  ]);
+  if (!dropped.size) {
+    return;
+  }
+  for (const key of ['changed', 'added', 'removed'] as const) {
+    diff[key] = diff[key].filter((file) => !dropped.has(file));
+  }
+  const names = [...dropped].sort().join(', ');
+  if (isEmptyDiff(diff)) {
+    throw new CommandError(
+      'PATCH_NOT_PATCHABLE',
+      `npm patch does not record a change to the package's own package.json or to a symlink, and those are the only edits: ${names}. Nothing was saved.`
+    );
+  }
+  Log.warn(`npm patch does not record these edits, so the patch leaves them out: ${names}.`);
 }
 
 function filesOfDiff(diff: TreeDiff): string[] {
