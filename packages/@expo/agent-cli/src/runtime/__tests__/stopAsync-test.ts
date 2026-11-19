@@ -85,17 +85,6 @@ describe(runtimeStopAsync, () => {
     });
   });
 
-  it(`should report a device that refused, and name the app it tried`, async () => {
-    mockDevServer([]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { exitCode: 1, stderr: 'Invalid device: NOPE' }]);
-
-    await expect(runtimeStopAsync(projectRoot, options())).resolves.toBe(1);
-    const report = JSON.parse(printed());
-    expect(report).toMatchObject({ stopped: false, wasRunning: null });
-    expect(report.reason).toBe('Invalid device: NOPE');
-    expect(printed(console.error)).toContain('--app-id');
-  });
-
   // The command reads the dev server for evidence, and an app can be running with no dev server
   // behind it at all — so an unreachable one must cost the evidence, not the command.
   it(`should still stop the app when no dev server answers`, async () => {

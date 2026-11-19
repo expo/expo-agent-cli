@@ -3,8 +3,8 @@
 // screen it belongs to instead of by hand.
 //
 // The act itself is `openRouteAsync` (`./openRoute.ts`), which `@expo/agent-cli smoke` performs too. What
-// is left here is this command's own half: its two output channels, its follow-ups, and the exit
-// code it gives a device that refused the link.
+// is left here is this command's own half: its two output channels, its follow-ups, and the error
+// it raises for a device that refused the link.
 import chalk from 'chalk';
 
 import { AGENT_DEVICE_SPEC } from '../device/cloudSimulator';
@@ -32,6 +32,7 @@ import type { NavigateOptions } from './resolveOptions';
 import type { RouteCheckJson } from './routeCheck';
 import { resolveRouteUrlAsync } from './routeResolution';
 import { easCommandPrefix } from '../utils/easCli';
+import { CommandError } from '../utils/errors';
 
 /**
  * Machine shape of `@expo/agent-cli navigate --json`.
@@ -186,7 +187,8 @@ export interface NavigateResultJson {
  * command drives a device, so a wrong dev server does not produce a wrong reading: it loads
  * another project's app onto the user's simulator and reports success.
  *
- * @returns the exit code: non-zero when the device refused the deep link.
+ * @returns the exit code: `22` when no app attached, `0` otherwise.
+ * @throws {CommandError} `DEEP_LINK_REFUSED` when the device refused the deep link.
  */
 export async function navigateAsync(
   projectRoot: string,
@@ -225,17 +227,23 @@ export async function navigateAsync(
         })
       : [];
 
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a refused link is a tool error, so under
+  // `--json` it is the envelope, not a report.
+  if (opened.exitCode !== 0) {
+    if (!json) {
+      Log.log(formatNavigateSummary(opened, route));
+    }
+    const error = new CommandError('DEEP_LINK_REFUSED', openRefusedMessage(opened));
+    error.data = { url: opened.url, command: opened.command, exitCode: opened.exitCode };
+    throw error;
+  }
+
   if (json) {
-    // The object is the whole of stdout, so the output can be piped into a parser. The failure
+    // The object is the whole of stdout, so the output can be piped into a parser. A failure
     // below still explains itself, on stderr.
     Log.log(JSON.stringify(buildNavigateReport(opened, followups), null, 2));
   } else {
     Log.log(formatNavigateSummary(opened, route));
-  }
-
-  if (opened.exitCode !== 0) {
-    Log.error(openRefusedMessage(opened));
-    return 1;
   }
 
   // What the device tool printed is a note for a human, so it is left out of the JSON object
@@ -354,9 +362,7 @@ function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
 /** The what/why/how message for a device that refused the deep link. */
 function openRefusedMessage(opened: OpenRouteResult): string {
   return [
-    chalk.red(
-      `The device did not open the deep link (${opened.command} exited with ${opened.exitCode ?? 'a signal'}).`
-    ),
+    `The device did not open the deep link (${opened.command} exited with ${opened.exitCode ?? 'a signal'}).`,
     `Why: ${opened.stderr.trim() || opened.stdout.trim() || 'the device tool reported no output.'}`,
     opened.isExpoGo
       ? `How: make sure Expo Go is installed on this device and the dev server at ${opened.devServerUrl} is running, then run this command again.`

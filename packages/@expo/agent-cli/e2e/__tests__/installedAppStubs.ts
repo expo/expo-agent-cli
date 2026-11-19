@@ -330,6 +330,7 @@ export const PNG_HEADER_ESCAPE = '\\x89PNG\\r\\n\\x1a\\n';
  * `openurl` and `terminate` mark the app started and stopped at {@link appStartedMarkerPath}.
  * `io screenshot` writes a PNG to the path it is given.
  * `terminate` refuses an app outside `runningAppIds` the way `simctl` does, when the list is given.
+ * A subcommand named in `refuses` exits 1 with a stub message, for a device that refuses the call.
  *
  * `devicectl list` answers with the fixture phones when `phone` is given; a `launch` then answers
  * the way the dev-launcher responder does, posting `phone.fingerprint` to the callback URL carried
@@ -345,6 +346,7 @@ export async function installStubXcrunAsync(
     phone,
     bind = true,
     listFails = false,
+    refuses = [],
   }: {
     booted?: { fingerprint: string };
     simulators?: { udid: string; name: string; state?: 'Booted' | 'Shutdown' }[];
@@ -357,6 +359,7 @@ export async function installStubXcrunAsync(
     bind?: boolean;
     /** `simctl list devices booted` exits 1, as when CoreSimulator is down. */
     listFails?: boolean;
+    refuses?: ('openurl' | 'terminate')[];
   } = {}
 ): Promise<{ binDir: string; calls: StubCalls }> {
   const recordPath = path.join(root, '.xcrun-calls.jsonl');
@@ -459,6 +462,10 @@ export async function installStubXcrunAsync(
       `  const approval = args.length === 9 && args[5] === 'com.apple.launchservices.schemeapproval' && /^com\\.apple\\.CoreSimulator\\.CoreSimulatorBridge-->[a-z][a-z0-9+.-]*$/.test(args[6]) && args[7] === '-string' && args[8] !== '';`,
       `  const onboarding = args.length === 9 && args[6] === 'EXDevMenuIsOnboardingFinished' && args[7] === '-bool' && args[8] === 'true';`,
       `  if (approval || onboarding) process.exit(0);`,
+      `}`,
+      `if (args[0] === 'simctl' && ${JSON.stringify(refuses)}.includes(args[1])) {`,
+      `  process.stderr.write('stub xcrun: ' + args[1] + ' refused\\n');`,
+      `  process.exit(1);`,
       `}`,
       `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
       `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(115);`,

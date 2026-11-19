@@ -15,6 +15,7 @@ import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import { resolveDeviceAsync } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
+import { CommandError } from '../utils/errors';
 import { readConfiguredAppId, resolveAppId } from './appId';
 import { stopAppOnDeviceAsync } from './appProcess';
 import { debugEvent, event } from './events';
@@ -92,7 +93,8 @@ export interface RuntimeStopResultJson {
  * Stop the app on a device.
  *
  * @returns the exit code: `0` the app is not running, `20` the app named by `--app-id` was never
- * running and another one is, `1` the device refused.
+ * running and another one is.
+ * @throws {CommandError} `DEVICE_STOP_REFUSED` when the device refused the stop.
  */
 export async function runtimeStopAsync(
   projectRoot: string,
@@ -183,15 +185,24 @@ export async function runtimeStopAsync(
 
   reportStopEvents(report);
 
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a refused stop is a tool error, so under
+  // `--json` it is the envelope, not a report.
+  if (!result.ok) {
+    if (!options.json) {
+      printHumanReport(report);
+    }
+    const error = new CommandError(
+      'DEVICE_STOP_REFUSED',
+      buildStopFailureMessage(result, resolved, device)
+    );
+    error.data = { bundleId: resolved.appId, command: result.command, reason: result.reason };
+    throw error;
+  }
+
   if (options.json) {
     Log.log(JSON.stringify(report, null, 2));
   } else {
     printHumanReport(report);
-  }
-
-  if (!result.ok) {
-    Log.error(buildStopFailureMessage(result, resolved, device));
-    return 1;
   }
 
   if (appIdMismatch) {
@@ -236,7 +247,7 @@ function buildStopFailureMessage(
   device: Awaited<ReturnType<typeof resolveDeviceAsync>>
 ): string {
   return [
-    chalk.red(`The device did not stop ${resolved.appId} (${result.command}).`),
+    `The device did not stop ${resolved.appId} (${result.command}).`,
     `Why: ${result.reason}.`,
     // `simctl` and `adb` are commands about *this machine*, and the device may not be on it.
     // A cloud session is checked with the CLI that owns it (llp/0005 §Cloud simulator).

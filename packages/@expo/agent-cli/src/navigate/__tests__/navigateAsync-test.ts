@@ -380,18 +380,6 @@ describe(navigateAsync, () => {
     expect(openedArgv().at(-1)).toBe('override://profile/42');
   });
 
-  it(`should report a device that refused the deep link`, async () => {
-    vol.fromJSON({
-      [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
-      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
-    });
-    mockDevServer([EXPO_GO_TARGET]);
-    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
-
-    await expect(navigateAsync(projectRoot, options())).resolves.toBe(1);
-    expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
-  });
-
   it(`should print one JSON object and nothing else with --json`, async () => {
     vol.fromJSON({
       [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
@@ -543,32 +531,6 @@ describe(navigateAsync, () => {
 
       expect(printed()).not.toContain('Suggested next:');
     });
-
-    it(`should offer nothing after a link the device refused`, async () => {
-      mockExpoGoProject();
-      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
-
-      await expect(navigateAsync(projectRoot, options({ json: true }))).resolves.toBe(1);
-
-      // There is no screen to capture, and the failure's own how/why is the next step.
-      expect(JSON.parse(printed()).followups).toEqual([]);
-    });
-  });
-
-  it(`should report a refused deep link on stderr and keep stdout to the JSON object`, async () => {
-    vol.fromJSON({
-      [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
-      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
-    });
-    mockDevServer([EXPO_GO_TARGET]);
-    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
-
-    await expect(navigateAsync(projectRoot, options({ json: true }))).resolves.toBe(1);
-
-    expect(console.log).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(printed()).exitCode).toBe(1);
-    // The what/why/how of a failure stays human text, on stderr.
-    expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
   });
 
   // A dynamic config is evaluated with `@expo/config` in this process (issue #84), so nothing is
