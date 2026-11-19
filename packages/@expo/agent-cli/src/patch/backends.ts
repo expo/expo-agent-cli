@@ -4,8 +4,8 @@
 // file, its name and its registration are the ones the package manager applies on the next install.
 //
 // Observed on macOS, 2026-11-17:
-// - bun 1.4.4: `bun patch --commit node_modules/<pkg>` works with no `bun patch <pkg>` before it, and
-//   answers an unedited package with "No changes detected" and exit 0. bun 1.3.14 crashes
+// - bun 1.4.4: `bun patch <pkg>` replaces `node_modules/<pkg>` with a clean copy (2026-11-18), so the
+//   backend copies the edits aside first, as it does for pnpm. bun 1.3.14 crashes
 //   (segmentation fault) on `bun patch --commit` for a package installed from a `file:` tarball,
 //   also after `bun patch <pkg>`; for a registry package it works (2026-11-18).
 // - pnpm 12.2.1: `pnpm patch-commit node_modules/<pkg>` refuses ("is not a valid patch directory"),
@@ -18,6 +18,9 @@
 //   saves it to `.yarn/patches/` and rewrites the dependency to a `patch:` spec.
 // - yarn 1.22.22 has no patch feature, so it takes the npm path; its clean copy comes from the
 //   `resolved` field of `yarn.lock`.
+// - npm 12.2.3 has `npm patch add <pkg> --edit-dir` and `npm patch commit <dir>`, the same shape as
+//   pnpm, and records `patchedDependencies` in package.json (2026-11-18). It refuses a package that is
+//   not from the registry (EPATCHNONREGISTRY). npm 11 has no `patch` command.
 
 import fs from 'fs';
 import os from 'os';
@@ -71,6 +74,10 @@ export async function savePatchAsync(
     case 'yarn-berry':
       return saveWithEditDirAsync(target, 'yarn');
     case 'npm':
+      return (await hasNpmPatchAsync(target.packageManager.root)) &&
+        !usesPatchPackage(target.packageManager.root)
+        ? saveWithEditDirAsync(target, 'npm')
+        : saveWithPatchPackageFormatAsync(target, options);
     case 'yarn-classic':
       return saveWithPatchPackageFormatAsync(target, options);
   }
@@ -78,20 +85,39 @@ export async function savePatchAsync(
 
 // ---- bun ----
 
+/**
+ * `bun patch --commit` records every difference between `node_modules/<pkg>` and bun's cache, so it
+ * runs on a clean copy that holds only the agent's edits: the edited package is copied aside, `bun
+ * patch <pkg>` replaces `node_modules/<pkg>` with a clean, unlinked copy (it also drops the edits,
+ * observed with bun 1.4.4), and only the files that differ are copied back.
+ */
 async function saveWithBunAsync(target: PatchTarget): Promise<BackendResult> {
   const root = target.packageManager.root;
-  const before = snapshotPatchDirs(root);
   const relative = toPosix(path.relative(root, target.packageDir));
-  const result = await runToolAsync('bun', ['patch', '--commit', relative], root).catch(
-    (error: unknown) => {
-      throw bunCrashHint(error) ?? error;
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-'));
+  try {
+    const edited = path.join(scratch, 'edited');
+    fs.cpSync(target.packageDir, edited, { recursive: true, dereference: false });
+    await runBunAsync(['patch', relative], root);
+
+    const diff = diffTrees(target.packageDir, edited);
+    if (isEmptyDiff(diff)) {
+      return { status: 'no-edits' };
     }
-  );
-  if (/No changes detected/i.test(`${result.stdout}\n${result.stderr}`)) {
-    return { status: 'no-edits' };
+    applyTreeDiff(diff, edited, target.packageDir);
+
+    const before = snapshotPatchDirs(root);
+    await runBunAsync(['patch', '--commit', relative], root);
+    return { status: 'saved', patchFile: findWrittenPatch(root, before), files: filesOfDiff(diff) };
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
-  const patchFile = findWrittenPatch(root, before);
-  return { status: 'saved', patchFile, files: filesOfPatch(fs.readFileSync(patchFile, 'utf8')) };
+}
+
+function runBunAsync(args: string[], root: string) {
+  return runToolAsync('bun', args, root).catch((error: unknown) => {
+    throw bunCrashHint(error) ?? error;
+  });
 }
 
 /** A clearer error when bun itself crashed, which is a bun bug and not a problem with the edits. */
@@ -113,21 +139,49 @@ function bunCrashHint(error: unknown): CommandError | null {
   return hint;
 }
 
-// ---- pnpm, yarn berry ----
+// ---- pnpm, yarn berry, npm 12 ----
+
+/** npm 12 has `npm patch`; npm 11 answers `npm patch --help` with "Unknown command" and exit 1. */
+async function hasNpmPatchAsync(root: string): Promise<boolean> {
+  const result = await spawnSubprocessAsync(requireTool('npm'), ['patch', '--help'], {
+    cwd: root,
+    output: 'capture',
+  });
+  return result.exitCode === 0;
+}
+
+/**
+ * The project already applies patches with patch-package. A second patch system would apply its
+ * patches as well, so the project stays on patch-package.
+ */
+function usesPatchPackage(root: string): boolean {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  return (
+    String(pkg.scripts?.postinstall ?? '').includes(PATCH_PACKAGE_SCRIPT) ||
+    !!pkg.devDependencies?.['patch-package'] ||
+    !!pkg.dependencies?.['patch-package']
+  );
+}
 
 async function saveWithEditDirAsync(
   target: PatchTarget,
-  tool: 'pnpm' | 'yarn'
+  tool: 'pnpm' | 'yarn' | 'npm'
 ): Promise<BackendResult> {
   const root = target.packageManager.root;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-'));
   try {
     let editDir: string;
-    if (tool === 'pnpm') {
+    if (tool === 'pnpm' || tool === 'npm') {
       editDir = path.join(scratch, 'edit');
       await runToolAsync(
-        'pnpm',
-        ['patch', `${target.packageName}@${target.version}`, '--edit-dir', editDir],
+        tool,
+        [
+          'patch',
+          ...(tool === 'npm' ? ['add'] : []),
+          `${target.packageName}@${target.version}`,
+          '--edit-dir',
+          editDir,
+        ],
         root
       );
     } else {
@@ -145,6 +199,8 @@ async function saveWithEditDirAsync(
     const before = snapshotPatchDirs(root);
     if (tool === 'pnpm') {
       await runToolAsync('pnpm', ['patch-commit', editDir], root);
+    } else if (tool === 'npm') {
+      await runToolAsync('npm', ['patch', 'commit', editDir], root);
     } else {
       await runToolAsync('yarn', ['patch-commit', '-s', editDir], root);
     }
@@ -172,9 +228,19 @@ export function parseYarnEditDir(stdout: string): string {
 
 // ---- npm, yarn classic: patch-package's format ----
 
-/** The `postinstall` that applies the patches, and the package that provides it. */
+/**
+ * The `postinstall` that applies the patches, and the package that provides it. `--error-on-fail`
+ * makes a patch that no longer applies fail the install, as patch-package already does on CI.
+ */
 export const PATCH_PACKAGE_SCRIPT = 'patch-package';
+const PATCH_PACKAGE_COMMAND = 'patch-package --error-on-fail';
 export const PATCH_PACKAGE_RANGE = '^8.0.0';
+/**
+ * yarn classic does not run the root `postinstall` after `yarn remove`, which replaces
+ * `node_modules` and so drops the patches; patch-package's README asks for this package to run it.
+ */
+const POSTINSTALL_POSTINSTALL = 'postinstall-postinstall';
+const POSTINSTALL_POSTINSTALL_RANGE = '^2.1.0';
 
 async function saveWithPatchPackageFormatAsync(
   target: PatchTarget,
@@ -190,9 +256,13 @@ async function saveWithPatchPackageFormatAsync(
     }
     const files = filesOfDiff(diff);
 
-    const projectChanges = patchPackageSetupChanges(root);
-    if (projectChanges.length && !yes) {
-      return { status: 'needs-consent', projectChanges, files };
+    const setup = patchPackageSetup(root, target.packageManager.name);
+    if (setup.length && !yes) {
+      return {
+        status: 'needs-consent',
+        projectChanges: setup.map((change) => change.description),
+        files,
+      };
     }
 
     const patchText = await unifiedDiffAsync(cleanDir, target.packageDir, diff, target.packageName);
@@ -203,7 +273,7 @@ async function saveWithPatchPackageFormatAsync(
     );
     fs.mkdirSync(path.dirname(patchFile), { recursive: true });
     fs.writeFileSync(patchFile, patchText);
-    applyPatchPackageSetup(root);
+    applyPackageJsonChanges(root, setup);
     return { status: 'saved', patchFile, files };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
@@ -260,7 +330,10 @@ function resolvedSpecFromNpmLock(root: string, packageDir: string): string | nul
 }
 
 /**
- * The `resolved` of a yarn classic lockfile entry for `<name>` at `<version>`, without its `#hash`.
+ * The `resolved` of a yarn classic lockfile entry for `<name>` at `<version>`.
+ *
+ * The `#…` fragment of a registry tarball URL is its sha1 and goes. The fragment of a git URL is
+ * the commit that was installed, and stays: without it `npm pack` clones the default branch.
  *
  * An entry is a header line of one or more specs (`"name@^1.0.0", name@~1.0.1:`) and indented
  * fields under it.
@@ -287,10 +360,17 @@ export function resolvedSpecFromYarnLock(
         .find(Boolean);
     if (names.includes(packageName) && field('version') === version) {
       const resolved = field('resolved');
-      return resolved ? resolved.replace(/#.*$/, '') : null;
+      if (!resolved) {
+        return null;
+      }
+      return isGitSpec(resolved) ? resolved : resolved.replace(/#.*$/, '');
     }
   }
   return null;
+}
+
+function isGitSpec(spec: string): boolean {
+  return /^(?:git\+|git:\/\/|ssh:\/\/|github:)/.test(spec) || /\.git(?:#|$)/.test(spec);
 }
 
 function parsePackFilename(stdout: string): string {
@@ -312,7 +392,10 @@ function parsePackFilename(stdout: string): string {
  * The patch, as patch-package writes it: a git diff whose paths start at `node_modules/<pkg>/`.
  *
  * `git diff --no-index` over two copies of only the edited files, so the header paths are the
- * copies' paths and are rewritten to the package's.
+ * copies' paths and are rewritten to the package's. The user's git config does not change the bytes:
+ * with `core.autocrlf=true` (the Windows default) a CRLF file would diff to LF context that no longer
+ * applies. patch-package cannot apply a binary change, so one is refused, and the patch is checked
+ * against the clean copy before it is saved.
  */
 async function unifiedDiffAsync(
   cleanDir: string,
@@ -332,9 +415,12 @@ async function unifiedDiffAsync(
     }
     fs.mkdirSync(a, { recursive: true });
     fs.mkdirSync(b, { recursive: true });
+    const git = requireTool('git');
+    const noConfig = ['-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false'];
     const result = await spawnSubprocessAsync(
-      requireTool('git'),
+      git,
       [
+        ...noConfig,
         'diff',
         '--no-index',
         '--no-color',
@@ -349,6 +435,39 @@ async function unifiedDiffAsync(
     // `git diff --no-index` exits 1 when the trees differ, which is the expected case.
     if (result.exitCode !== 0 && result.exitCode !== 1) {
       throw toolFailure('git', ['diff', '--no-index'], result);
+    }
+    // `Binary files a/x and b/x differ`, with /dev/null for an added or removed file.
+    const binary = [
+      ...result.stdout.matchAll(
+        /^Binary files (?:a\/(\S+)|\/dev\/null) and (?:b\/(\S+)|\/dev\/null) differ$/gm
+      ),
+    ];
+    if (binary.length) {
+      throw new CommandError(
+        'PATCH_BINARY',
+        `patch-package cannot apply a change to a binary file, so the patch was not saved: ${binary
+          .map((match) => match[1] ?? match[2])
+          .join(', ')}.\nHow: undo the change to the binary file, or patch it another way.`
+      );
+    }
+    // Apply the patch to the clean copy, as the next install will.
+    const patchFile = path.join(work, 'check.patch');
+    fs.writeFileSync(patchFile, result.stdout);
+    const check = result.stdout.trim()
+      ? await spawnSubprocessAsync(git, [...noConfig, 'apply', '--check', '-p1', patchFile], {
+          cwd: a,
+          output: 'capture',
+        })
+      : null;
+    if (!check || check.exitCode !== 0) {
+      const error = new CommandError(
+        'PATCH_NOT_APPLICABLE',
+        [
+          `The patch that was made from the edits does not apply to a clean copy of the package, so it was not saved.`,
+          check ? `${check.stderr}\n${check.stdout}`.trim() : 'The patch is empty.',
+        ].join('\n')
+      );
+      throw error;
     }
     const prefix = `node_modules/${packageName}/`;
     return result.stdout
@@ -366,41 +485,66 @@ function copyInto(fromRoot: string, toRoot: string, file: string): void {
   fs.copyFileSync(path.join(fromRoot, file), target);
 }
 
-/** What `package.json` still needs for patch-package to apply the patches on install. */
-export function patchPackageSetupChanges(root: string): string[] {
+interface PackageJsonChange {
+  /** What a person reads in the plan. */
+  description: string;
+  apply: (pkg: Record<string, any>) => void;
+}
+
+/**
+ * What `package.json` still needs for patch-package to apply the patches on install. An existing
+ * `postinstall` is kept, and patch-package runs after it.
+ */
+function patchPackageSetup(
+  root: string,
+  manager: DetectedPackageManager['name']
+): PackageJsonChange[] {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  const changes: string[] = [];
+  const changes: PackageJsonChange[] = [];
   const postinstall: unknown = pkg.scripts?.postinstall;
   if (typeof postinstall !== 'string' || !postinstall.includes(PATCH_PACKAGE_SCRIPT)) {
-    changes.push(
+    const script =
       typeof postinstall === 'string' && postinstall
-        ? `scripts.postinstall: "${postinstall}" → "${postinstall} && ${PATCH_PACKAGE_SCRIPT}"`
-        : `scripts.postinstall: "${PATCH_PACKAGE_SCRIPT}"`
-    );
+        ? `${postinstall} && ${PATCH_PACKAGE_COMMAND}`
+        : PATCH_PACKAGE_COMMAND;
+    changes.push({
+      description:
+        typeof postinstall === 'string' && postinstall
+          ? `scripts.postinstall: "${postinstall}" → "${script}"`
+          : `scripts.postinstall: "${script}"`,
+      apply: (json) => {
+        json.scripts ??= {};
+        json.scripts.postinstall = script;
+      },
+    });
   }
-  if (!pkg.devDependencies?.['patch-package'] && !pkg.dependencies?.['patch-package']) {
-    changes.push(
-      `devDependencies.patch-package: "${PATCH_PACKAGE_RANGE}" (install it before the next fresh install)`
-    );
+  const devDependencies: [string, string][] = [[PATCH_PACKAGE_SCRIPT, PATCH_PACKAGE_RANGE]];
+  if (manager === 'yarn-classic') {
+    devDependencies.push([POSTINSTALL_POSTINSTALL, POSTINSTALL_POSTINSTALL_RANGE]);
+  }
+  for (const [name, range] of devDependencies) {
+    if (!pkg.devDependencies?.[name] && !pkg.dependencies?.[name]) {
+      changes.push({
+        description: `devDependencies.${name}: "${range}" (install it before the next fresh install)`,
+        apply: (json) => {
+          json.devDependencies ??= {};
+          json.devDependencies[name] = range;
+        },
+      });
+    }
   }
   return changes;
 }
 
-function applyPatchPackageSetup(root: string): void {
+function applyPackageJsonChanges(root: string, changes: PackageJsonChange[]): void {
+  if (!changes.length) {
+    return;
+  }
   const file = path.join(root, 'package.json');
   const text = fs.readFileSync(file, 'utf8');
   const pkg = JSON.parse(text);
-  const postinstall: unknown = pkg.scripts?.postinstall;
-  if (typeof postinstall !== 'string' || !postinstall.includes(PATCH_PACKAGE_SCRIPT)) {
-    pkg.scripts ??= {};
-    pkg.scripts.postinstall =
-      typeof postinstall === 'string' && postinstall
-        ? `${postinstall} && ${PATCH_PACKAGE_SCRIPT}`
-        : PATCH_PACKAGE_SCRIPT;
-  }
-  if (!pkg.devDependencies?.['patch-package'] && !pkg.dependencies?.['patch-package']) {
-    pkg.devDependencies ??= {};
-    pkg.devDependencies['patch-package'] = PATCH_PACKAGE_RANGE;
+  for (const change of changes) {
+    change.apply(pkg);
   }
   const indent = /^[ \t]+/m.exec(text)?.[0] ?? '  ';
   fs.writeFileSync(file, `${JSON.stringify(pkg, null, indent)}\n`);
@@ -445,15 +589,6 @@ function findWrittenPatch(root: string, before: Snapshot): string {
       ' or '
     )}.`
   );
-}
-
-/** The files a git-style patch changes, relative to the package root. */
-export function filesOfPatch(patch: string): string[] {
-  const files = new Set<string>();
-  for (const match of patch.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)) {
-    files.add(match[2]!.replace(/^node_modules\/(?:@[^/]+\/)?[^/]+\//, ''));
-  }
-  return [...files].sort();
 }
 
 function filesOfDiff(diff: TreeDiff): string[] {
