@@ -103,7 +103,10 @@ export interface NavigateResultJson {
   appId: string | null;
   /** Device command that was run, for reproducing the step by hand. */
   command: string | null;
-  /** Exit code of that command: non-zero means the device refused the deep link. */
+  /**
+   * Exit code of that command, or null when nothing was opened. A refused link prints no report:
+   * it is the `DEEP_LINK_REFUSED` error.
+   */
   exitCode: number | null;
   /**
    * The dev launcher URL that was opened **before** {@link url}, or null when none was.
@@ -168,7 +171,7 @@ export interface NavigateResultJson {
    */
   attachAlert: AlertCheck | null;
   /**
-   * State-aware next actions, empty when the device refused the link or they are suppressed.
+   * State-aware next actions, empty when no app attached or loaded, or when they are suppressed.
    *
    * @see llp/0009-smart-followups.rfc.md §The follow-up block
    */

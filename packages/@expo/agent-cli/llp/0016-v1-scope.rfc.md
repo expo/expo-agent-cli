@@ -53,7 +53,7 @@ A command graduates when its flags, `--json` keys, and exit codes have held; it 
 
 `expo-doctor` exits 1 when a check fails. This command does not. [[0010-agent-conventions]] gives `1` one meaning: the tool did not work.
 
-**0** when every check passed. **20** when any failed. **1** only when the run produced no verdict. expo-doctor's own code stays on the `--json` `exitCode` field.
+**0** when every check passed. **20** when any failed. **1** only when the run produced no verdict: `EXPO_DOCTOR_NOT_FOUND` when it could not start, `EXPO_DOCTOR_KILLED` when a signal stopped it (e2e `doctor-test.ts`). expo-doctor's own code stays on the `--json` `exitCode` field.
 
 A forwarded exit code is handed back verbatim only where this CLI adds no verdict of its own.
 
