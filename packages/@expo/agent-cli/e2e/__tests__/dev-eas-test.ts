@@ -1150,7 +1150,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
-  it('a re-run that opens the app on a running server waits for it', async () => {
+  it('an EAS re-run on a running server waits for the app only with --wait-ready', async () => {
     const projectRoot = await setupAsync('go-app');
     await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
     const env = {
@@ -1167,6 +1167,15 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       );
       expect(first.exitCode).toBe(0);
       await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
+
+      // Without --wait-ready, reuse adds no wait for the app to open.
+      const unwaited = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--json'],
+        { env, reject: false }
+      );
+      expect(unwaited.exitCode).toBe(0);
+      expect(JSON.parse(unwaited.stdout).app ?? null).toBeNull();
 
       const again = await executeAgentCliAsync(
         projectRoot,
