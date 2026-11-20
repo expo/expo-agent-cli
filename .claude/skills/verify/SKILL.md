@@ -5,9 +5,9 @@ description: Drive the built @expo/agent-cli command-line tool (`expo-agent-cli`
 
 # Verify @expo/agent-cli
 
-The product is a CLI. A user runs it in an Expo project and reads the exit code, stdout and stderr. This skill runs the built bin (`bin/cli.js`, which loads `build/cli/`) in the committed app `apps/eas-example`: Expo Router, `expo-dev-client`, routes `/` and `/explore`. Nothing is stubbed. The app runs as a development build, not in Expo Go.
+The product is a CLI. A user runs it in an Expo project and reads the exit code, stdout and stderr. This skill runs the built bin of `packages/@expo/agent-cli` (`bin/cli.js`, which loads `build/cli/`) in the committed app `apps/eas-example`: Expo Router, `expo-dev-client`, routes `/` and `/explore`. Nothing is stubbed. The app runs as a development build, not in Expo Go.
 
-Run every command from the package root, `packages/@expo/agent-cli`. The helper is `.claude/skills/verify/verify.mjs`:
+Run every command from the repo root. The helper is `.claude/skills/verify/verify.mjs`:
 
 ```sh
 V=.claude/skills/verify/verify.mjs
@@ -30,7 +30,7 @@ node $V launch
 ```
 
 1. Refuses to start when `apps/eas-example` has uncommitted changes. Cleanup restores the app with git, so a change that is already there would be lost.
-2. `bun run build`. The bin runs the bundle, not `src/`. An edit to `src/` is not in the bin until a build.
+2. `bun run build` in `packages/@expo/agent-cli`. The bin runs the bundle, not `src/`. An edit to `src/` is not in the bin until a build.
 3. Links `apps/eas-example/.expo/build-cache` to the shared build cache, `~/Library/Caches/agent-cli-verify/build-cache` on macOS. `AGENT_CLI_VERIFY_HOME` moves it.
 
 Ready means the last output is a JSON object with `"ready": true`. It names `projectDir`, `evidenceDir`, and `cachedBuilds`: the builds that the cache holds. Launch takes about 15 seconds.
@@ -64,15 +64,15 @@ node $V doctor
 
 It prints one JSON object and exits 0 when `ok` is true. Run it first when a result looks wrong.
 
-| Key                | Meaning                                                                   |
-| ------------------ | ------------------------------------------------------------------------- |
-| `bundleStale`      | `true`: a file in `src/` is newer than the bundle. Run `bun run build`.   |
-| `version`          | What the bin answers to `--version`.                                      |
-| `run`              | The run in progress, or `null`. `null` means run `launch`.                |
-| `projectInstalled` | `apps/eas-example` has its `node_modules/expo`.                           |
-| `devServer`        | From `status --json`: the URL, `running`, and `appsConnected`.            |
-| `binding`          | The devices bound to this checkout. Empty before the first `dev`.         |
-| `bootedSimulators` | Every booted simulator on the machine. Not all of them belong to the run. |
+| Key                | Meaning                                                                      |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `bundleStale`      | `true`: a file in the package `src/` is newer than the bundle. Run `launch`. |
+| `version`          | What the bin answers to `--version`.                                         |
+| `run`              | The run in progress, or `null`. `null` means run `launch`.                   |
+| `projectInstalled` | `apps/eas-example` has its `node_modules/expo`.                              |
+| `devServer`        | From `status --json`: the URL, `running`, and `appsConnected`.               |
+| `binding`          | The devices bound to this checkout. Empty before the first `dev`.            |
+| `bootedSimulators` | Every booted simulator on the machine. Not all of them belong to the run.    |
 
 Doctor runs `status --json` in the app. That command writes only its caches under `.expo`.
 
