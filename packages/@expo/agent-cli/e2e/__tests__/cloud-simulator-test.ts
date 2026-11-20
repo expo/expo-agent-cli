@@ -780,6 +780,34 @@ describe('@expo/agent-cli runtime:stop --eas', () => {
     }
   );
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Readers — navigate drives the session that the
+  // last dev opened, without --eas, and renews its lease as --eas does.
+  it.skipIf(process.platform !== 'darwin')(
+    `navigate drives the session that the last dev opened, and renews its lease`,
+    async () => {
+      const projectRoot = await setupLastDevSessionAsync();
+      const bindingPath = cloudBindingFile(expoHomeOf(projectRoot), projectRoot);
+      const before = JSON.parse(await fs.promises.readFile(bindingPath, 'utf8')).expiresAt;
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['navigate', '/notes', '--ios', '--scheme', 'myapp', '--no-wait-attach', '--json'],
+        { reject: false, env: { AGENT_CLI_NO_DEVICE: '0' } }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        deviceBackend: 'cloud',
+        deviceId: 'sess-e2e',
+        url: 'myapp://notes',
+      });
+      const execs = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:exec');
+      expect(execs.map((argv) => argv.slice(3, 5))).toEqual([['open', 'myapp://notes']]);
+      const after = JSON.parse(await fs.promises.readFile(bindingPath, 'utf8')).expiresAt;
+      expect(Date.parse(after)).toBeGreaterThan(Date.parse(before));
+    }
+  );
+
   it(`says how to start a session when --eas finds none`, async () => {
     const projectRoot = await setupAsync('go-app');
 
