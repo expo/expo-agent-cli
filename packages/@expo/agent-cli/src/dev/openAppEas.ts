@@ -31,6 +31,7 @@ import {
 } from '../device/cloudSimulator';
 import * as Log from '../log';
 import { openRouteAsync } from '../navigate/openRoute';
+import { probeDevServerAsync } from '../runtime/devServer';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
@@ -52,7 +53,14 @@ import {
 /** How long the `build:list` that names the build this run just made may take. */
 const BUILD_LOOKUP_TIMEOUT_MS = 60_000;
 
-export type OpenAppOnEasOptions = EnsureEasSessionOptions;
+export type OpenAppOnEasOptions = EnsureEasSessionOptions & {
+  /**
+   * Whether a reused development-build open reads the debugger targets right before it sends the
+   * launcher URL, and refuses when no read reaches the dev server. Only a `--wait-ready` reopen
+   * needs them, to tell the reloaded app from the old one.
+   */
+  readStaleTargets?: boolean;
+};
 
 /** What one open on EAS amounted to. */
 export interface OpenAppOnEasReport {
@@ -65,6 +73,11 @@ export interface OpenAppOnEasReport {
   tunnelHost: string | null;
   /** Where a person watches the session, when the EAS CLI printed it. */
   sessionUrl: string | null;
+  /**
+   * The debugger target ids listed right before the launcher URL was sent: the app from before
+   * the reload. Null when no read was made (no `readStaleTargets`, Expo Go, a started session).
+   */
+  targetsBeforeOpen: string[] | null;
   /** Why the app was not opened. Null exactly when {@link opened} is true. */
   reason: string | null;
   /** The one-session-per-worktree refusal, when {@link reason} is that refusal. */
@@ -161,6 +174,7 @@ export async function openAppOnEasAsync(
     tunnelHost: session.tunnelHost,
     sessionUrl: session.sessionUrl,
     refusal: session.refusal,
+    targetsBeforeOpen: null as string[] | null,
   };
   if (!session.ok) {
     return { ...base, opened: false, reason: session.reason ?? 'no session was reached' };
@@ -196,6 +210,18 @@ export async function openAppOnEasAsync(
     if (!stillWanted()) {
       return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
     }
+    if (options.readStaleTargets && !options.expoGo) {
+      base.targetsBeforeOpen = await readTargetIdsAsync(options.devServerUrl, stillWanted);
+      if (base.targetsBeforeOpen == null) {
+        return {
+          ...base,
+          opened: false,
+          reason: stillWanted()
+            ? 'the dev server did not list its debugger targets, so the app that the open replaces cannot be told from the new one'
+            : 'the dev server stopped before the app was opened',
+        };
+      }
+    }
     const result = await openRouteAsync(projectRoot, {
       route,
       platform,
@@ -221,6 +247,25 @@ export async function openAppOnEasAsync(
   }
   event('open_app_eas_opened', { platform, sessionId: session.sessionId, started: false });
   return { ...base, opened: true, reason: null };
+}
+
+const TARGET_READ_ATTEMPTS = 3;
+const TARGET_READ_TIMEOUT_MS = 2000;
+const TARGET_READ_RETRY_MS = 300;
+
+/** The target ids the dev server lists, asked again after an unreachable answer. Null when none was reached. */
+async function readTargetIdsAsync(
+  devServerUrl: string,
+  stillWanted: () => boolean
+): Promise<string[] | null> {
+  for (let attempt = 0; attempt < TARGET_READ_ATTEMPTS && stillWanted(); attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, TARGET_READ_RETRY_MS));
+    const probe = await probeDevServerAsync(devServerUrl, {
+      signal: AbortSignal.timeout(TARGET_READ_TIMEOUT_MS),
+    });
+    if (probe.reachable) return probe.targets.map((target) => target.id);
+  }
+  return null;
 }
 
 /** The one line `dev` says about an open on EAS that did not happen, with the door that still works. */

@@ -73,7 +73,8 @@
 //
 // `simulator` / `simulator:start`
 // - A start with `--open-url`, and an `open` verb of `simulator:exec`, write `stub-eas-app-opened`
-//   under the cwd: the stub `expo` under STUB_EXPO_TARGETS_AFTER_EAS_OPEN lists its targets from then on
+//   under the cwd, one line per open: the stub `expo` under STUB_EXPO_TARGETS_AFTER_EAS_OPEN lists
+//   its targets from then on
 // - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready. Without
 //   `--json` the dotenv names the billed id, which the real command writes right after the create
 //   mutation (`commands/simulator/index.js` 276-281) and leaves after a failed wait; the session is
@@ -532,7 +533,7 @@ if (command === 'simulator' || command === 'simulator:start') {
 
 /** Say that an app was opened on the session: the stub `expo` lists its targets from then on. */
 function markAppOpened() {
-  fs.writeFileSync(path.join(cwd, 'stub-eas-app-opened'), '');
+  fs.appendFileSync(path.join(cwd, 'stub-eas-app-opened'), 'open\n');
 }
 
 /** Stop the session the argv or the dotenv names, the way `simulator:stop` does. */

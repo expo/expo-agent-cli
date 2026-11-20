@@ -154,6 +154,7 @@ export async function openAppOnDeviceAsync(
       routeCheck: false,
       command: 'navigate',
       device: bound ? navigateDeviceOf(bound) : undefined,
+      launchDevClient: true,
     });
     if (result.exitCode !== 0) {
       return stopped(

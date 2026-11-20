@@ -340,6 +340,7 @@ describe(detachFollowUps, () => {
       tunnelUrl: null,
       device: null,
       eas: null,
+      app: null,
       waitedMs: 10,
       followups: [],
       ...overrides,

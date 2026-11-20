@@ -429,6 +429,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       // The app of the session, attached: `--wait-ready` waits for it (llp/0004 §Daemonization).
       STUB_EXPO_TARGETS: SESSION_APP_TARGETS,
       STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
+      // The app attaches only after the dev server answered an empty list again and again.
+      STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: '3',
     };
   }
 
@@ -1125,9 +1127,25 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
+  it('--wait-ready says the load is unknown when the runtime cannot be asked', async () => {
+    const projectRoot = await setupAsync('go-app');
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready'],
+        { env: easRunEnv(projectRoot, 8538) }
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/App\s+attached · load unknown · \d+ms/);
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
   it('--wait-ready exits 22 when no app of the session attaches', async () => {
     const projectRoot = await setupAsync('go-app');
     try {
+      const startedAt = Date.now();
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
@@ -1141,6 +1159,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         }
       );
       expect(result.exitCode).toBe(22);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
       const { error } = JSON.parse(result.stdout);
       expect(error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
       expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --eas --ios');
@@ -1182,13 +1201,99 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       expect(unwaited.exitCode).toBe(0);
       expect(JSON.parse(unwaited.stdout).app ?? null).toBeNull();
 
+      const startedAt = Date.now();
       const again = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
         { env, reject: false }
       );
       expect(again.exitCode).toBe(22);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
       expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // The budget outlasts the empty polls after the reopen, so a 22 is a wait that ignored a target.
+  const REOPEN_WAIT_MS = 6000;
+
+  // An EAS re-run opens the app again. A development build gets the launcher URL, which reloads an
+  // attached app, so only a target that appears after the reopen proves it. Expo Go gets its route
+  // link, which keeps the loaded app and its target.
+  it.each([
+    ['keeps the Expo Go target, which counts', 'go-app', 'cloud-app', 0],
+    [
+      'passes on the target a development build reload adds',
+      'dev-client-fresh-app',
+      'cloud-app-{opens}',
+      0,
+    ],
+    [
+      'exits 22 when a development build lists only the target from before the reopen',
+      'dev-client-fresh-app',
+      'cloud-app',
+      22,
+    ],
+  ])('an EAS re-run with --wait-ready %s', async (_case, fixture, targetId, exitCode) => {
+    const projectRoot = await setupAsync(fixture);
+    const devClient = fixture !== 'go-app';
+    if (devClient) {
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      config.expo.scheme = 'myapp';
+      config.expo.ios = { bundleIdentifier: 'dev.e2e.devclient' };
+      fs.writeFileSync(configPath, JSON.stringify(config));
+    }
+    await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+    const env = {
+      ...easRunEnv(projectRoot, 8537),
+      STUB_SIM_SESSIONS: '1',
+      STUB_EXPO_TARGETS: JSON.stringify([
+        runtimeTarget(targetId, {
+          appId: devClient ? 'dev.e2e.devclient' : 'host.exp.Exponent',
+          deviceName: 'iPhone 17 Pro',
+        }),
+      ]),
+      STUB_EAS_BUILDS: JSON.stringify([
+        {
+          id: 'matching-build',
+          platform: 'IOS',
+          status: 'FINISHED',
+          fingerprintHash: '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567',
+          buildProfile: 'development-simulator',
+        },
+      ]),
+      AGENT_CLI_DEV_APP_WAIT_MS: String(REOPEN_WAIT_MS),
+    };
+    const devArgs = ['dev', '--ios', '--eas', ...(devClient ? ['--dev-client'] : []), '--detach'];
+    try {
+      const first = await executeAgentCliAsync(projectRoot, [...devArgs, '--json'], { env });
+      expect(first.exitCode, first.stderr).toBe(0);
+      await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
+      // The first open's app is listed before the reopen, so the reopen has an old target to skip.
+      const { port } = (await waitForDevLockAsync(projectRoot))!;
+      expect(
+        await waitForAsync(async () => {
+          const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+          return ((await response.json()) as unknown[]).length > 0;
+        }, 10_000)
+      ).toBe(true);
+
+      const startedAt = Date.now();
+      const again = await executeAgentCliAsync(
+        projectRoot,
+        [...devArgs, '--wait-ready', '--json'],
+        {
+          env,
+          reject: false,
+        }
+      );
+      expect(again.exitCode, again.stderr).toBe(exitCode);
+      if (exitCode === 22) {
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(REOPEN_WAIT_MS);
+        expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+      }
     } finally {
       await cleanUpAsync(projectRoot);
     }

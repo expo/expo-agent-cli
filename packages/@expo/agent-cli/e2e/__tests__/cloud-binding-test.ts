@@ -23,6 +23,8 @@ import {
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
+import { runtimeTarget } from '../runtimeTargetFixtures';
+import { installStubXcrunAsync } from './installedAppStubs';
 
 let machine: string;
 let expoHome: string;
@@ -40,19 +42,37 @@ afterEach(async () => {
     });
   }
 });
-function envFor(root: string) {
+/**
+ * The device name of the app on a session of each platform, as Metro lists it. An EAS Android
+ * session runs an x86_64 image, so an arm64 emulator on this host does not claim its app.
+ */
+const SESSION_DEVICE = { ios: 'iPhone 17 Pro', android: 'sdk_gphone64_x86_64 - 15 - API 35' };
+
+/** Empty answers of the dev server after an open: only a wait that polls again sees the app. */
+const EMPTY_POLLS_AFTER_OPEN = '3';
+
+function envFor(root: string, platform: 'ios' | 'android' = 'ios') {
   return {
     ...stubExpoEnv(root),
     AGENT_CLI_NO_DEVICE: '0',
     __UNSAFE_EXPO_HOME_DIRECTORY: expoHome,
     STUB_SIM_STORE: path.join(machine, 'sessions.json'),
     STUB_SIM_SESSIONS: '0',
+    // The app attaches once the session opens it, so `dev --wait-ready` finds it. Each open
+    // reloads it, so its target id changes, as a reload's does.
+    STUB_EXPO_TARGETS: JSON.stringify([
+      runtimeTarget('session-app-{opens}', { deviceName: SESSION_DEVICE[platform] }),
+    ]),
+    STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
+    STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: EMPTY_POLLS_AFTER_OPEN,
   };
 }
 async function project(fixture = 'go-app') {
   const root = fs.realpathSync(await setupFixtureAsync(fixture));
   await installStubFingerprintAsync(root);
   await installStubEasAsync(root);
+  // No local simulator: a booted one named like the session's device would claim its app.
+  await installStubXcrunAsync(root, { bind: false });
   projects.push(root);
   return root;
 }
@@ -147,7 +167,7 @@ it.each(['ios', 'android'] as const)(
     list([{ id: 'preserved-session', platform: platform.toUpperCase() }]);
     await writeCloudSessionFileAsync(root, 'preserved-session');
     const env = {
-      ...envFor(root),
+      ...envFor(root, platform),
       STUB_SIM_START_ID: 'preserved-session',
       STUB_EXPO_DEV_SERVER_PORT: platform === 'ios' ? '8754' : '8755',
       STUB_EXPO_LISTEN: '1',
