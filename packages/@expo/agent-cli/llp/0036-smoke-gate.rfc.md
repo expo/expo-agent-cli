@@ -146,7 +146,7 @@ An install replaces the running app, so the `app` phase drops its earlier look a
 
 Expo Go's native runtime is versioned with the SDK. A copy from another SDK takes the deep link but cannot load this project's bundle. So `smoke` compares the Expo Go on a **local** device with the release this project's SDK ships. The `app` phase never compares a development build or an EAS session's device. An EAS session that the CLI starts needs no check: the CLI passes `--expo-go` to `eas simulator`, and the service installs the Expo Go of the project's SDK.
 
-Two questions, two sources. Neither is `@expo/cli`'s ([[0001-agentic-cli-on-expo-cli]] §Constraints, constraint 5).
+Two questions, two sources. Neither is `@expo/cli`'s ([[0001-agentic-cli-on-expo-cli]] §Constraints, constraint 4).
 
 - **What the SDK wants:** `npx --yes expo-go url <platform> <sdk> --json`, a subprocess with a 15 s bound. It answers `{"url":…}` at exit 0 and `{"error":…}` at exit 1. The version is read from the release URL, and one parser serves both platforms. `EXPO_OFFLINE` (set, and not `0`) skips the lookup.
 - **What is installed:** each platform's own reader.

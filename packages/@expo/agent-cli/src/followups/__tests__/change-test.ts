@@ -94,7 +94,8 @@ describe(buildChangeFollowUps, () => {
     });
 
     // `dev` requires a platform, so the command states the host's when the report named none —
-    // stated text the caller can change, not a guess inside a run (llp/0005 §Which platform).
+    // stated text the caller can change, not a guess inside a run
+    // (llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say).
     it(`should state the host's platform when the report named none`, () => {
       const [local, cloud] = buildChangeFollowUps(input({ platform: null }));
 
