@@ -4,7 +4,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 ## Baseline preconditions
 
-- The working directory is the package root, `packages/@expo/agent-cli`.
+- The working directory is the repo root.
 - `V=.claude/skills/verify/verify.mjs`.
 - `node $V launch` printed `"ready": true`. The app is the committed `apps/eas-example`: SDK 58, Expo Router, `expo-dev-client`, routes `/`, `/explore` and `/_sitemap`, app id `dev.expo.easexample`.
 - The home screen has the `testID`s `home-title` (text `EAS Example home`), `counter-button`, `counter-value` (text `Count: 0`) and `explore-link`. The explore screen has `explore-title` (text `EAS Example explore`).

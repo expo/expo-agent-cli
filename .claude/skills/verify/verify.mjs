@@ -9,12 +9,12 @@ import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 
 const skillDir = path.dirname(fileURLToPath(import.meta.url));
-const packageRoot = path.resolve(skillDir, '../../..');
+const repoRoot = path.resolve(skillDir, '../../..');
+const packageRoot = path.join(repoRoot, 'packages/@expo/agent-cli');
 const bin = path.join(packageRoot, 'bin/cli.js');
 const bundle = path.join(packageRoot, 'build/cli/index.js');
 const artifactsRoot = path.join(skillDir, '.artifacts');
 const pointerFile = path.join(artifactsRoot, 'current-run.json');
-const repoRoot = path.resolve(packageRoot, '../../..');
 // The committed Expo Router app with expo-dev-client. The skill drives it in place.
 const projectDir = path.join(repoRoot, 'apps/eas-example');
 // Native builds are shared by every checkout on this machine, keyed by fingerprint.
