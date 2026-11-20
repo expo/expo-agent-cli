@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 
 import { event as cliEvent } from '../events';
 import { EXIT_ERROR, EXIT_NEEDS_HUMAN, exitWithCodeAsync } from '../exitCodes';
-import { error as printToStderr, exit, exception, hasWrittenToStdout, log, warn } from '../log';
+import { error as printToStderr, exception, hasWrittenToStdout, log, warn } from '../log';
 import { renderForInvoker } from './invoker';
 import { isJsonRequested } from './jsonMode';
 
@@ -226,37 +226,11 @@ export function jsonErrorEnvelope({
   };
 }
 
-export class AbortCommandError extends CommandError {
-  constructor() {
-    super('ABORTED', 'Interactive prompt was cancelled.');
-  }
-}
-
-/**
- * Used to end a CLI process without printing a stack trace in the Expo CLI. Should be used in favor of `process.exit`.
- */
-export class SilentError extends CommandError {
-  constructor(messageOrError?: string | Error) {
-    const message =
-      (typeof messageOrError === 'string' ? messageOrError : messageOrError?.message) ??
-      'This error should fail silently in the CLI';
-    super('SILENT', message);
-    if (typeof messageOrError !== 'string') {
-      // forward the props of the incoming error for tests or processes outside of expo-cli that use expo cli internals.
-      this.stack = messageOrError?.stack ?? this.stack;
-      this.name = messageOrError?.name ?? this.name;
-    }
-  }
-}
-
 export function logCmdError(error: any): never {
   if (!(error instanceof Error)) {
     throw error;
   }
-  if (error instanceof AbortCommandError || error instanceof SilentError) {
-    // Do nothing, this is used for prompts or other cases that were custom logged.
-    process.exit(EXIT_ERROR);
-  } else if (
+  if (
     error instanceof CommandError ||
     error instanceof AssertionError ||
     error.name === 'ApiV2Error' ||
@@ -322,9 +296,17 @@ export function logCmdError(error: any): never {
     return exitWithCodeAsync(exitCode) as unknown as never;
   }
 
-  const errorDetails = error.stack ? '\n' + chalk.gray(error.stack) : '';
-
-  exit(chalk.red(error.toString()) + errorDetails);
+  // Any other `Error` is a defect that reached the top through a command's `.catch`: the same
+  // crash report as `handleUncaughtException`, plus the event and the flush, which this
+  // asynchronous path can afford.
+  const message = printCrashReport(error);
+  cliEvent('error', {
+    code: UNCAUGHT_EXCEPTION_CODE,
+    message,
+    suggestedCommand: null,
+    needsHuman: false,
+  });
+  return exitWithCodeAsync(EXIT_ERROR) as unknown as never;
 }
 
 /**
@@ -444,6 +426,17 @@ export function handleUncaughtException(thrown: unknown): void {
     return;
   }
 
+  printCrashReport(error, thrown);
+  process.exit(EXIT_ERROR);
+}
+
+/**
+ * Print the report of a crash: the what / why / how and the stack on stderr, and the `--json`
+ * envelope on stdout when the run asked for one.
+ *
+ * @returns the message, for the `cli:error` event of a caller that can still flush one.
+ */
+function printCrashReport(error: Error, thrown: unknown = error): string {
   const errorCode =
     thrown != null && typeof thrown === 'object'
       ? ((thrown as NodeJS.ErrnoException).code ?? null)
@@ -494,5 +487,5 @@ export function handleUncaughtException(thrown: unknown): void {
     }
   }
 
-  process.exit(EXIT_ERROR);
+  return message;
 }

@@ -60,6 +60,7 @@ export function resolveExpoDoctorCli(projectRoot: string): ExpoDoctorCli {
  * this reports as a `CommandError` is not being able to start the tool at all.
  *
  * @throws {CommandError} `EXPO_DOCTOR_NOT_FOUND` when the CLI could not be spawned.
+ * @throws {CommandError} `EXPO_DOCTOR_KILLED` when a signal stopped it.
  */
 export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorReport> {
   const cli = resolveExpoDoctorCli(projectRoot);
@@ -87,6 +88,21 @@ export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorRe
   // parse has to have found nothing too, in case a future expo-doctor ever exits 127 of its own.
   if (result.exitCode === 127 && parsed.parse === 'failed') {
     throw notFoundError(cli, `running it exited 127, which is "command not found"`);
+  }
+
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a run a signal stopped did not finish its
+  // checks, so it says nothing about the project: a tool error, not a report.
+  if (result.signal || result.exitCode == null) {
+    const error = new CommandError(
+      'EXPO_DOCTOR_KILLED',
+      [
+        `expo-doctor (${cli.command}) stopped before it finished, so this project was not checked.`,
+        `Why: ${result.signal ? `the ${result.signal} signal` : 'a signal'} ended the process, for example a kill or an out-of-memory stop.`,
+        `How: run this command again. If it stops again, run "npx expo-doctor" by hand to see where it stops.`,
+      ].join('\n')
+    );
+    error.data = { signal: result.signal ?? null };
+    throw error;
   }
 
   return { projectRoot, exitCode: result.exitCode, raw, ...parsed };

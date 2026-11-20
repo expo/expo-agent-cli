@@ -94,6 +94,8 @@ export interface SubprocessResult {
   promptHang?: string;
   /** Set when the child was killed for running past `timeoutMs`. */
   timedOut?: boolean;
+  /** The signal that ended the child, when one did. `exitCode` then holds a stand-in. */
+  signal?: NodeJS.Signals;
 }
 
 /** Signals the terminal delivers to the whole process group, so the child gets them too. */
@@ -287,7 +289,7 @@ function spawnNowAsync(
         return;
       }
       const exitCode = code ?? (signal === 'SIGINT' || signal === 'SIGTERM' ? 0 : 1);
-      resolve({ exitCode, stdout, stderr });
+      resolve({ exitCode, stdout, stderr, ...(signal ? { signal } : {}) });
     });
   });
 }

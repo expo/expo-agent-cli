@@ -40,7 +40,7 @@ export interface ParsedDoctorOutput {
 export interface DoctorReport extends ParsedDoctorOutput {
   projectRoot: string;
   /** The exit code `expo-doctor` left with, which this command mirrors. */
-  exitCode: number | null;
+  exitCode: number;
   /**
    * Everything `expo-doctor` printed, stdout and stderr interleaved, with ANSI codes removed.
    *

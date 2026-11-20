@@ -89,7 +89,7 @@ The route is percent-encoded once. Delimiters, escapes the caller wrote, and IPv
 
 `--print-url` resolves the URL and opens nothing, at exit 0. Its `--json` has `url`, `hostType`, `connect` and `printUrl: true`; `deviceBackend`, `platform`, `deviceId`, `command`, `exitCode` and `launch` are `null`. With `--eas` it is `BAD_ARGS`: one flag asks for a device and the other for none. `navigate` with no device names the URL and `--print-url` in its failure.
 
-Exit codes: 0 when the link opened and an app attached, or under `--no-wait-attach` (`attached: null`); 1 for usage, `ROUTE_NOT_FOUND`, `DEEP_LINK_UNRESOLVED`, `CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER`, or a refused link; 20 when there is no device; 22 when no app attached (§Loading the app is not navigating it), or when the attached app ran no bundle inside the attach wait (§A loaded app).
+Exit codes: 0 when the link opened and an app attached, or under `--no-wait-attach` (`attached: null`); 1 for usage, `ROUTE_NOT_FOUND`, `DEEP_LINK_UNRESOLVED`, `CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER`, or a refused link (`DEEP_LINK_REFUSED`, with `url`, `command` and `exitCode` in `error.data`); 20 when there is no device; 22 when no app attached (§Loading the app is not navigating it), or when the attached app ran no bundle inside the attach wait (§A loaded app).
 
 ### The route table
 
@@ -466,7 +466,7 @@ The open runs these steps in order. A step whose condition does not hold is pass
 
 Step 3 opens the route link also for `/`, because the launcher loads whatever the app last had. A refused launcher open does not fail the run. The human output prints a `Launch` line above `App`. `smoke` passes its attach budget, so it loads a cold development build the same way.
 
-`attached` is `true` when an app attached (`App attached`), and `false` when none did, at exit 22. It is `null` under `--no-wait-attach` and when the device refused the link.
+`attached` is `true` when an app attached (`App attached`), and `false` when none did, at exit 22. It is `null` under `--no-wait-attach`.
 
 Step 6 exists because Expo Go's error screen does not fetch again, so a second link alone changes nothing. iOS never runs it. The stopped app is `--app-id`, else the app config's id, else Expo Go. This ladder has no dev-server rung, unlike §Stopping the app: the device's own read is empty. A link that targets Expo Go stops Expo Go. An app that another device runs on the same dev server is never stopped. After a failed stop the link does not open again. When `pidof` saw no process, the link opens again, and the reason says the app was not running. When the stop worked and its effect cannot be checked (a `pidof` that could not run or complained, or any EAS session), the link opens again, and the reason says only that: it never says the app was stopped. When the second open fails, `attachRecovered` is `false`, and the Why line follows the same three cases: an app the stop closed stays closed when `pidof` saw it running, nothing was stopped when `pidof` saw no process, and no claim about a close when the effect cannot be checked. Tests: `e2e/__tests__/navigate-target-selection-test.ts` "no flag, bound Android emulator, pidof cannot run when the recovery asks", "no flag, Android session, never attaches", and the three cases where the second link is refused.
 
@@ -851,6 +851,8 @@ A `localhost` or `lan` URL is refused before anything opens; no `adb reverse` re
 The report names the rung (`bundleIdSource`: `flag`, `dev-server`, `app-config`, `expo-go-default`) and why (`bundleIdReason`). The dev server outranks the config: the config names a build, the dev server names what runs.
 
 An app that was not running is success. `wasRunning` says whether this command stopped it: on iOS from the `simctl terminate` refusal, on Android from `adb shell pidof <appId>` before the stop. A pid gives `true`, and exit 1 with no output gives `false`. A `pidof` that could not run or complained, a failed stop, and any session give `null`.
+
+A device tool that refused the stop is `DEVICE_STOP_REFUSED`, exit 1, with `bundleId`, `command` and the tool's `reason` in `error.data` (e2e `error-envelope-test.ts`).
 
 `--app-id` naming an app that was not running, while the dev server reports at least one debugger target and none with that id, exits 20. An agent reads the exit code before the output. A second run after a good stop exits 0. `--json` has `connectedAppIds` and `appIdMismatch`; the follow-up is the same command with the connected id.
 
