@@ -270,11 +270,16 @@ async function spawnDevServerAsync(
   output: SubprocessOutput,
   signal: AbortSignal | undefined
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const env = loopbackBindEnv(args);
   if (output === 'inherit') {
-    return { exitCode: await runExpoAsync(projectRoot, args, { signal }), stdout: '', stderr: '' };
+    return {
+      exitCode: await runExpoAsync(projectRoot, args, { signal, env }),
+      stdout: '',
+      stderr: '',
+    };
   }
 
-  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false, signal });
+  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false, signal, env });
   if (result.spawnError) {
     throw new CommandError(
       'EXPO_CLI_NOT_FOUND',
@@ -282,4 +287,23 @@ async function spawnDevServerAsync(
     );
   }
   return { exitCode: result.exitCode ?? 1, stdout: result.stdout, stderr: result.stderr };
+}
+
+/**
+ * `expo start --localhost` binds the name `localhost`, and Node resolves it to `::1` alone on
+ * macOS, while Expo's own URLs and every reader of the dev lock use `127.0.0.1` [observed — Expo
+ * CLI 58.1.4 `MetroBundlerDevServer`, Node 22]. IPv4-first resolution makes the bind match them.
+ */
+function loopbackBindEnv(args: readonly string[]): NodeJS.ProcessEnv | undefined {
+  const host = args.indexOf('--host');
+  const localhost =
+    args.includes('--localhost') ||
+    args.includes('--host=localhost') ||
+    (host >= 0 && args[host + 1] === 'localhost');
+  if (!localhost) return undefined;
+  return {
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, '--dns-result-order=ipv4first']
+      .filter(Boolean)
+      .join(' '),
+  };
 }

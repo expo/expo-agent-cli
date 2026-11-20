@@ -394,7 +394,11 @@ function listen(port) {
       }, dieAfterMs).unref();
     }
   });
-  server.listen(port, '127.0.0.1');
+  // `expo start --localhost` binds the name `localhost`, and Node may resolve it to `::1` alone
+  // [observed — Expo CLI 58.1.4 `MetroBundlerDevServer` `host: 'localhost'`, Node 22 on macOS].
+  const loopbackByName =
+    args.includes('--localhost') || args.join(' ').includes('--host localhost');
+  server.listen(port, loopbackByName ? 'localhost' : '127.0.0.1');
   // Unreferenced: `STUB_EXPO_DELAY_MS` decides how long this stub lives, exactly as it does without
   // a listener, so a bound port never turns a short-lived stub into one the test has to signal.
   server.unref();

@@ -36,15 +36,19 @@ const TERMINAL_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
  * @throws the raw spawn error, for a caller that knows what a missing binary means in its case;
  * the reason of `signal` when it was aborted before the spawn, which then never happens.
  */
+interface InheritedRunOptions {
+  cwd: string;
+  onExit?: (code: number, signal: NodeJS.Signals | null) => void;
+  onSpawnError?: (error: NodeJS.ErrnoException) => void;
+  signal?: AbortSignal;
+  /** Variables added to this process's environment for the child. */
+  env?: NodeJS.ProcessEnv;
+}
+
 export function runInheritedAsync(
   command: string,
   args: string[],
-  options: {
-    cwd: string;
-    onExit?: (code: number, signal: NodeJS.Signals | null) => void;
-    onSpawnError?: (error: NodeJS.ErrnoException) => void;
-    signal?: AbortSignal;
-  }
+  options: InheritedRunOptions
 ): Promise<number> {
   const key = runnerSpawnKey(command, args);
   return key == null
@@ -58,24 +62,16 @@ export function runInheritedAsync(
 function runInheritedNowAsync(
   command: string,
   args: string[],
-  {
-    cwd,
-    onExit,
-    onSpawnError,
-    signal,
-  }: {
-    cwd: string;
-    onExit?: (code: number, signal: NodeJS.Signals | null) => void;
-    onSpawnError?: (error: NodeJS.ErrnoException) => void;
-    signal?: AbortSignal;
-  }
+  { cwd, onExit, onSpawnError, signal, env }: InheritedRunOptions
 ): Promise<number> {
   if (signal?.aborted) return Promise.reject(signal.reason);
   return new Promise<number>((resolve, reject) => {
     // On Windows the resolved bin is a batch shim, which only `cmd.exe` can run.
-    const target = resolveSpawnTarget(command, args, process.env);
+    const spawnEnv = env ? { ...process.env, ...env } : process.env;
+    const target = resolveSpawnTarget(command, args, spawnEnv);
     const child = spawn(target.command, target.args, {
       cwd,
+      ...(env ? { env: spawnEnv } : null),
       stdio: 'inherit',
       shell: target.shell,
     });

@@ -780,6 +780,30 @@ describe('@expo/agent-cli dev --detach', () => {
   // cannot die of the Automation refusal any more, because `dev` keeps the platform flag away from
   // it and opens the app itself (llp/0026). `run:*` still launches through AppleScript, so it is
   // the step the grace window still exists for.
+  // `expo start --localhost` binds the name `localhost`, which Node resolves to `::1` alone on
+  // macOS, while every reader of the lock dials `127.0.0.1`.
+  it('reports ready for --localhost, on the 127.0.0.1 origin the lock names', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const port = await freePortAsync();
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--localhost', '--no-open', '--detach', '--wait-ready', '--json'],
+        { env: { ...detachEnv(projectRoot, port), STUB_EXPO_LISTEN: '1' } }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        url: `http://127.0.0.1:${port}`,
+        ready: true,
+        phase: 'serving',
+      });
+    } finally {
+      await cleanUpDetachedAsync(projectRoot);
+    }
+  });
+
   describe('a dev server that dies just after its bundler answered', () => {
     /** Environment for a stub that comes up, answers `/status`, and then dies the way a launch does. */
     function diesAfterReadyEnv(projectRoot: string, port: number): Record<string, string> {
