@@ -10,6 +10,7 @@ import { resetSettingsCache } from '../../settings';
 import { detectToolchainAsync } from '../../toolchain';
 import type { ToolchainProbe, ToolchainStatus } from '../../toolchain/types';
 import { resolveStartPlanAsync as resolve, type ResolveStartPlanOptions } from '../resolveAsync';
+import { makeProjectState } from '../../project/__tests__/projectStateFixture';
 
 /** The plan alone, for the rows that bind nothing. */
 const resolveStartPlanAsync = async (
@@ -38,17 +39,11 @@ function stubToolchain(status: ToolchainStatus, { impossible = false } = {}): vo
 
 /** A managed project that needs a development build, so every plan of it contains a build. */
 function devClientState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    projectRoot,
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
+  return makeProjectState({
     usesDevClient: true,
-    hasWeb: false,
     expoGo: { compatible: false, reasons: [] },
-    fingerprint: { hash: 'abc123def4567890' },
     ...overrides,
-  };
+  });
 }
 
 /** A project Expo Go can run, whose plan builds nothing. */

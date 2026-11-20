@@ -4,7 +4,7 @@ import type { BindingSummary } from '../../deviceBinding/summary';
 import { decideStartPlan } from '../../plan/decide';
 import { PROGRAM_PREFIX } from '../../programName';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/expoApp';
-import type { ProjectState, StartPlan } from '../../project/types';
+import type { StartPlan } from '../../project/types';
 import {
   chooseNextAction,
   resolveNextTarget,
@@ -13,17 +13,9 @@ import {
   type NextTargetFacts,
 } from '../nextAction';
 import type { DevServerStatus, LocalDeviceStatus } from '../types';
+import { makeProjectState } from '../../project/__tests__/projectStateFixture';
 
-const state: ProjectState = {
-  projectRoot: '/project',
-  app: 'ready',
-  sdkVersion: '54.0.0',
-  nativeDirs: { ios: false, android: false },
-  usesDevClient: false,
-  hasWeb: true,
-  expoGo: { compatible: true, reasons: [] },
-  fingerprint: { hash: 'abcdef0123456789' },
-};
+const state = makeProjectState();
 
 function server(overrides: Partial<DevServerStatus> = {}): DevServerStatus {
   return {

@@ -36,6 +36,7 @@ import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { Log } from '../../log';
 import { RunLock } from '../../devLock';
+import { makeProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -149,17 +150,7 @@ function devServerRun(overrides: Partial<DevServerRun> = {}): DevServerRun {
 }
 
 function mockProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
-  const state: ProjectState = {
-    projectRoot,
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: true,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abc123def4567890' },
-    ...overrides,
-  };
+  const state = makeProjectState(overrides);
   vi.mocked(probeProjectStateAsync).mockResolvedValue(state);
   return state;
 }

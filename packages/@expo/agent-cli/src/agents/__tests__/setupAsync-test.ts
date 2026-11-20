@@ -10,6 +10,7 @@ import type { DiscoveredSkill } from '../../skills/types';
 import { event } from '../events';
 import { printSetupAsync, runSetupAsync } from '../setupAsync';
 import type { SetupOptions } from '../types';
+import { makeProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../../log');
 vi.mock('../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -46,17 +47,7 @@ function options(overrides: Partial<SetupOptions> = {}): SetupOptions {
 }
 
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
-  const state: ProjectState = {
-    projectRoot,
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: false,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abcdef0123456789' },
-    ...overrides,
-  };
+  const state = makeProjectState(overrides);
   vi.mocked(probeProjectStateAsync).mockResolvedValue(state);
   return state;
 }

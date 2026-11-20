@@ -1,4 +1,4 @@
-import type { ProjectState, StartPlan } from '../../project/types';
+import type { StartPlan } from '../../project/types';
 import type { PlanBuildLocation } from '../../toolchain/types';
 import {
   buildEasBuildFollowUp,
@@ -7,6 +7,7 @@ import {
   resolveDevServerPort,
   DEFAULT_DEV_SERVER_PORT,
 } from '../start';
+import { makeProjectState } from '../../project/__tests__/projectStateFixture';
 
 /** The build location a stale plan carries, with whatever the probe answered. */
 function mockBuildLocation(overrides: Partial<PlanBuildLocation> = {}): PlanBuildLocation {
@@ -27,20 +28,6 @@ const lanUrl = 'exp://192.168.1.5:8081';
 
 function ids(followups: { id: string }[]): string[] {
   return followups.map((followup) => followup.id);
-}
-
-function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    projectRoot: '/project',
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: true,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abc123' },
-    ...overrides,
-  };
 }
 
 function mockPlan(overrides: Partial<StartPlan> = {}): StartPlan {
@@ -210,7 +197,7 @@ describe(buildStartPlanFollowUps, () => {
           steps: [],
           devServerPort: { port: 8081, movedFrom: null, state: 'running', phase },
         }),
-        mockState({ nativeDirs }),
+        makeProjectState({ nativeDirs }),
         platform
       );
 
@@ -227,7 +214,7 @@ describe(buildStartPlanFollowUps, () => {
         steps: [],
         devServerPort: { port: 8081, movedFrom: null, state: 'running', phase: 'serving' },
       }),
-      mockState(),
+      makeProjectState(),
       'ios',
       [],
       { eas: true }
@@ -245,7 +232,7 @@ describe(buildStartPlanFollowUps, () => {
           how: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
         },
       }),
-      mockState(),
+      makeProjectState(),
       'ios'
     );
 
@@ -262,7 +249,7 @@ describe(buildStartPlanFollowUps, () => {
           how: 'npx @expo/agent-cli status --json',
         },
       }),
-      mockState({
+      makeProjectState({
         expoGo: {
           compatible: false,
           reasons: [{ kind: 'custom-native-code', detail: 'Native module.' }],
@@ -280,7 +267,7 @@ describe(buildStartPlanFollowUps, () => {
         explicitDevice: { refuses: false, summary: 'Will bind dogfood s2 (UDID-1).' },
         devServerPort: { port: 8091, movedFrom: null, state: 'named', taken: true },
       }),
-      mockState(),
+      makeProjectState(),
       'ios',
       ['--ios', '--local', '--plan', '--device', 'dogfood s2', '--port', '8091']
     );
@@ -291,7 +278,7 @@ describe(buildStartPlanFollowUps, () => {
   });
 
   it(`should offer to run the plan that was printed`, () => {
-    const followups = buildStartPlanFollowUps(mockPlan(), mockState());
+    const followups = buildStartPlanFollowUps(mockPlan(), makeProjectState());
 
     expect(ids(followups)).toEqual(['dev']);
     // `dev` requires a platform, so the command states the host's when the caller typed none.
@@ -309,13 +296,13 @@ describe(buildStartPlanFollowUps, () => {
   // text the caller reads and can change.
   it(`carries the platform flag the caller typed into the command that runs the plan (F103)`, () => {
     expect(
-      buildStartPlanFollowUps(mockPlan(), mockState(), 'android').find(
+      buildStartPlanFollowUps(mockPlan(), makeProjectState(), 'android').find(
         (followup) => followup.id === 'dev'
       )!.command
     ).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
 
     expect(
-      buildStartPlanFollowUps(mockPlan(), mockState(), undefined).find(
+      buildStartPlanFollowUps(mockPlan(), makeProjectState(), undefined).find(
         (followup) => followup.id === 'dev'
       )!.command
     ).toBe(
@@ -326,7 +313,7 @@ describe(buildStartPlanFollowUps, () => {
   it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'])(
     `should explain what makes the %s plan cheaper`,
     (rule) => {
-      const followups = buildStartPlanFollowUps(mockPlan({ rule }), mockState());
+      const followups = buildStartPlanFollowUps(mockPlan({ rule }), makeProjectState());
 
       expect(ids(followups)).toContain('build-freshness');
       expect(followups.find((item) => item.id === 'build-freshness')!.command).toBe(
@@ -338,7 +325,7 @@ describe(buildStartPlanFollowUps, () => {
   it.each(['expo-go', 'web', 'dev-client-fresh', 'bare-fresh'])(
     `should not offer a freshness hint for the %s plan, which builds nothing`,
     (rule) => {
-      const followups = buildStartPlanFollowUps(mockPlan({ rule }), mockState());
+      const followups = buildStartPlanFollowUps(mockPlan({ rule }), makeProjectState());
 
       expect(ids(followups)).not.toContain('build-freshness');
     }
@@ -347,7 +334,7 @@ describe(buildStartPlanFollowUps, () => {
   it(`should point at the Expo Go reasons when Expo Go is out`, () => {
     const followups = buildStartPlanFollowUps(
       mockPlan({ rule: 'dev-client-stale' }),
-      mockState({
+      makeProjectState({
         expoGo: { compatible: false, reasons: [{ kind: 'config-plugin', detail: 'a plugin' }] },
       })
     );
@@ -359,7 +346,7 @@ describe(buildStartPlanFollowUps, () => {
   it(`should never offer more than three follow-ups`, () => {
     const followups = buildStartPlanFollowUps(
       mockPlan({ rule: 'needs-dev-client' }),
-      mockState({ expoGo: { compatible: false, reasons: [] } })
+      makeProjectState({ expoGo: { compatible: false, reasons: [] } })
     );
 
     expect(followups).toHaveLength(3);
@@ -376,7 +363,7 @@ describe(buildStartPlanFollowUps, () => {
             detail: 'xcode-select is not on PATH.',
           }),
         }),
-        mockState()
+        makeProjectState()
       );
 
       expect(ids(followups)).toEqual(['eas-build-instead', 'dev', 'build-freshness']);
@@ -408,7 +395,7 @@ describe(buildStartPlanFollowUps, () => {
             },
           }),
         }),
-        mockState(),
+        makeProjectState(),
         'ios',
         ['--ios', '--plan', '--port', '8091', ...deviceArgs]
       );
@@ -431,7 +418,7 @@ describe(buildStartPlanFollowUps, () => {
           rule: 'dev-client-stale',
           buildLocation: mockBuildLocation({ status: 'present', detail: 'Xcode 16.2.' }),
         }),
-        mockState()
+        makeProjectState()
       );
 
       expect(ids(followups)).toEqual(['dev', 'build-freshness']);
@@ -445,7 +432,7 @@ describe(buildStartPlanFollowUps, () => {
           rule: 'dev-client-stale',
           buildLocation: mockBuildLocation({ status: 'unknown', detail: 'EPERM' }),
         }),
-        mockState()
+        makeProjectState()
       );
 
       expect(ids(followups)).not.toContain('eas-build-instead');
