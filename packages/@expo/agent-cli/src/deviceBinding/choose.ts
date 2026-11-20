@@ -64,6 +64,8 @@ export interface AndroidInventory {
   listedSerials: string[];
   /** Serials adb lists in a state other than `device`, with that state. */
   unready: { serial: string; state: string }[];
+  /** The `model:` adb lists for a ready serial: the name `expo run:android --device` also takes. */
+  models: { serial: string; model: string }[];
 }
 
 /** A serial on a console port and the worktree bound to it; `root` is null for one that is not ours. */

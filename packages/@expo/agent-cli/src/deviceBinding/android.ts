@@ -4,6 +4,7 @@
 // boot poll after it, and the kill of an instance this CLI spawned. The tool calls are
 // `./emulator.ts`.
 
+import { parseAdbDeviceList } from '../device/adbDeviceList';
 import { canonicalizeExistingPath } from '../utils/dir';
 import {
   chooseAndroidDevice,
@@ -184,7 +185,7 @@ export async function bootEmulatorAsync(
     if (devices.spawnError) {
       return { ok: false, reason: `could not run "adb": ${devices.spawnError.message}` };
     }
-    const listed = devices.stdout.split(/\r?\n/).some((line) => line.split(/\s+/)[0] === serial);
+    const listed = parseAdbDeviceList(devices.stdout).some((record) => record.serial === serial);
     if (listed) {
       const booted = await tools.adb(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
         timeoutMs: 30_000,

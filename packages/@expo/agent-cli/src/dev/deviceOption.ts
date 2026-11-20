@@ -23,7 +23,7 @@ export function resolveDeviceOption(argv: string[]): string | undefined {
       if (!value?.trim() || value.startsWith('-'))
         throw new CommandError(
           'BAD_ARGS',
-          '--device needs a simulator name or ID, or an Android serial.'
+          '--device needs a simulator name or ID, or an Android serial or model.'
         );
     }
   }

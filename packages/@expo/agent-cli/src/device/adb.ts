@@ -28,6 +28,7 @@ import fs from 'fs';
 import os from 'os';
 
 import { findExecutableOnPath, pathFor } from '../utils/pathLookup';
+import { isAdbDeviceStateUsable, parseAdbDeviceList } from './adbDeviceList';
 import { CommandError } from '../utils/errors';
 import {
   spawnCaptureAsync,
@@ -262,15 +263,13 @@ export function parseReverseList(stdout: string): { device: string; host: string
  * target be matched back to a device. Everything else about the two formats is the same.
  */
 export function parseAndroidDevices(stdout: string): AndroidDeviceLine[] {
-  const devices: AndroidDeviceLine[] = [];
-  // The first line is the `List of devices attached` header.
-  for (const line of stdout.split('\n').slice(1)) {
-    const [deviceId, state, ...rest] = line.trim().split(/\s+/);
-    // Devices in any other state (`unauthorized`, `offline`) cannot receive an intent.
-    if (deviceId && state === 'device') {
-      const model = rest.find((field) => field.startsWith('model:'))?.slice('model:'.length);
-      devices.push({ deviceId, model: model || null });
-    }
-  }
-  return devices;
+  // Devices in any other state (`unauthorized`, `offline`) cannot receive an intent.
+  return parseAdbDeviceList(stdout)
+    .filter(({ state }) => isAdbDeviceStateUsable(state))
+    .map(({ serial, metadata }) => ({ deviceId: serial, model: modelOf(metadata) }));
+}
+
+/** The `model:` field of a record, the name Expo CLI gives a usable phone. */
+export function modelOf(metadata: readonly string[]): string | null {
+  return metadata.find((field) => field.startsWith('model:'))?.slice('model:'.length) || null;
 }

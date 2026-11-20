@@ -2,7 +2,8 @@
 // The Android tool calls the registry reads with: the inventory before the lock, and `get-state`
 // for one serial, each one `adb` or `emulator` subprocess; and the instance check a `spawned` pid must pass.
 
-import { adbNotRunnableError, parseAndroidDevices, resolveAdb } from '../device/adb';
+import { adbNotRunnableError, modelOf, resolveAdb } from '../device/adb';
+import { isAdbDeviceStateUsable, parseAdbDeviceList } from '../device/adbDeviceList';
 import { parseAvds } from '../device/bootDevice';
 import { CommandError } from '../utils/errors';
 import type { SpawnCaptureResult } from '../utils/spawnCapture';
@@ -79,21 +80,19 @@ export async function readAndroidInventoryAsync(
     throw adbNotRunnableError(resolveAdb(), devices.spawnError.message);
   }
   assertAnswered(devices, 'adb devices -l', adbFailedError);
-  const runningSerials = parseAndroidDevices(devices.stdout).map((device) => device.deviceId);
-  const listedSerials = devices.stdout
-    .split('\n')
-    .slice(1)
-    .flatMap((line) => line.trim().split(/\s+/)[0] || []);
-  const unready = devices.stdout
-    .split('\n')
-    .slice(1)
-    .flatMap((line) => {
-      const [serial, word, next] = line.trim().split(/\s+/);
-      const state = word === 'no' && next === 'permissions' ? 'no permissions' : word;
-      return serial && state && state !== 'device' ? [{ serial, state }] : [];
-    });
+  const records = parseAdbDeviceList(devices.stdout);
+  const ready = records.filter(({ state }) => isAdbDeviceStateUsable(state));
+  const runningSerials = ready.map(({ serial }) => serial);
+  const models = ready.flatMap(({ serial, metadata }) => {
+    const model = modelOf(metadata);
+    return model ? [{ serial, model }] : [];
+  });
+  const listedSerials = records.map(({ serial }) => serial);
+  const unready = records.flatMap(({ serial, state }) =>
+    isAdbDeviceStateUsable(state) ? [] : [{ serial, state }]
+  );
   if (!listAvds || (reuseSerial !== undefined && listedSerials.includes(reuseSerial)))
-    return { avd: null, runningSerials, listedSerials, unready };
+    return { avd: null, runningSerials, listedSerials, unready, models };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);
@@ -104,6 +103,7 @@ export async function readAndroidInventoryAsync(
     runningSerials,
     listedSerials,
     unready,
+    models,
   };
 }
 

@@ -14,6 +14,8 @@ export interface FakeEmulator {
   pid?: number;
   /** The command line `commandOf` answers; defaults to an instance of ours on its serial's port. */
   command?: string;
+  /** The `model:` adb lists; defaults to the emulator image's. */
+  model?: string;
 }
 
 export interface FakeAndroidOptions {
@@ -85,7 +87,9 @@ export function fakeAndroid(
       };
     }
     if (args[0] === 'devices') {
-      const lines = state.map((e) => `${e.serial}\t${e.state} model:sdk_gphone64_arm64`);
+      const lines = state.map(
+        (e) => `${e.serial}\t${e.state} model:${e.model ?? 'sdk_gphone64_arm64'}`
+      );
       return ok(['List of devices attached', ...lines, ''].join('\n'));
     }
     const serial = args[1]!;

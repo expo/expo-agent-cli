@@ -109,7 +109,7 @@ it("refusals' How lines repeat the caller's flags, and an ambiguous name names a
     acquireDeviceAsync(ROOT, 'android', { explicit: named('nope', ['--android']), tools })
   ).rejects.toMatchObject({
     message:
-      'No device uniquely matches "nope".\nHow: run "adb devices", then pass a listed serial to --device.',
+      'No device uniquely matches "nope".\nHow: run "adb devices -l", then pass a listed serial or model to --device.',
   });
 });
 
@@ -282,6 +282,46 @@ it('explicit-android-needs-only-adb', async () => {
   await expect(acquireDeviceAsync(ROOT, 'android', { tools })).rejects.toMatchObject({
     code: 'EMULATOR_NOT_RUNNABLE',
   });
+});
+
+it('binds a phone by the model adb lists, and refuses a model two devices list', async () => {
+  const phone = { serial: 'R58N123', state: 'device' as const, model: 'SM_G960W' };
+  const tools = fakeTools({ emulators: [phone, { serial: 'emulator-5554', state: 'device' }] });
+  expect(
+    await acquireDeviceAsync(ROOT, 'android', { explicit: named('sm_g960w'), tools })
+  ).toMatchObject({ action: 'explicit', device: { serial: 'R58N123' } });
+  await expect(
+    acquireDeviceAsync(OTHER, 'android', {
+      explicit: named('sdk_gphone64_arm64', ['--android']),
+      tools: fakeTools({
+        emulators: [
+          { serial: 'emulator-5554', state: 'device' },
+          { serial: 'emulator-5556', state: 'device' },
+        ],
+      }),
+    })
+  ).rejects.toMatchObject({
+    data: { reason: 'explicit-not-found', matches: ['emulator-5554', 'emulator-5556'] },
+    suggestedCommand:
+      'npx @expo/agent-cli dev --android --device emulator-5554 --detach --wait-ready',
+  });
+});
+
+it('binds a phone on Wi-Fi whose adb serial has a space, by model or by serial', async () => {
+  const serial = 'adb-ZY22KPLGQ9-AbCd (2)._adb-tls-connect._tcp';
+  const phone = { serial, state: 'device' as const, model: 'moto_g55_5G' };
+  for (const [root, query] of [
+    [ROOT, 'moto_g55_5G'],
+    [OTHER, serial],
+  ] as const) {
+    expect(
+      await acquireDeviceAsync(root, 'android', {
+        explicit: named(query),
+        tools: fakeTools({ emulators: [{ ...phone }] }),
+      })
+    ).toMatchObject({ action: 'explicit', device: { serial } });
+    await releaseWorktreeDevicesAsync(root, { tools: fakeTools({ emulators: [{ ...phone }] }) });
+  }
 });
 
 it('refreshes the AVD inventory if a USB binding is removed during discovery', async () => {
