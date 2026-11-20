@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+// @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
 // @ref llp/0035-one-device-per-worktree.rfc.md §Entry points
 // What a boot needs that is not the boot itself: the budget per platform, and the Android SDK's
 // `emulator` and its AVD list. The boots are the device registry's (`src/deviceBinding/`): a

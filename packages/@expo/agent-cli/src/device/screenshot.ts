@@ -1,9 +1,9 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // Take a picture of what is on the device.
 //
 // The one thing this CLI could describe and not do. `src/followups/navigate.ts` has printed
 // `xcrun simctl io <id> screenshot screen.png` as a suggestion since the first runtime round, and
-// nothing ever ran it — so the loop llp/0005 §The smoke gate calls "verified UI changes" ended one
+// nothing ever ran it — so the loop llp/0036 §The smoke gate calls "verified UI changes" ended one
 // step short of the verification, every time, with the agent shelling out by hand.
 //
 // The two platform tools are two lines that never change, and they differ in one way that decides
@@ -258,7 +258,7 @@ function cloudScreenshotCommand(filePath: string): ScreenshotCommand {
  * Run the cloud capture, and answer in the shape the local runner answers in.
  *
  * The failure of the EAS CLI is folded into `stderr` rather than raised: this whole module degrades
- * and never decides (llp/0005 §The smoke gate), and a run that established the app does
+ * and never decides (llp/0036 §The smoke gate), and a run that established the app does
  * not throw has established that with or without a picture. A session that ended mid-run is exactly
  * that case.
  */

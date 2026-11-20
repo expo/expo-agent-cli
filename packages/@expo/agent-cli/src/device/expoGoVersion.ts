@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md — constraint 5, on subprocesses
 //
 // Expo Go being *installed* is not Expo Go being the *right* Expo Go.

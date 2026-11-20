@@ -181,7 +181,7 @@ describe(openUrlOnDeviceAsync, () => {
   });
 
   // @ref src/device/approveScheme.ts
-  // @ref llp/0005-runtime-loop-tools.rfc.md §A link nobody can approve is a link that never opens
+  // @ref llp/0036-smoke-gate.rfc.md §A link nobody can approve is a link that never opens
   //
   // The dialog is the whole problem: a scheme iOS has not seen approved raises `Open in "<app>"?`,
   // and `simctl openurl` **exits 0** while that alert is up — so the link reads as delivered,

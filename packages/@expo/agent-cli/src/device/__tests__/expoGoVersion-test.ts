@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 //
 // Expo Go being *installed* is not Expo Go being the *right* Expo Go. Its runtime is versioned with
 // the SDK, so the copy on a simulator is only the app under test when it comes from the same SDK

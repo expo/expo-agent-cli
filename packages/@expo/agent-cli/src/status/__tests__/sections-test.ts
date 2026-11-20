@@ -593,7 +593,7 @@ describe(buildNextActionStatus, () => {
     /**
      * A booted iOS simulator.
      *
-     * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+     * @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
      * Named by the cases that assert the gate's command line, because the platform in it comes
      * from the device this machine has — so a case that passed no device was asserting the *host's*
      * answer and failed on the Linux runner while passing on a Mac [observed — tier0-linux,
@@ -638,7 +638,7 @@ describe(buildNextActionStatus, () => {
       expect(next.why).toContain('app connected');
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+    // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
     //
     // The gate requires a platform now, so a bare `smoke` here would be a `next` line that exits 1
     // — and `next` is read as "run this" [found by the tier-0 evals, 2026-09-04]. The platform is

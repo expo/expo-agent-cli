@@ -18,7 +18,7 @@ interface AppOpen {
    * Null when the device was not asked. Otherwise why it refused this run's deep link, when the
    * device could say: "asked, and the device explained nothing" is a real answer.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+   * @ref llp/0036-smoke-gate.rfc.md §A refused link is a device without the app
    * Reported as a value and not only in the phase's sentence, for the same reason every other
    * finding here is: the follow-ups branch on it, and a re-run is never the answer to it.
    */
@@ -85,7 +85,7 @@ async function openAppAsync(
   // it loads (F123's ladder is gated on that), and the wait below asks the same question — so a
   // budget handed to each would be two of them: a cold run whose app never arrives would spend
   // four minutes to report what it knew after two.
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+  // @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
   //
   // The second line this phase says, and the only phase that says two. The reason is that the
   // phase does two things of very different sizes: a two-second look for an app that is already
@@ -101,7 +101,7 @@ async function openAppAsync(
   );
   walk.app.noteOpened(opened);
   if (opened.exitCode !== 0) {
-    // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+    // @ref llp/0036-smoke-gate.rfc.md §A refused link is a device without the app
     //
     // "The device refused the deep link" is what happened and not why, and it reads as a fault in
     // the device. The why is almost always one thing: nothing on that device handles this
@@ -198,7 +198,7 @@ async function noAppExit(
 
 // ---- Is the app that answered one this project can run at all? ---------------------------
 //
-// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+// @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
 //
 // Not a phase of its own: it is the second half of the question the `app` phase asks. "Is an app
 // attached" and "is it *this project's* app" have one answer between them, and a run that split

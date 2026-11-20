@@ -237,7 +237,7 @@ describe('Application ids from an untrusted source', () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 // @ref ../appId §readPrebuiltAndroidApplicationId
 //
 // The one place an Android application id lives that the app config does not. A great many projects

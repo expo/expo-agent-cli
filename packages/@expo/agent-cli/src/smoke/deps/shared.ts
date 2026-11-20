@@ -33,7 +33,7 @@ export interface SmokeDepsContext extends SmokeTargetSelection {
   /**
    * Forget it, so the next reader sees the project as it is now.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §A build changes the project it was read from
+   * @ref llp/0036-smoke-gate.rfc.md §A build changes the project it was read from
    * Called after a start phase that **compiled**, and for one reason: `expo prebuild` writes
    * `android.package` and `ios.bundleIdentifier` into the app config when they were not declared,
    * so a build is one of the few things that changes the answer to "which app is this run about"

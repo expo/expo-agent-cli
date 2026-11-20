@@ -522,7 +522,7 @@ describe(checkExpoGoCompatibilityAsync, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+// @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
 //
 // `compatible` is `false` for all four reason kinds, and only two of them rule Expo Go out. The
 // commands that pick a deep-link shape need the three-valued answer, because the other two kinds

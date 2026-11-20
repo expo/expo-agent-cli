@@ -79,7 +79,7 @@ A `--eas` run's follow-ups aim at the session: `navigate / --eas`, `runtime:erro
 
 ## smoke
 
-`smoke --eas` brings its own environment on EAS, as it boots a simulator locally ([[0005-runtime-loop-tools]] §The run brings its own environment):
+`smoke --eas` brings its own environment on EAS, as it boots a simulator locally ([[0036-smoke-gate]] §The run brings its own environment):
 
 - Its dev server starts on the `dev --eas` route without an open, so the session start stays smoke's own act. Its plan names the same build and install as `dev --eas`.
 - The **`start-session`** phase runs where the boot would. Expo Go needs no build. A development build needs a finished simulator build of this fingerprint on EAS, looked up only when no session is up. **Smoke never compiles one.** With no build the phase fails with a reason that names `dev --<platform> --eas`.

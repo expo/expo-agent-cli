@@ -162,7 +162,7 @@ export async function loadRouteFactsAsync(projectRoot: string, options: RouteUrl
       isCallerNamedDevServer(options)
         ? namedDevServerReach()
         : resolveDevServerReachAsync(projectRoot),
-      // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+      // @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
       //
       // In this `Promise.all` rather than after it, so it overlaps the dev-server discovery that
       // dominates this function's latency instead of adding to it. Never throws — an unreadable

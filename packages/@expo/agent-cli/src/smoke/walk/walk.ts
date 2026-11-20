@@ -37,12 +37,12 @@ const PHASE_ORDER = [
   // @ref llp/0027-everything-on-eas.rfc.md §smoke — the EAS device's counterpart of the boot.
   'start-session',
   'boot-device',
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it.
+  // @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it.
   // After the boot and not before it: `simctl install` answers `Unable to lookup in current state:
   // Shutdown` for a device that is not up [observed, 2026-09-03].
   'install-app',
   'app',
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk. Before
+  // @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk. Before
   // `route` rather than after it: a reload sends the app back to its initial route, so a run that
   // opened the route first would reload out of the screen it had just asked for.
   'reload',
@@ -61,7 +61,7 @@ void _everyPhaseIsOrdered;
 /**
  * The phases that are reported only by a run that performed them.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+ * @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
  * Every other phase is a question of every run, so a run that did not reach one owes the reader a
  * `skipped` row saying why. These two are not questions; they are *acts*, and a machine that
  * already had a dev server and a simulator did not skip them — there was nothing there to do. A
@@ -133,7 +133,7 @@ export function createPhaseWalk(
   /**
    * Record one phase and hand back what it produced, with the row it wrote.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+   * @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
    * The progress line is said here rather than at each call site, because "a phase is starting" and
    * "a phase is being recorded" are the same event and a second place to say it would be a second
    * place to forget one. The phases that are pushed straight onto the list instead of going through

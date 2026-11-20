@@ -1,5 +1,5 @@
 // @ref llp/0022-live-tier.plan.md §live-bootstrap
-// @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+// @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
 //
 // The eighth suite, and the one that runs where every other suite refuses. `live-local`'s gate
 // demands a **booted** simulator, and `pickSimulator` prefers a booted device — so on the machine

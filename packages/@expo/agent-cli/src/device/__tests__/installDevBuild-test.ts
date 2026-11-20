@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 //
 // Putting this project's development build on a device that has not got it. This used to be a
 // refusal that named `@expo/agent-cli dev --<platform>` — a correct instruction and a dead

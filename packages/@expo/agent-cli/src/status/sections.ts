@@ -46,7 +46,7 @@ const HASH_DISPLAY_LENGTH = 8;
  * The gate to put in front of anything that reads the app, once a dev server is up, with the
  * platform it should be run for.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+ * @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
  *
  * One command for both the app-attached and the nothing-attached case: this is the only command
  * that proves the project's own bundle *compiles*, which is the fact a report full of green lines

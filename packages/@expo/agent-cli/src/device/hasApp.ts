@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 // Whether one device has one app, across the two platforms and their different failure shapes.
 //
 // Extracted from `smoke` when the plan engine grew the same question (llp/0004 §A current build is

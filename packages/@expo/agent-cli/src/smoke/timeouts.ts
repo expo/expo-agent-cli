@@ -23,7 +23,7 @@ export const APP_SETTLE_MS = 4_000;
 /**
  * How long the **first** compile of a dev server this run started gets, out of a budget of its own.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+ * @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
  * Coming up is not reading, and this is the phase where the difference is largest: a dev server
  * that has never bundled has to transform the whole dependency graph, which is minutes on a real
  * app and milliseconds on the second run. Charging that to `--timeout` — the window meant for
@@ -53,7 +53,7 @@ export const APP_ATTACH_TIMEOUT_MS = 120_000;
 /**
  * How long an app this run opened gets to become *readable*, after it has attached.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+ * @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
  * The third window of a cold launch, and the one nothing was waiting for. Expo Go attaches to the
  * dev server, and *then* downloads and runs the bundle — so the debugger target it registered on
  * the way in goes away and comes back when the JS runtime is created. A single read landing in
@@ -72,7 +72,7 @@ export const RUNTIME_READY_TIMEOUT_MS = 15_000;
 /**
  * How long the reload gets to be proved, before the run reports that it was not.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+ * @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
  * `runtime:reload`'s own default is 30 s and covers a ladder that can stop and start the app. This
  * covers one broadcast on a socket that is already open, and the app fetching a bundle the dev
  * server has already built — the `bundle` phase two rows above just proved that it compiles, which
@@ -122,7 +122,7 @@ export const START_SESSION_TIMEOUT_MS = 900_000;
 /**
  * How long the start phase gets when the plan it runs **builds** first.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+ * @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
  *
  * Thirty minutes, and the number is the shape of the work rather than a measurement: a cold
  * `expo run:ios` is a pod install and a full native compile, and a machine doing it for the first

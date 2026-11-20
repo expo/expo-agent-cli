@@ -439,7 +439,7 @@ export function notReadyError(
       }`,
       // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
       `Note: this CLI reaches the dev server at ${lock.url}, over IPv4. A port number is not one listener — 127.0.0.1:${lock.port} and [::1]:${lock.port} are different sockets, so another process can be answering this port on the other stack while this project's dev server is fine, and neither will have reported a collision. "lsof -nP -iTCP:${lock.port} -sTCP:LISTEN" lists both.`,
-      // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+      // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
       // The machine-readable follow-up must run without a platform flag.
       `How: read ${logFile} with "${PROGRAM_PREFIX} dev:logs", which says what the bundler is doing. "${PROGRAM_PREFIX} smoke --ios" or "--android" then reports whether this project compiles and runs on that device. ${eas ? easStopSentence(eas) : `Stop it with "${PROGRAM_PREFIX} dev:stop".`}`,
     ].join('\n')

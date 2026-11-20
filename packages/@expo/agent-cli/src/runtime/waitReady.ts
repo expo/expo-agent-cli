@@ -129,7 +129,7 @@ function isNotListening(error: unknown): boolean {
  * command has to report differently, and an exception would flatten them into one.
  *
  * **A refused connection is not an answer, so it is asked again.**
- * @ref llp/0005-runtime-loop-tools.rfc.md §A refused connection is not an answer
+ * @ref llp/0036-smoke-gate.rfc.md §A refused connection is not an answer
  *
  * The original design was one request and no loop, on the reasoning that `/status` answers only
  * once the bundler has finished — so the request *is* the wait. That holds exactly while something

@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 // The gate itself: nine phases, one verdict — and four more that only some runs perform.
 //
@@ -27,7 +27,7 @@
 // | `screenshot`       | (new)                            | `captureScreenshotAsync`    |
 //
 // **The four conditional phases are acts rather than questions**, and that shapes three things
-// (llp/0005 §The run brings its own environment): they are reported only by a run that performed
+// (llp/0036 §The run brings its own environment): they are reported only by a run that performed
 // them, they are never charged to `--timeout`, and the ones that hold a resource register the way
 // to undo themselves *before* they do anything. `runSmokePhasesAsync` is the wrapper that runs
 // those undos, newest first, on every path out of the walk. A booted device registers its release
@@ -228,7 +228,7 @@ async function runPhasesAsync(
   // broken, and which session it was is no longer the open question.
   const threw = collected.records.some(isFailingRecord);
   const sessionKnown = walk.report.reload.disposition !== 'unproved';
-  // @ref llp/0005 §Expo Go is only a target for a project that fits in it. `threw` still outranks
+  // @ref llp/0036 §Expo Go is only a target for a project that fits in it. `threw` still outranks
   // it: Expo Go reporting an error while running this project's bundle is a fact about the code,
   // whichever app was holding it.
   const appFitsProject = appMismatch == null;

@@ -157,7 +157,7 @@ export async function openRouteAfterReloadAsync(
     targetAppIds: [],
     hasNativeDirs: nativeDirs.ios || nativeDirs.android,
     usesDevClient,
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+    // @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
     // This rung starts an app that is not running, so it builds the same deep link `navigate` does
     // and owes the same answer: starting Expo Go for a project that cannot run there would put the
     // wrong app on the screen and call it a reload.

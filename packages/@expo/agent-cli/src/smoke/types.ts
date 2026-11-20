@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 // What one `@expo/agent-cli smoke` run amounts to, as data.
 //
@@ -21,7 +21,7 @@ import type { SmokeAppMismatchKind } from './contract';
  *
  * A closed set, and reported as one: an agent branching on "which step of the gate failed" must
  * not have to match English. Each is the question of one existing command, asked without leaving
- * this process (llp/0005 §The smoke gate). The order of the whole run is `PHASE_ORDER` in
+ * this process (llp/0036 §The smoke gate). The order of the whole run is `PHASE_ORDER` in
  * `walk/walk.ts`.
  *
  * - `dev-server`: is there a dev server, and is it this project's to talk to?
@@ -29,7 +29,7 @@ import type { SmokeAppMismatchKind } from './contract';
  * - `bundle`: does this project's own entry bundle compile?
  * - `app`: is an app attached to the device, and if not, can one be opened?
  * - `reload`: is the app that answers the rest of this run the code that is on disk?
- *   @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+ *   @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
  *   The phase that makes the four after it mean something. An app this run opened fetched the
  *   served bundle on its way up, so it is `skipped` there and the reason says so. An app that was
  *   *already* attached is running whatever it last loaded, which after an edit is the code the
@@ -57,14 +57,14 @@ export const SMOKE_ALWAYS_PHASE_IDS = [
  *
  * **Conditional**: a run that found a dev server, a device or the app has not skipped a start, a
  * boot or an install, it never had one to do, and a `skipped` row there would read as a step that
- * was owed (llp/0005 §The run brings its own environment). Installing is an *act*.
+ * was owed (llp/0036 §The run brings its own environment). Installing is an *act*.
  *
  * - `start-dev-server`: was a dev server started for this run?
  * - `start-session`: was an EAS Simulator session started for this run? Only on `--eas`, and only
  *   when the run may bring its own environment (@ref llp/0027-everything-on-eas.rfc.md §smoke).
  * - `boot-device`: was a simulator or an emulator booted for this run?
  * - `install-app`: was the app put on that device for this run?
- *   @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+ *   @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
  */
 export const SMOKE_CONDITIONAL_PHASE_IDS = [
   'start-dev-server',
@@ -126,7 +126,7 @@ export type SmokeOutcome =
 /**
  * What this run did about the dev server it needed.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+ * @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
  * A closed set, because the difference between these four decides what the *machine* looks like
  * afterwards, and an agent must not have to read English to tell "I left your dev server alone"
  * from "I started one and took it away again".
@@ -192,7 +192,7 @@ export interface SmokeEnvironmentJson {
   /**
    * Why this device rather than another, in one clause. Null when this run chose none.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
+   * @ref llp/0036-smoke-gate.rfc.md §The device that can open the app
    * A machine has ten simulators and a run boots one of them; which one, and on what grounds, is
    * the difference between a gate that works and twelve seconds spent on a device that could never
    * have opened the app. `"it has Expo Go installed"`, `"it was already booted"`.
@@ -216,7 +216,7 @@ export interface SmokeEnvironmentJson {
 /**
  * Whether the app the rest of the run read was the code on disk, and what says so.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+ * @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
  * The narrow claim, and it has to be narrow: this says the app fetched the bundle the dev server is
  * serving *after* this run arrived. It does not say the bundle contains any particular edit — the
  * dev server's own freshness is the `bundle` phase's question, and nothing here re-answers it.
@@ -346,7 +346,7 @@ export interface SmokeResultJson {
   /**
    * Why the app that answered cannot run this project, or null when it can.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+   * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
    * A `passed` is impossible while this is set, so a caller reading the verdict alone is never
    * misled — and one that wants to know *why* it could not decide reads this rather than the phase
    * list's prose.

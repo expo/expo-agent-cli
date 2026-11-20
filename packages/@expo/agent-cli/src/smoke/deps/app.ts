@@ -80,7 +80,7 @@ async function openRoute(
   });
 }
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+// @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
 //
 // The gate's own version of the question `decideExpoGoTarget` answers for the *link*. That
 // decision stops this command opening Expo Go for a project that cannot run there; it says
@@ -105,7 +105,7 @@ async function checkAppFitsProject(
     return nothing;
   }
 
-  // @ref llp/0005 §Expo Go is only a target for a project that fits in it. Only a project that
+  // @ref llp/0036 §Expo Go is only a target for a project that fits in it. Only a project that
   // is **ruled out** is a mismatch. Unknown is not: a project this could not read is the
   // ordinary state of a fresh clone (@ref src/project/expoGo §RULES_OUT_EXPO_GO).
   if (decidesAgainstExpoGo(await checkExpoGoCompatibilityAsync(projectRoot)) === false) {
@@ -116,7 +116,7 @@ async function checkAppFitsProject(
     };
   }
 
-  // @ref llp/0005 §The Expo Go on the device is not the Expo Go the SDK wants
+  // @ref llp/0036 §The Expo Go on the device is not the Expo Go the SDK wants
   //
   // The project fits in Expo Go — but the Expo Go on the device is a build of *some* SDK, and
   // only the one from this project's release line is the app under test. Asked only of a local
@@ -151,10 +151,10 @@ async function checkAppFitsProject(
   );
 }
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+// @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
 //
 // `runtime:reload`'s rung 1, and its proofs, through the same functions — the whole point of
-// this command being one process (llp/0005 §The smoke gate). Deliberately **only** rung 1: the
+// this command being one process (llp/0036 §The smoke gate). Deliberately **only** rung 1: the
 // rungs above it stop the app and start it again, and a gate is not allowed to take the
 // caller's app away in order to answer a question about it. An app the broadcast cannot reach
 // is a fact this phase reports, not a licence to relaunch.

@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // The contract of the smoke gate: what its dependencies answer and what one run hands back.
 //
 // Types only. `walk/*` walks the phases against `SmokeDeps`, `deps/` implements it, and the
@@ -33,7 +33,7 @@ export interface SmokeStartResult {
   /**
    * The plan this start ran **compiled** something.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+   * @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
    * Reported whether the start succeeded or failed, because what it changes — the cheapest way to
    * find out why — is most useful exactly when it failed.
    */
@@ -112,7 +112,7 @@ export interface SmokeEvaluateResult {
 /**
  * What putting an already-attached app back on the served bundle amounted to.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+ * @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
  * Never a throw: a reload that could not be performed is a fact this gate reports, not a tool
  * failure — the run still has a picture and an error window to hand back, and the phase's job is to
  * say which session they are of.
@@ -144,8 +144,8 @@ export interface SmokeReloadResult {
 /**
  * Which of the two reasons an app cannot run this project.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
- * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+ * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
+ * @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
  *
  * Carried as a value rather than left to be read out of the sentence, because the **next action is
  * different for each** and the follow-ups have to pick one (llp/0021 §The rules — nothing
@@ -166,7 +166,7 @@ export type SmokeAppMismatchKind =
   /**
    * The device has not got the app at all, so nothing there handles this project's link.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+   * @ref llp/0036-smoke-gate.rfc.md §A refused link is a device without the app
    * The development-build case, and the reason it is a *third* kind: `smoke` installs Expo Go for
    * itself, and a development build is this project's own artefact to compile — so the answer is
    * `dev --<platform>` and not a re-run of anything.
@@ -234,7 +234,7 @@ export interface SmokeDeps {
   /**
    * Put the app on the device this run settled on, when the install decision said it needs it.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+   * @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
    * Only ever called after {@link SmokeDeps.installNeededOnDevice} answered yes, so the device
    * is up for `simctl install` to reach it.
    *
@@ -247,7 +247,7 @@ export interface SmokeDeps {
   /**
    * Whether this run has an app to put on that device before it can open anything.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+   * @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
    * The install table from row 3 is decided here, so the walk stays a walk over phases rather than a
    * second opinion about which apps may be installed. Rows 1 and 2, `--no-start` and no device, are
    * the walk's. `createdByBoot` is whether this run's boot
@@ -300,8 +300,8 @@ export interface SmokeDeps {
   /**
    * Whether the app that answered is one this project can actually run.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+   * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
+   * @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
    *
    * Three fields, because the findings are not the same weight and the two heavy ones do not have
    * the same answer. A `mismatch` is an app that cannot run this project, and the gate must not
@@ -318,7 +318,7 @@ export interface SmokeDeps {
    * Why an app this run opened may never have attached, read off the **device** rather than the
    * dev server.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+   * @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
    *
    * The one question {@link checkAppFitsProject} cannot answer, and the reason is in its argument:
    * it looks for an Expo Go among the dev server's debugger targets, and on this path there are
@@ -340,7 +340,7 @@ export interface SmokeDeps {
   /**
    * Put an app that was already attached back on the bundle the dev server is serving.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+   * @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
    * `runtime:reload`'s rung 1 and its proofs, asked here through the same functions. Only rung 1:
    * the rungs above it stop the app and start it again, and a gate is not allowed to take the
    * caller's app away to answer a question about it.
@@ -362,7 +362,7 @@ export interface SmokeDeps {
   /**
    * Say which phase is starting, before it starts.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+   * @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
    * A dependency rather than a `Log` call, for the same reason every other side effect of the walk
    * is one: the outcome table is tested against fakes, and a walk that printed for itself
    * would make those tests about prose. `silentProgress` is what they pass.
@@ -395,7 +395,7 @@ export interface SmokeRun {
   /**
    * Whether the app the later phases read was the code on disk.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+   * @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
    * Its default says the truth for a run that never reached the phase: nothing replaced the
    * session, because there was no session to replace.
    */
@@ -403,7 +403,7 @@ export interface SmokeRun {
   /**
    * Why the app that answered cannot run this project, or null when it can.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+   * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
    * Reported as a fact rather than only as the `app` phase's sentence, because the follow-ups and
    * the explanation both branch on it and neither may do that by matching English
    * (llp/0005 §One preflight for the runtime family, on `error.data`).
@@ -419,7 +419,7 @@ export interface SmokeRun {
   /**
    * The start phase ran a plan that **compiled**.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+   * @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
    * Read by the follow-ups, which offer a different cheapest-next-step for a start that took
    * minutes than for one that took seconds.
    */

@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 // `@expo/agent-cli smoke`: the composite gate.
 //
@@ -139,7 +139,7 @@ function explainOutcome(run: SmokeRun): string {
       ? `Read the phase list above: every phase before the one that failed did answer, so the failure is about what that phase asked and nothing later. The "Suggested next:" line is the command that acts on it.`
       : `Nothing was shown to be wrong and nothing was proved right, so this is not a failure to act on. ${
           run.appMismatchKind === 'expo-go-version'
-            ? // @ref llp/0005 §The Expo Go on the device is not the Expo Go the SDK wants. Looking
+            ? // @ref llp/0036 §The Expo Go on the device is not the Expo Go the SDK wants. Looking
               // again changes nothing *while the device holds that copy* — but unlike the case
               // below, the thing that has to change is cheap and this command does it itself.
               'The Expo Go on the device is built from another SDK, so looking again reads the same wrong runtime — a run without --no-start installs the release this SDK ships and reads that.'
@@ -173,7 +173,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     ...createAppDeps(ctx),
     waitForStableTargets,
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+    // @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
     progress: buildSmokeProgress(options, { installKind: () => ctx.installKind }),
 
     now: () => Date.now(),

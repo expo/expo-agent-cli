@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+// @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
 //
 // What the gate says while it runs. Three properties are worth pinning, and they are the three the
 // module was written for: nothing goes to stdout, a bound is printed only when it is real, and the

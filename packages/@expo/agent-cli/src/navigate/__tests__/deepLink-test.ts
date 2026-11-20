@@ -583,7 +583,8 @@ describe(resolveDeepLinkUrl, () => {
     });
 
     // `dev` requires a platform now, so a caller who named none is shown the host's — stated
-    // text they can change, not a flag smuggled into a run (llp/0005 §Which platform).
+    // text they can change, not a flag smuggled into a run
+    // (llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say).
     it(`states the host's platform when the caller named none`, () => {
       const result = resolveDeepLinkUrl({ route: '/profile/42', config: config(), isExpoGo: true });
 

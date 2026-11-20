@@ -46,7 +46,7 @@ async function startDevServer(
   server: DevServerState
 ): ReturnType<SmokeDeps['startDevServer']> {
   const { projectRoot, options } = ctx;
-  // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+  // @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
   //
   // This used to refuse. The detached child runs whatever plan it makes, and for a project
   // whose development build is missing or stale that plan is a compiler — so the gate named

@@ -446,12 +446,12 @@ declare module '2g' {
      * one, and an agent watching a run it did not ask for `--json` from still needs to know which
      * step of the gate decided the answer.
      *
-     * @see llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+     * @see llp/0036-smoke-gate.rfc.md §The smoke gate
      */
     /**
      * The start phase is about to run a plan that **compiles**, before it waits on it.
      *
-     * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+     * @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
      * Emitted before the build rather than after, because its whole purpose is to tell a reader
      * that a long wait is starting and is not a hang. The human sentence goes to stderr; this is
      * the same fact for a reader of the stream.
@@ -464,7 +464,7 @@ declare module '2g' {
     /**
      * One phase of the gate is starting, said before it starts.
      *
-     * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+     * @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
      * The stream half of the progress line. `smoke` can spend three minutes between its first
      * output and its report, and a reader that only has the report cannot tell a long run from a
      * hung one — so the walk is narrated, here for a consumer of events and on stderr for a person.
@@ -493,7 +493,7 @@ declare module '2g' {
       /**
        * What this run did about the dev server: `reused`, `started`, `failed` or `absent`.
        *
-       * @see llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+       * @see llp/0036-smoke-gate.rfc.md §The run brings its own environment
        */
       devServer: string;
       /** The same about the device: `reused`, `booted`, `failed` or `absent`. */

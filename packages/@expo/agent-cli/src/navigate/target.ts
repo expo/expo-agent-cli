@@ -24,7 +24,7 @@ export interface ExpoGoDecisionInput {
   /**
    * Whether the project can run in Expo Go at all, or null when nothing read the project.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+   * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
    * `ProjectState.expoGo.compatible`, from `checkExpoGoCompatibilityAsync` — the same fact `status`
    * prints and the plan engine branches on. Expo Go ships a fixed native runtime, so a project with
    * a native module that runtime does not contain cannot run there whatever the other four facts
@@ -108,7 +108,7 @@ export function decideExpoGoTarget({
       certain: true,
     };
   }
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+  // @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
   //
   // Above the native-directory guess below, because it is a stronger read of the same conclusion:
   // the compatibility check counts a checked-in native directory among its own reasons, and it also

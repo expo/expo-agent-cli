@@ -424,7 +424,7 @@ describe(parseRuntimeErrorMessage, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate — the three cases measured live on
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate — the three cases measured live on
 // 2026-08-24 against notesapp on SDK 57 in Expo Go on an iOS 26.5 simulator. They are pinned here
 // because a gate is built on the difference between them, and because the one a reader would
 // predict from the protocol — an uncaught throw arriving as `Runtime.exceptionThrown` — did not

@@ -188,7 +188,7 @@ describe(smokeResultToJson, () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate. Not `source`: React Native reports an
+  // @ref llp/0036-smoke-gate.rfc.md §The smoke gate. Not `source`: React Native reports an
   // uncaught throw through the console path, so the second record below — a console record that
   // carried the error's own stack — is a crash and the third is a log.
   it(`counts what the gate fails on apart from what the app logged`, () => {
@@ -297,7 +297,7 @@ describe(formatSmokeResult, () => {
     expect(printed).toContain('END UNTRUSTED APP OUTPUT');
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment.
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment.
   describe('what the run did to the machine', () => {
     it(`names what it started and says it was put back`, () => {
       const printed = formatSmokeResult(

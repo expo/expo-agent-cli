@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
 //
 // The gate used to refuse here and name `npx expo start --ios`, which is a correct instruction and
 // a dead end for an agent loop: the loop cannot take it without leaving the loop. So the missing
@@ -316,7 +316,7 @@ describe(`${installExpoGoAsync.name} on Android`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 //
 // Installing over a wrong version is the same call as installing a missing one, and that is on
 // purpose: `@expo/cli` notes that iOS needs no uninstall to update ("Don't need to uninstall to

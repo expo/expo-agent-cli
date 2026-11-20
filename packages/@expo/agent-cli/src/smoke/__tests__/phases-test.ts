@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 //
 // The outcome table. This is the half of `smoke` that can be wrong in a way nothing else notices:
@@ -321,7 +321,7 @@ describe(runSmokePhasesAsync, () => {
   });
 
   // The property that makes the phase list readable at all.
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate — observed live, 2026-08-24. Every
+  // @ref llp/0036-smoke-gate.rfc.md §The smoke gate — observed live, 2026-08-24. Every
   // phase has to be about the *same* dev server. `navigate` finds its own, so a run that had
   // settled on one in phase 1 went looking again in phase 4, found nothing, and exited 1 from a
   // run whose first three phases had all answered.
@@ -435,7 +435,7 @@ describe(runSmokePhasesAsync, () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment.
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment.
   // Start what is missing, stop only what this run started, and leave what was already there.
   describe('the environment this run brings', () => {
     /** A machine with nothing on it: no dev server, and no device. */
@@ -992,7 +992,7 @@ describe(runSmokePhasesAsync, () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
   // (2026-08-30). Coming up is not reading. A run that starts a dev server pays
   // for that dev server's **first compile**, and a run that boots a simulator pays for the app's
   // **first launch** on it; neither is a measurement of the app, and charging them to the window
@@ -1206,7 +1206,7 @@ describe(runSmokePhasesAsync, () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment. The
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment. The
   // deep link is a request, not a result: `simctl openurl` exits 0 as soon as the URL is handed
   // over, and on a simulator this run has just booted the app behind it may be a minute from
   // registering a debugger target — or may never register one, because it is not installed.
@@ -1269,7 +1269,7 @@ describe(runSmokePhasesAsync, () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment.
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment.
   // A cold Expo Go attaches to the dev server, *then* downloads and runs the bundle — and the
   // debugger target it registered on the way in goes away and comes back when the JS runtime is
   // created. A single read landing in that gap answers "No target found" about an app that is
@@ -1852,7 +1852,7 @@ describe(runSmokePhasesAsync, () => {
   });
 
   describe('the runtime and the window', () => {
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate. The regression this exists for,
+    // @ref llp/0036-smoke-gate.rfc.md §The smoke gate. The regression this exists for,
     // measured live on 2026-08-24: an uncaught `throw` arrives as `source: 'console'`, because
     // React Native catches it and reports it through the console path rather than as
     // `Runtime.exceptionThrown`. A gate reading `source` passed seventeen crashes in one window.
@@ -2099,7 +2099,7 @@ describe(smokeExitCode, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app. A picture is the one
+// @ref llp/0036-smoke-gate.rfc.md §The device that can open the app. A picture is the one
 // piece of evidence a reader believes without checking, and a home screen looks exactly like an app
 // that failed to render — so an `ok` on a run whose app never connected has to say what it is a
 // picture of.
@@ -2244,7 +2244,7 @@ describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+// @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
 //
 // The false green this phase was added to remove, and the one this command exists to prevent.
 // Every phase below `app` reads the *running app*, and an app that was already attached when the
@@ -2498,7 +2498,7 @@ describe(`${runSmokePhasesAsync.name} and the code on disk`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+// @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
 //
 // The other half of that section. Not opening Expo Go stops this gate *choosing* the wrong app; it
 // does nothing about an Expo Go that is already attached, which is the state `expo start --ios`
@@ -2690,13 +2690,13 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
 //
 // The gate used to refuse a machine with no Expo Go and name `npx expo start --ios`. Correct, and a
 // dead end for the caller this CLI is for: an agent cannot take that instruction without leaving
 // its loop. So the app is installed — and because installing is an *act* rather than a question,
 // the phase is conditional like the start and the boot, and it is reported only by a run that did
-// it (llp/0005 §The run brings its own environment).
+// it (llp/0036 §The run brings its own environment).
 describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
   /** A device this run settled on that has not got the app. */
   const missingApp = { installNeededOnDevice: async () => true };
@@ -2867,7 +2867,7 @@ describe(`${runSmokePhasesAsync.name} and what the install replaced`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
 //
 // The install invalidates the probe that came before it. `simctl install` over a running app
 // replaces the bundle and takes the process with it, so an app that was attached a moment earlier
@@ -2967,7 +2967,7 @@ describe(`${runSmokePhasesAsync.name} and the app the install replaced`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+// @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
 //
 // The gate can spend three minutes between its first output and its report, and until it narrated
 // itself a caller had no way to tell a long run from a hung one. What is worth pinning here is not
@@ -3101,7 +3101,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 // @ref ../contract §SmokeDeps.explainSilentApp
 //
 // Nothing attached is a symptom, and the device often holds the cause. Found live and at full
@@ -3201,7 +3201,7 @@ describe(`${runSmokePhasesAsync.name} and an app that never attached`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+// @ref llp/0036-smoke-gate.rfc.md §A refused link is a device without the app
 //
 // The device refused this run's deep link. Two things went wrong in that report and both were found
 // in one live run [observed — Kudo, 2026-09-04, a development build and a simulator that had not got
@@ -3339,7 +3339,7 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §A build changes the project it was read from
+// @ref llp/0036-smoke-gate.rfc.md §A build changes the project it was read from
 //
 // The start phase can **compile**, and a compile is one of the few things that changes the answer
 // to "which app is this run about": `expo prebuild` writes `android.package` and
@@ -3382,7 +3382,7 @@ describe(`${runSmokePhasesAsync.name} and a start that changed the project`, () 
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
+// @ref llp/0036-smoke-gate.rfc.md §An app that cannot be named still has to be installed
 //
 // The install decision is the wiring's, not the walk's, so what this pins is the one thing the walk
 // owns: that it *asks*, and that it installs whatever the answer says — including for a run whose
