@@ -91,6 +91,7 @@ describe('the option lists the sweep checks against', () => {
         "install",
         "navigate",
         "new",
+        "patch",
         "runtime",
         "runtime:errors",
         "runtime:eval",

@@ -121,6 +121,12 @@ describe('the flags this CLI writes onto a command line', () => {
     // of `installExpoGo.ts` in the same change, which is why that file no longer has a row for it:
     // the approval is not about installs, it is about every local iOS open.
     //
+    // The `src/patch/backends.ts` rows are git's, from the scratch repository that writes the
+    // patch-package patch (`diff`, `apply --check --cached`), and `npm patch --help`. git is not a
+    // package, so the run the rule asks for is the e2e itself [observed — 2026-11-19, git 2.54 on
+    // macOS: `e2e/__tests__/patch-test.ts` saves a real package, and patch-package 8.0.1 applies the
+    // patch to a fresh install; npm 11.20.0 exits 1 and npm 12.2.3 exits 0 on `npm patch --help`].
+    //
     // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
     // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
     // Expo-Go-54.0.8.apk` printed `Performing Streamed Install` then `Success` and exited 0 — over
@@ -140,10 +146,13 @@ describe('the flags this CLI writes onto a command line', () => {
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
+          "--cached  src/patch/backends.ts",
+          "--check  src/patch/backends.ts",
           "--detach  src/smoke/deps/startArgs.ts",
           "--device  src/device/installDevBuild.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
+          "--help  src/patch/backends.ts",
           "--is-inside-work-tree  src/new/git.ts",
           "--json  src/config/introspectAsync.ts",
           "--json  src/deploy/launchCli.ts",
@@ -153,9 +162,13 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/impact/runtimeVersion.ts",
           "--json  src/install/resolveOptions.ts",
           "--no-bundler  src/device/installDevBuild.ts",
+          "--no-color  src/patch/backends.ts",
+          "--no-ext-diff  src/patch/backends.ts",
           "--no-followups  src/docs/autoSync.ts",
           "--no-install  src/new/createExpo.ts",
           "--no-open  src/smoke/deps/startArgs.ts",
+          "--no-renames  src/patch/backends.ts",
+          "--no-textconv  src/patch/backends.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",
           "--platform  src/deploy/deployAsync.ts",
