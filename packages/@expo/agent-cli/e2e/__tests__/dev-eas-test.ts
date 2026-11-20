@@ -1200,6 +1200,9 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
+  // The budget outlasts the empty polls after the reopen, so a 22 is a wait that ignored a target.
+  const REOPEN_WAIT_MS = 6000;
+
   // An EAS re-run opens the app again. A development build gets the launcher URL, which reloads an
   // attached app, so only a target that appears after the reopen proves it. Expo Go gets its route
   // link, which keeps the loaded app and its target.
@@ -1246,15 +1249,21 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
           buildProfile: 'development-simulator',
         },
       ]),
-      AGENT_CLI_DEV_APP_WAIT_MS: '1500',
-      // The target from before the reopen must be listed when the run reads the list before it.
-      STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: exitCode === 22 ? '0' : '3',
+      AGENT_CLI_DEV_APP_WAIT_MS: String(REOPEN_WAIT_MS),
     };
     const devArgs = ['dev', '--ios', '--eas', ...(devClient ? ['--dev-client'] : []), '--detach'];
     try {
       const first = await executeAgentCliAsync(projectRoot, [...devArgs, '--json'], { env });
       expect(first.exitCode, first.stderr).toBe(0);
       await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
+      // The first open's app is listed before the reopen, so the reopen has an old target to skip.
+      const { port } = (await waitForDevLockAsync(projectRoot))!;
+      expect(
+        await waitForAsync(async () => {
+          const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+          return ((await response.json()) as unknown[]).length > 0;
+        }, 10_000)
+      ).toBe(true);
 
       const startedAt = Date.now();
       const again = await executeAgentCliAsync(
@@ -1267,7 +1276,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       );
       expect(again.exitCode, again.stderr).toBe(exitCode);
       if (exitCode === 22) {
-        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(REOPEN_WAIT_MS);
         expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
       }
     } finally {
