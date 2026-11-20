@@ -7,6 +7,10 @@ import type { LastBuildRecord } from '../lastBuild';
 import type { NativePlatform } from '../types';
 import type { RunTargetChoice } from '../runTarget';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/expoApp';
+import {
+  createProjectState,
+  createDevClientState,
+} from '../../project/__tests__/projectStateFixture';
 
 /**
  * A recorded build that stored only a hash, which is what an older CLI wrote.
@@ -48,38 +52,6 @@ function recordedWithSources(
   return { [platform]: { hash, sources } };
 }
 
-function createState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    projectRoot: '/project',
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: true,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abc123def4567890' },
-    ...overrides,
-  };
-}
-
-/** The state of a managed project that needs a development build. */
-function createDevClientState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return createState({
-    usesDevClient: true,
-    expoGo: {
-      compatible: false,
-      reasons: [
-        {
-          kind: 'unbundled-native-module',
-          packageName: 'react-native-mmkv',
-          detail: 'react-native-mmkv is not bundled in Expo Go',
-        },
-      ],
-    },
-    ...overrides,
-  });
-}
-
 function argvOf(steps: { argv: string[] }[]): string[][] {
   return steps.map((step) => step.argv);
 }
@@ -113,7 +85,7 @@ describe(decideStartPlan, () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
   describe('rule: not-expo-app', () => {
     it(`should plan nothing for a directory that declares no expo dependency`, () => {
-      const plan = decideStartPlan(createState({ app: 'not-expo-app' }));
+      const plan = decideStartPlan(createProjectState({ app: 'not-expo-app' }));
 
       expect(plan.rule).toBe('not-expo-app');
       expect(plan.target).toBe('none');
@@ -133,7 +105,9 @@ describe(decideStartPlan, () => {
     });
 
     it(`should outrank the web short-circuit, which is also about an app that is not here`, () => {
-      const plan = decideStartPlan(createState({ app: 'not-expo-app' }), { platform: 'web' });
+      const plan = decideStartPlan(createProjectState({ app: 'not-expo-app' }), {
+        platform: 'web',
+      });
 
       expect(plan.rule).toBe('not-expo-app');
       expect(plan.steps).toEqual([]);
@@ -141,7 +115,7 @@ describe(decideStartPlan, () => {
 
     it(`should outrank checked-in native directories`, () => {
       const plan = decideStartPlan(
-        createState({ app: 'not-expo-app', nativeDirs: { ios: true, android: true } })
+        createProjectState({ app: 'not-expo-app', nativeDirs: { ios: true, android: true } })
       );
 
       expect(plan.rule).toBe('not-expo-app');
@@ -156,7 +130,11 @@ describe(decideStartPlan, () => {
       ['an EAS build', { platform: 'android' as const, buildBackend: backend('eas') }],
     ])(`should plan nothing but the bare install for %s`, (_, options) => {
       const plan = decideStartPlan(
-        createState({ app: 'dependencies-not-installed', sdkVersion: null, usesDevClient: false }),
+        createProjectState({
+          app: 'dependencies-not-installed',
+          sdkVersion: null,
+          usesDevClient: false,
+        }),
         options
       );
 
@@ -172,7 +150,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: web', () => {
     it(`should start the dev server for web when the web platform is requested`, () => {
-      const plan = decideStartPlan(createState(), { platform: 'web' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'web' });
 
       expect(plan.rule).toBe('web');
       expect(plan.target).toBe('web');
@@ -190,7 +168,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should warn when the project has no react-native-web dependency`, () => {
-      const plan = decideStartPlan(createState({ hasWeb: false }), { platform: 'web' });
+      const plan = decideStartPlan(createProjectState({ hasWeb: false }), { platform: 'web' });
 
       expect(plan.rule).toBe('web');
       expect(plan.reasons.join('\n')).toMatch(/react-native-web is not a dependency/);
@@ -199,7 +177,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: expo-go', () => {
     it(`should only start the dev server for an Expo Go compatible project`, () => {
-      const plan = decideStartPlan(createState(), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
       expect(plan.rule).toBe('expo-go');
       expect(plan.target).toBe('expo-go');
@@ -209,15 +187,20 @@ describe(decideStartPlan, () => {
     });
 
     it(`should not choose Expo Go when the project depends on expo-dev-client`, () => {
-      const plan = decideStartPlan(createState({ usesDevClient: true }), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState({ usesDevClient: true }), {
+        platform: 'ios',
+      });
 
       expect(plan.rule).not.toBe('expo-go');
     });
 
     it(`should not choose Expo Go when native directories are checked in`, () => {
-      const plan = decideStartPlan(createState({ nativeDirs: { ios: true, android: false } }), {
-        platform: 'ios',
-      });
+      const plan = decideStartPlan(
+        createProjectState({ nativeDirs: { ios: true, android: false } }),
+        {
+          platform: 'ios',
+        }
+      );
 
       expect(plan.rule).not.toBe('expo-go');
     });
@@ -226,7 +209,7 @@ describe(decideStartPlan, () => {
     // it serves a bundle and waits. Following the plan left an agent with a dev server and no way
     // to reach the app, and `--ios` changed nothing in the argv even though it is forwarded.
     it(`should not claim to open anything when no platform flag was typed`, () => {
-      const reason = decideStartPlan(createState(), { platform: 'ios' }).steps[0]!.reason;
+      const reason = decideStartPlan(createProjectState(), { platform: 'ios' }).steps[0]!.reason;
 
       expect(reason).not.toMatch(/^Opens/);
       expect(reason).toContain('opens nothing on its own');
@@ -237,7 +220,7 @@ describe(decideStartPlan, () => {
       ['ios', 'an iOS simulator'],
       ['android', 'an Android device or emulator'],
     ] as const)(`should plan and describe the open that --%s performs`, (platform, device) => {
-      const plan = decideStartPlan(createState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform,
         requestedPlatform: platform,
       });
@@ -251,14 +234,17 @@ describe(decideStartPlan, () => {
 
     // The platform to *build* for is always resolved; only a typed flag reaches `expo start`.
     it(`should not invent a flag from the platform it fell back to`, () => {
-      const plan = decideStartPlan(createState(), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
       expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
     });
 
     // `--web` serves a browser; the native rows have no business opening one.
     it(`should not put --web on a native start step`, () => {
-      const plan = decideStartPlan(createState(), { platform: 'ios', requestedPlatform: 'web' });
+      const plan = decideStartPlan(createProjectState(), {
+        platform: 'ios',
+        requestedPlatform: 'web',
+      });
 
       expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
     });
@@ -305,7 +291,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should start Expo Go compatible projects in the dev client when one is a dependency`, () => {
-      const state = createState({ usesDevClient: true });
+      const state = createProjectState({ usesDevClient: true });
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -398,7 +384,7 @@ describe(decideStartPlan, () => {
     // The bare rows have the same hole and the same fix: native directories checked in say nothing
     // about what is on the simulator.
     it(`should install for a bare project whose device has not got the app`, () => {
-      const state = createState({
+      const state = createProjectState({
         nativeDirs: { ios: true, android: false },
         usesDevClient: true,
       });
@@ -712,9 +698,12 @@ describe(decideStartPlan, () => {
     });
 
     it(`should build a bare project that has no expo-dev-client dependency`, () => {
-      const plan = decideStartPlan(createState({ nativeDirs: { ios: false, android: true } }), {
-        platform: 'android',
-      });
+      const plan = decideStartPlan(
+        createProjectState({ nativeDirs: { ios: false, android: true } }),
+        {
+          platform: 'android',
+        }
+      );
 
       expect(plan.rule).toBe('bare-stale');
       expect(argvOf(plan.steps)).toEqual([['expo', 'run:android']]);
@@ -792,7 +781,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should report an unknown SDK version as the reason it cannot use Expo Go`, () => {
-      const state = createState({
+      const state = createProjectState({
         sdkVersion: null,
         expoGo: {
           compatible: false,
@@ -809,8 +798,8 @@ describe(decideStartPlan, () => {
 
   describe('plan shape', () => {
     const cases: [string, ProjectState, Parameters<typeof decideStartPlan>[1]][] = [
-      ['web', createState(), { platform: 'web' }],
-      ['expo-go', createState(), {}],
+      ['web', createProjectState(), { platform: 'web' }],
+      ['expo-go', createProjectState(), {}],
       [
         'dev-client-fresh',
         createDevClientState(),
@@ -873,7 +862,7 @@ describe(decideStartPlan, () => {
   // an argv that opens nothing on iOS [observed — friction run 2, 2026-08-23].
   describe('the platform reason', () => {
     it(`should say so when the caller named the platform`, () => {
-      const plan = decideStartPlan(createState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         requestedPlatform: 'ios',
       });
@@ -882,7 +871,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should name the inference, and say the plan opens nothing on it`, () => {
-      const plan = decideStartPlan(createState(), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
       expect(plan.steps[0]!.argv).toEqual(['expo', 'start', '--go']);
       expect(plan.reasons).toContain(
@@ -1002,7 +991,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should keep the install step of a project that has no expo-dev-client yet`, () => {
-      const state = createState({ expoGo: { compatible: false, reasons: [] } });
+      const state = createProjectState({ expoGo: { compatible: false, reasons: [] } });
       const plan = decideStartPlan(state, { platform: 'ios', buildBackend: backend('eas') });
 
       expect(plan.rule).toBe('needs-dev-client');
@@ -1025,7 +1014,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should leave a plan that builds nothing alone`, () => {
-      const plan = decideStartPlan(createState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
       });
@@ -1067,7 +1056,7 @@ describe(decideStartPlan, () => {
   // @ref llp/0015-backend-selection-and-config.rfc.md §The run target
   describe('the run target', () => {
     it(`should plan a development build for a project Expo Go could run`, () => {
-      const plan = decideStartPlan(createState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         runTarget: runTarget('dev-build'),
       });
@@ -1082,7 +1071,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should label the plan it changed`, () => {
-      const plan = decideStartPlan(createState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         runTarget: runTarget('dev-build'),
       });
@@ -1106,7 +1095,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should keep the Expo Go plan when Expo Go was asked for and can run it`, () => {
-      const plan = decideStartPlan(createState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         runTarget: runTarget('expo-go'),
       });
@@ -1147,7 +1136,7 @@ describe('the EAS device', () => {
     ['--no-open leaves the app to the caller', { ...eas, open: false }],
     ['no platform was named', { platform: 'ios' as const, deviceBackend: 'eas' as const }],
   ])(`names navigate with --eas when %s`, (_, options) => {
-    const plan = decideStartPlan(createState(), options);
+    const plan = decideStartPlan(createProjectState(), options);
 
     const text = [...plan.steps.map((step) => step.reason), ...plan.reasons].join('\n');
     expect(text).toContain('navigate / --eas');
@@ -1242,7 +1231,7 @@ describe('the EAS device', () => {
   });
 
   it(`opens Expo Go on a session for a project Expo Go can run`, () => {
-    const plan = decideStartPlan(createState(), eas);
+    const plan = decideStartPlan(createProjectState(), eas);
 
     expect(plan.rule).toBe('expo-go');
     expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
@@ -1297,11 +1286,14 @@ describe('the EAS device', () => {
   });
 
   it(`still installs expo-dev-client and builds when the project has not got it, found build or not`, () => {
-    const plan = decideStartPlan(createState({ expoGo: { compatible: false, reasons: [] } }), {
-      ...eas,
-      buildBackend: backend('eas'),
-      easBuild: { id: 'b', profile: 'development-simulator' },
-    });
+    const plan = decideStartPlan(
+      createProjectState({ expoGo: { compatible: false, reasons: [] } }),
+      {
+        ...eas,
+        buildBackend: backend('eas'),
+        easBuild: { id: 'b', profile: 'development-simulator' },
+      }
+    );
 
     expect(plan.rule).toBe('needs-dev-client');
     expect(plan.steps.map((step) => step.id)).toEqual(['install-dev-client', 'eas-build', 'start']);

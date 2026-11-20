@@ -3,41 +3,13 @@
 // says about a machine that cannot run them. `decideStartPlan` stays pure — the probe is the
 // caller's, and `applyToolchainProbe` is the pure function that folds it in.
 import { decideStartPlan } from '../../plan/decide';
-import type { ProjectState, StartPlan } from '../../project/types';
+import type { StartPlan } from '../../project/types';
 import { applyToolchainProbe } from '../planLocation';
 import type { ToolchainProbe } from '../types';
-
-function createState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    projectRoot: '/project',
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: true,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abc123def4567890' },
-    ...overrides,
-  };
-}
-
-/** A managed project that cannot run in Expo Go, so its plan contains a build. */
-function createDevClientState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return createState({
-    usesDevClient: true,
-    expoGo: {
-      compatible: false,
-      reasons: [
-        {
-          kind: 'unbundled-native-module',
-          packageName: 'react-native-mmkv',
-          detail: 'react-native-mmkv is not bundled in Expo Go',
-        },
-      ],
-    },
-    ...overrides,
-  });
-}
+import {
+  createProjectState,
+  createDevClientState,
+} from '../../project/__tests__/projectStateFixture';
 
 function probe(overrides: Partial<ToolchainProbe> = {}): ToolchainProbe {
   return {
@@ -58,7 +30,10 @@ function runsOnOf(plan: StartPlan): [string, string | null][] {
 
 describe('where each row of the decision table runs', () => {
   it(`labels an Expo Go plan as building nothing`, () => {
-    const plan = decideStartPlan(createState(), { platform: 'ios', requestedPlatform: 'ios' });
+    const plan = decideStartPlan(createProjectState(), {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+    });
 
     expect(plan.rule).toBe('expo-go');
     // A dev server is not a build, and answering "where does it run" for it would make the key
@@ -68,7 +43,7 @@ describe('where each row of the decision table runs', () => {
   });
 
   it(`labels a web plan as building nothing`, () => {
-    const plan = decideStartPlan(createState(), { platform: 'web' });
+    const plan = decideStartPlan(createProjectState(), { platform: 'web' });
 
     expect(runsOnOf(plan)).toEqual([['start', null]]);
     expect(plan.buildLocation).toBeNull();
@@ -122,9 +97,12 @@ describe('where each row of the decision table runs', () => {
   });
 
   it(`labels the needs-dev-client plan, whose install step builds nothing`, () => {
-    const plan = decideStartPlan(createState({ expoGo: { compatible: false, reasons: [] } }), {
-      platform: 'ios',
-    });
+    const plan = decideStartPlan(
+      createProjectState({ expoGo: { compatible: false, reasons: [] } }),
+      {
+        platform: 'ios',
+      }
+    );
 
     expect(plan.rule).toBe('needs-dev-client');
     expect(runsOnOf(plan)).toEqual([
@@ -203,7 +181,7 @@ describe('applyToolchainProbe', () => {
   });
 
   it(`is a no-op for a plan that builds nothing`, () => {
-    const plan = decideStartPlan(createState(), { platform: 'ios' });
+    const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
     expect(applyToolchainProbe(plan, probe())).toBe(plan);
   });

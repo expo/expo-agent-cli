@@ -25,6 +25,7 @@ import { getPersistedAgentIdsAsync } from '../../skills/agents';
 import { discoverSkillsAsync } from '../../skills/discovery';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../installed', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../installed')>()),
@@ -100,17 +101,7 @@ const devServerUrl = 'http://127.0.0.1:8081';
 const options = { devServerUrl };
 
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
-  const state: ProjectState = {
-    projectRoot,
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: true,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abcdef0123456789' },
-    ...overrides,
-  };
+  const state = createProjectState(overrides);
   vi.mocked(probeProjectStateAsync).mockResolvedValue(state);
   return state;
 }
@@ -211,7 +202,7 @@ describe(printStatusAsync, () => {
     }
     if (row.section !== 'project') {
       expect(printed.project).not.toBeNull();
-      expect(printed.freshness.hash).toBe('abcdef0123456789');
+      expect(printed.freshness.hash).toBe('abc123def4567890');
     }
     // A project that could not be probed has no freshness to judge an update against.
     expect(resolveRuntimeVersionAsync).toHaveBeenCalledTimes(row.section === 'project' ? 0 : 1);

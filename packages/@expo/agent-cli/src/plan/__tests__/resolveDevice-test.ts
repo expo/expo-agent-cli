@@ -3,11 +3,11 @@
 import { vol } from 'memfs';
 
 import type { AcquireResult } from '../../deviceBinding';
-import type { ProjectState } from '../../project/types';
 import { resetSettingsCache } from '../../settings';
 import { detectToolchainAsync } from '../../toolchain';
 import type { ToolchainProbe } from '../../toolchain/types';
 import { resolveStartPlanAsync, type ResolveStartPlanOptions } from '../resolveAsync';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../../toolchain', async () => {
   const actual = await vi.importActual('../../toolchain');
@@ -28,23 +28,12 @@ const ACQUIRED: AcquireResult = {
   action: 'created',
 };
 
-function state(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    projectRoot,
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: true,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abc123def4567890' },
-    ...overrides,
-  };
-}
-
 /** A managed project whose recorded iOS build matches: the draft serves and asks the device. */
 function freshDevClient() {
-  const project = state({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
+  const project = createProjectState({
+    usesDevClient: true,
+    expoGo: { compatible: false, reasons: [] },
+  });
   return { state: project, lastBuild: { ios: { hash: project.fingerprint.hash!, sources: null } } };
 }
 
@@ -74,11 +63,11 @@ beforeEach(() => {
 describe('the device the resolver binds', () => {
   // expo-go-and-bare-drafts-acquire
   it.each([
-    ['expo-go', state()],
+    ['expo-go', createProjectState()],
     ['dev-client', freshDevClient().state],
     [
       'bare',
-      state({
+      createProjectState({
         nativeDirs: { ios: true, android: true },
         expoGo: { compatible: false, reasons: [] },
       }),
@@ -112,9 +101,13 @@ describe('the device the resolver binds', () => {
   });
 
   it.each([
-    ['a web draft', state(), { platform: 'web' as const, requestedPlatform: 'web' as const }],
-    ['no requested platform', state(), { requestedPlatform: undefined }],
-    ['--eas', state(), { deviceBackend: 'eas' as const }],
+    [
+      'a web draft',
+      createProjectState(),
+      { platform: 'web' as const, requestedPlatform: 'web' as const },
+    ],
+    ['no requested platform', createProjectState(), { requestedPlatform: undefined }],
+    ['--eas', createProjectState(), { deviceBackend: 'eas' as const }],
   ])(`binds nothing for %s`, async (_case, project, overrides) => {
     const acquireDevice = vi.fn(async () => ACQUIRED);
 
@@ -133,7 +126,7 @@ describe('the device the resolver binds', () => {
 
     const { plan, acquired } = await resolveStartPlanAsync(
       projectRoot,
-      state({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } }),
+      createProjectState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } }),
       options({ acquireDevice })
     );
 

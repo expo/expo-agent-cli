@@ -1,19 +1,5 @@
-import type { ProjectState } from '../../project/types';
 import { generateAgentsMdBlock } from '../content';
-
-function createProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return {
-    projectRoot: '/project',
-    app: 'ready',
-    sdkVersion: '54.0.0',
-    nativeDirs: { ios: false, android: false },
-    usesDevClient: false,
-    hasWeb: false,
-    expoGo: { compatible: true, reasons: [] },
-    fingerprint: { hash: 'abc123', error: undefined },
-    ...overrides,
-  };
-}
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 describe(generateAgentsMdBlock, () => {
   it('should describe the project of a CNG app that Expo Go can run', () => {
