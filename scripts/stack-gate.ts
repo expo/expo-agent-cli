@@ -10,6 +10,7 @@ export type GateInput = {
   prNumber: number;
   headRef: string | null;
   headSha: string | null;
+  headRepo: string | null;
   action: string;
   waitSeconds: number;
   apiUrl: string;
@@ -31,9 +32,11 @@ export type GateIo = {
   sleep: (ms: number) => Promise<void>;
 };
 
-type Pull = { number: number; head: { ref: string; sha: string } };
-
-type PullBase = { head: { sha: string }; base: { ref: string; repo: { default_branch: string } } };
+type Pull = {
+  number: number;
+  head: { ref: string; sha: string; repo: { full_name: string } | null };
+  base: { ref: string; repo: { default_branch: string } };
+};
 
 type StackCover = { kind: 'covered'; by: number } | { kind: 'uncovered'; note: string };
 
@@ -54,6 +57,7 @@ export function inputFromEnv(env: NodeJS.ProcessEnv): GateInput | null {
     prNumber,
     headRef: env.PR_HEAD_REF || null,
     headSha: env.PR_HEAD_SHA || null,
+    headRepo: env.PR_HEAD_REPO || null,
     action: env.EVENT_ACTION ?? '',
     waitSeconds: Number(env.STACK_GATE_WAIT_SECONDS ?? 60),
     apiUrl: env.GITHUB_API_URL || 'https://api.github.com',
@@ -75,7 +79,9 @@ export async function decide(input: GateInput, io: GateIo): Promise<GateDecision
 }
 
 async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision> {
-  const stack = await stackCover(input, io);
+  let pull: Promise<Pull> | undefined;
+  const fetchPull = () => (pull ??= github(input, io, `/pulls/${input.prNumber}`) as Promise<Pull>);
+  const stack = await stackCover(input, io, fetchPull);
   if (stack.kind === 'covered') {
     return {
       scope: 'none',
@@ -84,7 +90,7 @@ async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision
   }
   // A stack layer lists only its own files against the layer below, so an LLP-only top layer could
   // hide the code of a lower layer that it covers.
-  const { head, base } = (await github(input, io, `/pulls/${input.prNumber}`)) as PullBase;
+  const { head, base } = await fetchPull();
   // The file list is the PR's as of now; it must be the event's commit.
   if (head.sha !== input.headSha) {
     return {
@@ -108,23 +114,35 @@ async function decideOrThrow(input: GateInput, io: GateIo): Promise<GateDecision
   return { scope: 'all', reason: `${stack.note} CI runs here.` };
 }
 
-async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
-  let { headRef, headSha } = input;
-  if (!headRef || !headSha) {
-    const pull = (await github(input, io, `/pulls/${input.prNumber}`)) as Pull;
+async function stackCover(
+  input: GateInput,
+  io: GateIo,
+  fetchPull: () => Promise<Pull>
+): Promise<StackCover> {
+  let { headRef, headSha, headRepo } = input;
+  if (!headRef || !headSha || !headRepo) {
+    const pull = await fetchPull();
     headRef = pull.head.ref;
     headSha = pull.head.sha;
+    headRepo = pull.head.repo?.full_name ?? null;
+  }
+  // The base filter matches branch names in this repo, so a fork's branch matches an unrelated one.
+  if (!sameRepo(headRepo, input.repo)) {
+    return { kind: 'uncovered', note: `The head branch is in ${headRepo ?? 'a deleted fork'}.` };
   }
 
   // gh stack submit opens the PR above a few seconds after this one, so a fresh PR waits for it.
   const deadline = input.action === 'opened' ? input.waitSeconds * 1000 : 0;
   let waited = 0;
   for (;;) {
-    const above = (await github(
-      input,
-      io,
-      `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
-    )) as Pull[];
+    // A fork PR's CI may wait for approval or not run at all, so it covers nothing.
+    const above = (
+      (await github(
+        input,
+        io,
+        `/pulls?state=open&base=${encodeURIComponent(headRef)}&per_page=100`
+      )) as Pull[]
+    ).filter((pull) => sameRepo(pull.head.repo?.full_name ?? null, input.repo));
     if (above.length > 0) {
       for (const pull of above) {
         const comparison = (await github(input, io, `/compare/${headSha}...${pull.head.sha}`)) as {
@@ -141,11 +159,16 @@ async function stackCover(input: GateInput, io: GateIo): Promise<StackCover> {
       };
     }
     if (waited >= deadline) {
-      return { kind: 'uncovered', note: 'No open PR is based on this branch.' };
+      return { kind: 'uncovered', note: 'No open PR from this repo is based on this branch.' };
     }
     await io.sleep(POLL_MS);
     waited += POLL_MS;
   }
+}
+
+// GitHub owner and repo names ignore case.
+function sameRepo(a: string | null, b: string): boolean {
+  return a !== null && a.toLowerCase() === b.toLowerCase();
 }
 
 // A rename lists its old path in previous_filename; a move out of src/ into llp/ is not LLP-only.

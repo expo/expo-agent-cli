@@ -10,6 +10,7 @@ const input: GateInput = {
   prNumber: 1,
   headRef: 'feature',
   headSha: 'aaa',
+  headRepo: 'o/r',
   action: 'synchronize',
   waitSeconds: 0,
   apiUrl: 'https://api',
@@ -31,6 +32,10 @@ function fakeIo(route: Route): GateIo & { paths: string[] } {
   return { fetch: fakeFetch as typeof fetch, sleep: async () => {}, paths };
 }
 
+function pull(number: number, sha: string, repo: string | null = 'o/r') {
+  return { number, head: { ref: 'up', sha, repo: repo && { full_name: repo } } };
+}
+
 const llpFiles = [{ filename: `${LLP_DIR}0015-a.rfc.md` }, { filename: `${LLP_DIR}0027-b.rfc.md` }];
 
 function stack(
@@ -45,7 +50,11 @@ function stack(
     if (path.startsWith('/compare/')) return { status: compare };
     if (path.startsWith('/pulls/1/files')) return files;
     if (path === '/pulls/1') {
-      return { head: { sha: head }, base: { ref: base, repo: { default_branch: 'main' } } };
+      return {
+        number: 1,
+        head: { ref: 'feature', sha: head, repo: { full_name: 'o/r' } },
+        base: { ref: base, repo: { default_branch: 'main' } },
+      };
     }
     throw new Error(`unexpected ${path}`);
   };
@@ -65,7 +74,7 @@ describe('onlyLlp', () => {
 
 describe('decide', () => {
   it('runs nothing when a PR above holds the head commit, even for an LLP-only PR', async () => {
-    const io = fakeIo(stack([{ number: 2, head: { ref: 'up', sha: 'bbb' } }], llpFiles, 'ahead'));
+    const io = fakeIo(stack([pull(2, 'bbb')], llpFiles, 'ahead'));
     expect(await decide(input, io)).toEqual({
       scope: 'none',
       reason: 'Covered by #2: its head holds this commit. CI runs there.',
@@ -73,10 +82,56 @@ describe('decide', () => {
     expect(io.paths.some((path) => path.includes('/files'))).toBe(false);
   });
 
+  it.each([['f/r'], [null]])(
+    'runs everything for a fork PR (head repo %p), even when a PR here on its branch name holds its commit',
+    async (headRepo) => {
+      const io = fakeIo((path) => {
+        if (path === '/pulls/1' && headRepo === null) {
+          return {
+            number: 1,
+            head: { ref: 'main', sha: 'aaa', repo: null },
+            base: { ref: 'main', repo: { default_branch: 'main' } },
+          };
+        }
+        return stack([pull(1, 'aaa')], [{ filename: 'src/x.ts' }], 'identical')(path);
+      });
+      const decision = await decide({ ...input, headRef: 'main', headRepo }, io);
+      expect(decision.scope).toBe('all');
+      expect(io.paths.some((path) => path.startsWith('/pulls?'))).toBe(false);
+    }
+  );
+
+  it.each([['f/r'], [null]])(
+    'runs everything when only a fork PR (head repo %p) above holds the head commit',
+    async (repo) => {
+      const io = fakeIo(stack([pull(2, 'bbb', repo)], [{ filename: 'src/x.ts' }], 'ahead'));
+      expect(await decide(input, io)).toEqual({
+        scope: 'all',
+        reason: 'No open PR from this repo is based on this branch. CI runs here.',
+      });
+    }
+  );
+
+  it('reads a missing head repo from the PR once and matches it without case', async () => {
+    const route = stack([], llpFiles);
+    const io = fakeIo((path) =>
+      path === '/pulls/1'
+        ? {
+            number: 1,
+            head: { ref: 'feature', sha: 'aaa', repo: { full_name: 'O/R' } },
+            base: { ref: 'main', repo: { default_branch: 'main' } },
+          }
+        : route(path)
+    );
+    expect((await decide({ ...input, headRepo: null }, io)).scope).toBe('llp');
+    expect(io.paths.filter((path) => path === '/pulls/1')).toHaveLength(1);
+    expect(io.paths.some((path) => path.startsWith('/pulls?'))).toBe(true);
+  });
+
   it('runs the LLP scope when every file is an LLP', async () => {
     expect(await decide(input, fakeIo(stack([], llpFiles)))).toEqual({
       scope: 'llp',
-      reason: `No open PR is based on this branch. All 2 changed paths are under ${LLP_DIR}: only the jobs that read it run.`,
+      reason: `No open PR from this repo is based on this branch. All 2 changed paths are under ${LLP_DIR}: only the jobs that read it run.`,
     });
   });
 
@@ -84,7 +139,7 @@ describe('decide', () => {
     expect(await decide(input, fakeIo(stack([], llpFiles, 'diverged', 'feature')))).toEqual({
       scope: 'all',
       reason:
-        'No open PR is based on this branch. Based on feature, not the default branch. CI runs here.',
+        'No open PR from this repo is based on this branch. Based on feature, not the default branch. CI runs here.',
     });
   });
 
@@ -92,13 +147,17 @@ describe('decide', () => {
     expect(await decide(input, fakeIo(stack([], llpFiles, 'diverged', 'main', 'bbb')))).toEqual({
       scope: 'all',
       reason:
-        'No open PR is based on this branch. The PR head bbb is not the event commit aaa. CI runs here.',
+        'No open PR from this repo is based on this branch. The PR head bbb is not the event commit aaa. CI runs here.',
     });
   });
 
   it('runs everything when the event names no head commit', async () => {
     const decision = await decide({ ...input, headSha: null }, fakeIo(stack([], llpFiles)));
-    expect(decision.scope).toBe('all');
+    expect(decision).toEqual({
+      scope: 'all',
+      reason:
+        'No open PR from this repo is based on this branch. The PR head aaa is not the event commit (none). CI runs here.',
+    });
   });
 
   it('runs everything when a file moves into llp/ from outside it', async () => {
@@ -109,9 +168,7 @@ describe('decide', () => {
   });
 
   it('runs everything when a PR above does not hold the head commit and a file is code', async () => {
-    const io = fakeIo(
-      stack([{ number: 2, head: { ref: 'up', sha: 'bbb' } }], [{ filename: 'src/x.ts' }])
-    );
+    const io = fakeIo(stack([pull(2, 'bbb')], [{ filename: 'src/x.ts' }]));
     expect(await decide(input, io)).toEqual({
       scope: 'all',
       reason: '#2 based on this branch, but none holds this commit. CI runs here.',
@@ -180,6 +237,20 @@ describe('workflow conditions', () => {
     );
     expect(eas).toContain('set-output full "$(bun scripts/stack-gate.ts || echo true)"');
   });
+
+  // `${{ }}` is pasted into a script as text, and a fork's branch name can hold ' and ;.
+  it.each([...Object.keys(expected), '.github/workflows/stack-gate.yml'])(
+    '%s passes event data to scripts through env only',
+    (file) => {
+      const workflow = Bun.YAML.parse(readFileSync(path.join(root, file), 'utf8')) as {
+        jobs: Record<string, { steps?: { run?: string }[] }>;
+      };
+      const runs = Object.values(workflow.jobs).flatMap((job) =>
+        (job.steps ?? []).map((step) => step.run ?? '')
+      );
+      expect(runs.filter((run) => /\$\{\{[^}]*github\.(event|head_ref)/.test(run))).toEqual([]);
+    }
+  );
 });
 
 describe('outputs', () => {
@@ -213,6 +284,7 @@ describe('outputs', () => {
           PR_NUMBER: '1',
           PR_HEAD_REF: 'feature',
           PR_HEAD_SHA: 'aaa',
+          PR_HEAD_REPO: 'o/r',
         },
         stdout: 'pipe',
         stderr: 'pipe',
