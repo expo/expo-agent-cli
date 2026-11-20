@@ -45,6 +45,9 @@ afterEach(async () => {
 /** The device name of the app on a session of each platform, as Metro lists it. */
 const SESSION_DEVICE = { ios: 'iPhone 17 Pro', android: 'sdk_gphone64_arm64 - 15 - API 35' };
 
+/** Empty answers of the dev server after an open: only a wait that polls again sees the app. */
+const EMPTY_POLLS_AFTER_OPEN = '3';
+
 function envFor(root: string, platform: 'ios' | 'android' = 'ios') {
   return {
     ...stubExpoEnv(root),
@@ -58,6 +61,7 @@ function envFor(root: string, platform: 'ios' | 'android' = 'ios') {
       runtimeTarget('session-app-{opens}', { deviceName: SESSION_DEVICE[platform] }),
     ]),
     STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
+    STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: EMPTY_POLLS_AFTER_OPEN,
   };
 }
 async function project(fixture = 'go-app') {

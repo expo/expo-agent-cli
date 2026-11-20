@@ -44,6 +44,9 @@
 //   opened an app on a session (`stub-eas-app-opened` under the cwd), as an app attaches after its
 //   open. Before that `GET /json/list` answers the empty list. `{opens}` in the list becomes how
 //   many opens the stub `eas` saw, so a target id can change with each open, as a reload does.
+// - STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: with STUB_EXPO_TARGETS_AFTER_EAS_OPEN, after each open the
+//   list stays empty for this many `GET /json/list` requests, whoever sends them, then shows the
+//   targets. Only a reader that asks again after an empty answer sees the app.
 // - STUB_EXPO_RUN_LAUNCH_FAILS: `run:ios` / `run:android` print what the real CLI prints for a
 //   build that compiled and installed the app, then fail at the *launch* the way F121's own run
 //   did. Nothing else is affected, which is the point: `prebuild` in the same plan still exits 0.
@@ -324,6 +327,8 @@ let tunnelUp = false;
  * with it, long after the port was bound.
  */
 function listen(port) {
+  let opensSeen = 0;
+  let emptyAnswers = 0;
   const server = http.createServer((request, response) => {
     const route = (request.url || '').split('?')[0];
     // The inspector proxy's target list, which is how every command in this CLI decides a dev
@@ -336,7 +341,16 @@ function listen(port) {
       const opens = fs.existsSync(openedFile)
         ? fs.readFileSync(openedFile, 'utf8').split('\n').filter(Boolean).length
         : 0;
-      const opened = !process.env.STUB_EXPO_TARGETS_AFTER_EAS_OPEN || opens > 0;
+      if (opens !== opensSeen) {
+        opensSeen = opens;
+        emptyAnswers = 0;
+      }
+      const emptyNeeded = Number(process.env.STUB_EXPO_EMPTY_POLLS_AFTER_OPEN || 0);
+      let opened = !process.env.STUB_EXPO_TARGETS_AFTER_EAS_OPEN || opens > 0;
+      if (opened && opens > 0 && emptyAnswers < emptyNeeded) {
+        emptyAnswers += 1;
+        opened = false;
+      }
       const targets = (process.env.STUB_EXPO_TARGETS || '[]').replaceAll('{opens}', String(opens));
       response.end(opened ? targets : '[]');
       return;

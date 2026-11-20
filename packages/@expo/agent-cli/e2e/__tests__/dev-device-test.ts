@@ -201,6 +201,7 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
       AGENT_CLI_DEV_APP_WAIT_MS: '1500',
     };
     try {
+      const startedAt = Date.now();
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--android', '--detach', '--wait-ready', '--port', '8623', '--json'],
@@ -209,6 +210,7 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
 
       // The app the stub dev server lists is none, so the run is not ready.
       expect(result.exitCode).toBe(22);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
       const { error } = JSON.parse(result.stdout);
       expect(error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
       expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --android');
@@ -263,6 +265,7 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
       await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
       const env = { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' };
       try {
+        const startedAt = Date.now();
         const result = await executeAgentCliAsync(
           projectRoot,
           ['dev', '--ios', '--detach', '--wait-ready', '--port', '8625', '--json'],
@@ -278,6 +281,7 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
         );
 
         expect(result.exitCode).toBe(22);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
         expect(JSON.parse(result.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
         const opened = xcrun
           .calls()
@@ -315,6 +319,7 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
       });
       const env = { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' };
       try {
+        const startedAt = Date.now();
         const result = await executeAgentCliAsync(
           projectRoot,
           ['dev', '--ios', '--detach', '--wait-ready', '--port', String(port), '--json'],
@@ -337,6 +342,7 @@ describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
           return;
         }
         expect(result.exitCode).toBe(22);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
         expect(report.error.code).toBe('APP_NOT_LOADED');
         expect(report.error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --ios');
         // A second `dev` would stop on the running server, so the text sends the caller elsewhere.

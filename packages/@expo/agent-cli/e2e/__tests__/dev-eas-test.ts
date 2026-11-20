@@ -429,6 +429,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       // The app of the session, attached: `--wait-ready` waits for it (llp/0004 §Daemonization).
       STUB_EXPO_TARGETS: SESSION_APP_TARGETS,
       STUB_EXPO_TARGETS_AFTER_EAS_OPEN: '1',
+      // The app attaches only after the dev server answered an empty list again and again.
+      STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: '3',
     };
   }
 
@@ -1128,6 +1130,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   it('--wait-ready exits 22 when no app of the session attaches', async () => {
     const projectRoot = await setupAsync('go-app');
     try {
+      const startedAt = Date.now();
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
@@ -1141,6 +1144,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         }
       );
       expect(result.exitCode).toBe(22);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
       const { error } = JSON.parse(result.stdout);
       expect(error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
       expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --eas --ios');
@@ -1182,12 +1186,14 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       expect(unwaited.exitCode).toBe(0);
       expect(JSON.parse(unwaited.stdout).app ?? null).toBeNull();
 
+      const startedAt = Date.now();
       const again = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
         { env, reject: false }
       );
       expect(again.exitCode).toBe(22);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
       expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
     } finally {
       await cleanUpAsync(projectRoot);
@@ -1241,6 +1247,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         },
       ]),
       AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+      // The target from before the reopen must be listed when the run reads the list before it.
+      STUB_EXPO_EMPTY_POLLS_AFTER_OPEN: exitCode === 22 ? '0' : '3',
     };
     const devArgs = ['dev', '--ios', '--eas', ...(devClient ? ['--dev-client'] : []), '--detach'];
     try {
@@ -1248,6 +1256,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       expect(first.exitCode, first.stderr).toBe(0);
       await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
 
+      const startedAt = Date.now();
       const again = await executeAgentCliAsync(
         projectRoot,
         [...devArgs, '--wait-ready', '--json'],
@@ -1258,6 +1267,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       );
       expect(again.exitCode, again.stderr).toBe(exitCode);
       if (exitCode === 22) {
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
         expect(JSON.parse(again.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
       }
     } finally {
