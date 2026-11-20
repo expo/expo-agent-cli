@@ -23,6 +23,24 @@ node $V cleanup [--purge]           # stop what the run started and restore the 
 
 Other surfaces exist and this skill does not cover them: the unit suite (`bun run test`), the stub e2e suite (`bun run test:e2e`), and the live vitest suites (`e2e-live/RUNBOOK.md`). Those are tests. This skill is the interactive proof.
 
+## Scope
+
+Run only what the change can break. Decide from the diff, before `launch`.
+
+| The diff changes                                                   | Run                                                                                    |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Only docs, `llp/`, tests, comments, or CI files                    | Nothing.                                                                               |
+| A pure function, a parser, or a table, with a unit test            | Nothing. The unit suite is the proof.                                                  |
+| Output text or JSON of a command that needs no device              | That command, once. No device.                                                         |
+| The behavior of one device command                                 | The recipes of that feature, on both platforms.                                        |
+| `dev`, device binding, the dev-server lock, or shared runtime code | The full map, on both platforms.                                                       |
+| `apps/eas-example` native dependencies or app config               | `dev` on both platforms, then `smoke`. Expect one full native build for each platform. |
+
+- When two rows match, use the lower row.
+- When no row matches, run the feature whose files the diff touches.
+- When you run nothing, say so in the report and name the row.
+- A person can ask for more. Then run what the person asks.
+
 ## Launch
 
 ```sh
