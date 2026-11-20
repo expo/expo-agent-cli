@@ -6,6 +6,7 @@
 // on with the stub `adb` of a fake Android SDK, so they run on every OS and never touch this
 // machine's devices.
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   executeAgentCliAsync,
@@ -15,10 +16,15 @@ import {
   setupFixtureAsync,
   spawnAgentCli,
   stubExpoEnv,
+  waitForAsync,
   waitForDevLockAsync,
+  startStubDevServerAsync,
 } from '../utils';
+import { appRuntime, runtimeTarget } from '../runtimeTargetFixtures';
 import {
   androidBindingFixture,
+  BOOTED_SIMULATOR,
+  bindingFixture,
   EMULATOR_SERIAL,
   installStubAdbAsync,
   installStubXcrunAsync,
@@ -151,4 +157,196 @@ describe('@expo/agent-cli dev, with devices on', () => {
       }
     });
   });
+});
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
+  const DEV_CLIENT_ID = 'dev.e2e.devclient';
+
+  /** A development build with a scheme, installed on the bound stub emulator. */
+  async function setupDevClientAsync() {
+    const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
+    await installStubFingerprintAsync(projectRoot);
+    const file = path.join(projectRoot, 'app.json');
+    const appJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+    appJson.expo.scheme = 'devclient';
+    appJson.expo.android = { package: DEV_CLIENT_ID };
+    await fs.promises.writeFile(file, JSON.stringify(appJson, null, 2));
+    const adb = await installStubAdbAsync(projectRoot, DEV_CLIENT_ID, { bound: false });
+    await fs.promises.writeFile(stubEmulatorStatePath(projectRoot), `${BOUND_SERIAL}\n`);
+    await androidBindingFixture(projectRoot, BOUND_SERIAL);
+    await installStubXcrunAsync(projectRoot);
+    const env = { ...stubExpoEnv(projectRoot), ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
+    return { projectRoot, adb, env };
+  }
+
+  /** Every URL the stub `adb` was asked to open, in order. */
+  function openedUrls(adb: { calls: () => string[][] }): string[] {
+    return adb
+      .calls()
+      .filter((args) => args.includes('am') && args.includes('start'))
+      .map((args) => args.at(-1)!.replace(/^'|'$/g, ''));
+  }
+
+  async function stopAsync(projectRoot: string, env: Record<string, string>) {
+    await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { env, reject: false });
+  }
+
+  it('opens a development build with the launcher URL, and --wait-ready exits 22 when it does not attach', async () => {
+    const { projectRoot, adb, env } = await setupDevClientAsync();
+    const runEnv = {
+      ...env,
+      STUB_EXPO_LISTEN: '1',
+      STUB_EXPO_DELAY_MS: '30000',
+      AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+    };
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--android', '--detach', '--wait-ready', '--port', '8623', '--json'],
+        { env: runEnv, reject: false }
+      );
+
+      // The app the stub dev server lists is none, so the run is not ready.
+      expect(result.exitCode).toBe(22);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --android');
+      // The dev server runs on after the failed wait.
+      expect((await fetch('http://127.0.0.1:8623/status')).ok).toBe(true);
+      // A development build with no app attached gets the URL that loads it, not the bare route.
+      expect(await waitForAsync(() => openedUrls(adb).length > 0, 10_000)).toBe(true);
+      expect(openedUrls(adb)[0]).toMatch(/^devclient:\/\/\?__expo_url=/);
+    } finally {
+      await stopAsync(projectRoot, env);
+    }
+  }, 60_000);
+
+  it('--wait-ready waits for no app when the run opens none', async () => {
+    const { projectRoot, env } = await setupAsync('go-app');
+    const startedAt = Date.now();
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--android', '--no-open', '--detach', '--wait-ready', '--port', '8624', '--json'],
+        {
+          env: {
+            ...env,
+            STUB_EXPO_LISTEN: '1',
+            STUB_EXPO_DELAY_MS: '30000',
+            AGENT_CLI_DEV_APP_WAIT_MS: '60000',
+          },
+        }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout).app).toBeNull();
+      // No app wait ran: an empty target list would have held the run for the whole budget.
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+    } finally {
+      await stopAsync(projectRoot, env);
+    }
+  }, 60_000);
+
+  // `dev` binds an iOS simulator on macOS only.
+  it.skipIf(process.platform !== 'darwin')(
+    'opens an iOS development build with the launcher URL, and --wait-ready exits 22 when it does not attach',
+    async () => {
+      const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
+      await installStubFingerprintAsync(projectRoot);
+      const file = path.join(projectRoot, 'app.json');
+      const appJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      appJson.expo.scheme = 'devclient';
+      appJson.expo.ios = { bundleIdentifier: DEV_CLIENT_ID };
+      await fs.promises.writeFile(file, JSON.stringify(appJson, null, 2));
+      const xcrun = await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
+      const env = { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' };
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--detach', '--wait-ready', '--port', '8625', '--json'],
+          {
+            env: {
+              ...env,
+              STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_DELAY_MS: '30000',
+              AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+            },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode).toBe(22);
+        expect(JSON.parse(result.stdout).error.code).toBe('DEV_DETACH_APP_NOT_ATTACHED');
+        const opened = xcrun
+          .calls()
+          .filter((args) => args[0] === 'simctl' && args[1] === 'openurl');
+        expect(opened.map((args) => args.at(-1))).toEqual([
+          expect.stringMatching(/^devclient:\/\/\?__expo_url=/),
+        ]);
+      } finally {
+        await stopAsync(projectRoot, env);
+      }
+    },
+    60_000
+  );
+
+  // The runtime of the app on the bound simulator answers the bundle question.
+  it.skipIf(process.platform !== 'darwin').each([
+    ['exits 0 for an app that ran its bundle', { __r() {} }, 8626],
+    ['exits 22 APP_NOT_LOADED for an app that ran no bundle', {}, 8627],
+  ])(
+    '--wait-ready on iOS %s',
+    async (_case, globals, port) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      await installStubFingerprintAsync(projectRoot);
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
+      const runtime = await startStubDevServerAsync({
+        projectRoot,
+        targets: [],
+        inspectorEvaluate: appRuntime(globals).evaluate,
+      });
+      const target = runtimeTarget('sim', {
+        appId: 'host.exp.Exponent',
+        deviceName: BOOTED_SIMULATOR.name,
+        webSocketDebuggerUrl: `ws://127.0.0.1:${new URL(runtime.url).port}/inspector/debug?device=sim&page=1`,
+      });
+      const env = { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' };
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--detach', '--wait-ready', '--port', String(port), '--json'],
+          {
+            env: {
+              ...env,
+              STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_DELAY_MS: '30000',
+              STUB_EXPO_TARGETS: JSON.stringify([target]),
+              AGENT_CLI_DEV_APP_WAIT_MS: '1500',
+            },
+            reject: false,
+          }
+        );
+
+        const report = JSON.parse(result.stdout);
+        if ('__r' in globals) {
+          expect(result.exitCode).toBe(0);
+          expect(report.app).toMatchObject({ attached: true, loaded: true });
+          return;
+        }
+        expect(result.exitCode).toBe(22);
+        expect(report.error.code).toBe('APP_NOT_LOADED');
+        expect(report.error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --ios');
+        // A second `dev` would stop on the running server, so the text sends the caller elsewhere.
+        expect(report.error.message).toContain('The dev server is still running');
+        expect((await fetch(`http://127.0.0.1:${port}/status`)).ok).toBe(true);
+      } finally {
+        await stopAsync(projectRoot, env);
+        await runtime.close();
+      }
+    },
+    60_000
+  );
 });

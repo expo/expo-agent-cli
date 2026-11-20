@@ -72,6 +72,8 @@
 // (`resetSimulatorEnvAsync`).
 //
 // `simulator` / `simulator:start`
+// - A start with `--open-url`, and an `open` verb of `simulator:exec`, write `stub-eas-app-opened`
+//   under the cwd: the stub `expo` under STUB_EXPO_TARGETS_AFTER_EAS_OPEN lists its targets from then on
 // - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready. Without
 //   `--json` the dotenv names the billed id, which the real command writes right after the create
 //   mutation (`commands/simulator/index.js` 276-281) and leaves after a failed wait; the session is
@@ -504,6 +506,7 @@ if (command === 'simulator' || command === 'simulator:start') {
     EAS_SIMULATOR_SESSION_ID: id,
   });
   rememberSession(id, 'IN_PROGRESS');
+  if (has('--open-url')) markAppOpened();
   process.stderr.write(
     `Simulator session created (id: ${id}${saved}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`
   );
@@ -525,6 +528,11 @@ if (command === 'simulator' || command === 'simulator:start') {
     );
   }
   process.exit(0);
+}
+
+/** Say that an app was opened on the session: the stub `expo` lists its targets from then on. */
+function markAppOpened() {
+  fs.writeFileSync(path.join(cwd, 'stub-eas-app-opened'), '');
 }
 
 /** Stop the session the argv or the dotenv names, the way `simulator:stop` does. */
@@ -606,6 +614,7 @@ if (command === 'simulator:exec') {
     printJson({ success: true, data: { message: 'Installed' } });
     process.exit(0);
   }
+  if (has('open')) markAppOpened();
   exitWith(process.stdout, 'opened', 0);
 }
 
