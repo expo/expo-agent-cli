@@ -132,6 +132,7 @@ describe('@expo/agent-cli inspect:build-log --file', () => {
     });
     expect(report.source).toMatchObject({ kind: 'file', truncated: false });
     // Real ANSI in the recording, and none of it in the payload.
+    // oxlint-disable-next-line no-control-regex -- looks for ANSI escapes
     expect(JSON.stringify(report)).not.toMatch(/\u001b\[/);
 
     const events = readEvents(eventsFile);

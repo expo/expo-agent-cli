@@ -152,6 +152,7 @@ describe('npx @expo/agent-cli help <command>', () => {
 // are piped, so chalk would already be off — what they pin is that nothing on these paths reaches
 // for an escape sequence unconditionally.
 describe('colour', () => {
+  // oxlint-disable-next-line no-control-regex -- looks for ANSI escapes
   const ESCAPE = /\u001b\[/;
 
   it('puts no escape sequences in a piped help screen', async () => {
