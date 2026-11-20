@@ -23,6 +23,7 @@ import {
 } from '../device/cloudSimulator';
 import { cloudSessionUnavailableError, cloudSessionUnknownError } from '../device/cloudErrors';
 import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
+import { lastDevSession } from '../dev/lastRequest';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { debugEvent } from './events';
@@ -93,7 +94,10 @@ function deviceRung<P extends CloudSessionProbe>(rung: CloudRung<P>): CloudDevic
  * else is looked at, because a caller that named a device meant that device. Otherwise the
  * **bound** local device wins: the rung loop of llp/0035 §Readers inspects this worktree's
  * bindings, any `up` one wins, and the winner's lease is extended. The cloud is the last rung,
- * taken only when every local rung passed and this project has a session on record.
+ * taken only when every local rung passed and this project has a session on record. One
+ * exception comes first: the live session that the last `dev` opened its app on, as for the
+ * readers ({@link lastDevSession}). It takes the cloud rung as `--eas` does, so its lease is
+ * renewed and a session that is gone is refused.
  *
  * @throws {CommandError} `NO_BOUND_DEVICE` when no local device is bound and no session serves,
  * and the tool error when a device tool could not run.
@@ -106,6 +110,13 @@ export async function resolveDeviceAsync(
   const startPlatform = platform ?? 'ios';
   if (context.cloud === 'required') {
     return await resolveCloudDeviceAsync(platform, context);
+  }
+
+  // The session that the last `dev` opened goes through the cloud rung like `--eas`: the lease is
+  // renewed, and a session that is gone is refused instead of replaced by the local device.
+  const session = lastDevSession(context.projectRoot, platform);
+  if (session) {
+    return await resolveCloudDeviceAsync(session.device.platform, context);
   }
 
   const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });

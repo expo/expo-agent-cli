@@ -254,7 +254,9 @@ async function reuseRunningAsync(
     checked?.result.ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // Read the verdict and PID after all probes: any can outlast the running server.
   await checkReuseFailureAsync(context, hasExited, lock, statusAnswering);
-  if (context.onRunning === 'reopen-eas') recordLastDevRequest(projectRoot, options);
+  if (session.kind === 'reopened') {
+    recordLastDevRequest(projectRoot, options, { easOpened: easOpenPlatform(options) != null });
+  }
   const app = await appWaitAsync(context, lock, {
     run: {
       kind: 'reused',

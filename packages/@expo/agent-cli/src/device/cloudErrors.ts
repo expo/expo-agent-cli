@@ -186,17 +186,20 @@ export function cloudPlatformUnknownError(sessionId: string | null): CommandErro
 export function cloudNeedsTunnelError(
   url: string,
   hostType: string | null,
-  platform: 'ios' | 'android'
+  platform: 'ios' | 'android',
+  { eas = false }: { eas?: boolean } = {}
 ): CommandError {
+  // `dev --eas` tunnels the dev server itself.
+  const restart = `${PROGRAM_PREFIX} dev --${platform} ${eas ? '--eas --detach' : '--detach --tunnel'}`;
   const error = new CommandError(
     'CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER',
     [
       `The dev server is only reachable from ${hostType === 'localhost' ? 'this machine' : 'this network'}, so a cloud simulator cannot load ${url} and nothing was opened.`,
       `Why: the URL carries a ${hostType ?? 'local'} host, and the simulator runs on EAS infrastructure — ${hostType === 'localhost' ? 'that host is the loopback of whatever resolves it, which there is a machine in a datacenter' : 'that address is on this network and the session is not'}. Opening it would land the app on an error screen with the device tool reporting success, which is the class of false green this command exists to remove.`,
-      `How: restart the dev server with a tunnel — "${PROGRAM_PREFIX} dev --${platform} --detach --tunnel" — and run this command again. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
+      `How: restart the dev server with a tunnel — "${restart}" — and run this command again. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${platform} --detach --tunnel`;
+  error.suggestedCommand = restart;
   return error;
 }
 

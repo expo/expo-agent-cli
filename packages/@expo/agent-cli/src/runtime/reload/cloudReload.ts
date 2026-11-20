@@ -72,7 +72,7 @@ export interface CloudReloadResult {
 export async function reloadOnCloudSimulatorAsync(
   projectRoot: string,
   options: ReloadOptions,
-  { targetAppIds }: { targetAppIds: string[] }
+  { targetAppIds, session }: { targetAppIds: string[]; session?: NavigateDevice }
 ): Promise<CloudReloadResult> {
   // The same resolution `navigate --eas` runs, which is the one that has been seen to open an app
   // on a live session [observed — 2026-08-26, exit 0]. `routeCheck: false` because the caller
@@ -93,19 +93,17 @@ export async function reloadOnCloudSimulatorAsync(
   // is no `adb reverse` for a session in a datacenter. Refusing here is what stops the relaunch from
   // terminating an app it cannot start again.
   if (resolved.hostType === 'localhost' || resolved.hostType === 'lan') {
+    // The last dev's session names its own platform, and its dev server came from `dev --eas`.
     throw cloudNeedsTunnelError(
       resolved.url,
       resolved.hostType,
-      options.platform ?? hostPlatform()
+      session?.platform ?? options.platform ?? hostPlatform(),
+      { eas: session != null }
     );
   }
 
-  const device = await resolveDeviceAsync(options.platform, {
-    url: resolved.url,
-    devServerRunning: resolved.devServerReachable,
-    cloud: 'required',
-    projectRoot,
-  });
+  const device =
+    session ?? (await resolveDeviceAsync(options.platform, { cloud: 'required', projectRoot }));
 
   // @see ../appId — the same rule the local device method applies: the dev server outranks the app
   // config, because the config says what a build of this project would be called and the dev server

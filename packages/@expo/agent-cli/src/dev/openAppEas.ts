@@ -301,11 +301,14 @@ export function easRunLifecycle(
     expoGo,
     fingerprintCache,
     keepSession,
+    onOpened,
   }: {
     platform: NativePlatform;
     expoGo: boolean;
     fingerprintCache?: boolean;
     keepSession: boolean;
+    /** Called once the open put the app on the session. */
+    onOpened?: () => void;
   }
 ): EasRunLifecycle {
   let task: Promise<OpenAppOnEasReport | null> | undefined;
@@ -323,6 +326,7 @@ export function easRunLifecycle(
         fingerprintCache,
         stillWanted,
         keepSession,
+        onOpened,
       });
       void task.finally(markFinished);
     },
@@ -351,11 +355,12 @@ export function easRunLifecycle(
  */
 async function openAppOnEasForRunAsync(
   projectRoot: string,
-  options: OpenAppOnEasOptions & { stillWanted: () => boolean }
+  options: OpenAppOnEasOptions & { stillWanted: () => boolean; onOpened?: () => void }
 ): Promise<OpenAppOnEasReport | null> {
   const { platform, stillWanted } = options;
   try {
     const report = await openAppOnEasAsync(projectRoot, options);
+    if (report.opened) options.onOpened?.();
     if (report.opened && stillWanted()) {
       Log.progress(
         `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${

@@ -1,4 +1,5 @@
 import { isTunnelCurrent, resolveDevServerReachAsync } from '../../dev/advertisedUrl';
+import { lastDevSession } from '../../dev/lastRequest';
 import { liveCloudBindings } from '../../deviceBinding/cloud';
 import {
   openUrlOnDeviceAsync,
@@ -22,36 +23,59 @@ import { type CdpTarget } from '../cdpClient';
 import { type ReloadAttempt } from './attempt';
 import { type ReloadOptions } from './resolveOptions';
 
-/** Reload by stopping the app on the device and opening it again. */
+/** The device a reload acts on, or why none was found. */
+export type ReloadDeviceResolution =
+  | { ok: true; device: NavigateDevice }
+  | { ok: false; error: unknown };
+
+/**
+ * Resolve the device the relaunch rung acts on. A cloud session is reached with `--eas`, or when
+ * the last `dev` opened its app on it (llp/0035 §Readers).
+ */
+export async function resolveReloadDeviceAsync(
+  projectRoot: string,
+  options: ReloadOptions
+): Promise<ReloadDeviceResolution> {
+  try {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
+    // `required` and never `fallback`: a machine with nothing booted is told it has nothing.
+    return {
+      ok: true,
+      device: await resolveDeviceAsync(options.platform, {
+        cloud: options.cloud ? 'required' : 'off',
+        projectRoot,
+      }),
+    };
+  } catch (error: unknown) {
+    return { ok: false, error };
+  }
+}
+
+/** Reload by stopping the app on a local device and opening it again. */
 export async function reloadOnDeviceAsync(
   projectRoot: string,
   options: ReloadOptions,
   devServerUrl: string,
-  own: (targets: CdpTarget[]) => CdpTarget[]
+  own: (targets: CdpTarget[]) => CdpTarget[],
+  resolution: ReloadDeviceResolution
 ): Promise<{ attempt: ReloadAttempt; device: NavigateDevice | null }> {
-  let device: NavigateDevice;
-  try {
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
-    // `required` and never `fallback`: only `--eas` sends this to a device that bills by the
-    // minute, and a machine with nothing booted is told it has nothing.
-    device = await resolveDeviceAsync(options.platform, {
-      cloud: options.cloud ? 'required' : 'off',
-      projectRoot,
-    });
-  } catch (error: unknown) {
-    // Without --eas the local rungs answer for a worktree whose device is an EAS session, so their
-    // refusal (an expired local lease, say) names the wrong device. Name the session instead.
-    const session = options.cloud
-      ? undefined
-      : liveCloudBindings(projectRoot).find(
-          (binding) => options.platform == null || binding.device.platform === options.platform
-        );
+  if (!resolution.ok) {
+    const { error } = resolution;
+    // The local rungs answered for a worktree whose device is an EAS session, so their refusal (an
+    // expired local lease, say) names the wrong device. Name the session instead. A refusal from
+    // the last dev's session already names that session, so it passes through.
+    const session =
+      options.cloud || lastDevSession(projectRoot, options.platform) != null
+        ? undefined
+        : liveCloudBindings(projectRoot).find(
+            (binding) => options.platform == null || binding.device.platform === options.platform
+          );
     return {
       attempt: {
         method: 'device',
         ok: false,
         reason: session
-          ? `this worktree's device is ${session.device.platform} EAS Simulator session ${session.device.id}; the relaunch acts on it only with --eas: run "${PROGRAM_PREFIX} runtime:reload --${session.device.platform} --eas"`
+          ? `this worktree's device is ${session.device.platform} EAS Simulator session ${session.device.id}; the relaunch acts on it only with --eas or when the last dev opened its app on it: run "${PROGRAM_PREFIX} runtime:reload --${session.device.platform} --eas"`
           : error instanceof Error
             ? error.message.split('\n')[0]!
             : String(error),
@@ -60,6 +84,7 @@ export async function reloadOnDeviceAsync(
       device: null,
     };
   }
+  const { device } = resolution;
 
   const appId = await resolveAppIdAsync(projectRoot, devServerUrl, device, own, options.appId);
   const stopped = await stopAppOnDeviceAsync({

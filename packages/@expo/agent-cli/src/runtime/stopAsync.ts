@@ -99,9 +99,10 @@ export async function runtimeStopAsync(
   options: RuntimeStopOptions
 ): Promise<number> {
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
-  // `required` and never `fallback`: a session bills by the minute, so `--eas` is the only way a
-  // stop reaches one, and a machine with no local device is told it has none rather than quietly
-  // handed a paid device it did not ask for.
+  // `required` and never `fallback`: a session bills by the minute, so a machine with no local
+  // device is told it has none rather than quietly handed a paid device it did not ask for. The
+  // one session reached without `--eas` is the one the last `dev` opened its app on (llp/0035
+  // §Readers): the agent asked for that device.
   const device = await resolveDeviceAsync(options.platform, {
     cloud: options.cloud ? 'required' : 'off',
     projectRoot,
