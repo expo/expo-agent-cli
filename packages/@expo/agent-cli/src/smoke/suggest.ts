@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+// @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
 //
 // `smoke` requires `--ios` or `--android` now (`./resolveOptions.ts`), so any next action that
 // names a bare `smoke` prints a command that exits 1 when a reader runs it — F151. The first sweep

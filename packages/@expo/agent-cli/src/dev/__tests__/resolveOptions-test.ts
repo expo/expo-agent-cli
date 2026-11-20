@@ -122,7 +122,7 @@ describe(resolveDevOptions, () => {
     expect(resolveDevOptions(['--web']).expoArgs).toEqual(['--web']);
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
   // The same rule `smoke` settled: the platform is the caller's to say, and this command has no
   // default to fall back on. One line, because the fix is visible on the command line.
   describe('the platform is required', () => {

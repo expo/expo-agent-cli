@@ -107,7 +107,7 @@ describe(`${decideExpoGoTarget.name} — how sure it is`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+// @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
 //
 // Expo Go ships a fixed native runtime, so a project with a native module that runtime does not
 // contain cannot run there at all. This function used to decide from four facts, none of which was

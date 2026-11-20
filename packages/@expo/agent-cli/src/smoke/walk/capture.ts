@@ -67,7 +67,7 @@ async function captureIfPossible(
     device = probe.deviceId;
   }
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+  // @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
   //
   // Here rather than at the top of this function, because everything above it is a decision and
   // this is where the work starts: a run with `--no-screenshot`, or one with no device to
@@ -81,7 +81,7 @@ async function captureIfPossible(
   await walk.app.settleAsync();
 
   const result = await deps.captureScreenshot(device, backend);
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app. A picture is the
+  // @ref llp/0036-smoke-gate.rfc.md §The device that can open the app. A picture is the
   // one piece of evidence a reader believes without checking, and a home screen, a dev launcher
   // and an app that failed to render look equally plausible. An `ok` beside a run whose app never
   // connected has to say what it is a picture *of*.

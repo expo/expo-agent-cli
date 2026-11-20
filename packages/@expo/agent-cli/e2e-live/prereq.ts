@@ -645,7 +645,7 @@ export function androidDevBuildGate(
  * Separate from the Android one because the two are different projects: an installed build is bound
  * to one platform's identifier, so the same directory rarely carries both. This one requires an
  * `ios.bundleIdentifier` — without it `approveScheme` resolves no app id, and the "Open in …?"
- * dialog it exists to suppress stays up (llp/0005 §The gate installs the app).
+ * dialog it exists to suppress stays up (llp/0036 §The gate installs the app).
  */
 export function iosDevClientProjectGate(): {
   gate: Gate;

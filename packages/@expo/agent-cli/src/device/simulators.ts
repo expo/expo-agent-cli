@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
+// @ref llp/0036-smoke-gate.rfc.md §The device that can open the app
 // What `xcrun simctl list devices -j` says about the iOS simulators on this machine.
 
 import type { IosSimulatorReaderDependencies } from '../installedApp/iosSimulator';

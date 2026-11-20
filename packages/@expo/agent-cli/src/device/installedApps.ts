@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
+// @ref llp/0036-smoke-gate.rfc.md §The device that can open the app
 // Which apps a simulator has, for a simulator that is not running.
 //
 // **Why this is a filesystem reader and not a `simctl` call.** Both of the tools that answer this
@@ -37,7 +37,7 @@ export function simulatorDeviceDir(
 /**
  * Whether this machine has a simulator with this udid at all, as a directory on disk.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+ * @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
  *
  * The distinction {@link readInstalledAppIdsAsync} deliberately does not draw. That function
  * answers "no apps" for a device it could not read, and for the boot choice the two are the same

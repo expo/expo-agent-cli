@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 //
 // What this tier owns, and what it does not.
@@ -119,7 +119,7 @@ async function installStubAdbAsync(projectRoot: string): Promise<Record<string, 
 /**
  * A stub `adb` for the Expo Go questions, and every call recorded.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+ * @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
  *
  * Separate from {@link installStubAdbAsync}, which answers the screenshot path. What this one is
  * for is the three commands the version check and the install go through, and each of its answers
@@ -195,7 +195,7 @@ async function writeRoutesAsync(projectRoot: string, files: string[]): Promise<v
 /**
  * A stub `npx`, so no test in this tier downloads Expo Go.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+ * @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
  * The install phase shells `npx --yes expo-go download`, which is a 423 MB transfer over the
  * network. Left unstubbed it doubled this suite's wall clock and made it depend on a CDN
  * [observed, 2026-09-03]. It answers the `{"path":…}` shape the real CLI does, and records what it
@@ -262,7 +262,7 @@ describe('@expo/agent-cli smoke', () => {
       expect(result.all).toContain('22');
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment. A command that
+    // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment. A command that
     // starts a dev server and boots a simulator changes the machine, so the help says so before
     // anybody runs it — and says what to do to keep the dev server afterwards.
     it(`says it starts what is missing, puts it back, and builds what is missing`, async () => {
@@ -272,7 +272,7 @@ describe('@expo/agent-cli smoke', () => {
 
       expect(result.all).toContain('brings its own environment');
       expect(result.all).toContain('stops exactly what it started');
-      // @ref llp/0005 §It builds what the app needs, and says so first. This said "It does not
+      // @ref llp/0036 §It builds what the app needs, and says so first. This said "It does not
       // build" until 2026-09-03, which was the boundary and is now the opposite promise.
       expect(result.all).toContain('It builds the development build');
     });
@@ -351,13 +351,13 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment.
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment.
   //
   // The property no unit test can show: a *second process* was started, it published this
   // project's lock, and it is gone by the time this command's own process exits. The dev server is
   // the stub `expo` bin, which takes the lock exactly as the real one does, because the wrapper
   // that takes it is real here.
-  // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+  // @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
   //
   // This command used to refuse a project whose development build is missing, and name `dev`. That
   // is a correct instruction and a dead end for a loop that cannot leave itself to take it, so it
@@ -464,7 +464,7 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment.
+    // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment.
     //
     // The deterministic form of the whole finding, through the published bin and a real second
     // process. The stub answers the entry bundle **four seconds late**, which is what a dev server
@@ -593,7 +593,7 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment.
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment.
   //
   // `xcrun simctl openurl` exits 0 the moment the URL is handed to the device, and the app behind
   // it may be a minute from registering a debugger target — or may never register one, because it
@@ -1194,7 +1194,7 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+  // @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
   //
   // A development build is the app of a `native-build` project, so the Expo Go beside it is not part
   // of the install decision: a device that holds the build installs nothing.
@@ -1281,7 +1281,7 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+  // @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
   // @ref llp/0005-runtime-loop-tools.rfc.md §Android
   //
   // The Android half of the version check, which did not exist. `checkExpoGoVersionAsync` only ever
@@ -1696,7 +1696,7 @@ describe('@expo/agent-cli smoke', () => {
 
   // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — the property the flag exists
   // for, checked as the property rather than as a substring.
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+  // @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
   //
   // The gate's four reading phases are about the *running* app, and an app that was already
   // attached is running whatever it last loaded. Live, that made `smoke` exit 0 over a `throw` at
@@ -1843,7 +1843,7 @@ describe('@expo/agent-cli smoke', () => {
       ]);
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+    // @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
     // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract
     //
     // The gate narrates itself now, and this tier owns the one property that matters about where
@@ -1880,7 +1880,7 @@ describe('@expo/agent-cli smoke', () => {
       expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --help');
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+    // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
     //
     // The one flag with no default. It used to default from the host — iOS on a Mac, Android
     // everywhere else — which is a fact about the machine the CLI runs on and not about the device

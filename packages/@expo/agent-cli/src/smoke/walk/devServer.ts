@@ -17,7 +17,7 @@ export async function devServerStep(walk: PhaseWalk): Promise<Step<null>> {
    */
   let buildAttempted = false;
   let devServerMs = 0;
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+  // @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
   //
   // Said here rather than left to `record`, because this phase is the one that does not go through
   // it: its row is pushed by hand further down, since its milliseconds are the *sum* of the look

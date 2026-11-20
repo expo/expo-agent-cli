@@ -9,7 +9,7 @@ const facts = (overrides: Partial<InstallFacts> = {}): InstallFacts => ({
   ...overrides,
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 describe(decideInstall, () => {
   // Each row also carries facts of a later row, so the first match is what the row proves.
   it.each<[number, Partial<InstallFacts>, InstallDecision]>([

@@ -305,7 +305,7 @@ describe(notReadyError, () => {
     expect(message).not.toContain('this is about the wait, not about the server');
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
   //
   // `dev:logs` rather than `smoke`, and the reason is mechanical: `smoke` requires a platform now,
   // this failure is about a dev server, and a dev server has no platform — so `smoke` is not a

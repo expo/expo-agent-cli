@@ -1,5 +1,5 @@
 // @ref llp/0022-live-tier.plan.md §live-devclient
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app
 //
 // The iOS twin of `live-devclient`. `live-devclient` runs the runtime family on an Android
 // development build and records that iOS was a wall: every local iOS open goes through
@@ -133,7 +133,7 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     // The dev server is started **without** `--ios`, unlike live-devclient's `--android`. `--ios`
     // makes `expo start` focus Simulator.app through AppleScript, which macOS refuses without an
     // Automation grant — the Expo CLI does not catch that and takes the whole start down with it
-    // (llp/0005 §The gate installs the app). So the plan is `expo start --dev-client`, which opens
+    // (llp/0036 §The gate installs the app). So the plan is `expo start --dev-client`, which opens
     // nothing, and `navigate --ios` below opens the app through `xcrun simctl openurl` instead — the
     // one path that needs no Automation and the one this suite exists to prove.
     const started = await runLiveAsync(
@@ -229,7 +229,7 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
 
   // --- the wall this suite exists to prove is gone ------------------------------------------------
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app. On iOS 26.5 this used to
+  // @ref llp/0036-smoke-gate.rfc.md §The gate installs the app. On iOS 26.5 this used to
   // exit 22 with the simulator on a springboard "Open in …?" modal. `approveScheme` pre-approves the
   // scheme before the open, so the build's own screen comes up and the app attaches — no dialog.
   it('navigates a development build on iOS with no dialog to answer', async () => {

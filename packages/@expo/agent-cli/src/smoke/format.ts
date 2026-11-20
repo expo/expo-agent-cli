@@ -156,7 +156,7 @@ export function formatSmokeResult(run: SmokeRun, options: SmokeOptions): string 
  * What this run started and put back, or null when it started nothing.
  *
  * Only the runs that acted get a line. "Reused the dev server that was already up" is the ordinary
- * case and saying it every time would bury the case that matters (llp/0005 §The run brings its own
+ * case and saying it every time would bury the case that matters (llp/0036 §The run brings its own
  * environment).
  */
 function environmentLine(run: SmokeRun): string | null {
@@ -166,7 +166,7 @@ function environmentLine(run: SmokeRun): string | null {
   }
   if (run.environment.device === 'booted' && run.environment.boundDevice == null) {
     // Which device, **and on what grounds**: a machine has ten simulators and this run picked one
-    // of them (llp/0005 §The device that can open the app).
+    // of them (llp/0036 §The device that can open the app).
     acts.push(
       `booted ${run.deviceId ?? 'a device'}${
         run.environment.deviceChoice ? chalk.dim(` — ${run.environment.deviceChoice}`) : ''

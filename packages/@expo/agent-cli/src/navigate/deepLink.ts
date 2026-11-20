@@ -183,7 +183,7 @@ function resolveUrl({
   // Carried onto every command the failures below name, and onto nothing else: the URL is the same
   // URL whichever device opens it (F142).
   // Stated even when the caller named none: `dev` requires one, and a suggestion is text the
-  // caller reads and can change (llp/0005 §Which platform is the caller's to say).
+  // caller reads and can change (llp/0036 §Which platform is the caller's to say).
   const platformFlag = ` --${platform ?? hostPlatform()}`;
   const trimmedRoute = route.trim();
   if (trimmedRoute.length === 0) {

@@ -342,7 +342,7 @@ describe('a run that asked for the cloud', () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+// @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
 //
 // The `reload` phase makes one of these follow-ups stale. `runtime:reload` led the list of a
 // non-empty error window because the window belonged to a session that outlived the fix — and the
@@ -390,7 +390,7 @@ describe(`${buildSmokeFollowUps.name} after the reload phase`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+// @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
 //
 // The one inconclusive state a re-run can never change, which is the rule this file exists for
 // (llp/0009, F41/F48-8). Expo Go answered for a project whose native code it does not contain: no
@@ -420,7 +420,7 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 //
 // The **other** mismatch, and the reason `appMismatchKind` exists
 // (@ref src/smoke/contract §SmokeAppMismatchKind). Before it did, both kinds got the advice above —
@@ -469,7 +469,7 @@ describe(`${buildSmokeFollowUps.name} for an app mismatch keeps the run's flags`
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+// @ref llp/0036-smoke-gate.rfc.md §A refused link is a device without the app
 //
 // The third kind of mismatch: the device has not got the app, so the deep link was refused and
 // nothing could attach. Leading with `navigate / --ios` is refused in exactly the same way every
@@ -481,7 +481,7 @@ describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
     appMismatchKind: 'app-not-installed' as const,
   };
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+  // @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
   //
   // **The gate installs it**, so the answer is the gate — not `dev`, which is what this said until
   // the boundary came down [Kudo, 2026-09-04: "smoke should be self-served without running dev
@@ -503,7 +503,7 @@ describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+// @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
 //
 // The gate builds now, so "start one on its own and watch it fail" is no longer cheap advice: it is
 // another native build, minutes of it, to see something the first one already wrote down. The log

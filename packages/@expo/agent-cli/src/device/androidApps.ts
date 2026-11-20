@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 // @ref llp/0005-runtime-loop-tools.rfc.md §Android
 //
 // Which apps an Android device has, and which version of one.

@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
 // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md — constraint 5, on subprocesses
 //
 // The gate used to refuse a machine with no Expo Go and name `npx expo start --ios`. That is a
@@ -105,7 +105,7 @@ const EXPO_GO_APP_ID = 'host.exp.Exponent';
 /**
  * Tell the simulator that Expo Go may open its own links, so nothing has to be tapped.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+ * @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
  *
  * The install is not the last obstacle. A freshly installed app has no approved URL schemes, so
  * `simctl openurl exp://…` puts up an `Open in "Expo Go"?` alert and waits — and in the loop this

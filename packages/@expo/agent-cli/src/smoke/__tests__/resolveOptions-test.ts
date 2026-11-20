@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // Every flag combination, decided without a dev server or a device.
 
 import {
@@ -31,7 +31,7 @@ describe(resolveSmokeOptions, () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk. The same
+  // @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk. The same
   // shape as `--start` above: reloading an app this run found already attached is what the command
   // does, `--reload` is that spelled out loud, and `--no-reload` is the opt-out for a caller who is
   // asking about the session that is running rather than about the code on disk.
@@ -49,7 +49,7 @@ describe(resolveSmokeOptions, () => {
     );
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
   // of 2026-08-29. Starting what is missing is what the command does now, so `--start` is the
   // default spelled out loud and `--no-start` is the attach-only run it used to be.
   it(`treats --start as the default and --no-start as the attach-only run`, () => {
@@ -83,7 +83,7 @@ describe(resolveSmokeOptions, () => {
     expect(resolveSmokeOptions(argv).platform).toBe(platform);
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
   //
   // This used to be a test that the host decides: iOS on a Mac and Android everywhere else. The
   // guess is gone, because it is a fact about the machine the CLI is running on and every question
@@ -205,7 +205,7 @@ describe(resolveSmokeOptions, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate — observed live, 2026-08-24. An absence
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate — observed live, 2026-08-24. An absence
 // is invisible in a diff and expensive to rediscover, so it is pinned: `--ios` on the detached
 // start makes the plan run `expo start --ios`, which drives Simulator.app through AppleScript and
 // takes the dev server down with it on a Mac that has granted no Automation permission.

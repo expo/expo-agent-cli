@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
+// @ref llp/0036-smoke-gate.rfc.md §The device that can open the app
 // Which apps a simulator has, read off disk.
 //
 // The reason this module is a filesystem reader rather than a `simctl` call is measured, and it is
@@ -105,7 +105,7 @@ describe(readInstalledAppIdsAsync, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
 //
 // "No apps" and "could not look" are the same answer from `readInstalledAppIdsAsync`, and for the
 // boot choice that is deliberate: both mean do not boot this device. For the **install** decision

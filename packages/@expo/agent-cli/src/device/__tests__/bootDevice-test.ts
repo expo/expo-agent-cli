@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+// @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
 // What the registry reads before it touches anything: the simulator list, the AVD list, and which
 // `emulator` binary to spawn. Each is a pure function of a tool's output, and each can be wrong in
 // a way that costs a minute of a real run and then fails against the device it picked — so they

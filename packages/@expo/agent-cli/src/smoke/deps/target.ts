@@ -15,7 +15,7 @@ export interface SmokeTarget {
   /**
    * Where this project's plan would build, or null when it builds nothing.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+   * @ref llp/0036-smoke-gate.rfc.md §It builds what the app needs, and says so first
    * `StartPlan.buildLocation`, the plan engine's own answer to "does this plan compile anything":
    * an Expo Go target and a development build already installed for this fingerprint both answer
    * null. It used to be the boundary this command refused at; it is now the fact that decides the
@@ -25,7 +25,7 @@ export interface SmokeTarget {
   /**
    * The application id this run's deep link would open, or null when it could not be read.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
+   * @ref llp/0036-smoke-gate.rfc.md §The device that can open the app
    * The **plan's** rule decides it rather than the app config alone, and that distinction is the
    * whole value: an Expo Go project usually also declares an `ios.bundleIdentifier`, so a device
    * choice made from the config would go looking for an app this run is never going to open.
@@ -38,7 +38,7 @@ export interface SmokeTarget {
   /**
    * How this run puts the app on a device that has not got it.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+   * @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
    *
    * **This was a boolean, and the boolean was the last refusal in the command**
    * [confirmed, Kudo, 2026-09-04: "smoke should be self-served without running dev first"]. It was

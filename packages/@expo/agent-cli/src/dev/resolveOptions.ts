@@ -62,7 +62,7 @@ export interface DevOptions {
    * Required, like `smoke`'s: the plan differs per platform — what gets built, which device the
    * app lands on — and the old host-based guess was wrong on any Mac developing for Android.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+   * @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
    */
   platform: PlanPlatform;
   /**
@@ -275,7 +275,7 @@ export function resolveDevOptions(
  *
  * It used to default from the host — iOS on a Mac, Android elsewhere — and the guessed platform
  * never reached `expo start`, so the plan opened nothing on a device. `smoke` dropped the same
- * guess for the same reason (llp/0005 §Which platform is the caller's to say); `dev` follows it,
+ * guess for the same reason (llp/0036 §Which platform is the caller's to say); `dev` follows it,
  * with `--web` as a third answer because serving the web bundle is a plan this command owns.
  *
  * @ref llp/0025-dev-requires-platform.rfc.md

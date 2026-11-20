@@ -112,7 +112,7 @@ export function checkRoute({
 const ROUTE_COMMANDS = {
   navigate: (route: string) => `${PROGRAM_PREFIX} navigate ${route}`,
   'runtime:reload': (route: string) => `${PROGRAM_PREFIX} runtime:reload --route ${route}`,
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
   //
   // The platform is carried because `smoke` requires it, and this string is the `Try:` line a
   // driving agent runs verbatim — so `smoke --route /notes` would correct the route and then be

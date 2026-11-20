@@ -176,7 +176,7 @@ async function scanAutolinkingGraphAsync(projectRoot: string): Promise<Installed
 /**
  * The reason kinds that **rule Expo Go out**, as opposed to merely counting against it.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+ * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
  *
  * Two of the five kinds, and which two is the whole content of this list.
  *
@@ -202,7 +202,7 @@ const RULES_OUT_EXPO_GO = new Set<ExpoGoIncompatibility['kind']>([
 /**
  * Whether the project can run in Expo Go, as a three-valued answer for a caller that must *act*.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+ * @ref llp/0036-smoke-gate.rfc.md §Expo Go is only a target for a project that fits in it
  *
  * {@link ExpoGoCompatibility.compatible} is two-valued and cannot be used for this, because it is
  * `false` for all five reason kinds and only two of them rule Expo Go out

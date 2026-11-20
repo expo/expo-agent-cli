@@ -58,7 +58,8 @@ What the CLI does:
 
 - [[0003-knowledge-tools-and-skills]]: skills shipped from modules.
 - [[0004-smart-start-and-project-state]]: smart `dev`, the Expo Go check, post-install decisions.
-- [[0005-runtime-loop-tools]]: runtime eval, the red-screen feed, deep links, the smoke gate.
+- [[0005-runtime-loop-tools]]: runtime eval, the red-screen feed, deep links, reload proof.
+- [[0036-smoke-gate]]: `smoke`, the one-command check that the app on disk builds, loads and renders.
 - [[0007-deploy-and-headless]]: `deploy` and `new`.
 - [[0011-impact-and-freshness]]: what a change costs, and whether it can ship over the air.
 - [[0012-build-explain]]: deterministic triage of a native build log.

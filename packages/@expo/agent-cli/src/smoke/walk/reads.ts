@@ -11,7 +11,7 @@ import type { PhaseWalk, Step } from './walk';
 
 // ---- Phase 6: is the app that answers the rest of this run the code on disk? --------------
 //
-// @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+// @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
 //
 // The phase that makes the three after it mean something. `runtime`, `errors` and `screenshot`
 // all read *the app*, and an app that was already attached when this run arrived is running

@@ -150,7 +150,7 @@ async function bootDevice(
   }
 }
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 //
 // Gathers the device reads the install table asks for, one at a time and only when a row asks, and
 // leaves the decision to `decideInstall`. `null` from a read is "could not look", never a licence
@@ -183,7 +183,7 @@ async function installNeededOnDevice(
 // Runs after `installNeededOnDevice` answered yes. For Expo Go: `expo-go download` for the binary
 // and `simctl install` for the device, both as subprocesses, at the SDK version the project
 // reports. For a native build: this project's own artefact.
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 //
 // Two installs, because they put two different apps on the device: a published binary to
 // download, or this project's own artefact to compile. The plan decides which
@@ -210,7 +210,7 @@ async function installApp(
       await readSdkVersionAsync(projectRoot)
     );
   }
-  // @ref llp/0005 §An app that cannot be named still has to be installed — the build resolves
+  // @ref llp/0036 §An app that cannot be named still has to be installed — the build resolves
   // the package itself, so this works with `target.appId` null, which is exactly the run that
   // most needs it.
   const built = await installDevBuildAsync(projectRoot, options.platform, deviceId, {
@@ -251,7 +251,7 @@ async function probeDevice(ctx: SmokeDepsContext): ReturnType<SmokeDeps['probeDe
   };
 }
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref llp/0036-smoke-gate.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
 // @ref ../contract §SmokeDeps.explainSilentApp
 //
 // The same version question as above, asked of the **device** instead of the dev server's
@@ -273,7 +273,7 @@ async function explainSilentApp(
   }
   const target = await ctx.targetAsync();
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+  // @ref llp/0036-smoke-gate.rfc.md §A refused link is a device without the app
   //
   // Asked first, and of **every** app rather than only of Expo Go: the commonest reason a
   // device answers nothing is that it has not got the app, and the commonest way that happens
@@ -287,7 +287,7 @@ async function explainSilentApp(
       return {
         mismatch: [
           `the app this project runs (${target.appLabel ?? target.appId}) is not installed on ${deviceId}, so nothing there handles its link`,
-          // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app
+          // @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app
           // it is. One sentence for both kinds now, because a run allowed to bring its own
           // environment installs both — a download for Expo Go, `expo run:<platform>` for a
           // development build. Anything that reaches here was told to change nothing, and the

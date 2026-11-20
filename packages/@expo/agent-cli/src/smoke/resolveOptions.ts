@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 // @ref llp/0010-agent-conventions.rfc.md §Registry rules
 // Argument resolution for `@expo/agent-cli smoke`. Pure: argv in, options out, `CommandError` for anything
 // a user can get wrong, so every flag combination is testable without a dev server or a device.
@@ -36,7 +36,7 @@ export const DEFAULT_SMOKE_TIMEOUT_MS = 60_000;
  * **It does not contain the bootstrap itself.** Starting a dev server and booting a simulator each
  * get a budget of their own (`./timeouts.ts`), and the time they spend is taken off the clock this
  * bounds — a minute spent waiting for a simulator to come up must not be a minute the error window
- * no longer has (llp/0005 §The run brings its own environment).
+ * no longer has (llp/0036 §The run brings its own environment).
  */
 export const DEFAULT_SMOKE_START_TIMEOUT_MS = 180_000;
 
@@ -76,7 +76,7 @@ export interface SmokeOptions {
    * Whether this run brings its own environment: start a dev server when there is none, boot a
    * device when there is none, and put both back afterwards. Cleared by `--no-start`.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+   * @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
    */
   bootstrap: boolean;
   /** How long the error window stays open, in milliseconds. */
@@ -100,7 +100,7 @@ export interface SmokeOptions {
    * Put an app that was already attached back on the code on disk before reading it. Cleared by
    * `--no-reload`.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+   * @ref llp/0036-smoke-gate.rfc.md §The app under test is the code on disk
    * On by default because the moment this command is for is the moment after an edit, and at that
    * moment the app is already running the bundle from *before* it. A run that read that session
    * answered about code the caller had already replaced — exit 0 over a `throw` at the top of the
@@ -224,7 +224,7 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
     );
   }
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+  // @ref llp/0036-smoke-gate.rfc.md §The run brings its own environment
   // of 2026-08-29. On by default, and the flag that changes anything is the one that turns it off.
   const bootstrap = !args['--no-start'];
   return {
@@ -275,7 +275,7 @@ function namedPlatform(args: { [flag: string]: unknown }): string | null {
  * Read the platform flags: `--ios`/`--android`, or `--platform <name>`.
  *
  * **One of them is required** [confirmed, Kudo, 2026-09-03], which is the one flag in this command
- * that has no default. @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+ * that has no default. @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
  *
  * **`--platform web` is refused**, and this is the one place the command's flag set is narrower
  * than a bundler wait's. The reason is llp/0010 §An empty target list is inconclusive: `/json/list` is
@@ -326,7 +326,7 @@ function resolveSmokePlatform(args: { [flag: string]: unknown }): SmokePlatform 
     );
   }
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say
   //
   // No flag at all used to mean iOS on a Mac and Android everywhere else. That is a guess about
   // the *host*, and every question this command answers is about a *device* — so the two came

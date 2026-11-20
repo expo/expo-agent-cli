@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
 // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md — constraint 4, on subprocesses
 //
 // Put this project's **development build** on a device that has not got it.
@@ -104,7 +104,7 @@ export interface InstallDevBuildOptions {
    * app has been installed. Measured: the command exited non-zero with an `osascript` stack, and
    * the app was on the simulator [observed — live, 2026-09-04, iOS 26.5]. The window is nothing
    * this run needs: `smoke` opens the app itself with `simctl openurl`, which needs no grant
-   * (llp/0005 §The smoke gate, on why `--start` carries no platform flag).
+   * (llp/0036 §The smoke gate, on why `--start` carries no platform flag).
    *
    * So the question is "is the app there", and the device answers it. Null when it could not be
    * asked, and then the exit code decides after all — it is the only evidence left.

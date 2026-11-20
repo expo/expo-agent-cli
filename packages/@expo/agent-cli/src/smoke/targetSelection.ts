@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The smoke gate
+// @ref llp/0036-smoke-gate.rfc.md §The smoke gate
 import { resolveDeviceAsync, type CloudPreference, type NavigateDevice } from '../navigate/device';
 import type { CdpTarget } from '../runtime/cdpClient';
 import { probeDevServerAsync } from '../runtime/devServer';

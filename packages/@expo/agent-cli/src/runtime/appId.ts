@@ -122,7 +122,7 @@ export function resolveAppId({
 /**
  * The `applicationId` of a **prebuilt** Android project, from `android/app/build.gradle`.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+ * @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
  *
  * The one place an Android application id lives that the app config does not. `expo prebuild`
  * writes it into the Gradle file whether or not `android.package` was ever declared, and a great

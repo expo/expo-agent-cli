@@ -1151,7 +1151,7 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
     }
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+  // @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
   it(`installs nothing onto the session for a project with no app id`, async () => {
     const projectRoot = await fs.promises.realpath(await setupFixtureAsync('dev-client-fresh-app'));
     const npxLog = path.join(projectRoot, '.runner-calls.jsonl');

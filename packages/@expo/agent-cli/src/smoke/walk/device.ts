@@ -14,7 +14,7 @@ export interface DeviceReady {
   /**
    * This run replaced the app on the device, so nothing that was attached before is still running.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+   * @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
    * Read by the `app` phase, which must open rather than take the attached-app shortcut: a target
    * the dev server still lists is one the install has already killed.
    */
@@ -149,7 +149,7 @@ async function bootStep(
 
 // ---- Is there an app on that device to open at all? ---------------------------------------
 //
-// @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+// @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got it
 //
 // Conditional and an *act*, like the start and the boot: only a run that installed something
 // reports a row, because a machine that already had the app never had an install to do.
@@ -171,7 +171,7 @@ async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Ste
   }
   const releasedAfterRun =
     environment.boundDevice?.id === deviceId && environment.boundDevice.released !== null;
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+  // @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
   //
   // The build budget rather than an install budget, because this phase now covers both and the
   // larger of the two is a native compile — the same `BUILD_DEV_SERVER_TIMEOUT_MS` the start
@@ -201,7 +201,7 @@ async function installStep(walk: PhaseWalk, createdByBoot: boolean): Promise<Ste
     { budgetMs: BUILD_DEV_SERVER_TIMEOUT_MS, bootstrap: true }
   );
   if (installed.ok) {
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got
+    // @ref llp/0036-smoke-gate.rfc.md §Putting Expo Go on a simulator that has not got
     // it. **The install invalidates every read of the app that came before it.** `simctl
     // install` over a running app replaces the bundle and takes the process with it, and the
     // dev server's target list does not forget that app as quickly as the install kills it.

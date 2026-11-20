@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+// @ref llp/0036-smoke-gate.rfc.md §The gate says what it is doing while it does it
 // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract
 //
 // What `smoke` says while it is running, as opposed to what it reports when it has finished.
@@ -80,7 +80,7 @@ function phaseSentence(
     case 'start-session':
       return `Reaching an EAS Simulator session (${options.platform}) — starting one takes a few minutes; this run stops any session it creates`;
     case 'install-app':
-      // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+      // @ref llp/0036-smoke-gate.rfc.md §The gate installs the app, whichever app it is
       // Two very different waits behind one phase, and the line has to say which: a download is
       // minutes of network, a native build is minutes of compiler. The walk knows because the plan
       // does, so it is told rather than guessed.

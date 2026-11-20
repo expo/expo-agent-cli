@@ -101,7 +101,7 @@ describe('the flags this CLI writes onto a command line', () => {
     //
     // The two `src/device/installDevBuild.ts` rows are `expo run:<platform>`'s, and they are what
     // makes `smoke` install a development build instead of naming `dev` and stopping
-    // (llp/0005 §The gate installs the app, whichever app it is). Run as the rule requires
+    // (llp/0036 §The gate installs the app, whichever app it is). Run as the rule requires
     // [observed — live, 2026-09-04: `npx expo run:ios --no-bundler --device <udid>` in a project
     // outside this repository compiled, installed `com.tuft.pdfbuild` on the simulator, and then
     // exited non-zero on the AppleScript window activation — which is why the caller judges that

@@ -24,7 +24,7 @@ export type InstallDecision =
   | { ask: 'expoGoVerdict'; deviceId: string };
 
 /**
- * The install table of llp/0005 §The gate installs the app, whichever app it is. The first row that
+ * The install table of llp/0036 §The gate installs the app, whichever app it is. The first row that
  * matches decides; the comments carry the row numbers of the table.
  * Rows 1 and 2, `--no-start` and no device, are the walk's: it never asks without a device.
  *

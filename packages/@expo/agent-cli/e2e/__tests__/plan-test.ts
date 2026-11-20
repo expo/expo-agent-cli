@@ -150,7 +150,7 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(output).toContain('expo start --go');
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — `dev`
+    // @ref llp/0036-smoke-gate.rfc.md §Which platform is the caller's to say — `dev`
     // follows `smoke`: the platform is required, and the refusal is one line with a runnable Try:.
     it('refuses a run with no platform flag', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
