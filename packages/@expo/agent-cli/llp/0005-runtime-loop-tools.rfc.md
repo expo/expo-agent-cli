@@ -817,7 +817,7 @@ Rejected: ending the wait on the `Log.entryAdded` announcement that the engine "
 
 ## Cloud simulator
 
-Device resolution has a third backend: an EAS session. `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take `--eas`. `navigate` and `smoke` fall back to this worktree's session when no local device answers. `runtime:stop` and `runtime:reload` reach a session only with `--eas`, so a session never bills a run that a local device could serve. The order is [[0035-one-device-per-worktree]] §Readers. The developer config does not move `navigate` or the `runtime:*` commands; `smoke` reads `deviceBackend` only when it starts its own dev server ([[0015-backend-selection-and-config]] §The device backend).
+Device resolution has a third backend: an EAS session. `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take `--eas`. `navigate` and `smoke` fall back to this worktree's session when no local device answers. `runtime:stop` and `runtime:reload` reach a session only with `--eas`, or when the last `dev` opened its app on it, so a session never bills a run that a local device could serve. The act follows the resolved device: a cloud device gets the cloud reload, never a local `close`. The order is [[0035-one-device-per-worktree]] §Readers. The developer config does not move `navigate` or the `runtime:*` commands; `smoke` reads `deviceBackend` only when it starts its own dev server ([[0015-backend-selection-and-config]] §The device backend).
 
 `--json` reports `deviceBackend`: `local-ios`, `local-android` or `cloud`. A session runs iOS too, so `platform` does not say where the device is. The session id is on the `Device` line, in `deviceId`, and on the `cli:navigate` event. `--eas --ios` names the platform the session must be; a session on the other platform is `CLOUD_SIMULATOR_PLATFORM_MISMATCH`.
 
@@ -841,7 +841,7 @@ A `localhost` or `lan` URL is refused before anything opens; no `adb reverse` re
 
 `eas simulator:availability` runs only when the listing has no usable session. "Start one" for a session the CLI could not rule out starts a second billed session.
 
-**Reload.** On `--eas`, rung 1 runs first, as on a local run. The broadcast does not reach a session: the tunnel carries the bundle, not the command socket. So when rung 1 climbs, the EAS relaunch restarts the app and then opens the link (§How it reloads). The tunnel check runs before the first verb.
+**Reload.** On `--eas`, or when the last `dev` opened its app on the session, rung 1 runs first, as on a local run. The broadcast does not reach a session: the tunnel carries the bundle, not the command socket. So when rung 1 climbs, the EAS relaunch restarts the app and then opens the link (§How it reloads). The tunnel check runs before the first verb.
 
 **The iOS open dialog.** An `exp://` URL on an iOS session raises "Open in 'Expo Go'?", and nobody is at the screen. `navigate` answers it under four gates: the device is an EAS session; this run's own open exited 0; nothing attached inside the attach budget; and `alert get` names the app the URL was for. Any other alert is reported and left. The gate holds also when the run reached the session by the fallback, without `--eas`: the fallback takes only this worktree's own session, so the answer finishes the caller's own open. An empty `alert get` is exit 1, `alert not found`, so a read is safe. `--json` reports `attachAlert` (`checked`, `found`, `accepted`).
 

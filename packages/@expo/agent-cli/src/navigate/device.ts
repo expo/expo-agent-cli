@@ -96,7 +96,8 @@ function deviceRung<P extends CloudSessionProbe>(rung: CloudRung<P>): CloudDevic
  * bindings, any `up` one wins, and the winner's lease is extended. The cloud is the last rung,
  * taken only when every local rung passed and this project has a session on record. One
  * exception comes first: the live session that the last `dev` opened its app on, as for the
- * readers ({@link lastDevSession}).
+ * readers ({@link lastDevSession}). It takes the cloud rung as `--eas` does, so its lease is
+ * renewed and a session that is gone is refused.
  *
  * @throws {CommandError} `NO_BOUND_DEVICE` when no local device is bound and no session serves,
  * and the tool error when a device tool could not run.
@@ -111,11 +112,11 @@ export async function resolveDeviceAsync(
     return await resolveCloudDeviceAsync(platform, context);
   }
 
+  // The session that the last `dev` opened goes through the cloud rung like `--eas`: the lease is
+  // renewed, and a session that is gone is refused instead of replaced by the local device.
   const session = lastDevSession(context.projectRoot, platform);
   if (session) {
-    const device = navigateDeviceOf(session.device);
-    debugEvent('device_resolved', { platform: device.platform, deviceId: device.deviceId });
-    return device;
+    return await resolveCloudDeviceAsync(session.device.platform, context);
   }
 
   const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });

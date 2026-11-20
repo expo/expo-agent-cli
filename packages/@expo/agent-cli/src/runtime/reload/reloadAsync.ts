@@ -67,7 +67,11 @@ import {
   type RungOneOutcome,
 } from './rungOne';
 import { reloadOverRuntimeAsync } from './runtimeReload';
-import { reloadOnDeviceAsync, openRouteAfterReloadAsync } from './deviceReload';
+import {
+  reloadOnDeviceAsync,
+  openRouteAfterReloadAsync,
+  resolveReloadDeviceAsync,
+} from './deviceReload';
 import { printHumanReport, explainReloadFailure } from './report';
 
 /**
@@ -591,8 +595,15 @@ async function climbLadderAsync(
   const relaunchRung =
     options.method === 'device' || (options.method === 'auto' && relaunchWhy != null);
   const why = relaunchWhy ?? '--method device named the relaunch';
-  if (relaunchRung && options.cloud) {
+  // The resolved device decides the act, not the flag: the session that the last `dev` opened is a
+  // cloud device too (llp/0035 §Readers), and a local relaunch would `close` it.
+  const resolution =
+    relaunchRung && !options.cloud ? await resolveReloadDeviceAsync(projectRoot, options) : null;
+  const cloudDevice =
+    resolution?.ok && resolution.device.backend === 'cloud' ? resolution.device : null;
+  if (relaunchRung && (options.cloud || cloudDevice)) {
     const cloud = await reloadOnCloudSimulatorAsync(projectRoot, options, {
+      session: cloudDevice ?? undefined,
       // Only this worktree's apps: a skipped app's id would relaunch the wrong app.
       targetAppIds: own(prepared.targets)
         .map((target) => target.appId)
@@ -607,8 +618,8 @@ async function climbLadderAsync(
       // something this is a mechanism that ran rather than a reload that happened.
       method = 'device';
     }
-  } else if (relaunchRung) {
-    const attempt = await reloadOnDeviceAsync(projectRoot, options, devServerUrl, own);
+  } else if (resolution) {
+    const attempt = await reloadOnDeviceAsync(projectRoot, options, devServerUrl, own, resolution);
     attempts.push(withRelaunchCost(attempt.attempt, observedApps, why));
     device = attempt.device;
     if (attempt.attempt.ok) {
