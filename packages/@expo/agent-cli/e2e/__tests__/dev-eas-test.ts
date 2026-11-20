@@ -704,7 +704,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   // its open put the app on the session; a failed open leaves the record of the run before.
   it.skipIf(process.platform === 'win32').each([
     ['records eas once the app is open on the session', '0', 'eas'],
-    ['keeps the previous record when the open fails', '1', 'local'],
+    ['records its request and keeps the previous device backend when the open fails', '1', 'local'],
   ] as const)('a foreground dev --eas %s', async (_case, startExit, deviceBackend) => {
     const projectRoot = await setupAsync('go-app');
     const lastDev = path.join(projectRoot, '.expo', 'agent-cli-last-dev.json');
@@ -737,8 +737,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       ).toBe(true);
       const record = JSON.parse(await fs.promises.readFile(lastDev, 'utf8'));
       expect(record.deviceBackend).toBe(deviceBackend);
-      if (deviceBackend === 'local') expect(record).toEqual(JSON.parse(previous));
-      else expect(record.platform).toBe('ios');
+      expect(record.platform).toBe('ios');
       child.kill('SIGINT');
       await exited;
     } finally {

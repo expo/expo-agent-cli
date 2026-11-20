@@ -48,13 +48,30 @@ it('retains only the parsed recovery choices from a real invocation', () => {
 // @ref llp/0035-one-device-per-worktree.rfc.md §Readers — only a run that opened on EAS prefers it.
 it.each([
   [['--ios', '--eas'], true, 'eas'],
-  [['--ios', '--eas'], false, undefined],
+  [['--ios', '--eas'], false, 'local'],
   [['--ios', '--eas', '--no-open'], false, 'local'],
   [['--ios'], false, 'local'],
 ])('records the device backend of %j (opened on EAS: %s) as %s', (argv, easOpened, expected) => {
   recordLastDevRequest(root, resolveDevOptions(argv), { easOpened });
   expect(readLastDevRequest(root)?.deviceBackend).toBe(expected);
 });
+
+it.each(['eas', 'local'] as const)(
+  'writes the request of an EAS run before its open, and keeps the previous %s device backend',
+  (previous) => {
+    recordLastDevRequest(root, resolveDevOptions(['--android', '--eas']), {
+      easOpened: previous === 'eas',
+    });
+    recordLastDevRequest(root, resolveDevOptions(['--ios', '--eas', '--port', '19083']));
+
+    expect(readLastDevRequest(root)).toMatchObject({
+      platform: 'ios',
+      port: 19083,
+      buildBackend: 'eas',
+      deviceBackend: previous,
+    });
+  }
+);
 
 it('does not write a dry run or erase the preceding real request', () => {
   recordLastDevRequest(root, resolveDevOptions(['--ios', '--plan']));
