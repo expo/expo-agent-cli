@@ -700,6 +700,52 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Readers — the last dev records `eas` only once
+  // its open put the app on the session; a failed open leaves the record of the run before.
+  it.skipIf(process.platform === 'win32').each([
+    ['records eas once the app is open on the session', '0', 'eas'],
+    ['keeps the previous record when the open fails', '1', 'local'],
+  ] as const)('a foreground dev --eas %s', async (_case, startExit, deviceBackend) => {
+    const projectRoot = await setupAsync('go-app');
+    const lastDev = path.join(projectRoot, '.expo', 'agent-cli-last-dev.json');
+    const previous = JSON.stringify({
+      version: 1,
+      platform: 'android',
+      port: null,
+      buildBackend: null,
+      runTarget: null,
+      deviceBackend: 'local',
+    });
+    await fs.promises.mkdir(path.dirname(lastDev), { recursive: true });
+    await fs.promises.writeFile(lastDev, previous);
+    const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
+      env: { ...easRunEnv(projectRoot, 8539), STUB_SIM_START_EXIT: startExit },
+    });
+    const output = collectOutput(child);
+    const exited = waitForExitAsync(child, output);
+    try {
+      expect(
+        await waitForAsync(
+          () =>
+            output.stderr.includes(
+              startExit === '1'
+                ? 'The app was not opened on an EAS Simulator session'
+                : 'Opened the app on EAS Simulator session'
+            ),
+          10000
+        )
+      ).toBe(true);
+      const record = JSON.parse(await fs.promises.readFile(lastDev, 'utf8'));
+      expect(record.deviceBackend).toBe(deviceBackend);
+      if (deviceBackend === 'local') expect(record).toEqual(JSON.parse(previous));
+      else expect(record.platform).toBe('ios');
+      child.kill('SIGINT');
+      await exited;
+    } finally {
+      await killAsync(child);
+    }
+  });
+
   it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
     'SIGINT cleans up an owned session (%s)',
     async (state) => {

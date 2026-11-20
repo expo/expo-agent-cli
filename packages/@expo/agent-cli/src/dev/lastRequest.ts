@@ -43,8 +43,18 @@ export function readLastDevRequest(projectRoot: string): LastDevRequest | null {
   }
 }
 
-export function recordLastDevRequest(projectRoot: string, options: DevOptions): void {
+/**
+ * Record the run's request. A run that opens its app on EAS records only once the open put the app
+ * on the session (`easOpened`), so a refused or failed run leaves the previous record.
+ */
+export function recordLastDevRequest(
+  projectRoot: string,
+  options: DevOptions,
+  { easOpened = false }: { easOpened?: boolean } = {}
+): void {
   if (options.mode !== 'run') return;
+  const opensOnEas = easOpenPlatform(options) != null;
+  if (opensOnEas !== easOpened) return;
   try {
     // Nonrecursive: a late invocation must not resurrect a deleted checkout.
     try {
@@ -53,7 +63,7 @@ export function recordLastDevRequest(projectRoot: string, options: DevOptions): 
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return;
     }
     const { platform, port, device, buildBackend, runTarget } = options;
-    const deviceBackend = easOpenPlatform(options) != null ? 'eas' : 'local';
+    const deviceBackend = easOpened ? 'eas' : 'local';
     fs.writeFileSync(
       path.join(projectRoot, '.expo', FILE),
       JSON.stringify({

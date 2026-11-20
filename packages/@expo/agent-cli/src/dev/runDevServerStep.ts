@@ -17,6 +17,7 @@ import type { SubprocessOutput } from '../utils/subprocess';
 import { portDemandedError, warnPortMove } from './devServerPort';
 import { event as devEvent } from './events';
 import { buildsBeforeServing, withPortArg } from './forwardedArgs';
+import { recordLastDevRequest } from './lastRequest';
 import { easRunLifecycle } from './openAppEas';
 import {
   defaultMetroPort,
@@ -118,6 +119,7 @@ export class DevServerStepRunner {
             expoGo: plan.target === 'expo-go',
             fingerprintCache: options.fingerprintCache,
             keepSession: options.detachedChild,
+            onOpened: () => recordLastDevRequest(projectRoot, options, { easOpened: true }),
           })
         : null;
       return await runDevServerAsync(projectRoot, args, {
