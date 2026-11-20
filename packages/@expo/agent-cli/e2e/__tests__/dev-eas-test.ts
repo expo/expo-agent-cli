@@ -1158,6 +1158,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
     const env = {
       ...easRunEnv(projectRoot, 8536),
+      // Three `dev` runs and an open reuse this one dev server: keep it up past all of them.
+      STUB_EXPO_DELAY_MS: '90000',
       STUB_SIM_SESSIONS: '1',
       STUB_EXPO_TARGETS: '[]',
       AGENT_CLI_DEV_APP_WAIT_MS: '1500',
