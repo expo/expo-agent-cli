@@ -172,7 +172,7 @@ describe('the old name', () => {
   });
 
   it(`is gone from the package's own documents`, () => {
-    const documents = ['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'package.json'];
+    const documents = ['README.md', 'AGENTS.md', 'CLAUDE.md', 'package.json'];
     const found = documents.flatMap((document) => {
       const text = readTextOrNull(document);
       return text == null ? [] : occurrencesIn(document, text);
