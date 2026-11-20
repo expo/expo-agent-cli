@@ -41,7 +41,8 @@ type BindingKind =
   | 'simulator'
   | 'ios-cloud'
   | 'android-cloud'
-  | 'simulator-and-ios-cloud';
+  | 'simulator-and-ios-cloud'
+  | 'ios-and-android-cloud';
 type AppId = keyof typeof apps;
 const sessionLine =
   'Scoped to ios: the EAS Simulator session 01a160c1, the device bound to this worktree.';
@@ -79,6 +80,9 @@ async function setupBoundAsync(
       id: binding === 'android-cloud' ? '01a15bf1' : '01a160c1',
     });
   }
+  if (binding === 'ios-and-android-cloud') {
+    await writeCloudBindingAsync(expoHomeOf(root), root, { platform: 'android', id: '01a15bf1' });
+  }
   if (lastDev) {
     await fs.promises.mkdir(path.join(root, '.expo'), { recursive: true });
     await fs.promises.writeFile(
@@ -112,6 +116,8 @@ const selectionCases: {
   /** List the local emulator beside an EAS Android session. */
   emulatorAttached?: boolean;
   lastDev?: 'local' | 'eas';
+  /** Run with AGENT_CLI_NO_DEVICE=1. */
+  noDevice?: boolean;
   targets: AppId[];
   selected: AppId;
   line: string | null;
@@ -191,10 +197,27 @@ const selectionCases: {
     selected: 'a',
     line: simulatorLine,
   },
+  // A session on each platform and no local binding: the last `dev` names the session, as it
+  // does for the commands that act on a device. Also with devices off.
+  {
+    binding: 'ios-and-android-cloud',
+    lastDev: 'eas',
+    targets: ['androidSession', 'cloud'],
+    selected: 'cloud',
+    line: sessionLine,
+  },
+  {
+    binding: 'ios-and-android-cloud',
+    lastDev: 'eas',
+    noDevice: true,
+    targets: ['androidSession', 'cloud'],
+    selected: 'cloud',
+    line: sessionLine,
+  },
 ];
 for (const row of selectionCases) {
   it.skipIf(row.binding.startsWith('simulator') && process.platform !== 'darwin')(
-    `eval with ${row.binding}, flag ${row.flag ?? 'none'}${row.lastDev ? `, last dev ${row.lastDev}` : ''}, reads ${row.selected}`,
+    `eval with ${row.binding}, flag ${row.flag ?? 'none'}${row.lastDev ? `, last dev ${row.lastDev}` : ''}${row.noDevice ? ', devices off' : ''}, reads ${row.selected}`,
     async () => {
       const { root, env } = await setupBoundAsync(row.binding, {
         attached: row.emulatorAttached ?? row.binding === 'emulator',
@@ -221,7 +244,7 @@ for (const row of selectionCases) {
             server.url,
             '--json',
           ],
-          { reject: false, env }
+          { reject: false, env: row.noDevice ? { ...env, AGENT_CLI_NO_DEVICE: '1' } : env }
         );
         expect(result.exitCode, result.all).toBe(0);
         expect(JSON.parse(result.stdout).value).toBe(row.selected);

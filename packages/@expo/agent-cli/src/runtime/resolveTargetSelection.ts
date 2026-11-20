@@ -97,7 +97,7 @@ export async function resolveTargetSelectionAsync(
  * now. No inspection decides it: a device that is not up has no app, so the read finds none. With
  * no local binding, the one live cloud binding is the scope. With devices disabled, only `--eas`
  * reads a binding. When the last `dev` opened its app on an EAS session, that platform's live
- * session outranks the local binding.
+ * session comes first, also with devices disabled.
  *
  * @throws `NO_BOUND_DEVICE` when an own binding file cannot be read.
  */
@@ -105,10 +105,15 @@ async function boundDeviceAsync(
   projectRoot: string,
   flags: ResolveTargetSelectionOptions['flags']
 ): Promise<BoundDevice | null> {
-  // AGENT_CLI_NO_DEVICE keeps this machine's devices untouched; an EAS session is not one of them.
-  if (!flags.eas && !devicesDisabled()) {
-    const local = liveLocalBinding(projectRoot, flags.platform ?? undefined);
-    if (local) return (lastDevSession(projectRoot, flags.platform) ?? local).device;
+  if (!flags.eas) {
+    // The session that the last `dev` opened is the device the actors drive, so it comes first.
+    const session = lastDevSession(projectRoot, flags.platform);
+    if (session) return session.device;
+    // AGENT_CLI_NO_DEVICE keeps this machine's devices untouched; an EAS session is not one of them.
+    if (!devicesDisabled()) {
+      const local = liveLocalBinding(projectRoot, flags.platform ?? undefined);
+      if (local) return local.device;
+    }
   }
   const { bindings, unreadable } = readCloudBindings(projectRoot);
   const own = unreadable.find((each) => flags.platform == null || each.platform === flags.platform);
