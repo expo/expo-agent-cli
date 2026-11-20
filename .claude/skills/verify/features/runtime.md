@@ -38,11 +38,11 @@ Preconditions:
 - **Reload.** Put the app on the edit. Run `node $V run --label runtime-reload-$PF -- runtime:reload --$PF --json`. Exit code `0`. The object has `method: "dev-server"`.
 - **Second view.** Run `node $V run --until "Verify marker 42" -- runtime:tree --all --$PF`. It matches. The counter is back at `Count: 0`: a reload resets the app state.
 - **Errors.** Read the error window. Run `node $V run --label runtime-errors-$PF -- runtime:errors --$PF --json`. Exit code `0` on the healthy app.
-- **Restore.** Run `git checkout -- apps/eas-example` from the repository root, then `node $V run -- runtime:reload --$PF`, then `node $V run --until "EAS Example home" --timeout 240 -- runtime:tree --all --$PF`.
+- **Restore.** Run `git checkout -- apps/eas-example/src/app/index.tsx`, then `node $V run -- runtime:reload --$PF`, then `node $V run --until "EAS Example home" --timeout 240 -- runtime:tree --all --$PF`.
 
 ## Gotchas
 
-- Seen once, not reproduced: on the Android emulator (AVD `TestingAVD`, API 29), the app stopped answering after one `runtime:reload` that reported `method: "dev-server"` and exit `0`. Then `runtime:tree` took about 7 minutes for each call, and a second `runtime:reload` took 16 minutes before exit `22`. The emulator's Android system restarted itself during that time. A later run on a new project did five reloads in about 2 seconds each with no failure. When a command after an Android reload is slow or killed, report the evidence file and run the cycle again.
+- When a command after an Android reload is slow or killed, report the evidence file and run the cycle again.
 - On the Android emulator, a reload can exceed the 8 seconds that `runtime:reload` waits for the app to reconnect. The command then reports `method: "device"`: it stopped and relaunched the app. The exit code is still `0`, but the relaunch is a cold start of about two minutes. Record which method the proof saw. A proof of the dev-server reload needs `method: "dev-server"`.
 - On iOS, every reload reported `method: "dev-server"` in under one second.
 - `runtime:tap` calls the prop. It does not touch the screen. `runtime:tap --verify` reports `nothing in the interactive projection changed` for a handler that changes nothing in the component tree.
