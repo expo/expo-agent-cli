@@ -42,8 +42,11 @@ afterEach(async () => {
     });
   }
 });
-/** The device name of the app on a session of each platform, as Metro lists it. */
-const SESSION_DEVICE = { ios: 'iPhone 17 Pro', android: 'sdk_gphone64_arm64 - 15 - API 35' };
+/**
+ * The device name of the app on a session of each platform, as Metro lists it. An EAS Android
+ * session runs an x86_64 image, so an arm64 emulator on this host does not claim its app.
+ */
+const SESSION_DEVICE = { ios: 'iPhone 17 Pro', android: 'sdk_gphone64_x86_64 - 15 - API 35' };
 
 /** Empty answers of the dev server after an open: only a wait that polls again sees the app. */
 const EMPTY_POLLS_AFTER_OPEN = '3';
