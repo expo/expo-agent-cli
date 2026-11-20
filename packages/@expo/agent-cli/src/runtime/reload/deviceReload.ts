@@ -1,4 +1,5 @@
 import { isTunnelCurrent, resolveDevServerReachAsync } from '../../dev/advertisedUrl';
+import { lastDevSession } from '../../dev/lastRequest';
 import { liveCloudBindings } from '../../deviceBinding/cloud';
 import {
   openUrlOnDeviceAsync,
@@ -61,12 +62,14 @@ export async function reloadOnDeviceAsync(
   if (!resolution.ok) {
     const { error } = resolution;
     // The local rungs answered for a worktree whose device is an EAS session, so their refusal (an
-    // expired local lease, say) names the wrong device. Name the session instead.
-    const session = options.cloud
-      ? undefined
-      : liveCloudBindings(projectRoot).find(
-          (binding) => options.platform == null || binding.device.platform === options.platform
-        );
+    // expired local lease, say) names the wrong device. Name the session instead. A refusal from
+    // the last dev's session already names that session, so it passes through.
+    const session =
+      options.cloud || lastDevSession(projectRoot, options.platform) != null
+        ? undefined
+        : liveCloudBindings(projectRoot).find(
+            (binding) => options.platform == null || binding.device.platform === options.platform
+          );
     return {
       attempt: {
         method: 'device',

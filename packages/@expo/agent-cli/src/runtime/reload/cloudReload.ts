@@ -93,10 +93,12 @@ export async function reloadOnCloudSimulatorAsync(
   // is no `adb reverse` for a session in a datacenter. Refusing here is what stops the relaunch from
   // terminating an app it cannot start again.
   if (resolved.hostType === 'localhost' || resolved.hostType === 'lan') {
+    // The last dev's session names its own platform, and its dev server came from `dev --eas`.
     throw cloudNeedsTunnelError(
       resolved.url,
       resolved.hostType,
-      options.platform ?? hostPlatform()
+      session?.platform ?? options.platform ?? hostPlatform(),
+      { eas: session != null }
     );
   }
 

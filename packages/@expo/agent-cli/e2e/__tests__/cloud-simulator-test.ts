@@ -55,13 +55,13 @@ async function setupAsync(fixtureName: string): Promise<string> {
  * A worktree with a live local simulator binding and a live session binding that expires in five
  * minutes, whose last `dev` opened its app on the session.
  */
-async function setupLastDevSessionAsync(): Promise<string> {
+async function setupLastDevSessionAsync(platform: 'ios' | 'android' = 'ios'): Promise<string> {
   const projectRoot = await setupAsync('go-app');
   await writeSessionFileAsync(projectRoot, 'sess-e2e');
   await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
   await bindingFixture(projectRoot, BOOTED_SIMULATOR.udid);
   await writeCloudBindingAsync(expoHomeOf(projectRoot), projectRoot, {
-    platform: 'ios',
+    platform,
     id: 'sess-e2e',
     expiresAt: new Date(Date.now() + 5 * 60000).toISOString(),
   });
@@ -70,7 +70,7 @@ async function setupLastDevSessionAsync(): Promise<string> {
     path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'),
     JSON.stringify({
       version: 1,
-      platform: 'ios',
+      platform,
       port: null,
       buildBackend: null,
       runTarget: null,
@@ -780,6 +780,36 @@ describe('@expo/agent-cli runtime:stop --eas', () => {
     }
   );
 
+  it.skipIf(process.platform !== 'darwin')(
+    `runtime:reload --method device passes the gone last-dev session's refusal through`,
+    async () => {
+      const projectRoot = await setupLastDevSessionAsync();
+      const server = await startLockedDevServerAsync(projectRoot, 'https://stub-tunnel.example');
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          [
+            'runtime:reload',
+            '--ios',
+            '--method',
+            'device',
+            '--timeout',
+            '2s',
+            '--json',
+            '--no-followups',
+          ],
+          { reject: false, env: { AGENT_CLI_NO_DEVICE: '0', STUB_SIM_SESSIONS: '0' } }
+        );
+
+        expect(result.exitCode, result.all).not.toBe(0);
+        expect(result.all).toContain('ended');
+        expect(result.all).not.toContain('runtime:reload --ios --eas');
+      } finally {
+        await server.close();
+      }
+    }
+  );
+
   // @ref llp/0035-one-device-per-worktree.rfc.md §Readers — navigate drives the session that the
   // last dev opened, without --eas, and renews its lease as --eas does.
   it.skipIf(process.platform !== 'darwin')(
@@ -1115,6 +1145,26 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
         const execs = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:exec');
         expect(execs, result.all).toEqual([]);
         expect(result.all).toContain('tunnel');
+      } finally {
+        await server.close();
+      }
+    }
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
+    `names the last-dev session's platform and --eas in the tunnel refusal, with no platform flag`,
+    async () => {
+      const projectRoot = await setupLastDevSessionAsync('android');
+      const server = await startLockedDevServerAsync(projectRoot);
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['runtime:reload', '--method', 'device', '--timeout', '2s', '--json', '--no-followups'],
+          { reject: false, env: { AGENT_CLI_NO_DEVICE: '0', STUB_SIM_PLATFORM: 'ANDROID' } }
+        );
+        const execs = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:exec');
+        expect(execs, result.all).toEqual([]);
+        expect(result.all).toContain('@expo/agent-cli dev --android --eas --detach');
       } finally {
         await server.close();
       }
