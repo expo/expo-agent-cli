@@ -41,6 +41,8 @@ export interface TreeFollowUpNode {
   testID: string | null;
   handlers: string[];
   disabled: boolean;
+  /** A switch's boolean `value`, or null. */
+  value?: boolean | null;
 }
 
 export interface TreeFollowUpInput {
@@ -53,7 +55,14 @@ export interface TreeFollowUpInput {
 
 /** Whether an element is one this command could tap, i.e. suggesting it is not suggesting exit 20. */
 function tappable(node: TreeFollowUpNode): boolean {
-  return node.testID != null && !node.disabled && node.handlers.includes('onPress');
+  return (
+    node.testID != null && !node.disabled && (node.handlers.includes('onPress') || isSwitch(node))
+  );
+}
+
+/** A row `runtime:tap` toggles: `onValueChange` with a boolean `value`. */
+function isSwitch(node: TreeFollowUpNode): boolean {
+  return node.handlers.includes('onValueChange') && typeof node.value === 'boolean';
 }
 
 /** Whether an element takes text. */
@@ -83,7 +92,7 @@ export function buildTreeFollowUps({ nodes, testID, platform }: TreeFollowUpInpu
     followups.push({
       id: 'tap-element',
       command: `${PROGRAM_PREFIX} runtime:tap ${quoted(toTap.testID!)} --verify${flag}`,
-      why: 'Calls the onPress this element carries and walks the tree again afterwards, which is the only proof this CLI can offer that the tap did anything.',
+      why: `Calls the ${toTap.handlers.includes('onPress') ? 'onPress' : 'onValueChange(!value)'} this element carries and walks the tree again afterwards, which is the only proof this CLI can offer that the tap did anything.`,
     });
   }
   if (toType) {

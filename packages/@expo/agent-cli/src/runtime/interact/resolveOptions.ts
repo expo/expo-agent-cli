@@ -110,6 +110,8 @@ const CALL_ARGS = {
 
 const TAP_ARGS = {
   ...CALL_ARGS,
+  '--testID': String,
+  '--test-id': '--testID',
   '--verify': Boolean,
 };
 
@@ -230,6 +232,16 @@ export function resolveTapOptions(argv: string[]): RuntimeTapOptions {
   rejectNegativeCounts(argv);
   const args = parseArgsOrThrow(TAP_ARGS, argv, 'runtime:tap');
   const positional = args._.map(String);
+  const flagged = args['--testID'] == null ? null : String(args['--testID']);
+  if (flagged != null && positional.length > 0 && positional[0] !== flagged) {
+    throw new CommandError(
+      'BAD_ARGS',
+      `Two testIDs were named: ${positional[0]} and ${flagged} (--testID). "${PROGRAM_NAME} runtime:tap" taps one element; name it once, as the first argument or with --testID.`
+    );
+  }
+  if (flagged != null && positional.length === 0) {
+    positional.push(flagged);
+  }
   if (positional.length === 0) {
     throw new CommandError(
       'BAD_ARGS',

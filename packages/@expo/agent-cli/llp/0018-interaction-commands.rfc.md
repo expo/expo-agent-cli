@@ -138,7 +138,8 @@ this section.
 8. `--test-id` is accepted as another spelling of `--testID`. `testID` is React Native's
    own prop name and is what every report prints back, so it stays canonical. An unknown
    flag is a hard stop for a driving agent, and `--test-id` is what every other flag in
-   this CLI would have led one to type.
+   this CLI would have led one to type. `runtime:tap` takes its testID as the positional
+   or as `--testID`, the flag `tree` and `type` take, and refuses two different ones.
 
 Also shipped, because the listing and the refusals depend on them:
 
@@ -147,7 +148,9 @@ The default `runtime:tree` listing groups by element, the same match `--testID` 
 when any fiber of it is disabled, the first text any of them has, and `groupSize`. A
 node with a handler and no testID is still a row, grouped by its own fiber identity. The
 row's `handlers` are the element's own, never an ancestor's. `runtime:tap` walks up when
-the group has none and says `handlerOutsideMatch: true` about it.
+the group has no `onPress` and no switch, and says `handlerOutsideMatch: true` about it.
+The row's `value` is the first boolean `value` of the group, or null: the state of a
+switch.
 
 `nodeCount` is what came back. `nodesBeforeTruncation` is what the projection produced.
 
@@ -168,7 +171,7 @@ A pre-scan of the caller's argv catches `--index` and `--max-nodes` values match
 
 It walks the full projection before and after, keys each node by its testID (or its
 component name) plus its position among nodes with the same key, and reports what was
-added, what was removed, and whose text changed. The interactive projection is the wrong
+added, what was removed, whose text changed, and whose boolean `value` changed. The interactive projection is the wrong
 choice for a diff: the row a tap appends is often a `Text` with no testID and no
 handler.
 
@@ -181,6 +184,37 @@ only the diff between two of them.
 
 Without `--verify`, the only claim is that the handler was called. Nothing reports an
 effect it did not observe.
+
+## A tap on a switch toggles it
+
+A React Native `Switch` has no `onPress`. It has `onValueChange` and a boolean `value`,
+and a real touch calls `onValueChange(!value)`. `runtime:tap` makes the same call. It
+looks for its handler in this order:
+
+1. `onPress` on a fiber of the group.
+2. A fiber of the group with an `onValueChange` function and a boolean `value`.
+3. `onPress` on an ancestor.
+
+Rule 2 is before rule 3: a touch on a switch in a pressable row toggles the switch and
+does not press the row. The `value` must be a boolean. A `Slider` has a number `value`,
+and a `Picker` has none, so a tap has no argument to give them. They are refused as
+`no-handler`. A disabled switch is refused like a disabled button.
+
+The report names the call: `handler: "onValueChange"` and `toggledTo: <bool>`, which is
+null for a press. The text starts with `Toggled <id>: called onValueChange(true)`. The
+switch shows the new state only if the app passes it back as `value`, so `--verify` is
+the proof: its `changedValue` names the switch, `false` before and `true` after.
+
+The `no-handler` refusal of `runtime:tap` names a real touch through `agent-device`: `open
+<app-id> --foreground` on the device this run read (`--udid` for a simulator, `--serial`
+for an emulator, `eas simulator:exec` in front on an EAS session), then `press @eN
+--settle`. A bare `agent-device` command refuses when several simulators are booted, so
+the device is named. It does not name `runtime:tree`: the agent has usually read the tree
+already, so that line sends it back in a loop.
+
+Tests: `expression-test.ts` "a tap on a switch" (the search order and the shapes that are
+refused), and `e2e/__tests__/runtime-interact-test.ts` "a tap on a switch" (the report,
+the `--verify` diff and the refusal through the published bin).
 
 ## Honest limits
 

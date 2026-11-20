@@ -1,13 +1,16 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, Switch, Text, View } from 'react-native';
 
 // A stable string the live-eas deploy test looks for in the served web bundle.
 const DEPLOY_MARKER = '@expo/agent-cli live-eas deploy marker';
 
 export default function App() {
+  const [reminders, setReminders] = useState(false);
   return (
     <View style={styles.container}>
-      <Text>{DEPLOY_MARKER}</Text>
+      <Text testID="deploy-marker">{DEPLOY_MARKER}</Text>
+      <Switch testID="reminders-switch" value={reminders} onValueChange={setReminders} />
       <StatusBar style="auto" />
     </View>
   );

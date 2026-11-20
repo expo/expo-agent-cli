@@ -416,13 +416,165 @@ describe('@expo/agent-cli runtime:tap', () => {
     }
   });
 
-  it(`refuses a run that names no testID`, async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['runtime:tap', '--json'], {
+  it.each([
+    { run: 'names no testID', args: [], says: 'Missing testID' },
+    {
+      run: 'names two different testIDs',
+      args: ['reminders', '--testID', 'other'],
+      says: 'reminders and other',
+    },
+  ])(`refuses a run that $run`, async ({ args, says }) => {
+    const result = await executeAgentCliAsync(projectRoot, ['runtime:tap', ...args, '--json'], {
       reject: false,
     });
 
     expect(result.exitCode).toBe(1);
-    expect(JSON.parse(result.stdout)).toMatchObject({ error: { code: 'BAD_ARGS' } });
+    const envelope = JSON.parse(result.stdout);
+    expect(envelope).toMatchObject({ error: { code: 'BAD_ARGS' } });
+    expect(envelope.error.message).toContain(says);
+  });
+});
+
+// @ref llp/0018-interaction-commands.rfc.md §A tap on a switch toggles it — dogfood N2-38.
+describe('a tap on a switch', () => {
+  const toggled = callAnswer({
+    testID: 'reminders',
+    component: 'Switch',
+    handler: 'onValueChange',
+    handlerOn: 'Switch',
+    toggledTo: true,
+  });
+  const switchRow = (value: boolean) =>
+    treeAnswer({
+      nodes: [
+        node({ component: 'Switch', testID: 'reminders', handlers: ['onValueChange'], value }),
+      ],
+      nodeCount: 1,
+    });
+
+  it(`toggles it, by --testID or by the positional, and --verify reports the changed value`, async () => {
+    let walks = 0;
+    const devServer = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      inspectorEvaluate: (expression) => {
+        if (expression.includes('var TESTID =')) {
+          return expression.includes('var TESTID = "reminders"') ? toggled : undefined;
+        }
+        if (expression.includes('var FULL =')) {
+          walks += 1;
+          return switchRow(walks % 2 === 0);
+        }
+        return undefined;
+      },
+    });
+    const tapArgs = ['--verify', '--dev-server-url', devServer.url];
+    try {
+      const json = await executeAgentCliAsync(projectRoot, [
+        'runtime:tap',
+        '--testID',
+        'reminders',
+        ...tapArgs,
+        '--json',
+      ]);
+      expect(json.exitCode).toBe(0);
+      expect(JSON.parse(json.stdout)).toMatchObject({
+        testID: 'reminders',
+        handler: 'onValueChange',
+        toggledTo: true,
+        ok: true,
+        verify: {
+          changed: true,
+          changedValue: [{ key: 'reminders', before: false, after: true }],
+        },
+      });
+
+      const text = await executeAgentCliAsync(projectRoot, [
+        'runtime:tap',
+        'reminders',
+        ...tapArgs,
+      ]);
+      expect(text.stdout).toContain('Toggled reminders: called onValueChange(true)');
+      expect(text.stdout).toContain('~ reminders: value false -> true');
+    } finally {
+      await devServer.close();
+    }
+  });
+
+  it(`is offered as the tap after a tree, and a slider is not`, async () => {
+    const devServer = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      inspectorEvaluate: responder({
+        tree: treeAnswer({
+          nodes: [
+            node({
+              component: 'Slider',
+              testID: 'volume',
+              handlers: ['onValueChange'],
+              value: null,
+            }),
+            node({
+              component: 'Switch',
+              testID: 'reminders',
+              handlers: ['onValueChange'],
+              value: false,
+            }),
+          ],
+          nodeCount: 2,
+        }),
+      }),
+    });
+    try {
+      const result = await executeAgentCliAsync(projectRoot, [
+        'runtime:tree',
+        '--dev-server-url',
+        devServer.url,
+      ]);
+
+      expect(result.stdout).toContain('npx @expo/agent-cli runtime:tap reminders --verify');
+      expect(result.stdout).not.toContain('runtime:tap volume');
+    } finally {
+      await devServer.close();
+    }
+  });
+
+  it(`refuses a shape with no handler, and names a real touch instead of runtime:tree`, async () => {
+    const devServer = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      inspectorEvaluate: responder({
+        tap: callAnswer({
+          testID: 'volume',
+          component: 'Slider',
+          called: false,
+          reason: 'no-handler',
+          handler: null,
+          handlerOn: null,
+          handlerOutsideMatch: null,
+          toggledTo: null,
+          candidates: [{ index: 0, component: 'Slider', screen: 'notes', handler: null }],
+        }),
+      }),
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:tap', 'volume', '--dev-server-url', devServer.url, '--json'],
+        { reject: false }
+      );
+
+      expect(result.exitCode).toBe(20);
+      expect(JSON.parse(result.stdout)).toMatchObject({ reason: 'no-handler', toggledTo: null });
+      expect(result.stderr).toContain('has no onPress and no switch');
+      expect(result.stderr).toContain(
+        'Try: npx agent-device@latest open host.exp.Exponent --foreground'
+      );
+      expect(result.stderr).toContain('press @eN --settle');
+      expect(result.stderr).toMatch(
+        /simulator:exec npx agent-device@latest open host\.exp\.Exponent/
+      );
+      expect(result.stderr).not.toContain('Try: npx @expo/agent-cli runtime:tree');
+    } finally {
+      await devServer.close();
+    }
   });
 });
 
