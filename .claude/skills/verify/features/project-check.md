@@ -29,7 +29,7 @@ Preconditions:
 - **Plan, build recorded.** After [dev-server.md](./dev-server.md) `dev-first-build` for `$PF` and a `dev:stop`, run `node $V run --label dev-plan-fresh-$PF -- dev --$PF --plan`. Exit code `0`. stdout starts with `Smart start plan (rule: dev-client-fresh, target: dev-client)` and lists one step, `expo start --dev-client`.
 - **Plan runs nothing.** Read the state again. Run `node $V run -- status --json --no-followups`. `devServer.running` is still `false`.
 - **No type errors.** Run `node $V run --label typecheck-clean -- typecheck`. Exit code `0`. stdout has `Typecheck    no type errors`.
-- **Type errors.** Add `const wrong: number = 'text';` as the last line of `APP/src/app/explore.tsx`. Run `node $V run --label typecheck-report -- typecheck`. Exit code `20`. stdout names `src/app/explore.tsx` and `TS2322`. Run `git checkout -- apps/eas-example`.
+- **Type errors.** Add `const wrong: number = 'text';` as the last line of `APP/src/app/explore.tsx`. Run `node $V run --label typecheck-report -- typecheck`. Exit code `20`. stdout names `src/app/explore.tsx` and `TS2322`. Run `git checkout -- apps/eas-example/src/app/explore.tsx`.
 
 ## Gotchas
 

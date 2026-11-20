@@ -31,7 +31,6 @@ Preconditions:
 ## Gotchas
 
 - Right after a full Android build, the emulator is slow. `navigate-open` then gave exit `22` with `attached: false`, and the first screen came about a minute later. On a quiet machine it gave exit `0` and the screen came at once. Keep the `--timeout 240`, and report an exit `22` here with the machine state.
-- Seen once on an earlier scaffold: right after the first `navigate /` on Android, the tree had one more text, `The action 'NAVIGATE' with payload … was not handled by any navigator.` It was gone on the next read.
 - An Expo Go on the same device that is connected to the dev server becomes the target: `navigate --json` then reports `expo-go` and opens an `exp://` link. Check the target in every `navigate-open` proof.
 - `status` reports `0 apps connected` until the first `navigate`.
 - `--no-route-check` opens any link. A proof of `navigate-unknown` must not pass it.
