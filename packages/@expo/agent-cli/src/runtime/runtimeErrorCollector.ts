@@ -310,7 +310,7 @@ export class CdpRuntimeErrorCollector {
  * The runtime's own announcement that it has no CDP debugger, or null.
  *
  * It arrives on `Log.entryAdded` as a `warning`, in italics
- * [observed — 2026-08-25: `"The current JavaScript engine, [3mHermesRuntime[RNBridgeless][23m,
+ * [observed — 2026-08-25: `"The current JavaScript engine, \u001b[3mHermesRuntime[RNBridgeless]\u001b[23m,
  * does not support debugging over the Chrome DevTools Protocol."`], so the text is matched on the
  * part that carries no formatting and no engine name.
  */

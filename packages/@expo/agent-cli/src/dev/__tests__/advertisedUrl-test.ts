@@ -116,7 +116,7 @@ describe(readDevServerLog, () => {
   });
 
   it(`strips the underline escape the CLI wraps the URL in`, () => {
-    const lines = ['Waiting on [4mhttp://localhost:8081[24m'];
+    const lines = ['Waiting on \u001b[4mhttp://localhost:8081\u001b[24m'];
 
     expect(readDevServerLog(lines).advertised?.host).toBe('localhost:8081');
   });

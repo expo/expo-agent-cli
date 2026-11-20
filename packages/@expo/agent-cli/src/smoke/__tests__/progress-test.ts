@@ -40,7 +40,7 @@ function said(build: (say: ReturnType<typeof buildSmokeProgress>) => void): stri
     progress.mockRestore();
   }
   // eslint-disable-next-line no-control-regex
-  return lines.map((line) => line.replace(/\[[0-9;]*m/g, ''));
+  return lines.map((line) => line.replace(/\u001b\[[0-9;]*m/g, ''));
 }
 
 describe(buildSmokeProgress, () => {
