@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Verification harness for @expo/agent-cli. Usage is in SKILL.md next to this file.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,28 +18,31 @@ const pointerFile = path.join(artifactsRoot, 'current-run.json');
 // The committed Expo Router app with expo-dev-client. The skill drives it in place.
 const projectDir = path.join(repoRoot, 'apps/eas-example');
 // Native builds are shared by every checkout on this machine, keyed by fingerprint.
-const buildCacheDir = path.join(
+const home = path.resolve(
   process.env.AGENT_CLI_VERIFY_HOME ??
     path.join(
       os.homedir(),
       process.platform === 'darwin' ? 'Library/Caches' : '.cache',
       'agent-cli-verify'
-    ),
-  'build-cache'
+    )
 );
-// The helper's own "no result" exit code. It is outside the exit codes of the CLI.
+const buildCacheDir = path.join(home, 'build-cache');
+// The helper's own exit codes. They are outside the exit codes of the CLI.
 const NO_RESULT = 124;
+const HELPER_ERROR = 125;
 const STATUS = ['status', '--json', '--no-followups'];
 
 function fail(message) {
   process.stderr.write(`verify: ${message}\n`);
-  process.exit(1);
+  process.exit(HELPER_ERROR);
 }
 
 /** The run in progress, or null. */
 function currentRun() {
   if (!fs.existsSync(pointerFile)) return null;
-  const run = JSON.parse(fs.readFileSync(pointerFile, 'utf8'));
+  const run = parseJson(fs.readFileSync(pointerFile, 'utf8'));
+  if (!run?.id)
+    fail(`${pointerFile} is not a run pointer. Delete it, then run "verify.mjs launch".`);
   return { ...run, evidenceDir: path.join(artifactsRoot, run.id) };
 }
 
@@ -52,11 +56,24 @@ function seconds(value, name) {
   return number;
 }
 
-function appStatus() {
-  return spawnSync('git', ['status', '--porcelain', '--', 'apps/eas-example'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  }).stdout.trimEnd();
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/** The uncommitted state of the app: the changed files, and a hash that also covers their content. */
+function appState() {
+  const git = (...args) =>
+    spawnSync('git', [...args, '--', 'apps/eas-example'], { cwd: repoRoot, encoding: 'utf8' })
+      .stdout;
+  const status = git('status', '--porcelain').trimEnd();
+  const hash = createHash('sha1')
+    .update(status + git('diff', 'HEAD'))
+    .digest('hex');
+  return { appStatus: status, appHash: hash };
 }
 
 function childEnv() {
@@ -97,6 +114,7 @@ function buildIsStale() {
  * only the CLI process, so a detached dev server that it started stays up.
  */
 async function execCli(argv, { echo = false, killAfter = 600 } = {}) {
+  if (!fs.existsSync(bundle)) fail('the CLI bundle is missing. Run "verify.mjs launch".');
   const startedAt = Date.now();
   const child = spawn(process.execPath, [bin, ...argv], {
     cwd: projectDir,
@@ -170,11 +188,16 @@ async function poll(argv, accept, { timeout, interval, killAfter = 60 }) {
   }
 }
 
-function parseJson(text) {
+function moveInto(source, target) {
   try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+    fs.renameSync(source, target);
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+    // Another volume: copy next to the cache first, then rename.
+    const staged = path.join(home, `incoming-${process.pid}`);
+    fs.rmSync(staged, { recursive: true, force: true });
+    fs.cpSync(source, staged, { recursive: true });
+    fs.renameSync(staged, target);
   }
 }
 
@@ -188,9 +211,10 @@ function linkBuildCache() {
     if (fs.readlinkSync(link) === buildCacheDir) return;
     fs.rmSync(link);
   } else if (stat) {
+    // A rename is atomic, so the shared cache never holds a partial build.
     for (const name of fs.readdirSync(link)) {
       const target = path.join(buildCacheDir, name);
-      if (!fs.existsSync(target)) fs.cpSync(path.join(link, name), target, { recursive: true });
+      if (!fs.existsSync(target)) moveInto(path.join(link, name), target);
     }
     fs.rmSync(link, { recursive: true });
   }
@@ -198,8 +222,6 @@ function linkBuildCache() {
 }
 
 async function launch() {
-  const previous = currentRun();
-  if (previous) fail(`run ${previous.id} is in progress. Run "verify.mjs cleanup" first.`);
   if (!fs.existsSync(path.join(projectDir, 'node_modules', 'expo'))) {
     fail('apps/eas-example has no node_modules. Run "bun install" at the repository root.');
   }
@@ -207,11 +229,14 @@ async function launch() {
   if (build.status !== 0) fail('"bun run build" failed.');
   linkBuildCache();
 
-  const id = new Date().toISOString().replace(/[:.]/g, '-');
-  // `appStatus` lets cleanup tell a leftover recipe edit from a change that was there before.
-  const run = { id, startedAt: Date.now(), appStatus: appStatus() };
-  fs.mkdirSync(path.join(artifactsRoot, id), { recursive: true });
-  fs.writeFileSync(pointerFile, JSON.stringify(run, null, 2));
+  // A second launch in one run only builds again. The run and its evidence continue.
+  if (!currentRun()) {
+    const id = new Date().toISOString().replace(/[:.]/g, '-');
+    // The app state lets cleanup tell a leftover recipe edit from a change that was there before.
+    const run = { id, startedAt: Date.now(), ...appState() };
+    fs.mkdirSync(path.join(artifactsRoot, id), { recursive: true });
+    fs.writeFileSync(pointerFile, JSON.stringify(run, null, 2));
+  }
   process.stdout.write(
     `${JSON.stringify({ ready: true, ...currentRun(), projectDir, buildCacheDir, cachedBuilds: fs.readdirSync(buildCacheDir) }, null, 2)}\n`
   );
@@ -222,6 +247,7 @@ async function runCommand(args) {
   const usage =
     'usage: verify.mjs run [--label <name>] [--kill-after <seconds>] [--until <regex> [--timeout <seconds>]] -- <cli arguments>';
   let parsed;
+  let pattern;
   try {
     parsed = parseArgs({
       args,
@@ -233,30 +259,32 @@ async function runCommand(args) {
         'kill-after': { type: 'string' },
       },
     });
+    pattern = parsed.values.until === undefined ? null : new RegExp(parsed.values.until);
   } catch (error) {
     fail(`${error.message}\n${usage}`);
   }
   const { values, positionals: argv } = parsed;
   if (argv.length === 0) fail(usage);
-  const killAfter = values['kill-after'] && seconds(values['kill-after'], '--kill-after');
+  if (buildIsStale()) fail('the CLI bundle is older than src/. Run "verify.mjs launch".');
+  const killAfter =
+    values['kill-after'] === undefined ? null : seconds(values['kill-after'], '--kill-after');
 
-  if (values.until === undefined) {
-    const result = await execCli(argv, { echo: true, killAfter: killAfter || 600 });
+  if (!pattern) {
+    const result = await execCli(argv, { echo: true, killAfter: killAfter ?? 600 });
     record(run, result, values.label);
-    process.exit(result.code);
+    return result.code;
   }
-  const pattern = new RegExp(values.until);
   const { result, matched, attempts } = await poll(argv, ({ stdout }) => pattern.test(stdout), {
     timeout: seconds(values.timeout, '--timeout'),
     interval: 4,
-    killAfter: killAfter || 60,
+    killAfter: killAfter ?? 60,
   });
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   const outcome = `${matched ? 'matched' : 'did not match'} /${values.until}/ after ${attempts} attempts`;
   record(run, result, values.label, `until: ${outcome}`);
   process.stderr.write(`verify: ${outcome}\n`);
-  process.exit(matched ? result.code : NO_RESULT);
+  return matched ? result.code : NO_RESULT;
 }
 
 async function doctor() {
@@ -267,7 +295,7 @@ async function doctor() {
     version: null,
     run,
     projectInstalled: fs.existsSync(path.join(projectDir, 'node_modules', 'expo')),
-    appStatus: appStatus(),
+    appStatus: appState().appStatus,
     statusError: null,
     devServer: null,
     binding: null,
@@ -300,7 +328,7 @@ async function doctor() {
     facts.projectInstalled &&
     !facts.statusError;
   process.stdout.write(`${JSON.stringify({ ok, ...facts }, null, 2)}\n`);
-  process.exit(ok ? 0 : 1);
+  return ok ? 0 : 1;
 }
 
 /** Wait until the project's dev server answers. A native build can take many minutes. */
@@ -317,7 +345,12 @@ async function waitServer(args) {
     interval: 15,
   });
   record(run, result, 'wait-server');
-  if (!matched) fail(`no dev server after ${minutes} minutes. Run "verify.mjs run -- dev:logs".`);
+  if (!matched) {
+    process.stderr.write(
+      `verify: no dev server after ${minutes} minutes. Run "verify.mjs run -- dev:logs".\n`
+    );
+    return NO_RESULT;
+  }
   process.stdout.write(`${JSON.stringify({ running: true, url: serverOf(result).url })}\n`);
 }
 
@@ -327,7 +360,6 @@ async function cleanup() {
     process.stdout.write('verify: no run in progress. Nothing to clean.\n');
     return;
   }
-  if (!fs.existsSync(bundle)) fail('the CLI bundle is missing. Run "bun run build", then cleanup.');
   const stop = await execCli(['dev:stop', '--release', '--json', '--no-followups']);
   record(run, stop, 'cleanup-dev-stop');
   if (stop.code !== 0) {
@@ -346,10 +378,10 @@ async function cleanup() {
   }
   fs.rmSync(pointerFile);
   process.stdout.write(`verify: evidence kept at ${run.evidenceDir}\n`);
-  const status = appStatus();
-  if (status !== run.appStatus) {
+  const app = appState();
+  if (app.appHash !== run.appHash) {
     fail(
-      `apps/eas-example changed during the run. Cleanup does not touch it. Undo a recipe edit by hand:\n${status}`
+      `apps/eas-example changed during the run. Cleanup does not touch it. Undo a recipe edit by hand:\n${app.appStatus}`
     );
   }
 }
@@ -357,6 +389,9 @@ async function cleanup() {
 /** Delete the generated native projects and the CLI's records. The shared build cache stays. */
 async function purge() {
   if (currentRun()) fail('a run is in progress. Run "verify.mjs cleanup" first.');
+  if (fs.existsSync(bundle) && parseJson((await execCli(STATUS)).stdout)?.devServer?.running) {
+    fail('a dev server runs for the app. Stop it with "dev:stop" first.');
+  }
   for (const dir of ['ios', 'android', '.expo']) {
     fs.rmSync(path.join(projectDir, dir), { recursive: true, force: true });
   }
@@ -372,7 +407,8 @@ const commands = {
   cleanup,
   purge,
 };
-if (!commands[command]) {
+if (!Object.hasOwn(commands, command ?? '')) {
   fail(`usage: verify.mjs <${Object.keys(commands).join('|')}>`);
 }
-await commands[command](rest);
+// `process.exit` would cut output that a pipe has not read yet.
+process.exitCode = (await commands[command](rest)) ?? 0;
