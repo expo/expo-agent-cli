@@ -7,14 +7,15 @@ import { CommandError } from '../utils/errors';
 import { openAppOnEasAsync } from './openAppEas';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 
-/** The session a reopen used, and whether its open reloads an app that is already attached. */
+/** The session a reopen used, and the targets that the open replaces. */
 export interface EasReopen {
   sessionId: string | null;
   /**
-   * A development build gets the launcher URL, which loads the app again. Expo Go gets its route
-   * link, which only moves an app that is already loaded: no new debugger target appears.
+   * Targets listed right before the open, when the open reloads the app. A development build gets
+   * the launcher URL, which loads the app again. Expo Go gets its route link, which only moves an
+   * app that is already loaded: its target stays, so none is stale.
    */
-  reloadsApp: boolean;
+  staleTargetIds: string[];
 }
 
 /**
@@ -60,7 +61,10 @@ export async function reopenEasAsync(
       'DEVICE_UNAVAILABLE',
       result.reason ?? 'The EAS app could not be opened.'
     );
-  return { sessionId: result.sessionId, reloadsApp: !expoGo };
+  return {
+    sessionId: result.sessionId,
+    staleTargetIds: expoGo ? [] : (result.targetsBeforeOpen ?? []),
+  };
 }
 
 /** A Metro with no tunnel cannot serve an EAS session, which runs off this machine. */

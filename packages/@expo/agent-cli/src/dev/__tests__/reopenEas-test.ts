@@ -21,6 +21,7 @@ const opened = {
   tunnelHost: 'abc.tunnel.example',
   sessionUrl: null,
   reason: null,
+  targetsBeforeOpen: ['old'],
 };
 
 beforeEach(() => {
@@ -52,7 +53,7 @@ it.each([
 
   await expect(reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL)).resolves.toEqual({
     sessionId: 'sess-1',
-    reloadsApp,
+    staleTargetIds: reloadsApp ? ['old'] : [],
   });
 });
 

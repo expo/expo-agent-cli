@@ -11,6 +11,7 @@ import { acquireCloudBindingAsync } from '../../deviceBinding/cloud';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { registryDirectory } from '../../deviceBinding/registry';
 import { openRouteAsync } from '../../navigate/openRoute';
+import { probeDevServerAsync } from '../../runtime/devServer';
 import { resolveRouteUrlAsync } from '../../navigate/routeResolution';
 import { resolveEasCli } from '../../utils/easCli';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';
@@ -49,6 +50,7 @@ vi.mock('../../deviceBinding/cloud', async () => {
   };
 });
 vi.mock('../../navigate/openRoute', () => ({ openRouteAsync: vi.fn() }));
+vi.mock('../../runtime/devServer', () => ({ probeDevServerAsync: vi.fn() }));
 vi.mock('../../navigate/routeResolution', () => ({ resolveRouteUrlAsync: vi.fn() }));
 vi.mock('../../utils/easCli', async () => {
   const actual = await vi.importActual<typeof import('../../utils/easCli')>('../../utils/easCli');
@@ -232,6 +234,73 @@ describe(findLatestSimulatorBuildIdAsync, () => {
     } as any);
     await expect(findLatestSimulatorBuildIdAsync(projectRoot, 'ios', EAS_CLI)).resolves.toBeNull();
     await expect(findLatestSimulatorBuildIdAsync(projectRoot, 'ios', null)).resolves.toBeNull();
+  });
+});
+
+describe('the target ids read before a reused open', () => {
+  const reused = {
+    platform: 'ios',
+    devServerUrl: DEV_SERVER,
+    keepSession: true,
+    buildId: null,
+  } as const;
+  const target = (id: string) => ({ id }) as any;
+  const unreachable = { reachable: false, targets: [], reason: 'refused' };
+
+  beforeEach(() => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
+    vi.mocked(openRouteAsync).mockResolvedValue({ exitCode: 0, command: 'x' } as any);
+  });
+
+  it(`reads them after the tunnel wait and right before the open`, async () => {
+    const order: string[] = [];
+    vi.mocked(fetchAdvertisedUrlAsync).mockImplementation(async () => {
+      order.push('tunnel');
+      return { url: 'https://abc.tunnel.example', host: 'abc.tunnel.example', hostType: 'tunnel' };
+    });
+    vi.mocked(probeDevServerAsync).mockImplementation(async () => {
+      order.push('probe');
+      return { reachable: true, targets: [target('old')] };
+    });
+    vi.mocked(openRouteAsync).mockImplementation(async () => {
+      order.push('open');
+      return { exitCode: 0, command: 'x' } as any;
+    });
+
+    const report = await openAppOnEasAsync(projectRoot, { ...reused, expoGo: false });
+
+    expect(report).toMatchObject({ opened: true, targetsBeforeOpen: ['old'] });
+    expect(order.slice(-2)).toEqual(['probe', 'open']);
+  });
+
+  it(`asks again after an unreachable read, and never takes it for an empty list`, async () => {
+    vi.mocked(probeDevServerAsync)
+      .mockResolvedValueOnce(unreachable)
+      .mockResolvedValueOnce(unreachable)
+      .mockResolvedValue({ reachable: true, targets: [target('old')] });
+
+    const report = await openAppOnEasAsync(projectRoot, { ...reused, expoGo: false });
+
+    expect(report).toMatchObject({ opened: true, targetsBeforeOpen: ['old'] });
+  });
+
+  it(`does not open the app when no read ever reached the dev server`, async () => {
+    vi.mocked(probeDevServerAsync).mockResolvedValue(unreachable);
+
+    const report = await openAppOnEasAsync(projectRoot, { ...reused, expoGo: false });
+
+    expect(report).toMatchObject({ opened: false, targetsBeforeOpen: null });
+    expect(report.reason).toContain('debugger targets');
+    expect(openRouteAsync).not.toHaveBeenCalled();
+  });
+
+  it(`reads none for Expo Go, whose open keeps its target`, async () => {
+    const report = await openAppOnEasAsync(projectRoot, { ...reused, expoGo: true });
+
+    expect(report).toMatchObject({ opened: true, targetsBeforeOpen: null });
+    expect(probeDevServerAsync).not.toHaveBeenCalled();
   });
 });
 

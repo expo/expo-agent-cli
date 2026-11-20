@@ -48,13 +48,32 @@ export async function readAppLoadedAsync(
 
 /** How often the debugger target list is read again while a wait for a loaded app runs. */
 const LOADED_APP_POLL_MS = 500;
+/** How often a running probe checks `stillWanted`. */
+const STILL_WANTED_CHECK_MS = 100;
+
+/** One probe that the deadline and `stillWanted` both cut short, so neither waits on a hung request. */
+async function probeUntilAsync(devServerUrl: string, deadline: number, stillWanted: () => boolean) {
+  const stop = new AbortController();
+  const timer = setInterval(() => {
+    if (!stillWanted() || Date.now() >= deadline) stop.abort();
+  }, STILL_WANTED_CHECK_MS);
+  const left = Math.max(deadline - Date.now(), APP_LOADED_PROBE_FLOOR_MS);
+  try {
+    return await probeDevServerAsync(devServerUrl, {
+      signal: AbortSignal.any([stop.signal, AbortSignal.timeout(left)]),
+    });
+  } finally {
+    clearInterval(timer);
+  }
+}
 
 /**
  * How a wait for a loaded app ended.
  *
  * - `loaded`: the scope holds `targets`, and the runtime did not answer that no bundle ran.
  * - `not-loaded`: the scope held `targets`, and the runtime answered that no bundle ran.
- * - `not-attached`: the scope held no target at the deadline. `devServerAnswered` is the last read.
+ * - `not-attached`: the scope held no target at the deadline. `devServerAnswered` is whether any
+ *   poll of the wait reached the dev server.
  * - `abandoned`: the caller's `stillWanted` said no first.
  */
 export type LoadedAppWait =
@@ -96,8 +115,10 @@ export async function waitForLoadedAppAsync(
   // An app that a poll saw stays the answer when the list is empty for the last read: a short gap
   // in the list must not start a recovery that stops a loading app.
   let seen: Extract<LoadedAppWait, { kind: 'not-loaded' }> | null = null;
+  let reached = false;
   for (;;) {
-    const probe = await probeDevServerAsync(devServerUrl);
+    const probe = await probeUntilAsync(devServerUrl, deadline, stillWanted);
+    reached ||= probe.reachable;
     const scoped = probe.reachable ? (await classify(probe.targets, deadline)).read : [];
     const read = scoped.filter((target) => !stale.has(target.id));
     if (read.length > 0) {
@@ -107,7 +128,7 @@ export async function waitForLoadedAppAsync(
     }
     if (!stillWanted()) return { kind: 'abandoned' };
     if (Date.now() >= deadline) {
-      return seen ?? { kind: 'not-attached', devServerAnswered: probe.reachable };
+      return seen ?? { kind: 'not-attached', devServerAnswered: reached };
     }
     await new Promise((resolve) => setTimeout(resolve, LOADED_APP_POLL_MS));
   }

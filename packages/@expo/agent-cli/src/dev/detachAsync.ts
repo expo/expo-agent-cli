@@ -35,7 +35,6 @@ import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, statedSmokePlatform } from '../smoke/suggest';
 import { requestsTunnel } from '../start/followUps';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
-import { probeDevServerAsync } from '../runtime/devServer';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
@@ -332,16 +331,11 @@ async function sessionForExistingRunAsync(
       : null;
     return { kind: 'followed', sessionId };
   }
-  // Read before the open: an open that reloads an attached app leaves its old target listed for a
-  // while. An open that only moves a loaded app keeps its target, so that target still counts.
-  const before = options.waitReady
-    ? (await probeDevServerAsync(lock.url)).targets.map((target) => target.id)
-    : [];
   const reopen = await reopenEasAsync(projectRoot, options, lock.url, tunnelUrl);
   return {
     kind: 'reopened',
     sessionId: reopen?.sessionId ?? null,
-    staleTargetIds: reopen?.reloadsApp ? before : [],
+    staleTargetIds: reopen?.staleTargetIds ?? [],
   };
 }
 
