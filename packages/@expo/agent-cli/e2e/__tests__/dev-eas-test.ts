@@ -1127,6 +1127,21 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
+  it('--wait-ready says the load is unknown when the runtime cannot be asked', async () => {
+    const projectRoot = await setupAsync('go-app');
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready'],
+        { env: easRunEnv(projectRoot, 8538) }
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/App\s+attached · load unknown · \d+ms/);
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
   it('--wait-ready exits 22 when no app of the session attaches', async () => {
     const projectRoot = await setupAsync('go-app');
     try {

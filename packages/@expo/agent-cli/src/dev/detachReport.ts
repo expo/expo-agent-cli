@@ -203,7 +203,7 @@ function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): 
   }
   if (report.app) {
     lines.push(
-      `${label('App')}attached${report.app.loaded ? ' · loaded' : ''} · ${report.app.waitedMs}ms`
+      `${label('App')}attached · ${report.app.loaded ? 'loaded' : 'load unknown'} · ${report.app.waitedMs}ms`
     );
   }
   if (report.tunnelUrl) {
