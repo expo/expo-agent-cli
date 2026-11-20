@@ -6,7 +6,10 @@ import { decideStartPlan } from '../../plan/decide';
 import type { StartPlan } from '../../project/types';
 import { applyToolchainProbe } from '../planLocation';
 import type { ToolchainProbe } from '../types';
-import { makeProjectState, makeDevClientState } from '../../project/__tests__/projectStateFixture';
+import {
+  createProjectState,
+  createDevClientState,
+} from '../../project/__tests__/projectStateFixture';
 
 function probe(overrides: Partial<ToolchainProbe> = {}): ToolchainProbe {
   return {
@@ -27,7 +30,10 @@ function runsOnOf(plan: StartPlan): [string, string | null][] {
 
 describe('where each row of the decision table runs', () => {
   it(`labels an Expo Go plan as building nothing`, () => {
-    const plan = decideStartPlan(makeProjectState(), { platform: 'ios', requestedPlatform: 'ios' });
+    const plan = decideStartPlan(createProjectState(), {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+    });
 
     expect(plan.rule).toBe('expo-go');
     // A dev server is not a build, and answering "where does it run" for it would make the key
@@ -37,14 +43,14 @@ describe('where each row of the decision table runs', () => {
   });
 
   it(`labels a web plan as building nothing`, () => {
-    const plan = decideStartPlan(makeProjectState(), { platform: 'web' });
+    const plan = decideStartPlan(createProjectState(), { platform: 'web' });
 
     expect(runsOnOf(plan)).toEqual([['start', null]]);
     expect(plan.buildLocation).toBeNull();
   });
 
   it(`labels a fresh dev-client plan as building nothing, because it builds nothing`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       platform: 'ios',
       lastBuild: { ios: { hash: 'abc123def4567890', sources: null } },
     });
@@ -55,7 +61,7 @@ describe('where each row of the decision table runs', () => {
   });
 
   it(`labels a stale dev-client plan's prebuild and build as local, and names the requirement`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+    const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
 
     expect(plan.rule).toBe('dev-client-stale');
     expect(runsOnOf(plan)).toEqual([
@@ -77,7 +83,7 @@ describe('where each row of the decision table runs', () => {
 
   it(`labels a bare stale plan's build as local, with no prebuild to label`, () => {
     const plan = decideStartPlan(
-      makeDevClientState({ nativeDirs: { ios: false, android: true } }),
+      createDevClientState({ nativeDirs: { ios: false, android: true } }),
       { platform: 'android' }
     );
 
@@ -91,9 +97,12 @@ describe('where each row of the decision table runs', () => {
   });
 
   it(`labels the needs-dev-client plan, whose install step builds nothing`, () => {
-    const plan = decideStartPlan(makeProjectState({ expoGo: { compatible: false, reasons: [] } }), {
-      platform: 'ios',
-    });
+    const plan = decideStartPlan(
+      createProjectState({ expoGo: { compatible: false, reasons: [] } }),
+      {
+        platform: 'ios',
+      }
+    );
 
     expect(plan.rule).toBe('needs-dev-client');
     expect(runsOnOf(plan)).toEqual([
@@ -106,7 +115,7 @@ describe('where each row of the decision table runs', () => {
 
 describe('applyToolchainProbe', () => {
   it(`says the machine can do it, and leaves the plan otherwise alone`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+    const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
     const applied = applyToolchainProbe(plan, probe());
 
     expect(applied.buildLocation).toMatchObject({
@@ -119,7 +128,7 @@ describe('applyToolchainProbe', () => {
   });
 
   it(`names the EAS route up front when the local toolchain is missing`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+    const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
     const applied = applyToolchainProbe(
       plan,
       probe({
@@ -139,7 +148,7 @@ describe('applyToolchainProbe', () => {
   });
 
   it(`does not call an unprobeable machine a machine without Xcode`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+    const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
     const applied = applyToolchainProbe(
       plan,
       probe({ status: 'unknown', detail: 'The ios toolchain could not be probed: EPERM' })
@@ -154,7 +163,7 @@ describe('applyToolchainProbe', () => {
   });
 
   it(`carries the probe's caveats into the reasons, where a reader will meet them`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { platform: 'android' });
+    const plan = decideStartPlan(createDevClientState(), { platform: 'android' });
     const applied = applyToolchainProbe(
       plan,
       probe({
@@ -172,7 +181,7 @@ describe('applyToolchainProbe', () => {
   });
 
   it(`is a no-op for a plan that builds nothing`, () => {
-    const plan = decideStartPlan(makeProjectState(), { platform: 'ios' });
+    const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
     expect(applyToolchainProbe(plan, probe())).toBe(plan);
   });
@@ -194,7 +203,7 @@ describe('folding the probe into a plan that already chose its backend', () => {
   }
 
   it(`does not repeat the sentence the selection already said`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       platform: 'ios',
       buildBackend: chosen('default'),
     });
@@ -205,7 +214,7 @@ describe('folding the probe into a plan that already chose its backend', () => {
   });
 
   it(`does say it for a chosen local build the machine cannot perform`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       platform: 'ios',
       buildBackend: chosen('flag'),
     });
@@ -221,7 +230,7 @@ describe('folding the probe into a plan that already chose its backend', () => {
   });
 
   it(`carries the caveats whatever chose the backend`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       platform: 'android',
       buildBackend: chosen('config'),
     });

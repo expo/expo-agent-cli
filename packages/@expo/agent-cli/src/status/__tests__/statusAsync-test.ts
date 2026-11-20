@@ -25,7 +25,7 @@ import { getPersistedAgentIdsAsync } from '../../skills/agents';
 import { discoverSkillsAsync } from '../../skills/discovery';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
-import { makeProjectState } from '../../project/__tests__/projectStateFixture';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../installed', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../installed')>()),
@@ -101,7 +101,7 @@ const devServerUrl = 'http://127.0.0.1:8081';
 const options = { devServerUrl };
 
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
-  const state = makeProjectState(overrides);
+  const state = createProjectState(overrides);
   vi.mocked(probeProjectStateAsync).mockResolvedValue(state);
   return state;
 }

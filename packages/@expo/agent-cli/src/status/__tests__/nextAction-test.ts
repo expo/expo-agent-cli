@@ -13,9 +13,9 @@ import {
   type NextTargetFacts,
 } from '../nextAction';
 import type { DevServerStatus, LocalDeviceStatus } from '../types';
-import { makeProjectState } from '../../project/__tests__/projectStateFixture';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
-const state = makeProjectState();
+const state = createProjectState();
 
 function server(overrides: Partial<DevServerStatus> = {}): DevServerStatus {
   return {

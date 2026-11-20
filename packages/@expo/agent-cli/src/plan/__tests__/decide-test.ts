@@ -7,7 +7,10 @@ import type { LastBuildRecord } from '../lastBuild';
 import type { NativePlatform } from '../types';
 import type { RunTargetChoice } from '../runTarget';
 import { INSTALL_DEPENDENCIES_COMMAND } from '../../project/expoApp';
-import { makeProjectState, makeDevClientState } from '../../project/__tests__/projectStateFixture';
+import {
+  createProjectState,
+  createDevClientState,
+} from '../../project/__tests__/projectStateFixture';
 
 /**
  * A recorded build that stored only a hash, which is what an older CLI wrote.
@@ -82,7 +85,7 @@ describe(decideStartPlan, () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
   describe('rule: not-expo-app', () => {
     it(`should plan nothing for a directory that declares no expo dependency`, () => {
-      const plan = decideStartPlan(makeProjectState({ app: 'not-expo-app' }));
+      const plan = decideStartPlan(createProjectState({ app: 'not-expo-app' }));
 
       expect(plan.rule).toBe('not-expo-app');
       expect(plan.target).toBe('none');
@@ -95,14 +98,16 @@ describe(decideStartPlan, () => {
     // client" and planned an install into whatever repository the caller was standing in.
     it(`should never plan an install into a directory that is not an Expo app`, () => {
       const plan = decideStartPlan(
-        makeDevClientState({ app: 'not-expo-app', usesDevClient: false })
+        createDevClientState({ app: 'not-expo-app', usesDevClient: false })
       );
 
       expect(argvOf(plan.steps)).toEqual([]);
     });
 
     it(`should outrank the web short-circuit, which is also about an app that is not here`, () => {
-      const plan = decideStartPlan(makeProjectState({ app: 'not-expo-app' }), { platform: 'web' });
+      const plan = decideStartPlan(createProjectState({ app: 'not-expo-app' }), {
+        platform: 'web',
+      });
 
       expect(plan.rule).toBe('not-expo-app');
       expect(plan.steps).toEqual([]);
@@ -110,7 +115,7 @@ describe(decideStartPlan, () => {
 
     it(`should outrank checked-in native directories`, () => {
       const plan = decideStartPlan(
-        makeProjectState({ app: 'not-expo-app', nativeDirs: { ios: true, android: true } })
+        createProjectState({ app: 'not-expo-app', nativeDirs: { ios: true, android: true } })
       );
 
       expect(plan.rule).toBe('not-expo-app');
@@ -125,7 +130,7 @@ describe(decideStartPlan, () => {
       ['an EAS build', { platform: 'android' as const, buildBackend: backend('eas') }],
     ])(`should plan nothing but the bare install for %s`, (_, options) => {
       const plan = decideStartPlan(
-        makeProjectState({
+        createProjectState({
           app: 'dependencies-not-installed',
           sdkVersion: null,
           usesDevClient: false,
@@ -145,7 +150,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: web', () => {
     it(`should start the dev server for web when the web platform is requested`, () => {
-      const plan = decideStartPlan(makeProjectState(), { platform: 'web' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'web' });
 
       expect(plan.rule).toBe('web');
       expect(plan.target).toBe('web');
@@ -155,7 +160,7 @@ describe(decideStartPlan, () => {
 
     it(`should choose web over every native rule`, () => {
       const plan = decideStartPlan(
-        makeDevClientState({ nativeDirs: { ios: true, android: true } }),
+        createDevClientState({ nativeDirs: { ios: true, android: true } }),
         { platform: 'web' }
       );
 
@@ -163,7 +168,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should warn when the project has no react-native-web dependency`, () => {
-      const plan = decideStartPlan(makeProjectState({ hasWeb: false }), { platform: 'web' });
+      const plan = decideStartPlan(createProjectState({ hasWeb: false }), { platform: 'web' });
 
       expect(plan.rule).toBe('web');
       expect(plan.reasons.join('\n')).toMatch(/react-native-web is not a dependency/);
@@ -172,7 +177,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: expo-go', () => {
     it(`should only start the dev server for an Expo Go compatible project`, () => {
-      const plan = decideStartPlan(makeProjectState(), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
       expect(plan.rule).toBe('expo-go');
       expect(plan.target).toBe('expo-go');
@@ -182,14 +187,16 @@ describe(decideStartPlan, () => {
     });
 
     it(`should not choose Expo Go when the project depends on expo-dev-client`, () => {
-      const plan = decideStartPlan(makeProjectState({ usesDevClient: true }), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState({ usesDevClient: true }), {
+        platform: 'ios',
+      });
 
       expect(plan.rule).not.toBe('expo-go');
     });
 
     it(`should not choose Expo Go when native directories are checked in`, () => {
       const plan = decideStartPlan(
-        makeProjectState({ nativeDirs: { ios: true, android: false } }),
+        createProjectState({ nativeDirs: { ios: true, android: false } }),
         {
           platform: 'ios',
         }
@@ -202,7 +209,7 @@ describe(decideStartPlan, () => {
     // it serves a bundle and waits. Following the plan left an agent with a dev server and no way
     // to reach the app, and `--ios` changed nothing in the argv even though it is forwarded.
     it(`should not claim to open anything when no platform flag was typed`, () => {
-      const reason = decideStartPlan(makeProjectState(), { platform: 'ios' }).steps[0]!.reason;
+      const reason = decideStartPlan(createProjectState(), { platform: 'ios' }).steps[0]!.reason;
 
       expect(reason).not.toMatch(/^Opens/);
       expect(reason).toContain('opens nothing on its own');
@@ -213,7 +220,7 @@ describe(decideStartPlan, () => {
       ['ios', 'an iOS simulator'],
       ['android', 'an Android device or emulator'],
     ] as const)(`should plan and describe the open that --%s performs`, (platform, device) => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform,
         requestedPlatform: platform,
       });
@@ -227,14 +234,14 @@ describe(decideStartPlan, () => {
 
     // The platform to *build* for is always resolved; only a typed flag reaches `expo start`.
     it(`should not invent a flag from the platform it fell back to`, () => {
-      const plan = decideStartPlan(makeProjectState(), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
       expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
     });
 
     // `--web` serves a browser; the native rows have no business opening one.
     it(`should not put --web on a native start step`, () => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         requestedPlatform: 'web',
       });
@@ -245,7 +252,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: dev-client-fresh', () => {
     it(`should only start the dev server when the fingerprint matches the last build`, () => {
-      const state = makeDevClientState();
+      const state = createDevClientState();
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -260,7 +267,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should plan the open a development build gets from --ios`, () => {
-      const state = makeDevClientState();
+      const state = createDevClientState();
       const plan = decideStartPlan(state, {
         platform: 'ios',
         requestedPlatform: 'ios',
@@ -274,7 +281,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should ignore a matching hash recorded for another platform`, () => {
-      const state = makeDevClientState();
+      const state = createDevClientState();
       const plan = decideStartPlan(state, {
         platform: 'android',
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -284,7 +291,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should start Expo Go compatible projects in the dev client when one is a dependency`, () => {
-      const state = makeProjectState({ usesDevClient: true });
+      const state = createProjectState({ usesDevClient: true });
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -301,7 +308,7 @@ describe(decideStartPlan, () => {
   describe('the device the app would open on', () => {
     /** A project whose recorded build matches, which is what makes the device the open question. */
     function freshState() {
-      const state = makeDevClientState();
+      const state = createDevClientState();
       return {
         state,
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -362,7 +369,7 @@ describe(decideStartPlan, () => {
     );
 
     it(`should never add an install to a plan that builds, because the build installs`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         appPresence: 'missing',
       });
@@ -377,7 +384,7 @@ describe(decideStartPlan, () => {
     // The bare rows have the same hole and the same fix: native directories checked in say nothing
     // about what is on the simulator.
     it(`should install for a bare project whose device has not got the app`, () => {
-      const state = makeProjectState({
+      const state = createProjectState({
         nativeDirs: { ios: true, android: false },
         usesDevClient: true,
       });
@@ -402,7 +409,7 @@ describe(decideStartPlan, () => {
   // identical `ios/` would spend a minute to produce the file already there.
   describe('rule: dev-client-rebuild', () => {
     it(`should build without prebuilding when only the build config moved`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [appConfig('a'), easJson('changed')] },
       });
       const plan = decideStartPlan(state, {
@@ -417,7 +424,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should say what moved, so the skipped prebuild is not a silent decision`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [easJson('changed')] },
       });
       const plan = decideStartPlan(state, {
@@ -430,7 +437,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should still be a build, so a plan that runs on EAS keeps its build location`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [easJson('changed')] },
       });
       const plan = decideStartPlan(state, {
@@ -447,7 +454,7 @@ describe(decideStartPlan, () => {
     // writes comes from the template, the app config and the plugins the app config applies, and a
     // new dependency is none of the three.
     it(`should build without prebuilding when a native module was added`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: {
           hash: 'head',
           sources: [
@@ -472,7 +479,7 @@ describe(decideStartPlan, () => {
     // Removing one is the same fact in the other direction: `pod install` and the Gradle
     // autolinking read `node_modules` as it is now, and neither reads a file prebuild rewrites.
     it(`should build without prebuilding when a native module was removed`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [appConfig('a')] },
       });
       const plan = decideStartPlan(state, {
@@ -493,7 +500,7 @@ describe(decideStartPlan, () => {
     // *contents* at once, and the prebuild template travels with the SDK — so the native project
     // it would generate really is a different one, and regenerating it is the point.
     it(`should prebuild when an autolinked module's contents changed`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [appConfig('a'), nativeModule('expo-router', 'r2')] },
       });
       const plan = decideStartPlan(state, {
@@ -515,7 +522,7 @@ describe(decideStartPlan, () => {
     // generated code ships a config plugin and is named in the app config to apply it, so the app
     // config moves too — and that source has always demanded a prebuild.
     it(`should prebuild when the module that was added also moved the app config`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: {
           hash: 'head',
           sources: [appConfig('changed'), nativeModule('expo-observe', 'o1')],
@@ -537,7 +544,7 @@ describe(decideStartPlan, () => {
     // movement changes what prebuild writes rather than only what it reads, so it is planned as a
     // prebuild whatever the operation was [asked — Kudo, 2026-09-07].
     it(`should prebuild when the expo package itself moved`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: {
           hash: 'head',
           sources: [appConfig('a'), nativeModule('expo', 'sdk-55')],
@@ -556,7 +563,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should prebuild and build when no build was recorded`, () => {
-      const plan = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+      const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
 
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.target).toBe('dev-client');
@@ -569,7 +576,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should prebuild and build when the fingerprint changed`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'android',
         lastBuild: recorded('android', 'a-different-hash'),
       });
@@ -588,7 +595,7 @@ describe(decideStartPlan, () => {
     // `sources` is what every older CLI wrote, and there is nothing to diff against it. The table
     // cannot tell what moved, so it plans the prebuild it always planned.
     it(`should still prebuild when the record stored only a hash`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         lastBuild: recorded('ios', 'a-different-hash'),
       });
@@ -606,7 +613,7 @@ describe(decideStartPlan, () => {
     // read "no source prebuild owns changed" out of a list it never saw, and skipped the prebuild.
     // A change nobody can account for is the case the conservative default is *for*.
     it(`should prebuild when the hash moved but the diff explains nothing`, () => {
-      const state = makeDevClientState({ fingerprint: { hash: 'head', sources: [] } });
+      const state = createDevClientState({ fingerprint: { hash: 'head', sources: [] } });
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recordedWithSources('ios', 'base', []),
@@ -620,7 +627,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should prebuild when the app config is what moved`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [appConfig('changed'), easJson('a')] },
       });
       const plan = decideStartPlan(state, {
@@ -637,7 +644,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should prebuild when one source of a mixed diff is one prebuild owns`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: 'head', sources: [appConfig('changed'), easJson('changed')] },
       });
       const plan = decideStartPlan(state, {
@@ -650,7 +657,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should build when the fingerprint could not be computed`, () => {
-      const state = makeDevClientState({
+      const state = createDevClientState({
         fingerprint: { hash: null, error: 'fingerprint exited with code 1' },
       });
       const plan = decideStartPlan(state, {
@@ -666,7 +673,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should build when the fingerprint is missing without an error`, () => {
-      const state = makeDevClientState({ fingerprint: { hash: null } });
+      const state = createDevClientState({ fingerprint: { hash: null } });
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recorded('ios', 'any-hash'),
@@ -680,7 +687,7 @@ describe(decideStartPlan, () => {
   describe('rule: bare-stale', () => {
     it(`should build without prebuilding when native directories are checked in`, () => {
       const plan = decideStartPlan(
-        makeDevClientState({ nativeDirs: { ios: true, android: false } }),
+        createDevClientState({ nativeDirs: { ios: true, android: false } }),
         { platform: 'ios' }
       );
 
@@ -692,7 +699,7 @@ describe(decideStartPlan, () => {
 
     it(`should build a bare project that has no expo-dev-client dependency`, () => {
       const plan = decideStartPlan(
-        makeProjectState({ nativeDirs: { ios: false, android: true } }),
+        createProjectState({ nativeDirs: { ios: false, android: true } }),
         {
           platform: 'android',
         }
@@ -704,7 +711,7 @@ describe(decideStartPlan, () => {
 
     it(`should build the requested platform when both native directories exist`, () => {
       const plan = decideStartPlan(
-        makeDevClientState({ nativeDirs: { ios: true, android: true } }),
+        createDevClientState({ nativeDirs: { ios: true, android: true } }),
         { platform: 'android' }
       );
 
@@ -714,7 +721,7 @@ describe(decideStartPlan, () => {
 
     it(`should default to iOS when both native directories exist and no platform is requested`, () => {
       const plan = decideStartPlan(
-        makeDevClientState({ nativeDirs: { ios: true, android: true } })
+        createDevClientState({ nativeDirs: { ios: true, android: true } })
       );
 
       expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
@@ -722,7 +729,7 @@ describe(decideStartPlan, () => {
 
     it(`should infer the platform from the only native directory`, () => {
       const plan = decideStartPlan(
-        makeDevClientState({ nativeDirs: { ios: false, android: true } })
+        createDevClientState({ nativeDirs: { ios: false, android: true } })
       );
 
       expect(argvOf(plan.steps)).toEqual([['expo', 'run:android']]);
@@ -731,7 +738,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: bare-fresh', () => {
     it(`should only start the dev server when the fingerprint matches the last build`, () => {
-      const state = makeDevClientState({ nativeDirs: { ios: true, android: false } });
+      const state = createDevClientState({ nativeDirs: { ios: true, android: false } });
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -745,7 +752,7 @@ describe(decideStartPlan, () => {
 
   describe('rule: needs-dev-client', () => {
     it(`should install expo-dev-client, prebuild, and build`, () => {
-      const state = makeDevClientState({ usesDevClient: false });
+      const state = createDevClientState({ usesDevClient: false });
       const plan = decideStartPlan(state, { platform: 'ios' });
 
       expect(plan.rule).toBe('needs-dev-client');
@@ -764,7 +771,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should install expo-dev-client even when the fingerprint matches a recorded build`, () => {
-      const state = makeDevClientState({ usesDevClient: false });
+      const state = createDevClientState({ usesDevClient: false });
       const plan = decideStartPlan(state, {
         platform: 'ios',
         lastBuild: recorded('ios', state.fingerprint.hash!),
@@ -774,7 +781,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should report an unknown SDK version as the reason it cannot use Expo Go`, () => {
-      const state = makeProjectState({
+      const state = createProjectState({
         sdkVersion: null,
         expoGo: {
           compatible: false,
@@ -791,24 +798,24 @@ describe(decideStartPlan, () => {
 
   describe('plan shape', () => {
     const cases: [string, ProjectState, Parameters<typeof decideStartPlan>[1]][] = [
-      ['web', makeProjectState(), { platform: 'web' }],
-      ['expo-go', makeProjectState(), {}],
+      ['web', createProjectState(), { platform: 'web' }],
+      ['expo-go', createProjectState(), {}],
       [
         'dev-client-fresh',
-        makeDevClientState(),
+        createDevClientState(),
         { platform: 'ios', lastBuild: recorded('ios', 'abc123def4567890') },
       ],
-      ['dev-client-stale', makeDevClientState(), { platform: 'ios' }],
-      ['bare-stale', makeDevClientState({ nativeDirs: { ios: true, android: false } }), {}],
+      ['dev-client-stale', createDevClientState(), { platform: 'ios' }],
+      ['bare-stale', createDevClientState({ nativeDirs: { ios: true, android: false } }), {}],
       [
         'bare-fresh',
-        makeDevClientState({ nativeDirs: { ios: true, android: false } }),
+        createDevClientState({ nativeDirs: { ios: true, android: false } }),
         { lastBuild: recorded('ios', 'abc123def4567890') },
       ],
-      ['needs-dev-client', makeDevClientState({ usesDevClient: false }), { platform: 'ios' }],
+      ['needs-dev-client', createDevClientState({ usesDevClient: false }), { platform: 'ios' }],
       [
         'dev-client-rebuild',
-        makeDevClientState({
+        createDevClientState({
           fingerprint: { hash: 'head', sources: [appConfig('a'), easJson('changed')] },
         }),
         {
@@ -837,7 +844,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should report the probed facts as reasons`, () => {
-      const plan = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+      const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
 
       expect(plan.reasons).toEqual([
         'Expo SDK 54.0.0.',
@@ -855,7 +862,7 @@ describe(decideStartPlan, () => {
   // an argv that opens nothing on iOS [observed — friction run 2, 2026-08-23].
   describe('the platform reason', () => {
     it(`should say so when the caller named the platform`, () => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         requestedPlatform: 'ios',
       });
@@ -864,7 +871,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should name the inference, and say the plan opens nothing on it`, () => {
-      const plan = decideStartPlan(makeProjectState(), { platform: 'ios' });
+      const plan = decideStartPlan(createProjectState(), { platform: 'ios' });
 
       expect(plan.steps[0]!.argv).toEqual(['expo', 'start', '--go']);
       expect(plan.reasons).toContain(
@@ -873,7 +880,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should say the plan builds for an inferred platform when a step does`, () => {
-      const plan = decideStartPlan(makeDevClientState(), { platform: 'android' });
+      const plan = decideStartPlan(createDevClientState(), { platform: 'android' });
 
       expect(plan.steps.at(-1)!.argv).toEqual(['expo', 'run:android']);
       expect(plan.reasons).toContain(
@@ -885,7 +892,7 @@ describe(decideStartPlan, () => {
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   describe('the EAS backend', () => {
     it(`should replace prebuild and run:* with one cloud build and a dev server`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
       });
@@ -900,7 +907,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should label the cloud build as running on eas and the dev server as running nowhere`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
       });
@@ -913,7 +920,7 @@ describe(decideStartPlan, () => {
 
     it(`should point the plan's build location at the cloud, with the local build as the alternative`, () => {
       const chosen = backend('eas');
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'android',
         buildBackend: chosen,
       });
@@ -927,7 +934,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should say why the backend was chosen, in the plan's own reasons`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('eas', {
           why: 'Building in the cloud on EAS: this host runs linux.',
@@ -941,7 +948,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should tell the reader that the artifact has to be installed before the dev server helps`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
       });
@@ -953,7 +960,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should configure eas.json first when the project has none`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
         easJson: false,
@@ -966,7 +973,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should not configure eas.json when the project already has one`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
         easJson: true,
@@ -984,7 +991,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should keep the install step of a project that has no expo-dev-client yet`, () => {
-      const state = makeProjectState({ expoGo: { compatible: false, reasons: [] } });
+      const state = createProjectState({ expoGo: { compatible: false, reasons: [] } });
       const plan = decideStartPlan(state, { platform: 'ios', buildBackend: backend('eas') });
 
       expect(plan.rule).toBe('needs-dev-client');
@@ -996,7 +1003,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should take a bare project to the cloud without touching its native directories`, () => {
-      const state = makeDevClientState({ nativeDirs: { ios: true, android: false } });
+      const state = createDevClientState({ nativeDirs: { ios: true, android: false } });
       const plan = decideStartPlan(state, { platform: 'ios', buildBackend: backend('eas') });
 
       expect(plan.rule).toBe('bare-stale');
@@ -1007,7 +1014,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should leave a plan that builds nothing alone`, () => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         buildBackend: backend('eas'),
       });
@@ -1021,7 +1028,7 @@ describe(decideStartPlan, () => {
   describe('the local backend', () => {
     it(`should keep the steps it has always had, and carry the choice on the plan`, () => {
       const chosen = backend('local');
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: chosen,
       });
@@ -1035,7 +1042,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should say out loud that an explicit local build cannot work on this host`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         buildBackend: backend('local', { source: 'config', doomed: true }),
       });
@@ -1049,7 +1056,7 @@ describe(decideStartPlan, () => {
   // @ref llp/0015-backend-selection-and-config.rfc.md §The run target
   describe('the run target', () => {
     it(`should plan a development build for a project Expo Go could run`, () => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         runTarget: runTarget('dev-build'),
       });
@@ -1064,7 +1071,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should label the plan it changed`, () => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         runTarget: runTarget('dev-build'),
       });
@@ -1075,11 +1082,11 @@ describe(decideStartPlan, () => {
     });
 
     it(`should change nothing for a project that already needs a development build`, () => {
-      const withTarget = decideStartPlan(makeDevClientState(), {
+      const withTarget = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         runTarget: runTarget('dev-build'),
       });
-      const without = decideStartPlan(makeDevClientState(), { platform: 'ios' });
+      const without = decideStartPlan(createDevClientState(), { platform: 'ios' });
 
       expect(argvOf(withTarget.steps)).toEqual(argvOf(without.steps));
       expect(withTarget.reasons).toContain(
@@ -1088,7 +1095,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should keep the Expo Go plan when Expo Go was asked for and can run it`, () => {
-      const plan = decideStartPlan(makeProjectState(), {
+      const plan = decideStartPlan(createProjectState(), {
         platform: 'ios',
         runTarget: runTarget('expo-go'),
       });
@@ -1100,7 +1107,7 @@ describe(decideStartPlan, () => {
     });
 
     it(`should not pretend a project Expo Go cannot run will run in it`, () => {
-      const plan = decideStartPlan(makeDevClientState(), {
+      const plan = decideStartPlan(createDevClientState(), {
         platform: 'ios',
         runTarget: runTarget('expo-go'),
       });
@@ -1129,7 +1136,7 @@ describe('the EAS device', () => {
     ['--no-open leaves the app to the caller', { ...eas, open: false }],
     ['no platform was named', { platform: 'ios' as const, deviceBackend: 'eas' as const }],
   ])(`names navigate with --eas when %s`, (_, options) => {
-    const plan = decideStartPlan(makeProjectState(), options);
+    const plan = decideStartPlan(createProjectState(), options);
 
     const text = [...plan.steps.map((step) => step.reason), ...plan.reasons].join('\n');
     expect(text).toContain('navigate / --eas');
@@ -1137,7 +1144,7 @@ describe('the EAS device', () => {
   });
 
   it(`builds with the simulator dev-client profile, never the device one`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { ...eas, buildBackend: backend('eas') });
+    const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
 
     expect(argvOf(plan.steps)).toEqual([
       [
@@ -1160,7 +1167,7 @@ describe('the EAS device', () => {
   });
 
   it(`says the profile is added to eas.json when the file has not got it`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       ...eas,
       buildBackend: backend('eas'),
       easSimulatorProfile: false,
@@ -1172,7 +1179,7 @@ describe('the EAS device', () => {
   });
 
   it(`writes eas.json itself when there is none, and runs no build:configure`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       ...eas,
       buildBackend: backend('eas'),
       easJson: false,
@@ -1187,7 +1194,7 @@ describe('the EAS device', () => {
   });
 
   it(`says nothing about adding the profile when eas.json has it`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       ...eas,
       buildBackend: backend('eas'),
       easSimulatorProfile: true,
@@ -1197,7 +1204,7 @@ describe('the EAS device', () => {
   });
 
   it(`keeps the device profile when the device is local, whatever the build backend`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       platform: 'ios',
       requestedPlatform: 'ios',
       buildBackend: backend('eas'),
@@ -1215,7 +1222,7 @@ describe('the EAS device', () => {
   });
 
   it(`opens the development build on a session, and says the session bills`, () => {
-    const plan = decideStartPlan(makeDevClientState(), { ...eas, buildBackend: backend('eas') });
+    const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
 
     const start = plan.steps.at(-1)!;
     expect(start.argv).toEqual(['expo', 'start', '--dev-client']);
@@ -1224,7 +1231,7 @@ describe('the EAS device', () => {
   });
 
   it(`opens Expo Go on a session for a project Expo Go can run`, () => {
-    const plan = decideStartPlan(makeProjectState(), eas);
+    const plan = decideStartPlan(createProjectState(), eas);
 
     expect(plan.rule).toBe('expo-go');
     expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
@@ -1236,7 +1243,7 @@ describe('the EAS device', () => {
 
   it(`rests on a finished EAS build of this fingerprint instead of making one`, () => {
     const found = { id: 'build-1', profile: 'development-simulator' };
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       ...eas,
       buildBackend: backend('eas'),
       easBuild: found,
@@ -1253,7 +1260,7 @@ describe('the EAS device', () => {
   });
 
   it(`ignores a found build when the device is local — a local simulator has to have the app`, () => {
-    const plan = decideStartPlan(makeDevClientState(), {
+    const plan = decideStartPlan(createDevClientState(), {
       platform: 'ios',
       requestedPlatform: 'ios',
       buildBackend: backend('eas'),
@@ -1266,7 +1273,7 @@ describe('the EAS device', () => {
 
   it(`rests on a found build for a bare project too`, () => {
     const plan = decideStartPlan(
-      makeDevClientState({ nativeDirs: { ios: true, android: false } }),
+      createDevClientState({ nativeDirs: { ios: true, android: false } }),
       {
         ...eas,
         buildBackend: backend('eas'),
@@ -1279,18 +1286,21 @@ describe('the EAS device', () => {
   });
 
   it(`still installs expo-dev-client and builds when the project has not got it, found build or not`, () => {
-    const plan = decideStartPlan(makeProjectState({ expoGo: { compatible: false, reasons: [] } }), {
-      ...eas,
-      buildBackend: backend('eas'),
-      easBuild: { id: 'b', profile: 'development-simulator' },
-    });
+    const plan = decideStartPlan(
+      createProjectState({ expoGo: { compatible: false, reasons: [] } }),
+      {
+        ...eas,
+        buildBackend: backend('eas'),
+        easBuild: { id: 'b', profile: 'development-simulator' },
+      }
+    );
 
     expect(plan.rule).toBe('needs-dev-client');
     expect(plan.steps.map((step) => step.id)).toEqual(['install-dev-client', 'eas-build', 'start']);
   });
 
   it(`leaves a plan with no --eas exactly as it was`, () => {
-    const local = decideStartPlan(makeDevClientState(), {
+    const local = decideStartPlan(createDevClientState(), {
       platform: 'ios',
       requestedPlatform: 'ios',
     });

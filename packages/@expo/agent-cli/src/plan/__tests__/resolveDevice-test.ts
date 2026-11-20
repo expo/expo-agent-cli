@@ -7,7 +7,7 @@ import { resetSettingsCache } from '../../settings';
 import { detectToolchainAsync } from '../../toolchain';
 import type { ToolchainProbe } from '../../toolchain/types';
 import { resolveStartPlanAsync, type ResolveStartPlanOptions } from '../resolveAsync';
-import { makeProjectState } from '../../project/__tests__/projectStateFixture';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../../toolchain', async () => {
   const actual = await vi.importActual('../../toolchain');
@@ -30,7 +30,7 @@ const ACQUIRED: AcquireResult = {
 
 /** A managed project whose recorded iOS build matches: the draft serves and asks the device. */
 function freshDevClient() {
-  const project = makeProjectState({
+  const project = createProjectState({
     usesDevClient: true,
     expoGo: { compatible: false, reasons: [] },
   });
@@ -63,11 +63,11 @@ beforeEach(() => {
 describe('the device the resolver binds', () => {
   // expo-go-and-bare-drafts-acquire
   it.each([
-    ['expo-go', makeProjectState()],
+    ['expo-go', createProjectState()],
     ['dev-client', freshDevClient().state],
     [
       'bare',
-      makeProjectState({
+      createProjectState({
         nativeDirs: { ios: true, android: true },
         expoGo: { compatible: false, reasons: [] },
       }),
@@ -103,11 +103,11 @@ describe('the device the resolver binds', () => {
   it.each([
     [
       'a web draft',
-      makeProjectState(),
+      createProjectState(),
       { platform: 'web' as const, requestedPlatform: 'web' as const },
     ],
-    ['no requested platform', makeProjectState(), { requestedPlatform: undefined }],
-    ['--eas', makeProjectState(), { deviceBackend: 'eas' as const }],
+    ['no requested platform', createProjectState(), { requestedPlatform: undefined }],
+    ['--eas', createProjectState(), { deviceBackend: 'eas' as const }],
   ])(`binds nothing for %s`, async (_case, project, overrides) => {
     const acquireDevice = vi.fn(async () => ACQUIRED);
 
@@ -126,7 +126,7 @@ describe('the device the resolver binds', () => {
 
     const { plan, acquired } = await resolveStartPlanAsync(
       projectRoot,
-      makeProjectState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } }),
+      createProjectState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } }),
       options({ acquireDevice })
     );
 

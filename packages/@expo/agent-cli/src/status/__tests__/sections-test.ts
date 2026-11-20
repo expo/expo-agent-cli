@@ -15,13 +15,13 @@ import {
 } from '../sections';
 import type { DevServerStatus, FreshnessStatus, LocalDeviceStatus, PlatformBuild } from '../types';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
-import { makeProjectState } from '../../project/__tests__/projectStateFixture';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 const projectRoot = '/project';
 
 describe(buildProjectStatus, () => {
   it(`should report the package name, the SDK version and a CNG project`, () => {
-    expect(buildProjectStatus(makeProjectState({ hasWeb: false }), 'my-app')).toEqual({
+    expect(buildProjectStatus(createProjectState({ hasWeb: false }), 'my-app')).toEqual({
       root: projectRoot,
       name: 'my-app',
       isExpoApp: true,
@@ -35,12 +35,12 @@ describe(buildProjectStatus, () => {
   });
 
   it(`should fall back to the directory name when the package has no name`, () => {
-    expect(buildProjectStatus(makeProjectState(), null).name).toBe('project');
+    expect(buildProjectStatus(createProjectState(), null).name).toBe('project');
   });
 
   it(`should report a checked-in native directory as a bare project`, () => {
     const status = buildProjectStatus(
-      makeProjectState({ nativeDirs: { ios: true, android: false } }),
+      createProjectState({ nativeDirs: { ios: true, android: false } }),
       'my-app'
     );
 
@@ -50,7 +50,7 @@ describe(buildProjectStatus, () => {
 
   it(`should report the dev client and web dependencies`, () => {
     const status = buildProjectStatus(
-      makeProjectState({ usesDevClient: true, hasWeb: true }),
+      createProjectState({ usesDevClient: true, hasWeb: true }),
       'my-app'
     );
 
@@ -60,18 +60,18 @@ describe(buildProjectStatus, () => {
 
   it(`should report an unknown SDK version instead of failing`, () => {
     expect(
-      buildProjectStatus(makeProjectState({ sdkVersion: null }), 'my-app').sdkVersion
+      buildProjectStatus(createProjectState({ sdkVersion: null }), 'my-app').sdkVersion
     ).toBeNull();
   });
 });
 
 describe(buildExpoGoStatus, () => {
   it(`should report a compatible project without reasons`, () => {
-    expect(buildExpoGoStatus(makeProjectState())).toEqual({ compatible: true, reasonCount: 0 });
+    expect(buildExpoGoStatus(createProjectState())).toEqual({ compatible: true, reasonCount: 0 });
   });
 
   it(`should count the reasons a project cannot run in Expo Go`, () => {
-    const state = makeProjectState({
+    const state = createProjectState({
       expoGo: {
         compatible: false,
         reasons: [
@@ -97,7 +97,7 @@ describe(buildFreshnessStatus, () => {
   // @ref llp/0023-fingerprint-caching.rfc.md §The report says where the answer came from
   it(`should carry where the hash came from`, () => {
     const status = buildFreshnessStatus(
-      makeProjectState({
+      createProjectState({
         fingerprint: {
           hash: 'abc123def4567890',
           source: 'cache',
@@ -123,7 +123,7 @@ describe(buildFreshnessStatus, () => {
 
   it(`should carry no caveats for a hash it measured`, () => {
     const status = buildFreshnessStatus(
-      makeProjectState({
+      createProjectState({
         // A `computed` result carries no revalidation, and its caveats are about a cache that did
         // not answer — so they must not reach a report about a measurement.
         fingerprint: { hash: 'abc123def4567890', source: 'computed' },
@@ -143,7 +143,7 @@ describe(buildFreshnessStatus, () => {
 
   // @ref llp/0021-honest-reports.rfc.md §The rules — K7(d). Backend × platform.
   it(`should report one entry per backend per platform`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     expect(status.platforms.map((entry) => `${entry.platform} ${entry.backend}`)).toEqual([
       'ios local',
@@ -156,7 +156,7 @@ describe(buildFreshnessStatus, () => {
   // `unknown`, never `stale`: the whole finding is that "this machine has no record" was reported
   // as the answer to a question about EAS.
   it(`should report the eas axis as unasked until something asks`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     expect(axis(status, 'ios', 'eas')).toMatchObject({
       state: 'unknown',
@@ -167,7 +167,7 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report both platforms as unknown when there is no fingerprint`, () => {
-    const state = makeProjectState({
+    const state = createProjectState({
       fingerprint: { hash: null, error: 'fingerprint CLI not found' },
     });
 
@@ -184,7 +184,7 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report a platform without a recorded build as stale`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     expect(axis(status, 'ios', 'local')).toMatchObject({
       state: 'stale',
@@ -203,7 +203,7 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report a platform whose recorded build matches as fresh`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {
+    const status = buildFreshnessStatus(createProjectState(), {
       ios: { hash: 'abc123def4567890', sources: null },
     });
 
@@ -221,7 +221,7 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report a platform whose recorded build differs as stale`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {
+    const status = buildFreshnessStatus(createProjectState(), {
       android: { hash: '99999999deadbeef', sources: null },
     });
 
@@ -232,7 +232,7 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report the fingerprint hash it compared against`, () => {
-    expect(buildFreshnessStatus(makeProjectState(), {}).hash).toBe('abc123def4567890');
+    expect(buildFreshnessStatus(createProjectState(), {}).hash).toBe('abc123def4567890');
   });
 });
 
@@ -257,7 +257,7 @@ describe(applyEasFreshness, () => {
   }
 
   it(`should report a matching EAS build as fresh, and name it`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     applyEasFreshness(status, { askedEas: true, platforms: [easBuild()] });
 
@@ -272,7 +272,7 @@ describe(applyEasFreshness, () => {
   });
 
   it(`should report an EAS that has no such build as stale on that axis`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     applyEasFreshness(status, {
       askedEas: true,
@@ -285,7 +285,7 @@ describe(applyEasFreshness, () => {
   });
 
   it(`should say how old a remembered none is`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     applyEasFreshness(status, {
       askedEas: true,
@@ -310,7 +310,7 @@ describe(applyEasFreshness, () => {
   });
 
   it(`should keep the reason of a lookup that could not answer`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
 
     applyEasFreshness(status, {
       askedEas: true,
@@ -323,7 +323,7 @@ describe(applyEasFreshness, () => {
   });
 
   it(`should leave an axis a --build comparison already claimed`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
     const entry = status.platforms.find((one) => one.platform === 'ios' && one.backend === 'eas')!;
     entry.impact = {
       class: 'js-only',
@@ -346,7 +346,7 @@ describe(applyEasFreshness, () => {
 
 describe(effectivePlatformFreshness, () => {
   it(`should answer with the freshest axis, whichever it is`, () => {
-    const status = buildFreshnessStatus(makeProjectState(), {});
+    const status = buildFreshnessStatus(createProjectState(), {});
     applyEasFreshness(status, {
       askedEas: true,
       platforms: [
@@ -489,7 +489,12 @@ describe(buildNextActionStatus, () => {
   // `status` answers here rather than refusing, so its `next` line is the one place the trap could
   // survive: `@expo/agent-cli dev` in a directory that is not an Expo app is exactly what `dev` now stops.
   it(`should not name @expo/agent-cli dev for a directory that is not an Expo app`, () => {
-    const next = buildNextActionStatus(makeProjectState({ app: 'not-expo-app' }), {}, 'ios', null);
+    const next = buildNextActionStatus(
+      createProjectState({ app: 'not-expo-app' }),
+      {},
+      'ios',
+      null
+    );
 
     expect(next.command).not.toBe('npx @expo/agent-cli dev');
     expect(next.rule).toBe('not-expo-app');
@@ -500,7 +505,7 @@ describe(buildNextActionStatus, () => {
   });
 
   it(`should say so even when a dev server this project could use is answering`, () => {
-    const next = buildNextActionStatus(makeProjectState({ app: 'not-expo-app' }), {}, 'ios', {
+    const next = buildNextActionStatus(createProjectState({ app: 'not-expo-app' }), {}, 'ios', {
       url: 'http://127.0.0.1:8081',
       running: true,
       appsConnected: 1,
@@ -519,7 +524,7 @@ describe(buildNextActionStatus, () => {
   });
 
   it(`should report the Expo Go rule and the command that runs it`, () => {
-    const next = buildNextActionStatus(makeProjectState(), {}, 'ios', null);
+    const next = buildNextActionStatus(createProjectState(), {}, 'ios', null);
 
     expect(next.command).toBe('npx @expo/agent-cli dev --ios');
     expect(next.rule).toBe('expo-go');
@@ -528,7 +533,7 @@ describe(buildNextActionStatus, () => {
   });
 
   it(`should report the whole plan of a project that needs a build`, () => {
-    const state = makeProjectState({
+    const state = createProjectState({
       usesDevClient: true,
       expoGo: { compatible: false, reasons: [] },
     });
@@ -543,7 +548,7 @@ describe(buildNextActionStatus, () => {
   });
 
   it(`should report the fresh rule when the recorded build matches`, () => {
-    const state = makeProjectState({
+    const state = createProjectState({
       usesDevClient: true,
       expoGo: { compatible: false, reasons: [] },
     });
@@ -560,7 +565,7 @@ describe(buildNextActionStatus, () => {
   });
 
   it(`should target the platform it is given`, () => {
-    const next = buildNextActionStatus(makeProjectState({ hasWeb: true }), {}, 'web', null);
+    const next = buildNextActionStatus(createProjectState({ hasWeb: true }), {}, 'web', null);
 
     expect(next.rule).toBe('web');
     expect(next.steps[0]!.argv).toEqual(['expo', 'start', '--web']);
@@ -610,7 +615,7 @@ describe(buildNextActionStatus, () => {
     // debugger target list, and no command in this CLI puts an app in it except this one. The
     // honest next action is the one that changes the state the wait is waiting for.
     it(`should send a matched server with no app to the command that opens one`, () => {
-      const next = buildNextActionStatus(makeProjectState(), {}, 'ios', devServerStatus());
+      const next = buildNextActionStatus(createProjectState(), {}, 'ios', devServerStatus());
 
       expect(next.command).toBe('npx @expo/agent-cli navigate /');
       expect(next.why).toContain('no app is connected');
@@ -623,7 +628,7 @@ describe(buildNextActionStatus, () => {
     // only command that proves the bundle compiles, and `next` must not repeat a follow-up.
     it(`should send a matched server with an app to the gate too`, () => {
       const next = buildNextActionStatus(
-        makeProjectState(),
+        createProjectState(),
         {},
         'ios',
         devServerStatus({ appsConnected: 1 }),
@@ -642,7 +647,7 @@ describe(buildNextActionStatus, () => {
     // otherwise have to go looking for: an Android emulator gets `--android` on a Mac.
     it(`names the platform of the device this machine has, not the host's`, () => {
       const next = buildNextActionStatus(
-        makeProjectState(),
+        createProjectState(),
         {},
         'ios',
         devServerStatus({ appsConnected: 1 }),
@@ -664,7 +669,7 @@ describe(buildNextActionStatus, () => {
     // (@ref ../sections §resolveDefaultPlatform).
     it(`falls back to the platform the rest of the report already names`, () => {
       const next = buildNextActionStatus(
-        makeProjectState(),
+        createProjectState(),
         {},
         'ios',
         devServerStatus({ appsConnected: 1 }),
@@ -687,7 +692,7 @@ describe(buildNextActionStatus, () => {
     // there is, and starting a second would collide with it.
     it(`should still verify when the match could not be decided`, () => {
       const next = buildNextActionStatus(
-        makeProjectState(),
+        createProjectState(),
         {},
         'ios',
         // With an app attached, so this isolates the match decision from the app-count branch.
@@ -700,7 +705,7 @@ describe(buildNextActionStatus, () => {
 
     it(`should keep the plan for another project's dev server`, () => {
       const next = buildNextActionStatus(
-        makeProjectState(),
+        createProjectState(),
         {},
         'ios',
         devServerStatus({ projectRootMatched: false, appsConnected: 1 })
@@ -732,7 +737,7 @@ describe(buildNextActionStatus, () => {
 
       it(`names the tunnel URL instead of a command that needs a device`, () => {
         const next = buildNextActionStatus(
-          makeProjectState(),
+          createProjectState(),
           {},
           'ios',
           devServerStatus({ hostType: 'tunnel', tunnelUrl: 'http://abc.boltexpo.dev' }),
@@ -748,7 +753,7 @@ describe(buildNextActionStatus, () => {
         vi.spyOn(network, 'resolveLanHost').mockReturnValue('192.168.1.233');
 
         const next = buildNextActionStatus(
-          makeProjectState(),
+          createProjectState(),
           {},
           'ios',
           devServerStatus(),
@@ -765,7 +770,7 @@ describe(buildNextActionStatus, () => {
         vi.spyOn(network, 'resolveLanHost').mockReturnValue(null);
 
         const next = buildNextActionStatus(
-          makeProjectState(),
+          createProjectState(),
           {},
           'ios',
           devServerStatus(),
@@ -780,7 +785,7 @@ describe(buildNextActionStatus, () => {
       // that points it at a dev server is the dev launcher's own shape.
       it(`names the app's own scheme for a development build`, () => {
         const next = buildNextActionStatus(
-          makeProjectState({ usesDevClient: true }),
+          createProjectState({ usesDevClient: true }),
           {},
           'ios',
           devServerStatus({ hostType: 'tunnel', tunnelUrl: 'http://abc.boltexpo.dev' }),
@@ -797,7 +802,7 @@ describe(buildNextActionStatus, () => {
       // the honest answer.
       it(`hands a development build with no readable scheme to the print-url command`, () => {
         const next = buildNextActionStatus(
-          makeProjectState({ usesDevClient: true }),
+          createProjectState({ usesDevClient: true }),
           {},
           'ios',
           devServerStatus({ hostType: 'tunnel', tunnelUrl: 'http://abc.boltexpo.dev' }),
@@ -811,7 +816,7 @@ describe(buildNextActionStatus, () => {
       // Two applications could be meant, and one line cannot carry a labelled pair.
       it(`names the command that prints both when nothing established which app is running`, () => {
         const next = buildNextActionStatus(
-          makeProjectState({ nativeDirs: { ios: true, android: false } }),
+          createProjectState({ nativeDirs: { ios: true, android: false } }),
           {},
           'ios',
           devServerStatus({ hostType: 'tunnel', tunnelUrl: 'http://abc.boltexpo.dev' }),
@@ -826,7 +831,7 @@ describe(buildNextActionStatus, () => {
       // The rule that keeps this from breaking a working machine: a probe that could not run
       // establishes nothing, so the ladder is left exactly as it was.
       it(`keeps navigate when the probe could not establish anything`, () => {
-        const next = buildNextActionStatus(makeProjectState(), {}, 'ios', devServerStatus(), {
+        const next = buildNextActionStatus(createProjectState(), {}, 'ios', devServerStatus(), {
           ...absent,
           state: 'unknown',
         });
@@ -835,7 +840,7 @@ describe(buildNextActionStatus, () => {
       });
 
       it(`keeps navigate when a device is there`, () => {
-        const next = buildNextActionStatus(makeProjectState(), {}, 'ios', devServerStatus(), {
+        const next = buildNextActionStatus(createProjectState(), {}, 'ios', devServerStatus(), {
           state: 'present',
           platform: 'ios',
           deviceId: 'SIM-1',
@@ -850,7 +855,7 @@ describe(buildNextActionStatus, () => {
 
     it(`should keep the plan when nothing answered`, () => {
       const next = buildNextActionStatus(
-        makeProjectState(),
+        createProjectState(),
         {},
         'ios',
         devServerStatus({ running: false, ready: null })
@@ -865,23 +870,23 @@ describe(buildNextActionStatus, () => {
 describe(resolveDefaultPlatform, () => {
   it(`should let a single checked-in native directory decide`, () => {
     expect(
-      resolveDefaultPlatform(makeProjectState({ nativeDirs: { ios: false, android: true } }))
+      resolveDefaultPlatform(createProjectState({ nativeDirs: { ios: false, android: true } }))
     ).toBe('android');
     expect(
-      resolveDefaultPlatform(makeProjectState({ nativeDirs: { ios: true, android: false } }))
+      resolveDefaultPlatform(createProjectState({ nativeDirs: { ios: true, android: false } }))
     ).toBe('ios');
   });
 
   it(`should target iOS on macOS when the project has no native directories`, () => {
     mockPlatform('darwin');
 
-    expect(resolveDefaultPlatform(makeProjectState())).toBe('ios');
+    expect(resolveDefaultPlatform(createProjectState())).toBe('ios');
   });
 
   it(`should target Android on a host that cannot build for iOS`, () => {
     mockPlatform('linux');
 
-    expect(resolveDefaultPlatform(makeProjectState())).toBe('android');
+    expect(resolveDefaultPlatform(createProjectState())).toBe('android');
   });
 });
 
@@ -972,7 +977,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
   } as never;
 
   /** The project shape the next-action rules read, from this file's own builder. */
-  const state = makeProjectState();
+  const state = createProjectState();
 
   // A session is a device this CLI can drive, so it outranks every URL below it: those are things
   // a person has to open somewhere else.
@@ -1166,7 +1171,7 @@ describe(applyOpenUrls, () => {
   it(`builds the encoded launcher URL of a development build over the tunnel`, () => {
     const devServer = { ...tunnelled };
 
-    applyOpenUrls(devServer, makeProjectState({ usesDevClient: true }), 'exp+sampleapp');
+    applyOpenUrls(devServer, createProjectState({ usesDevClient: true }), 'exp+sampleapp');
 
     expect(devServer.openUrls).toEqual([
       {
@@ -1184,7 +1189,7 @@ describe(applyOpenUrls, () => {
   it(`builds no link for a tunnel nobody confirmed`, () => {
     const devServer = { ...tunnelled, tunnelUrl: null };
 
-    applyOpenUrls(devServer, makeProjectState({ usesDevClient: true }), 'exp+sampleapp');
+    applyOpenUrls(devServer, createProjectState({ usesDevClient: true }), 'exp+sampleapp');
 
     expect(devServer.openUrls).toEqual([]);
   });
@@ -1192,7 +1197,7 @@ describe(applyOpenUrls, () => {
   it(`leaves a dev server that is not running alone`, () => {
     const devServer = { ...tunnelled, running: false };
 
-    applyOpenUrls(devServer, makeProjectState(), 'exp+app');
+    applyOpenUrls(devServer, createProjectState(), 'exp+app');
 
     expect(devServer.openUrls).toEqual([]);
   });

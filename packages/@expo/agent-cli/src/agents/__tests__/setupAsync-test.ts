@@ -10,7 +10,7 @@ import type { DiscoveredSkill } from '../../skills/types';
 import { event } from '../events';
 import { printSetupAsync, runSetupAsync } from '../setupAsync';
 import type { SetupOptions } from '../types';
-import { makeProjectState } from '../../project/__tests__/projectStateFixture';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../../log');
 vi.mock('../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -47,7 +47,7 @@ function options(overrides: Partial<SetupOptions> = {}): SetupOptions {
 }
 
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
-  const state = makeProjectState(overrides);
+  const state = createProjectState(overrides);
   vi.mocked(probeProjectStateAsync).mockResolvedValue(state);
   return state;
 }

@@ -36,7 +36,7 @@ import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { Log } from '../../log';
 import { RunLock } from '../../devLock';
-import { makeProjectState } from '../../project/__tests__/projectStateFixture';
+import { createProjectState } from '../../project/__tests__/projectStateFixture';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -150,7 +150,7 @@ function devServerRun(overrides: Partial<DevServerRun> = {}): DevServerRun {
 }
 
 function mockProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
-  const state = makeProjectState(overrides);
+  const state = createProjectState(overrides);
   vi.mocked(probeProjectStateAsync).mockResolvedValue(state);
   return state;
 }

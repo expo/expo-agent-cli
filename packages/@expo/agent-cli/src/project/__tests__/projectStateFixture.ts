@@ -4,7 +4,7 @@ import type { ProjectState } from '../types';
  * The one builder of a `ProjectState` fixture: a ready CNG app at `/project` that Expo Go can run.
  * Pass only the fields a test is about, so a new `ProjectState` field is a change to this file.
  */
-export function makeProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
+export function createProjectState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
     projectRoot: '/project',
     app: 'ready',
@@ -19,8 +19,8 @@ export function makeProjectState(overrides: Partial<ProjectState> = {}): Project
 }
 
 /** A managed project that cannot run in Expo Go, so its plan contains a development build. */
-export function makeDevClientState(overrides: Partial<ProjectState> = {}): ProjectState {
-  return makeProjectState({
+export function createDevClientState(overrides: Partial<ProjectState> = {}): ProjectState {
+  return createProjectState({
     usesDevClient: true,
     expoGo: {
       compatible: false,
