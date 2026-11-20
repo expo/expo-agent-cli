@@ -246,6 +246,7 @@ export function authFallbackNotice(cli: AuthCli, command: string): string | null
 export function agentCliAuthPassthrough(command: string): Command {
   return async (argv) => {
     const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
+    const { exitWithAnyCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
     const { event } = require('../events') as typeof import('../events');
     const Log = require('../log') as typeof import('../log');
     const { runInheritedAsync } =
@@ -282,15 +283,15 @@ export function agentCliAuthPassthrough(command: string): Command {
       // was ignored, and an agent that asked for one object got a line of prose at exit 0
       // [observed — live run S7]. `whoami` is a *read*, so this one can be answered here.
       if (command === 'whoami' && args.includes('--json')) {
-        process.exitCode = await printWhoamiJsonAsync(projectRoot, cli, args);
+        await exitWithAnyCodeAsync(await printWhoamiJsonAsync(projectRoot, cli, args));
         return;
       }
 
       // Both CLIs spell all four verbs the same way, so the command word is the command word.
-      process.exitCode = await runInheritedAsync(
-        cli.command,
-        [...cli.prefixArgs, command, ...args],
-        { cwd: projectRoot }
+      await exitWithAnyCodeAsync(
+        await runInheritedAsync(cli.command, [...cli.prefixArgs, command, ...args], {
+          cwd: projectRoot,
+        })
       );
     })().catch(logCmdError);
   };

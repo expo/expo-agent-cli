@@ -4,17 +4,16 @@
 // `runtime:eval` and `runtime:errors` had no e2e suite: the two commands appeared in `wrapper-test`
 // and `skills-test` only as names in a help listing, so nothing ran them through the published bin.
 //
-// **What this tier can ask them, and what it cannot.** llp/0002 §Tier 0 doubles the dev server, not
-// the app: the stub carries no CDP inspector, so nothing downstream of a debugger *conversation* is
-// reachable here and a successful `eval` is not a thing this file can produce. What is reachable is
-// everything on the near side of that connection — the three states of "there is nobody to talk to"
-// and the exit code each leaves the process with — and those are precisely the states a driving
-// agent hits most often and the ones the contract is about.
+// llp/0002 §Tier 0 doubles the dev server, not the app. Its stub inspector answers `Runtime.evaluate`
+// with a canned value or a thrown error, so this file proves the exit code of each answer, not
+// what the app computes.
 import {
   executeAgentCliAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   holdLockForAsync,
+  InspectorThrows,
+  stubExpoEnv,
 } from '../utils';
 
 /**
@@ -74,6 +73,34 @@ describe('@expo/agent-cli runtime:eval', () => {
       expect(result.exitCode).toBe(22);
       const report = JSON.parse(result.stdout);
       expect(report.error.code).toBe('NO_APP_CONNECTED');
+    } finally {
+      await stub.close();
+    }
+  });
+
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — the tool worked and the app threw: an
+  // outcome, so the report stays on stdout and the code is 20, not the tool error 1.
+  it('exits 20 with the report when the expression throws in the app', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const stub = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      inspectorEvaluate: (expression) =>
+        expression.includes('boom()')
+          ? new InspectorThrows('TypeError: boom is not a function')
+          : undefined,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:eval', 'boom()', '--dev-server-url', stub.url, '--json'],
+        { env: stubExpoEnv(projectRoot), reject: false }
+      );
+
+      expect(result.exitCode).toBe(20);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        threw: true,
+        exception: { text: 'TypeError: boom is not a function', stack: null },
+      });
     } finally {
       await stub.close();
     }

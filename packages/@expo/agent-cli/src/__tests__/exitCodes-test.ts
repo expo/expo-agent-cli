@@ -80,6 +80,48 @@ describe('exit codes', () => {
     expect(users).toEqual([]);
   });
 
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a tool error is a throw, so `logCmdError`
+  // prints the `--json` envelope and flushes the events. `exitWithCodeAsync` takes only an outcome,
+  // and this table keeps the other ways out of the process in the files that need them.
+  it.each([
+    { exit: 'process.exitCode =', pattern: /process\.exitCode\s*=(?!=)/, files: ['exitCodes.ts'] },
+    {
+      exit: 'exitWithAnyCodeAsync',
+      pattern: /\bexitWithAnyCodeAsync\(/,
+      // `logCmdError`, and the commands that pass on the exit code of the CLI they ran.
+      files: [
+        'exitCodes.ts',
+        'install/index.ts',
+        'new/index.ts',
+        'passthrough/auth.ts',
+        'passthrough/index.ts',
+        'start/index.ts',
+        'utils/errors.ts',
+      ],
+    },
+    {
+      exit: 'process.exit(',
+      pattern: /process\.exit\(/,
+      // Help (exit 0), the crash handler, a signal relay, and scripts this CLI writes for a child.
+      files: [
+        'cli.ts',
+        'dev/runSteps.ts',
+        'device/cloudCommand.ts',
+        'help/index.ts',
+        'log.ts',
+        'telemetry/worker.ts',
+        'utils/errors.ts',
+      ],
+    },
+  ])('leaves through $exit only in the files that need it', ({ pattern, files }) => {
+    const root = path.resolve(__dirname, '..');
+    const users = sourceFilesUnder(root).filter((file) =>
+      pattern.test(fs.readFileSync(path.join(root, file), 'utf8'))
+    );
+
+    expect(users).toEqual(files.map((file) => path.normalize(file)));
+  });
+
   it('names every code once', () => {
     const codes = [
       EXIT_OK,
@@ -126,10 +168,10 @@ describe(exitWithCodeAsync, () => {
   it('exits even when the flush fails', async () => {
     vi.mocked(flushEventLogger).mockRejectedValue(new Error('no writer'));
 
-    exitWithCodeAsync(EXIT_NEEDS_HUMAN);
+    exitWithCodeAsync(EXIT_OUTCOME_TIMEOUT);
     await waitForExitAsync();
 
-    expect(process.exitCode).toBe(7);
+    expect(process.exitCode).toBe(22);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 

@@ -24,6 +24,7 @@ import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
 import { isFailingRecord } from './results';
 import type { SmokeEnvironmentJson } from './types';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
 export function cleanupLeft(environment: SmokeEnvironmentJson): {
@@ -43,7 +44,10 @@ export function cleanupLeft(environment: SmokeEnvironmentJson): {
  * A *tool* error — a route the project has not got, an unusable flag — is thrown instead, so it
  * gets the `1` and the envelope every other tool failure in this CLI gets.
  */
-export async function smokeAsync(projectRoot: string, options: SmokeOptions): Promise<number> {
+export async function smokeAsync(
+  projectRoot: string,
+  options: SmokeOptions
+): Promise<OutcomeExitCode> {
   if (options.cloud === 'required') {
     await assertEasProjectConfiguredAsync(projectRoot);
   }

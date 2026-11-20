@@ -52,6 +52,7 @@ import { prepareDeviceStep } from './walk/device';
 import { devServerStep } from './walk/devServer';
 import { reloadStep, routeStep, runtimeAndErrorsStep } from './walk/reads';
 import { createPhaseWalk, type WalkRun } from './walk/walk';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /**
  * The exit code one verdict deserves (llp/0010 §Exit codes).
@@ -63,7 +64,7 @@ import { createPhaseWalk, type WalkRun } from './walk/walk';
  *
  * Kept next to the outcome it maps, and pure, so the table is testable as a table.
  */
-export function smokeExitCode(outcome: SmokeOutcome): number {
+export function smokeExitCode(outcome: SmokeOutcome): OutcomeExitCode {
   switch (outcome) {
     case 'passed':
       return EXIT_OK;

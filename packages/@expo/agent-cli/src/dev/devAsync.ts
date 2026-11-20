@@ -50,13 +50,14 @@ import { resolvePlannedPortAsync } from './portCollision';
 import { type DevOptions } from './resolveOptions';
 import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { devServerRunningStopAsync } from './runningDevServer';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /**
  * Probe the project, emit the plan, and run it.
  *
  * @returns 0 after a successful foreground run or plan, or the detached parent's result.
  */
-export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
+export async function devAsync(projectRoot: string, options: DevOptions): Promise<OutcomeExitCode> {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
   // log, so a parent can tell which run wrote it.
   if (options.detachedChild) {

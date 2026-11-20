@@ -705,6 +705,11 @@ export async function waitForDevLockAsync(
 /** An `inspectorEvaluate` answer that sends no reply, as an app whose answer is lost. */
 export const NO_ANSWER = Symbol('no answer');
 
+/** An `inspectorEvaluate` answer that throws in the app, as CDP reports an uncaught error. */
+export class InspectorThrows {
+  constructor(readonly description: string) {}
+}
+
 /** How a stub dev server should answer, per {@link startStubDevServerAsync}. */
 export type StubDevServerOptions = {
   /**
@@ -1203,6 +1208,20 @@ export async function startStubDevServerAsync({
               ? globals.delete(removeMarker[1]!)
               : inspectorEvaluate!(expression, device);
         if (value === NO_ANSWER) {
+          return;
+        }
+        if (value instanceof InspectorThrows) {
+          const exception = { type: 'object', subtype: 'error', description: value.description };
+          reply({
+            result: exception,
+            exceptionDetails: {
+              exceptionId: 1,
+              text: 'Uncaught',
+              lineNumber: 0,
+              columnNumber: 0,
+              exception,
+            },
+          });
           return;
         }
         // The reload call over the debugger reloads only with a reason: the SDK 58 native function

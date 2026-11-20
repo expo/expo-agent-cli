@@ -193,6 +193,7 @@ A command with its own `--json` prints one JSON object on stdout under `--json`,
 - Argument parsing is covered. An unknown option or a stray positional is a tool error, caught where every command is invoked. A bad option gets `Try: <command> --help`, or names the command that has it, such as `--port` on `dev`. A unit test checks that each named command resolves.
 - `--json` is read from the raw arguments, because the error path can run before the command parses its own. Only the arguments after the command name and before any `--` count: in `install -- --json`, the flag is npm's.
 - An `Error` that is not a `CommandError` is a defect: `UNCAUGHT_EXCEPTION`, exit `1`, the same envelope as a crash.
+- A command returns only an outcome (`0`, `20`, `22`). A tool error or a step for a person is a throw, so it always gets the envelope and the flush. The type checker refuses a returned `1`. `exitCodes-test.ts` keeps every other way out (`process.exitCode`, `process.exit`, a forwarded child code) in a named list of files.
 - `dev --json` prints exactly one object at the end: the plan with step results, or the envelope. `dev --plan --json` prints the plan. The `cli:start_plan` event carries the plan before the first step.
 
 The exit code is still the first thing to read. The envelope explains a failure; it does not signal one.

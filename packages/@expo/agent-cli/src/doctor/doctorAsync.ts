@@ -19,6 +19,7 @@ import * as Log from '../log';
 import { runDoctorCheckAsync } from './checkAsync';
 import { formatDoctorReport } from './format';
 import type { DoctorReportPayload } from './types';
+import type { OutcomeExitCode } from '../exitCodes';
 
 export interface DoctorCheckOptions {
   json?: boolean;
@@ -34,7 +35,7 @@ export interface DoctorCheckOptions {
 export async function printDoctorCheckAsync(
   projectRoot: string,
   options: DoctorCheckOptions
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const report = await runDoctorCheckAsync(projectRoot);
 
   // Counts and the parse quality only: the issue text belongs to the caller's answer, and a
