@@ -47,9 +47,9 @@ Run only what the change can break. Decide from the diff, before `launch`.
 node $V launch
 ```
 
-1. `bun run build` in `packages/@expo/agent-cli`. The bin runs the bundle, not `src/`. An edit to `src/` is not in the bin until a build.
+1. `bun run build` in `packages/@expo/agent-cli`. The bin runs the bundle, not `src/`. An edit to `src/` is not in the bin until a build. `run` refuses a bundle that is older than `src/`: run `launch` again. A second `launch` builds again and continues the same run.
 2. Links `apps/eas-example/.expo/build-cache` to the shared build cache, `~/Library/Caches/agent-cli-verify/build-cache` on macOS. `AGENT_CLI_VERIFY_HOME` moves it. Builds that are already in `.expo/build-cache` move to the shared cache.
-3. Records the git status of `apps/eas-example`. `cleanup` compares against it.
+3. Records the uncommitted state of `apps/eas-example`, and prints the changed files as `appStatus`. `cleanup` compares against it.
 
 Ready means the last output is a JSON object with `"ready": true`. It names `projectDir`, `evidenceDir`, and `cachedBuilds`: the builds that the cache holds. Launch takes about 15 seconds.
 
@@ -70,7 +70,7 @@ The app sets `buildCacheProvider`, so a build comes from the shared cache when t
 node $V doctor
 ```
 
-It prints one JSON object and exits 0 when `ok` is true. Run it first when a result looks wrong.
+It prints one JSON object. It exits 0 when `ok` is true, and 1 when not. Run it first when a result looks wrong.
 
 | Key                | Meaning                                                                      |
 | ------------------ | ---------------------------------------------------------------------------- |
@@ -99,8 +99,8 @@ node $V run --label smoke-android -- smoke --android --no-start --json
 
 - `--until <regex>` repeats a read-only command every 4 seconds until its stdout matches, for at most `--timeout` seconds (default 180). It prints and records the last attempt. It exits `124` when nothing matched.
 - `run` kills a command that does not exit in time, and then exits `124`. The limit is 600 seconds, and 60 seconds for each attempt of `--until`. `--kill-after <seconds>` changes it. The evidence file records the kill. A kill is a finding about the CLI: report it.
-- `124` is the helper's own code. Every other exit code is the exit code of the CLI.
-- `wait-server [minutes]` is the same loop on `status --json`. It ends when this project's dev server answers, and exits `1` after the limit (default 25 minutes).
+- `124` and `125` are the helper's own codes. `124`: no result. `125`: the helper could not do its work, for example no run in progress, a wrong option, or a stale bundle. In `run`, every other exit code is the exit code of the CLI.
+- `wait-server [minutes]` is the same loop on `status --json`. It ends when this project's dev server answers, and exits `124` after the limit (default 25 minutes).
 - The helper removes `NODE_ENV` and `npm_config_minimum_release_age` from the child. It sets `EXPO_NO_TELEMETRY=1` and `NO_COLOR=1`, and a UTF-8 locale that `pod install` needs. Do not start the bin by another path during a proof.
 
 The recipes, the driving conventions and the proof standard are in the feature map: start at [features/README.md](features/README.md). A proof that covers one entry point is incomplete when the map lists others. Run each device recipe on both platforms.
@@ -119,9 +119,9 @@ node $V cleanup
 
 1. Runs `dev:stop --release` in the app. That command signals only the process that the project's own dev-server lock names. It shuts down the simulator that this checkout created and ends the emulator that this checkout started.
 2. Copies screenshots and the log to the evidence directory, and ends the run.
-3. Compares the git status of the app with the status at `launch`. When they differ, cleanup exits `1` and lists the files. Cleanup never changes the app: undo a recipe edit with `git checkout -- <the file>`.
+3. Compares the uncommitted state of the app, file content included, with the state at `launch`. When they differ, cleanup exits `125` and lists the changed files. The run has ended at that point. Cleanup never changes the app: undo a recipe edit yourself.
 
-The native projects, the build cache and the evidence stay. `node $V purge` deletes `ios/`, `android/` and `.expo/` of the app in this checkout, when no run is in progress. The shared build cache stays. To force a full build, delete the matching entry in the build cache directory by hand.
+The native projects, the build cache and the evidence stay. `node $V purge` deletes `ios/`, `android/` and `.expo/` of the app in this checkout, when no run is in progress and no dev server runs. The shared build cache stays. To force a full build, delete the matching entry in the build cache directory by hand.
 
 When `dev:stop` does not exit 0, cleanup stops and changes nothing else. Read the `cleanup-dev-stop` evidence file, fix the cause, and run cleanup again. Never kill a process by name, and never run `xcrun simctl shutdown all` or `adb emu kill` on a device that this run did not start: other worktrees have their own servers and devices.
 
