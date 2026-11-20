@@ -41,6 +41,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Record the sub-feature ID and the platform with each evidence file, for example `--label navigate-open-android`.
 - Report an entry point that you could not reach with the command you tried and the precondition that was missing.
 - Do not report a skipped entry point as verified through a different one. A pass on iOS proves nothing about Android.
+- When a recipe and the real output disagree, do not change the recipe to match. Find the contract first: `grep -rln "<the command>" packages/@expo/agent-cli/llp --include=*.md`. Read only the section that names the behavior. Report the disagreement, with the recipe, the output and the contract.
 
 ## Feature entry contract
 
