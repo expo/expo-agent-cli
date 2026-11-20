@@ -54,13 +54,13 @@ const STILL_WANTED_CHECK_MS = 100;
 /** One probe that the deadline and `stillWanted` both cut short, so neither waits on a hung request. */
 async function probeUntilAsync(devServerUrl: string, deadline: number, stillWanted: () => boolean) {
   const stop = new AbortController();
+  const abortAt = Math.max(deadline, Date.now() + APP_LOADED_PROBE_FLOOR_MS);
   const timer = setInterval(() => {
-    if (!stillWanted() || Date.now() >= deadline) stop.abort();
+    if (!stillWanted() || Date.now() >= abortAt) stop.abort();
   }, STILL_WANTED_CHECK_MS);
-  const left = Math.max(deadline - Date.now(), APP_LOADED_PROBE_FLOOR_MS);
   try {
     return await probeDevServerAsync(devServerUrl, {
-      signal: AbortSignal.any([stop.signal, AbortSignal.timeout(left)]),
+      signal: AbortSignal.any([stop.signal, AbortSignal.timeout(abortAt - Date.now())]),
     });
   } finally {
     clearInterval(timer);

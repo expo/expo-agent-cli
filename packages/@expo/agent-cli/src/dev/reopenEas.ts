@@ -54,17 +54,31 @@ export async function reopenEasAsync(
     buildId: plan.easBuild?.id ?? null,
     fingerprintCache: options.fingerprintCache,
     keepSession: true,
+    readStaleTargets: options.waitReady,
   });
   if (result.refusal) throw result.refusal;
-  if (!result.opened)
-    throw new CommandError(
-      'DEVICE_UNAVAILABLE',
-      result.reason ?? 'The EAS app could not be opened.'
-    );
+  if (!result.opened) throw reopenFailedError(platform, result.sessionId, result.reason);
   return {
     sessionId: result.sessionId,
     staleTargetIds: expoGo ? [] : (result.targetsBeforeOpen ?? []),
   };
+}
+
+function reopenFailedError(
+  platform: 'ios' | 'android',
+  sessionId: string | null,
+  reason: string | null
+): CommandError {
+  const retry = `${PROGRAM_PREFIX} dev --${platform} --eas --detach`;
+  const error = new CommandError(
+    'DEVICE_UNAVAILABLE',
+    [
+      `The app was not opened on EAS Simulator session ${sessionId ?? '(id unknown)'}: ${reason ?? 'no reason was given'}.`,
+      `How: run "${retry}" again. If it fails again, read "${PROGRAM_PREFIX} dev:logs".`,
+    ].join('\n')
+  );
+  error.suggestedCommand = retry;
+  return error;
 }
 
 /** A Metro with no tunnel cannot serve an EAS session, which runs off this machine. */

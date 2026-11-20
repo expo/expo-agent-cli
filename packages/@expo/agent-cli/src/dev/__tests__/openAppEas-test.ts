@@ -243,6 +243,7 @@ describe('the target ids read before a reused open', () => {
     devServerUrl: DEV_SERVER,
     keepSession: true,
     buildId: null,
+    readStaleTargets: true,
   } as const;
   const target = (id: string) => ({ id }) as any;
   const unreachable = { reachable: false, targets: [], reason: 'refused' };
@@ -294,6 +295,19 @@ describe('the target ids read before a reused open', () => {
     expect(report).toMatchObject({ opened: false, targetsBeforeOpen: null });
     expect(report.reason).toContain('debugger targets');
     expect(openRouteAsync).not.toHaveBeenCalled();
+  });
+
+  it(`neither reads nor refuses without readStaleTargets`, async () => {
+    vi.mocked(probeDevServerAsync).mockResolvedValue(unreachable);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      ...reused,
+      expoGo: false,
+      readStaleTargets: false,
+    });
+
+    expect(report).toMatchObject({ opened: true, targetsBeforeOpen: null });
+    expect(probeDevServerAsync).not.toHaveBeenCalled();
   });
 
   it(`reads none for Expo Go, whose open keeps its target`, async () => {

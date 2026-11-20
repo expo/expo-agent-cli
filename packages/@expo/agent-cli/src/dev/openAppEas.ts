@@ -53,7 +53,14 @@ import {
 /** How long the `build:list` that names the build this run just made may take. */
 const BUILD_LOOKUP_TIMEOUT_MS = 60_000;
 
-export type OpenAppOnEasOptions = EnsureEasSessionOptions;
+export type OpenAppOnEasOptions = EnsureEasSessionOptions & {
+  /**
+   * Whether a reused development-build open reads the debugger targets right before it sends the
+   * launcher URL, and refuses when no read reaches the dev server. Only a `--wait-ready` reopen
+   * needs them, to tell the reloaded app from the old one.
+   */
+  readStaleTargets?: boolean;
+};
 
 /** What one open on EAS amounted to. */
 export interface OpenAppOnEasReport {
@@ -68,7 +75,7 @@ export interface OpenAppOnEasReport {
   sessionUrl: string | null;
   /**
    * The debugger target ids listed right before the launcher URL was sent: the app from before
-   * the reload. Null when no read was made (Expo Go, a started session) or none reached the dev server.
+   * the reload. Null when no read was made (no `readStaleTargets`, Expo Go, a started session).
    */
   targetsBeforeOpen: string[] | null;
   /** Why the app was not opened. Null exactly when {@link opened} is true. */
@@ -203,7 +210,7 @@ export async function openAppOnEasAsync(
     if (!stillWanted()) {
       return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
     }
-    if (!options.expoGo) {
+    if (options.readStaleTargets && !options.expoGo) {
       base.targetsBeforeOpen = await readTargetIdsAsync(options.devServerUrl, stillWanted);
       if (base.targetsBeforeOpen == null) {
         return {

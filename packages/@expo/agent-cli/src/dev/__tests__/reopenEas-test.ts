@@ -67,7 +67,22 @@ it(`hands the plan's build to the open`, async () => {
     buildId: null,
     fingerprintCache: true,
     keepSession: true,
+    readStaleTargets: false,
   });
+});
+
+it(`reads the stale targets only for --wait-ready`, async () => {
+  await reopenEasAsync(
+    projectRoot,
+    resolveDevOptions(['--ios', '--eas', '--detach', '--wait-ready']),
+    DEV_SERVER,
+    TUNNEL
+  );
+
+  expect(openAppOnEasAsync).toHaveBeenCalledWith(
+    projectRoot,
+    expect.objectContaining({ readStaleTargets: true })
+  );
 });
 
 it(`throws the one-session refusal unchanged`, async () => {
@@ -90,10 +105,15 @@ it(`throws the one-session refusal unchanged`, async () => {
 it(`fails a plain failed open with DEVICE_UNAVAILABLE`, async () => {
   vi.mocked(openAppOnEasAsync).mockResolvedValue({ ...opened, opened: false, reason: 'no luck' });
 
-  await expect(reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL)).rejects.toMatchObject({
-    code: 'DEVICE_UNAVAILABLE',
-    message: 'no luck',
-  });
+  const error = await reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL).catch((e) => e);
+
+  expect(error.code).toBe('DEVICE_UNAVAILABLE');
+  expect(error.message).toMatch(
+    /^The app was not opened on EAS Simulator session sess-1: no luck\./
+  );
+  expect(error.message).toContain(
+    'How: run "npx @expo/agent-cli dev --ios --eas --detach" again. If it fails again, read "npx @expo/agent-cli dev:logs".'
+  );
 });
 
 it(`opens nothing for --no-open, with or without a tunnel`, async () => {

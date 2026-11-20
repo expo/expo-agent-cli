@@ -55,3 +55,20 @@ it(`aborts a hung probe when stillWanted turns false`, async () => {
   expect(wait).toEqual({ kind: 'abandoned' });
   expect(Date.now() - startedAt).toBeLessThan(2000);
 });
+
+it(`gives a probe past the deadline its floor before it aborts`, async () => {
+  vi.mocked(probeDevServerAsync).mockImplementation(
+    (_url, { signal } = {}) =>
+      new Promise((resolve) => {
+        const answer = setTimeout(() => resolve(reachableEmpty), 180);
+        signal?.addEventListener('abort', () => {
+          clearTimeout(answer);
+          resolve({ reachable: false, targets: [], reason: 'aborted' });
+        });
+      })
+  );
+
+  const wait = await waitForLoadedAppAsync(URL, classify, Date.now() - 1000);
+
+  expect(wait).toEqual({ kind: 'not-attached', devServerAnswered: true });
+});
