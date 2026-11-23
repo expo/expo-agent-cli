@@ -192,6 +192,37 @@ describe(readAuthPreflightAsync, () => {
     });
   });
 
+  // Only the two answers the CLIs print for "nobody is signed in" are "signed out" [observed —
+  // eas-cli 27.7.2, expo 58.1.4]. Anything else is a CLI that could not answer: a login handoff for
+  // a network failure, or "signed in" for a stopped child, sends the user the wrong way.
+  it.each([
+    [
+      'an unreachable API',
+      {
+        exitCode: 1,
+        stderr:
+          'request to http://127.0.0.1:3000/graphql failed, reason: connect ECONNREFUSED 127.0.0.1:3000\n    Error: GraphQL request failed.\n',
+      },
+    ],
+    ['a child a signal stopped', { exitCode: 0, signal: 'SIGTERM' as const, stdout: '' }],
+  ])('answers "unknown" for %s', async (_, result) => {
+    withPinnedEasCli();
+    mockWhoami(result);
+
+    await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({ loggedIn: null });
+  });
+
+  it('reports a rejected EXPO_TOKEN as signed out', async () => {
+    withPinnedEasCli();
+    process.env.EXPO_TOKEN = 'bogus';
+    mockWhoami({
+      exitCode: 1,
+      stderr: 'The bearer token is invalid.\n    Error: GraphQL request failed.\n',
+    });
+
+    await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({ loggedIn: false });
+  });
+
   it('answers "unknown" when the CLI could not be started', async () => {
     withPinnedEasCli();
     mockWhoami({

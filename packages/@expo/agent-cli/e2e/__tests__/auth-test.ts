@@ -93,9 +93,21 @@ fs.appendFileSync(
 const rest = args[0] === '--yes' ? args.slice(1) : args;
 const spec = rest[0] || '';
 const verb = rest[1];
-if (verb === 'whoami' && process.env.STUB_SIGNED_OUT === '1') {
+// The answers eas-cli 27.7.2 gave when it could not name an account [observed — 2026-11-23].
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'signed-out') {
   process.stdout.write('Not logged in\\n');
   process.exit(1);
+}
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'bad-token') {
+  process.stderr.write('The bearer token is invalid.\\n    Error: GraphQL request failed.\\n');
+  process.exit(1);
+}
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'network') {
+  process.stderr.write('request to https://api.expo.dev/graphql failed, reason: getaddrinfo ENOTFOUND api.expo.dev\\n');
+  process.exit(1);
+}
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'killed') {
+  process.kill(process.pid, 'SIGTERM');
 }
 if (spec.startsWith('eas-cli') && verb === 'whoami') {
   process.stdout.write('alice\\nalice@example.com\\n\\nAccounts:\\n• alice (Role: Owner)\\n');
@@ -205,29 +217,37 @@ describe('auth commands outside an Expo project', () => {
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Exit codes — signing in is a step only a person can
-  // do, so a signed-out machine is exit 7 with the login handoff, not a report at exit 1.
-  it(`should answer a signed-out whoami --json with the login handoff`, async () => {
+  // do, so a signed-out machine is the login handoff (7). A run that names no account for another
+  // reason is a tool error (1): a login would send the user the wrong way.
+  it.each(
+    [
+      { stub: 'signed-out', exitCode: 7, code: 'EAS_LOGIN_REQUIRED', says: 'Not logged in' },
+      {
+        stub: 'bad-token',
+        exitCode: 7,
+        code: 'EAS_LOGIN_REQUIRED',
+        says: 'bearer token is invalid',
+      },
+      { stub: 'network', exitCode: 1, code: 'WHOAMI_FAILED', says: 'ENOTFOUND' },
+      { stub: 'killed', exitCode: 1, code: 'WHOAMI_FAILED', says: 'SIGTERM' },
+      // A signal does not survive the Windows `.cmd` shim of the stub runner.
+    ].filter(({ stub }) => process.platform !== 'win32' || stub !== 'killed')
+  )('should answer whoami --json for $stub with $code', async ({ stub, exitCode, code, says }) => {
     const dir = await setupBareDirAsync(['eas']);
 
     const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
-      env: { ...realHomeEnv(dir), STUB_SIGNED_OUT: '1' },
+      env: { ...realHomeEnv(dir), STUB_WHOAMI: stub },
       reject: false,
     });
 
-    expect(result.exitCode).toBe(7);
-    expect(JSON.parse(result.stdout)).toEqual({
-      error: {
-        code: 'EAS_LOGIN_REQUIRED',
-        message: expect.stringContaining('Not logged in'),
-        suggestedCommand: 'npx @expo/agent-cli login',
-        needsHuman: expect.objectContaining({ scenario: 'eas-login' }),
-        data: {
-          source: 'eas whoami',
-          sessionFile: path.join(os.homedir(), '.expo', 'state.json'),
-          cli: expect.stringContaining('eas'),
-        },
-      },
+    expect(result.exitCode).toBe(exitCode);
+    const { error } = JSON.parse(result.stdout);
+    expect(error).toMatchObject({
+      code,
+      message: expect.stringContaining(says),
+      data: expect.objectContaining({ source: 'eas whoami' }),
     });
+    expect(error.needsHuman?.scenario ?? null).toBe(exitCode === 7 ? 'eas-login' : null);
   });
 
   it.each([

@@ -329,7 +329,8 @@ export interface WhoamiResultJson {
  * `--json` is dropped from the argv it forwards, because neither CLI has it.
  *
  * A signed-out machine is a step only a person can complete, so it throws the login handoff: exit
- * `7` with the `--json` envelope (llp/0010 §Exit codes).
+ * `7` with the `--json` envelope (llp/0010 §Exit codes). A run that names no account for another
+ * reason (`classifyWhoami`) is `WHOAMI_FAILED`, exit `1`.
  */
 async function printWhoamiJsonAsync(
   projectRoot: string,
@@ -340,8 +341,9 @@ async function printWhoamiJsonAsync(
   const { needsHumanError } =
     require('../needsHuman/error') as typeof import('../needsHuman/error');
   const { EXIT_OK } = require('../exitCodes') as typeof import('../exitCodes');
-  const { parseWhoamiUser } =
+  const { classifyWhoami, parseWhoamiUser } =
     require('../needsHuman/preflight') as typeof import('../needsHuman/preflight');
+  const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
 
   // Only this CLI's own `--json`, before any `--`: what follows the separator is the other CLI's.
   const separator = args.indexOf('--');
@@ -353,8 +355,24 @@ async function printWhoamiJsonAsync(
   );
 
   const source = `${cli.tool} whoami`;
-  if (result.exitCode !== 0) {
-    const said = `${result.stderr}${result.stdout}`.trim();
+  const answer = classifyWhoami(result);
+  const said = `${result.stderr}${result.stdout}`.trim();
+  const data = { source, sessionFile: sessionFilePath(), cli: authCliLabel(cli) };
+  // A run that said nothing about who is signed in is a tool error, never a login: a network
+  // failure exits 1 like a signed-out machine, and a stopped child can report exit 0.
+  if (answer === 'failed') {
+    const error = new CommandError(
+      'WHOAMI_FAILED',
+      [
+        `"${source}" did not say who is signed in on this machine.`,
+        `Why: it ${result.signal ? `was stopped by ${result.signal}` : `exited ${result.exitCode}`}${said ? ` and said: ${said}` : ''}.`,
+        `How: fix what it names (often the network), then run this command again.`,
+      ].join('\n')
+    );
+    error.data = { ...data, exitCode: result.exitCode, signal: result.signal ?? null };
+    throw error;
+  }
+  if (answer === 'signed-out') {
     const error = needsHumanError(cli.tool === 'eas' ? 'eas-login' : 'expo-login', {
       detectedBy: 'preflight',
       message: [
@@ -363,16 +381,14 @@ async function printWhoamiJsonAsync(
         `How: sign in with "${PROGRAM_PREFIX} login", or, on a machine with nobody at the keyboard, set EXPO_TOKEN to an access token from expo.dev.`,
       ].join('\n'),
     });
-    error.data = { source, sessionFile: sessionFilePath(), cli: authCliLabel(cli) };
+    error.data = data;
     throw error;
   }
 
   const report: WhoamiResultJson = {
     loggedIn: true,
     user: parseWhoamiUser(result.stdout),
-    source,
-    sessionFile: sessionFilePath(),
-    cli: authCliLabel(cli),
+    ...data,
   };
   Log.log(JSON.stringify(report, null, 2));
   return EXIT_OK;

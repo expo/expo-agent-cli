@@ -11,7 +11,7 @@
 
 import { easCliArgs, mayDownloadEasCli, resolveEasCli } from '../utils/easCli';
 import { resolveProjectBin } from '../utils/projectBin';
-import { spawnSubprocessAsync } from '../utils/subprocess';
+import { spawnSubprocessAsync, type SubprocessResult } from '../utils/subprocess';
 import { looksLikeWrapperCrash } from '../utils/wrapperCrash';
 
 /** Who the Expo CLI family acts as on this machine. */
@@ -116,13 +116,32 @@ async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Auth
   if (result.spawnError || result.timedOut || looksLikeWrapperCrash({ tool: 'eas', ...result })) {
     return null;
   }
-  if (result.exitCode !== 0) {
-    // The CLI answered, and the answer was no — including a run with an `EXPO_TOKEN` that the
-    // service rejected, which is exactly the case a bare "the variable is set" would get wrong.
-    return { loggedIn: false, user: null, source: 'eas whoami' };
-  }
-  return { loggedIn: true, user: parseWhoamiUser(result.stdout), source: 'eas whoami' };
+  return fromWhoami(result, 'eas whoami');
 }
+
+/**
+ * What a `whoami` run answered.
+ *
+ * `signed-out` only for the two texts the CLIs print for nobody signed in [observed — eas-cli
+ * 27.7.2 and expo 58.1.4: `Not logged in` for no session, `The bearer token is invalid.` for a
+ * rejected `EXPO_TOKEN`, both at exit 1]. A network failure exits 1 as well, and a child a signal
+ * stopped can report exit 0, so both are `failed`: neither says who is signed in.
+ */
+export function classifyWhoami(
+  result: Pick<SubprocessResult, 'exitCode' | 'stdout' | 'stderr' | 'signal'>
+): 'signed-in' | 'signed-out' | 'failed' {
+  if (result.signal) {
+    return 'failed';
+  }
+  if (result.exitCode === 0) {
+    return 'signed-in';
+  }
+  return SIGNED_OUT_ANSWERS.some((answer) => answer.test(`${result.stdout}\n${result.stderr}`))
+    ? 'signed-out'
+    : 'failed';
+}
+
+const SIGNED_OUT_ANSWERS = [/^Not logged in\s*$/m, /The bearer token is invalid\./];
 
 /**
  * What the **project's own** `expo whoami` said, or null when it said nothing.
@@ -154,10 +173,26 @@ async function askProjectExpoAsync(
   if (result.spawnError || result.timedOut || looksLikeWrapperCrash({ tool: 'expo', ...result })) {
     return null;
   }
-  if (result.exitCode !== 0) {
-    return { loggedIn: false, user: null, source: 'expo whoami' };
+  return fromWhoami(result, 'expo whoami');
+}
+
+/**
+ * The preflight's answer from one `whoami` run, or null when the run said nothing about who is
+ * signed in. A rejected `EXPO_TOKEN` is "signed out", which is exactly the case a bare "the
+ * variable is set" would get wrong.
+ */
+function fromWhoami(
+  result: SubprocessResult,
+  source: 'eas whoami' | 'expo whoami'
+): AuthPreflight | null {
+  switch (classifyWhoami(result)) {
+    case 'signed-in':
+      return { loggedIn: true, user: parseWhoamiUser(result.stdout), source };
+    case 'signed-out':
+      return { loggedIn: false, user: null, source };
+    case 'failed':
+      return null;
   }
-  return { loggedIn: true, user: parseWhoamiUser(result.stdout), source: 'expo whoami' };
 }
 
 /**
