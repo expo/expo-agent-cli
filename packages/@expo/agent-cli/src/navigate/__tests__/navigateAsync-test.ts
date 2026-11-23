@@ -417,7 +417,6 @@ describe(navigateAsync, () => {
       attachAlert: null,
       reversedPort: null,
       command: "xcrun simctl openurl IOS-1 'exp://127.0.0.1:8081/--/profile/42'",
-      exitCode: 0,
       // Expo Go, so one link and nothing to load first: `exp://<host>` carries the dev server it
       // is for, which is exactly what a development build's route link does not (F123).
       launch: null,
@@ -468,7 +467,6 @@ describe(navigateAsync, () => {
       'devServerUrl',
       'deviceBackend',
       'deviceId',
-      'exitCode',
       'followups',
       'hostType',
       'launch',
@@ -977,7 +975,6 @@ describe(navigateAsync, () => {
         platform: null,
         deviceId: null,
         command: null,
-        exitCode: null,
         reversedPort: null,
         attached: null,
         attachWaitedMs: 0,
@@ -996,7 +993,6 @@ describe(navigateAsync, () => {
         'devServerUrl',
         'deviceBackend',
         'deviceId',
-        'exitCode',
         'followups',
         'hostType',
         'launch',

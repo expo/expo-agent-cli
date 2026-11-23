@@ -59,7 +59,6 @@ export const navigateHelp: CommandHelp = {
       'deviceId',
       'appId',
       'command',
-      'exitCode',
       'launch',
       'routeCheck',
       'reversedPort',

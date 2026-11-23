@@ -66,11 +66,6 @@ export interface RuntimeStopResultJson {
   /** The device command that ran, for reproducing the step by hand. */
   command: string;
   /**
-   * What the device tool said when it did not stop the app. Null when it did. Only the text report
-   * shows a refusal: `--json` prints the `DEVICE_STOP_REFUSED` error instead.
-   */
-  reason: string | null;
-  /**
    * Application ids of the apps connected to the dev server **on the platform this stopped**.
    *
    * Reported whether or not they were used to choose {@link bundleId}: they are what makes a
@@ -179,7 +174,6 @@ export async function runtimeStopAsync(
     bundleIdSource: resolved.source,
     bundleIdReason: resolved.reason,
     command: result.command,
-    reason: result.ok ? null : result.reason,
     connectedAppIds,
     appIdMismatch,
     followups: [],

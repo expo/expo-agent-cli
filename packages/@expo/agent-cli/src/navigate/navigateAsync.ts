@@ -104,11 +104,6 @@ export interface NavigateResultJson {
   /** Device command that was run, for reproducing the step by hand. */
   command: string | null;
   /**
-   * Exit code of that command, or null when nothing was opened. A refused link prints no report:
-   * it is the `DEEP_LINK_REFUSED` error.
-   */
-  exitCode: number | null;
-  /**
    * The dev launcher URL that was opened **before** {@link url}, or null when none was.
    *
    * Two links are delivered when the target is a development build with nothing loaded: this one
@@ -291,7 +286,6 @@ function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): Na
     deviceId: opened.deviceId,
     appId: opened.appId,
     command: opened.command,
-    exitCode: opened.exitCode,
     launch: opened.launch,
     routeCheck: opened.routeCheck,
     reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
@@ -433,7 +427,6 @@ async function printRouteUrlAsync(projectRoot: string, options: NavigateOptions)
       deviceId: null,
       appId: options.appId ?? null,
       command: null,
-      exitCode: null,
       // Nothing was opened, so neither of the two links this command can deliver was.
       launch: null,
       routeCheck: resolved.routeCheck,

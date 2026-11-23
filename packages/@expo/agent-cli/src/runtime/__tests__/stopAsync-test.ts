@@ -181,7 +181,6 @@ describe(buildStopFollowUps, () => {
       bundleIdSource: 'dev-server',
       bundleIdReason: 'the dev server named it',
       command: 'xcrun simctl terminate IOS-1 host.exp.Exponent',
-      reason: null,
       connectedAppIds: [],
       appIdMismatch: false,
       followups: [],

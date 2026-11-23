@@ -87,7 +87,7 @@ The route is percent-encoded once. Delimiters, escapes the caller wrote, and IPv
 
 `navigate /` on Expo Go opens `exp://<host>/--/?`: expo-router's Expo Go handler drops an empty path, and a bare `?` survives it as the index route. Rejected: a reload to reach `/`, because Expo Go loads its launch URL again.
 
-`--print-url` resolves the URL and opens nothing, at exit 0. Its `--json` has `url`, `hostType`, `connect` and `printUrl: true`; `deviceBackend`, `platform`, `deviceId`, `command`, `exitCode` and `launch` are `null`. With `--eas` it is `BAD_ARGS`: one flag asks for a device and the other for none. `navigate` with no device names the URL and `--print-url` in its failure.
+`--print-url` resolves the URL and opens nothing, at exit 0. Its `--json` has `url`, `hostType`, `connect` and `printUrl: true`; `deviceBackend`, `platform`, `deviceId`, `command` and `launch` are `null`. With `--eas` it is `BAD_ARGS`: one flag asks for a device and the other for none. `navigate` with no device names the URL and `--print-url` in its failure.
 
 Exit codes: 0 when the link opened and an app attached, or under `--no-wait-attach` (`attached: null`); 1 for usage, `ROUTE_NOT_FOUND`, `DEEP_LINK_UNRESOLVED`, `CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER`, or a refused link (`DEEP_LINK_REFUSED`, with `url`, `command` and `exitCode` in `error.data`); 20 when there is no device; 22 when no app attached (§Loading the app is not navigating it), or when the attached app ran no bundle inside the attach wait (§A loaded app).
 
