@@ -80,31 +80,40 @@ describe('@expo/agent-cli runtime:eval', () => {
 
   // @ref llp/0010-agent-conventions.rfc.md §Exit codes — the tool worked and the app threw: an
   // outcome, so the report stays on stdout and the code is 20, not the tool error 1.
-  it('exits 20 with the report when the expression throws in the app', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({
-      targets: [EXPO_GO_TARGET],
-      inspectorEvaluate: (expression) =>
-        expression.includes('boom()')
-          ? new InspectorThrows('TypeError: boom is not a function')
-          : undefined,
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:eval', 'boom()', '--dev-server-url', stub.url, '--json'],
-        { env: stubExpoEnv(projectRoot), reject: false }
-      );
-
-      expect(result.exitCode).toBe(20);
-      expect(JSON.parse(result.stdout)).toMatchObject({
-        threw: true,
-        exception: { text: 'TypeError: boom is not a function', stack: null },
+  it.each([
+    {
+      name: 'an Error',
+      thrown: { description: 'TypeError: boom is not a function' },
+      text: 'TypeError: boom is not a function',
+    },
+    // An empty message is still a throw: `throw ""` must not read as a value.
+    { name: 'an empty string', thrown: { value: '' }, text: '' },
+  ])(
+    'exits 20 with the report when the expression throws $name in the app',
+    async ({ thrown, text }) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({
+        targets: [EXPO_GO_TARGET],
+        inspectorEvaluate: (expression) =>
+          expression.includes('boom()') ? new InspectorThrows(thrown) : undefined,
       });
-    } finally {
-      await stub.close();
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['runtime:eval', 'boom()', '--dev-server-url', stub.url, '--json'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+
+        expect(result.exitCode).toBe(20);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          threw: true,
+          exception: { text, stack: null },
+        });
+      } finally {
+        await stub.close();
+      }
     }
-  });
+  );
 
   it('reads the dev server off the project lock rather than assuming 8081', async () => {
     const projectRoot = await setupFixtureAsync('go-app');

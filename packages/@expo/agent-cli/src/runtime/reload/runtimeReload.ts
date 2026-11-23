@@ -105,7 +105,7 @@ const RUNTIME_RELOAD: TargetAction = {
     if (answer.value !== 'sent') {
       throw new ActionRefusedError(
         (typeof answer.value === 'string' && CANNOT_RELOAD[answer.value]) ||
-          (answer.exceptionText
+          (answer.exceptionText !== undefined
             ? `the app threw while it was asked to reload itself: ${answer.exceptionText}`
             : `the app answered the reload call with ${JSON.stringify(answer.value ?? null)}, which this command cannot read`)
       );

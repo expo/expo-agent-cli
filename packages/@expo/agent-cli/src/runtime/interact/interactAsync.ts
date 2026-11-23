@@ -236,7 +236,7 @@ async function askAppAsync(
     );
   }
 
-  if (result.exceptionText) {
+  if (result.exceptionText !== undefined) {
     // The walk itself raised inside the app, which is this CLI's bug or a fiber shape it has never
     // met — not something the caller can fix by passing a different flag.
     throw new CommandError(

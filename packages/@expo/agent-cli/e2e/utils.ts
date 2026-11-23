@@ -705,9 +705,12 @@ export async function waitForDevLockAsync(
 /** An `inspectorEvaluate` answer that sends no reply, as an app whose answer is lost. */
 export const NO_ANSWER = Symbol('no answer');
 
-/** An `inspectorEvaluate` answer that throws in the app, as CDP reports an uncaught error. */
+/**
+ * An `inspectorEvaluate` answer that throws in the app, as CDP reports an uncaught exception: an
+ * Error has a `description`, a thrown primitive (`throw ""`) has only a `value`.
+ */
 export class InspectorThrows {
-  constructor(readonly description: string) {}
+  constructor(readonly thrown: { description: string } | { value: string }) {}
 }
 
 /** How a stub dev server should answer, per {@link startStubDevServerAsync}. */
@@ -1210,7 +1213,10 @@ export async function startStubDevServerAsync({
           return;
         }
         if (value instanceof InspectorThrows) {
-          const exception = { type: 'object', subtype: 'error', description: value.description };
+          const exception =
+            'description' in value.thrown
+              ? { type: 'object', subtype: 'error', description: value.thrown.description }
+              : { type: typeof value.thrown.value, value: value.thrown.value };
           reply({
             result: exception,
             exceptionDetails: {

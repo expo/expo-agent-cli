@@ -95,10 +95,9 @@ const UNTRUSTED_EVALUATE_FIELDS = ['value', 'description', 'exception', 'promise
 
 /** Renders an evaluate result, with the app-originated part fenced as untrusted. */
 export function formatEvaluateResult(devServerUrl: string, result: CdpEvaluateResult): string {
-  if (result.exceptionText) {
-    const body = result.exceptionStack
-      ? `${result.exceptionText}\n${result.exceptionStack}`
-      : result.exceptionText;
+  if (result.exceptionText !== undefined) {
+    const text = result.exceptionText || '(an empty string)';
+    const body = result.exceptionStack ? `${text}\n${result.exceptionStack}` : text;
     return [
       `The expression threw an exception in the app (dev server ${devServerUrl}).`,
       wrapUntrustedAppOutput(body),
@@ -196,7 +195,7 @@ export function evaluateResultToJson(
 ): EvaluateResultJson {
   // Stable key set across outcomes (llp/0006 §Output contract): absent facts are null,
   // never dropped, so `Object.keys` is identical whether the expression returned or threw.
-  if (result.exceptionText) {
+  if (result.exceptionText !== undefined) {
     return {
       devServerUrl,
       expression,

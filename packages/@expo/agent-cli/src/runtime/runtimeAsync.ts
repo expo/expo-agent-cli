@@ -95,7 +95,7 @@ export async function runtimeEvalAsync(
 
   event('runtime_eval', {
     devServerUrl,
-    threw: !!result.exceptionText,
+    threw: result.exceptionText !== undefined,
     type: result.type ?? 'undefined',
     promise: result.promise?.state ?? null,
   });
@@ -109,7 +109,7 @@ export async function runtimeEvalAsync(
   // A rejected promise is the asynchronous form of a throw, so it exits the same way: an agent
   // gating on `runtime:eval` must not read a failed `fetch` as a pass. The two are still told apart
   // in the report itself — `threw` for one, `promise.state` for the other.
-  return result.exceptionText || result.promise?.state === 'rejected'
+  return result.exceptionText !== undefined || result.promise?.state === 'rejected'
     ? EXIT_OUTCOME_FAILED
     : EXIT_OK;
 }
