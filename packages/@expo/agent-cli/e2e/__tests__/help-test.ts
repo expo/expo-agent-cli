@@ -167,7 +167,8 @@ describe('colour', () => {
 
     const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
 
-    expect(result.stdout).not.toContain(ESCAPE);
+    // JSON writes ESC as `\u001b`, and JSON.parse rejects a raw one.
+    expect(result.stdout).not.toContain('\\u001b');
     expect(() => JSON.parse(result.stdout)).not.toThrow();
   });
 });
