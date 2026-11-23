@@ -33,6 +33,7 @@ import { getExpoHomeDirectory } from '../utils/expoHome';
 import { type Invoker } from '../utils/invoker';
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { resolveProjectBin } from '../utils/projectBin';
+import type { SubprocessResult } from '../utils/subprocess';
 import { argvRequestsJson } from '../utils/jsonMode';
 import { spawnSubprocessAsync } from '../utils/subprocess';
 
@@ -365,11 +366,18 @@ async function printWhoamiJsonAsync(
       'WHOAMI_FAILED',
       [
         `"${source}" did not say who is signed in on this machine.`,
-        `Why: it ${result.signal ? `was stopped by ${result.signal}` : `exited ${result.exitCode}`}${said ? ` and said: ${said}` : ''}.`,
+        `Why: it ${howItEnded(result)}${said ? ` and said: ${said}` : ''}.`,
         `How: fix what it names (often the network), then run this command again.`,
       ].join('\n')
     );
-    error.data = { ...data, exitCode: result.exitCode, signal: result.signal ?? null };
+    error.data = {
+      ...data,
+      exitCode: result.exitCode,
+      signal: result.signal ?? null,
+      spawnError: result.spawnError
+        ? { code: result.spawnError.code ?? null, message: result.spawnError.message }
+        : null,
+    };
     throw error;
   }
   if (answer === 'signed-out') {
@@ -392,4 +400,11 @@ async function printWhoamiJsonAsync(
   };
   Log.log(JSON.stringify(report, null, 2));
   return EXIT_OK;
+}
+
+function howItEnded(result: SubprocessResult): string {
+  if (result.spawnError) {
+    return `could not start (${result.spawnError.message})`;
+  }
+  return result.signal ? `was stopped by ${result.signal}` : `exited ${result.exitCode}`;
 }
