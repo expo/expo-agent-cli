@@ -7,7 +7,6 @@ import * as Log from '../../log';
 import { runExpoAsync } from '../../utils/expoCli';
 import { runInheritedAsync } from '../../utils/inheritedRun';
 import { resetPackageRunnerCache } from '../../utils/packageRunner';
-import * as errors from '../../utils/errors';
 import * as subprocess from '../../utils/subprocess';
 import {
   AUTH_COMMANDS,
@@ -21,13 +20,6 @@ import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn() }));
-// The real exit never settles; this one records the forwarded code and lets the command finish.
-vi.mock('../../exitCodes', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../exitCodes')>()),
-  exitWithAnyCodeAsync: vi.fn(async (code: number) => {
-    process.exitCode = code;
-  }),
-}));
 vi.mock('../../utils/inheritedRun', () => ({ runInheritedAsync: vi.fn() }));
 
 const projectRoot = path.resolve('/project');
@@ -262,15 +254,15 @@ describe(agentCliPassthrough, () => {
         ? { exitCode: null, stdout: '', stderr: '', spawnError }
         : { exitCode: 0, stdout: '', stderr: '' }
     );
-    const logCmdError = vi.spyOn(errors, 'logCmdError').mockImplementation((() => {}) as never);
 
-    await agentCliPassthrough('whoami')(['--json']);
+    const run = agentCliPassthrough('whoami')(['--json']);
 
-    const error = logCmdError.mock.calls[0]?.[0] as errors.CommandError;
-    expect(error.code).toBe('WHOAMI_FAILED');
-    expect(error.message).toContain('spawn npx ENOENT');
-    expect(error.message).not.toContain('exited null');
-    expect(error.data).toMatchObject({ spawnError: { code: 'ENOENT' } });
+    await expect(run).rejects.toMatchObject({
+      code: 'WHOAMI_FAILED',
+      message: expect.stringContaining('spawn npx ENOENT'),
+      data: { spawnError: { code: 'ENOENT' } },
+    });
+    await expect(run).rejects.not.toThrow('exited null');
   });
 
   it(`should leave every other forwarded command on the expo path`, async () => {

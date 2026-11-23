@@ -153,8 +153,6 @@ export const agentCliRuntime: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli runtime:eval -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
-  const { exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   const { findUpProjectRootOrCwd } = require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveRuntimeCommand } =
     require('./resolveOptions') as typeof import('./resolveOptions');
@@ -168,11 +166,9 @@ export const agentCliRuntime: Command = async (argv) => {
     const context = { projectRoot: findUpProjectRootOrCwd(process.cwd()) };
     switch (options.action) {
       case 'eval':
-        await exitWithCodeAsync(await runtimeAsync.runtimeEvalAsync(options, context));
-        break;
+        return await runtimeAsync.runtimeEvalAsync(options, context);
       case 'errors':
-        await exitWithCodeAsync(await runtimeAsync.runtimeErrorsAsync(options, context));
-        break;
+        return await runtimeAsync.runtimeErrorsAsync(options, context);
     }
-  })().catch(logCmdError);
+  })();
 };

@@ -9,7 +9,7 @@ import {
   EXIT_OUTCOME_CANCELED,
   EXIT_OUTCOME_FAILED,
   EXIT_OUTCOME_TIMEOUT,
-  exitWithCodeAsync,
+  exitAsync,
 } from '../exitCodes';
 import type { Command } from '../types';
 import type { MockInstance } from 'vitest';
@@ -81,15 +81,16 @@ describe('exit codes', () => {
     expect(users).toEqual([]);
   });
 
-  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a tool error is a throw, so `logCmdError`
-  // prints the `--json` envelope and flushes the events. `exitWithCodeAsync` takes only an outcome,
-  // and this table keeps the other ways out of the process in the files that need them.
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a command returns its outcome or throws,
+  // and only `cli.ts` exits. The type refuses a bad return value; this table keeps the exits the
+  // type cannot see in the files that need them.
   it.each([
     { exit: 'process.exitCode =', pattern: /process\.exitCode\s*=(?!=)/, files: ['exitCodes.ts'] },
+    { exit: 'exitAsync(', pattern: /\bexitAsync\(/, files: ['cli.ts', 'exitCodes.ts'] },
     {
-      exit: 'exitWithAnyCodeAsync',
-      pattern: /\bexitWithAnyCodeAsync\(/,
-      // `logCmdError`, and the commands that pass on the exit code of the CLI they ran.
+      // The one way an arbitrary child code becomes a command's result.
+      exit: 'forwardedExit(',
+      pattern: /\bforwardedExit\(/,
       files: [
         'exitCodes.ts',
         'install/index.ts',
@@ -97,13 +98,13 @@ describe('exit codes', () => {
         'passthrough/auth.ts',
         'passthrough/index.ts',
         'start/index.ts',
-        'utils/errors.ts',
       ],
     },
     {
-      // A command that calls it and goes on settles, and `cli.ts` then exits 0 over its code.
-      exit: 'logCmdError(',
-      pattern: /(?<!\.catch\()\blogCmdError\(/,
+      // A command that reports an error itself and returns a code would print the error and exit
+      // with that code instead; the type cannot tell. Only dispatch reports.
+      exit: 'reportCmdError(',
+      pattern: /\breportCmdError\(/,
       files: ['cli.ts', 'utils/errors.ts'],
     },
     {
@@ -129,12 +130,21 @@ describe('exit codes', () => {
     expect(users).toEqual(files.map((file) => path.normalize(file)));
   });
 
-  // A command that returned a code would exit 0: `cli.ts` exits 0 when a command settles. So the
-  // type refuses the return value, and the code goes through an exit call or a throw.
-  it('refuses a command that returns an exit code', () => {
-    // @ts-expect-error — a returned code would never be read.
-    const command: Command = async () => EXIT_OUTCOME_FAILED;
-    expect(command).toBeTypeOf('function');
+  // `cli.ts` exits with what a command returns, so the type is the guard on that value.
+  it('accepts an outcome and refuses any other command result', async () => {
+    const outcome = async (): Promise<typeof EXIT_OUTCOME_FAILED> => EXIT_OUTCOME_FAILED;
+    const commands: Command[] = [
+      async () => EXIT_OUTCOME_FAILED,
+      // @ts-expect-error — `1` is a tool error, which is a throw.
+      async () => 1,
+      // @ts-expect-error — a child's code passes only through `forwardedExit`.
+      async () => 3 as number,
+      // @ts-expect-error — a body that awaits an outcome and falls off the end would exit 0.
+      async () => {
+        await outcome();
+      },
+    ];
+    expect(commands).toHaveLength(4);
   });
 
   it('names every code once', () => {
@@ -150,7 +160,7 @@ describe('exit codes', () => {
   });
 });
 
-describe(exitWithCodeAsync, () => {
+describe(exitAsync, () => {
   let originalExitCode: typeof process.exitCode;
   let exitSpy: MockInstance;
 
@@ -165,14 +175,13 @@ describe(exitWithCodeAsync, () => {
     exitSpy.mockRestore();
   });
 
-  it('flushes the event stream before leaving the event loop with the requested code', async () => {
+  it('flushes the event stream and leaves the event loop with the requested code', async () => {
     let flushed = false;
     vi.mocked(flushEventLogger).mockImplementation(async () => {
       flushed = true;
     });
 
-    exitWithCodeAsync(EXIT_OUTCOME_FAILED);
-    await waitForExitAsync();
+    await exitAsync(EXIT_OUTCOME_FAILED);
 
     expect(flushed).toBe(true);
     expect(process.exitCode).toBe(20);
@@ -180,28 +189,12 @@ describe(exitWithCodeAsync, () => {
   });
 
   // A flush that fails must not turn an outcome into a hung process: the code still leaves.
-  it('exits even when the flush fails', async () => {
+  it('settles with the code even when the flush fails', async () => {
     vi.mocked(flushEventLogger).mockRejectedValue(new Error('no writer'));
 
-    exitWithCodeAsync(EXIT_OUTCOME_TIMEOUT);
-    await waitForExitAsync();
+    await exitAsync(EXIT_OUTCOME_TIMEOUT);
 
     expect(process.exitCode).toBe(22);
     expect(exitSpy).not.toHaveBeenCalled();
   });
-
-  it('never settles, so a caller has nothing left to run', async () => {
-    vi.mocked(flushEventLogger).mockResolvedValue(undefined as never);
-    const settled = vi.fn();
-
-    exitWithCodeAsync(EXIT_OK).then(settled, settled);
-    await waitForExitAsync();
-
-    expect(settled).not.toHaveBeenCalled();
-  });
 });
-
-/** Let the async flush and its cleanup finish. */
-async function waitForExitAsync(): Promise<void> {
-  await new Promise((resolve) => setImmediate(resolve));
-}

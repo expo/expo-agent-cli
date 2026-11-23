@@ -24,7 +24,7 @@ import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import type { DevServerLockInfo } from '../devLock';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
-import { exitWithCodeAsync } from '../exitCodes';
+import { EXIT_OK, type OutcomeExitCode } from '../exitCodes';
 import { buildStatusFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { ImpactClass } from '../impact/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
@@ -172,7 +172,10 @@ export interface StatusOptions {
 }
 
 /** Gather the report, emit it for agents, and print it for humans. */
-export async function printStatusAsync(projectRoot: string, options: StatusOptions): Promise<void> {
+export async function printStatusAsync(
+  projectRoot: string,
+  options: StatusOptions
+): Promise<OutcomeExitCode> {
   const { report, fingerprints } = await collectStatusReportAsync(projectRoot, options);
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — status already carries "next" by
   // design, so these are the actions that line does not name, and only the machine channels
@@ -224,9 +227,7 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
   // The one path out of this command that is not 0, and it exists only because the caller asked
   // for a verdict. The report is printed first either way: a gate that failed is still a report,
   // and an agent reading the exit code needs the reasons above it.
-  if (report.assertion && !report.assertion.ok) {
-    await exitWithCodeAsync(report.assertion.exitCode);
-  }
+  return report.assertion && !report.assertion.ok ? report.assertion.exitCode : EXIT_OK;
 }
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup

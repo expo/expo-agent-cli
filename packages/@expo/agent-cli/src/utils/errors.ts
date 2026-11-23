@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { execSync } from 'child_process';
 
 import { event as cliEvent } from '../events';
-import { EXIT_ERROR, EXIT_NEEDS_HUMAN, exitWithAnyCodeAsync } from '../exitCodes';
+import { EXIT_ERROR, EXIT_NEEDS_HUMAN } from '../exitCodes';
 import { error as printToStderr, exception, hasWrittenToStdout, log, warn } from '../log';
 import { renderForInvoker } from './invoker';
 import { isJsonRequested } from './jsonMode';
@@ -122,7 +122,7 @@ export class NeedsHumanError extends CommandError {
   ) {
     super(code, message);
     // The `Try:` line of the base class and the handoff would say the same thing twice, so
-    // `logCmdError` prints the block instead — this keeps the field right for anything reading
+    // `reportCmdError` prints the block instead — this keeps the field right for anything reading
     // the error object itself.
     this.suggestedCommand = needsHuman.command ?? undefined;
     this.exitCode = EXIT_NEEDS_HUMAN;
@@ -226,7 +226,11 @@ export function jsonErrorEnvelope({
   };
 }
 
-export function logCmdError(thrown: unknown): never {
+/**
+ * Report a failure that reached the top of a command: the event, the message, the `Try:` line, and
+ * under `--json` the envelope. Returns the exit code; `cli.ts` exits with it.
+ */
+export function reportCmdError(thrown: unknown): number {
   const error: any = asError(thrown);
   if (
     error instanceof CommandError ||
@@ -287,16 +291,12 @@ export function logCmdError(thrown: unknown): never {
         )
       );
     }
-    // `process.exit` drops buffered JSONL events (the `cli:error` above never reached
-    // LOG_EVENTS), so `exitWithCodeAsync` flushes first. It never settles, which keeps the
-    // process alive until the exit fires and gives the `.catch(logCmdError)` callers nothing
-    // further to run. An error that names no code is a tool error, so it exits 1 (llp/0010).
-    return exitWithAnyCodeAsync(exitCode) as unknown as never;
+    // An error that names no code is a tool error, so it exits 1 (llp/0010).
+    return exitCode;
   }
 
-  // Any other `Error` is a defect that reached the top through a command's `.catch`: the same
-  // crash report as `handleUncaughtException`, plus the event and the flush, which this
-  // asynchronous path can afford.
+  // Any other `Error` is a defect that reached the top of a command: the same crash report as
+  // `handleUncaughtException`, plus the event, which this asynchronous path can afford.
   const message = printCrashReport(error, thrown);
   cliEvent('error', {
     code: UNCAUGHT_EXCEPTION_CODE,
@@ -304,14 +304,14 @@ export function logCmdError(thrown: unknown): never {
     suggestedCommand: null,
     needsHuman: false,
   });
-  return exitWithAnyCodeAsync(EXIT_ERROR) as unknown as never;
+  return EXIT_ERROR;
 }
 
 /**
  * The same failure with its suggested commands spelled for the runner in use.
  *
  * A copy rather than a mutation, and only when the spelling actually changes: the error object may
- * be caught and inspected further up, and `logCmdError` is the last thing that touches it — the one
+ * be caught and inspected further up, and `reportCmdError` is the last thing that touches it — the one
  * place where "what gets printed" and "what the error *is*" are allowed to differ. `exception`
  * prints `name: message` and, under `EXPO_DEBUG`, the stack, so both are carried over.
  */

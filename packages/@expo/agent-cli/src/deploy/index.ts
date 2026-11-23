@@ -3,6 +3,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { EXIT_OK, type OutcomeExitCode } from '../exitCodes';
 
 export const deployHelp: CommandHelp = {
   command: 'deploy',
@@ -71,7 +72,6 @@ export const agentCliDeploy: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli deploy -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
   const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
@@ -79,10 +79,11 @@ export const agentCliDeploy: Command = async (argv) => {
   const { resolveDeployOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
   const { deployAsync } = require('./deployAsync') as typeof import('./deployAsync');
 
-  return (async () => {
+  return (async (): Promise<OutcomeExitCode> => {
     const options = resolveDeployOptions(argv ?? []);
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
     assertDependenciesInstalledSync(projectRoot);
     await deployAsync(projectRoot, options);
-  })().catch(logCmdError);
+    return EXIT_OK;
+  })();
 };

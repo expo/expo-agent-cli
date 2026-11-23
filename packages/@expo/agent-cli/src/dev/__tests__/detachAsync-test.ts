@@ -27,10 +27,6 @@ import { childLogOf } from './childLog';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../log');
-vi.mock('../../exitCodes', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../exitCodes')>()),
-  exitWithCodeAsync: vi.fn(() => new Promise<never>(() => {})),
-}));
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   devicesDisabled: vi.fn(() => true),
@@ -686,7 +682,7 @@ describe('the bound device', () => {
   });
 
   // detached-device-error-relayed
-  // detached-device-error-relayed: the child's log is what `logCmdError` writes under
+  // detached-device-error-relayed: the child's log is what `reportCmdError` writes under
   // `__EXPO_AGENT_CLI_DETACHED=1`, captured off the log module, so the round trip is the real one.
   it("rethrows the child's device refusal unchanged: code, exit, data and Try line", async () => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);

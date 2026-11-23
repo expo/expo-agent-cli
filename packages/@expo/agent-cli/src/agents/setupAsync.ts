@@ -4,7 +4,7 @@
 import chalk from 'chalk';
 
 import { docsSummary, syncDocsForProjectAsync } from '../docs/autoSync';
-import { EXIT_OUTCOME_FAILED, exitWithCodeAsync } from '../exitCodes';
+import { EXIT_OK, EXIT_OUTCOME_FAILED, type OutcomeExitCode } from '../exitCodes';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import {
@@ -31,7 +31,7 @@ const LABEL_WIDTH = 12;
 export async function printSetupAsync(
   projectRoot: string | null,
   options: SetupOptions
-): Promise<void> {
+): Promise<OutcomeExitCode> {
   const report = await runSetupAsync(projectRoot, options);
 
   event('setup_completed', {
@@ -59,7 +59,7 @@ export async function printSetupAsync(
     }
     for (const error of report.errors) Log.warn(error);
   }
-  if (report.errors.length) await exitWithCodeAsync(EXIT_OUTCOME_FAILED);
+  return report.errors.length ? EXIT_OUTCOME_FAILED : EXIT_OK;
 }
 
 /** Confirm the complete plan before any installer, project probe, or file writer runs. */

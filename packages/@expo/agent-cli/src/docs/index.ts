@@ -4,6 +4,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { EXIT_OK } from '../exitCodes';
 
 export const docsSyncHelp: CommandHelp = {
   command: 'docs:sync',
@@ -105,6 +106,7 @@ export const agentCliDocsSync: Command = async (argv) => {
     json: !!args['--json'],
     followups: !args['--no-followups'],
   });
+  return EXIT_OK;
 };
 
 export const agentCliDocsSearch: Command = async (argv) => {
@@ -133,4 +135,5 @@ export const agentCliDocsSearch: Command = async (argv) => {
     json: !!args['--json'],
     followups: !args['--no-followups'],
   });
+  return EXIT_OK;
 };

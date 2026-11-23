@@ -1,7 +1,10 @@
+import type { CommandExit } from './exitCodes';
+
 /**
  * A CLI subcommand. `argv` holds the arguments after the subcommand name.
  *
- * It settles only on success, and `cli.ts` then exits 0. Any other exit is a throw or an exit call
- * that never settles (llp/0010 §Exit codes), so a command cannot return a code that is dropped.
+ * It returns its outcome, or a forwarded child's code, and `cli.ts` exits with it. A tool error is
+ * a throw (llp/0010 §Exit codes). Every path returns a code, so a body that awaits an outcome and
+ * falls off the end does not compile.
  */
-export type Command = (argv?: string[]) => Promise<void>;
+export type Command = (argv?: string[]) => Promise<CommandExit>;

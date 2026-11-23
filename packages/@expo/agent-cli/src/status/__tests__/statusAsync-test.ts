@@ -6,6 +6,7 @@ import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
 import * as deviceBinding from '../../deviceBinding';
 import { event } from '../../events';
+import { EXIT_OK } from '../../exitCodes';
 import * as network from '../../followups/network';
 import { lookUpBuildPlatformAsync } from '../../impact/buildCache';
 import { compareWithEasBuildAsync } from '../../impact/compare';
@@ -252,9 +253,7 @@ describe('status early fingerprints', () => {
       throw new Error('no platforms');
     });
 
-    await expect(
-      printStatusAsync(projectRoot, { ...options, json: true })
-    ).resolves.toBeUndefined();
+    await expect(printStatusAsync(projectRoot, { ...options, json: true })).resolves.toBe(EXIT_OK);
     expect(Log.log).toHaveBeenCalledTimes(1);
   });
 });

@@ -68,7 +68,6 @@ export const agentCliHelp: Command = async (argv) => {
   const registry = require('../commandRegistry') as typeof import('../commandRegistry');
   const listing = require('./listing') as typeof import('./listing');
   const errors = require('../commandErrors') as typeof import('../commandErrors');
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
 
   return (async () => {
     const asked = args._.map(String)[0] ?? null;
@@ -76,8 +75,7 @@ export const agentCliHelp: Command = async (argv) => {
     // `Log.exit` never returns, but it is reached through a `require`, which the type checker
     // cannot use for control-flow narrowing — so each branch says it is done.
     if (asked == null) {
-      Log.exit(listing.formatTopLevelHelp(), EXIT_OK);
-      return;
+      return Log.exit(listing.formatTopLevelHelp(), EXIT_OK);
     }
 
     // Topics before commands: a topic is what this command is *for*, and a command that one day
@@ -85,8 +83,7 @@ export const agentCliHelp: Command = async (argv) => {
     const { findHelpTopic } = require('./topics') as typeof import('./topics');
     const topic = findHelpTopic(asked);
     if (topic) {
-      Log.exit(topic.render(), EXIT_OK);
-      return;
+      return Log.exit(topic.render(), EXIT_OK);
     }
 
     // Everything else is a command name, answered by that command rather than about it.
@@ -94,8 +91,7 @@ export const agentCliHelp: Command = async (argv) => {
     switch (resolution.kind) {
       case 'command': {
         const exec = await resolution.load();
-        await exec(resolution.argv);
-        return;
+        return await exec(resolution.argv);
       }
       // A bare group is its listing, exactly as `@expo/agent-cli runtime --help` prints it, plus the
       // options of the action the bare name runs when it has one.
@@ -106,15 +102,13 @@ export const agentCliHelp: Command = async (argv) => {
           process.exit(EXIT_OK);
         }
         const exec = await actions[defaultAction]!.load();
-        await exec(['--help']);
-        return;
+        return await exec(['--help']);
       }
       // An `expo` command this CLI forwards: its help is that CLI's to print, so it prints it.
       case 'passthrough': {
         const { agentCliPassthrough } =
           require('../passthrough') as typeof import('../passthrough');
-        await agentCliPassthrough(resolution.command)(['--help']);
-        return;
+        return await agentCliPassthrough(resolution.command)(['--help']);
       }
       // A group of ours asked about an action it does not have: the listing, then the error, the
       // same order `cli.ts` prints them in — the alternatives are on screen before the sentence
@@ -136,5 +130,5 @@ export const agentCliHelp: Command = async (argv) => {
         throw error;
       }
     }
-  })().catch(logCmdError);
+  })();
 };

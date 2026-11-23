@@ -66,8 +66,6 @@ export const agentCliTypecheck: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli typecheck -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
-  const { exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { printTypeCheckAsync } = require('./typecheckAsync') as typeof import('./typecheckAsync');
@@ -78,8 +76,6 @@ export const agentCliTypecheck: Command = async (argv) => {
       json: !!args['--json'],
       followups: !args['--no-followups'],
     });
-    if (exitCode !== 0) {
-      await exitWithCodeAsync(exitCode);
-    }
-  })().catch(logCmdError);
+    return exitCode;
+  })();
 };

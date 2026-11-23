@@ -3,6 +3,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs, strayArgumentError } from '../utils/args';
+import { EXIT_OK } from '../exitCodes';
 
 export const skillsSyncHelp: CommandHelp = {
   command: 'skills:sync',
@@ -189,10 +190,12 @@ export const agentCliSkills: Command = async (argv) => {
   switch (action) {
     case 'sync':
       assertNoTarget('sync');
-      return await skillsAsync.syncSkillsAsync(projectRoot, options);
+      await skillsAsync.syncSkillsAsync(projectRoot, options);
+      return EXIT_OK;
     case 'list':
       assertNoTarget('list');
-      return await skillsAsync.listSkillsAsync(projectRoot, { json: !!args['--json'] });
+      await skillsAsync.listSkillsAsync(projectRoot, { json: !!args['--json'] });
+      return EXIT_OK;
     case 'show': {
       const packageName = args._[1];
       if (!packageName) {
@@ -201,11 +204,13 @@ export const agentCliSkills: Command = async (argv) => {
           `Missing package name. Usage: ${PROGRAM_PREFIX} skills:show <package> [skill]`
         );
       }
-      return await skillsAsync.showSkillsAsync(projectRoot, packageName, args._[2]);
+      await skillsAsync.showSkillsAsync(projectRoot, packageName, args._[2]);
+      return EXIT_OK;
     }
     case 'clean':
       assertNoTarget('clean');
-      return await skillsAsync.cleanSkillsAsync(projectRoot, options);
+      await skillsAsync.cleanSkillsAsync(projectRoot, options);
+      return EXIT_OK;
     default:
       throw new CommandError(
         'BAD_ARGS',

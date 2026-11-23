@@ -87,13 +87,12 @@ export const agentCliAgentsSetup: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli agents:setup -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findSetupProjectRoot } = require('./plan') as typeof import('./plan');
   const { printSetupAsync } = require('./setupAsync') as typeof import('./setupAsync');
 
   return (async () => {
     const projectRoot = findSetupProjectRoot(process.cwd());
-    await printSetupAsync(projectRoot, {
+    return await printSetupAsync(projectRoot, {
       yes: !!args['--yes'],
       project: !!args['--project'],
       plugins: !args['--no-plugins'],
@@ -103,5 +102,5 @@ export const agentCliAgentsSetup: Command = async (argv) => {
       docs: !args['--no-docs'],
       json: !!args['--json'],
     });
-  })().catch(logCmdError);
+  })();
 };

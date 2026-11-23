@@ -11,12 +11,12 @@ import {
   unknownCommandSuggestion,
 } from './commandErrors';
 import { commandGroups, resolveCommand } from './commandRegistry';
-import { EXIT_OK, exitWithCodeAsync } from './exitCodes';
+import { EXIT_OK, exitAsync, type CommandExit } from './exitCodes';
 import { formatGroupHelp, formatTopLevelHelp } from './help/listing';
 import * as Log from './log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import { configureColor } from './utils/color';
-import { handleUncaughtException } from './utils/errors';
+import { CommandError, handleUncaughtException, reportCmdError } from './utils/errors';
 import { DETACHED_EVENT_DEBUG_ENV } from './utils/eventLogEnv';
 import { argvRequestsJson, setJsonRequested } from './utils/jsonMode';
 
@@ -151,11 +151,9 @@ function logErrorListing(text: string): void {
 // terminal to the `expo` subprocess and forward the signals to it, in `utils/expoCli.ts`.
 switch (resolution.kind) {
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
-  // The outermost catch of the CLI. A command's own body already ends in `.catch(logCmdError)`,
-  // but its **argument parsing** runs before that chain is built — so a bad flag rejected here,
-  // with nobody listening, and Node printed an `ArgError` stack trace and exited 1 with no event,
-  // no `Try:` line and, under `--json`, nothing at all on stdout. Every command funnels through
-  // this one line, so the envelope is guaranteed rather than per command.
+  // The outermost catch of the CLI, and the only one: a command returns its exit code or throws,
+  // its argument parsing included, and `runCommand` reports and exits. Every command funnels
+  // through this one line, so the envelope is guaranteed rather than per command.
   case 'command':
     runCommand(resolution.load().then((exec) => exec(resolution.argv)));
     break;
@@ -179,23 +177,19 @@ switch (resolution.kind) {
   // The listing comes first and the error last: the last line is what a driving agent acts on
   // (llp/0006 "errors are prompts").
   case 'unknown-action': {
-    const { CommandError, logCmdError } =
-      require('./utils/errors') as typeof import('./utils/errors');
     logErrorListing(formatGroupHelp(resolution.group));
     const error = new CommandError(
       'UNKNOWN_ACTION',
       unknownActionMessage(resolution.group, resolution.action)
     );
     error.suggestedCommand = `${PROGRAM_PREFIX} ${resolution.group} --help`;
-    logCmdError(error);
+    runCommand(Promise.reject(error));
     break;
   }
 
   // Options with no action used to print this listing and exit 0, which reads as success to an
   // agent that then waits for output that never comes (llp/0010 §Registry rules).
   case 'flags-without-action': {
-    const { CommandError, logCmdError } =
-      require('./utils/errors') as typeof import('./utils/errors');
     logErrorListing(formatGroupHelp(resolution.group));
     const error = new CommandError(
       'UNKNOWN_ACTION',
@@ -204,17 +198,15 @@ switch (resolution.kind) {
     // For a group named after another CLI's verb this is that CLI's command, with these flags on
     // it: `@expo/agent-cli build --platform ios` recovers with `npx eas build --platform ios`.
     error.suggestedCommand = flagsWithoutActionSuggestion(resolution.group, resolution.flags);
-    logCmdError(error);
+    runCommand(Promise.reject(error));
     break;
   }
 
   case 'unknown-command': {
-    const { CommandError, logCmdError } =
-      require('./utils/errors') as typeof import('./utils/errors');
     const error = new CommandError('UNKNOWN_COMMAND', unknownCommandMessage(resolution.command));
     // One close name is a recovery to run; several are a choice, and the message lists them.
     error.suggestedCommand = unknownCommandSuggestion(resolution.command);
-    logCmdError(error);
+    runCommand(Promise.reject(error));
     break;
   }
 
@@ -228,15 +220,15 @@ switch (resolution.kind) {
 }
 
 /**
- * The one end of every command: one that settles exits 0 with the events flushed, and anything it
- * throws, its loading and argument parsing included, is `logCmdError`'s.
+ * The one end of every command, and the only place a finished command exits: with the code it
+ * returned, or, for anything it threw, its loading and argument parsing included, with the code
+ * `reportCmdError` gives after printing it (llp/0010 §Exit codes).
  */
-function runCommand(run: Promise<void>): void {
-  run.then(
-    () => exitWithCodeAsync(EXIT_OK),
-    (error: unknown) => {
-      const { logCmdError } = require('./utils/errors') as typeof import('./utils/errors');
-      logCmdError(error);
-    }
-  );
+function runCommand(run: Promise<CommandExit>): void {
+  run
+    .then(
+      (code) => exitAsync(code),
+      (error: unknown) => exitAsync(reportCmdError(error))
+    )
+    .catch(handleUncaughtException);
 }

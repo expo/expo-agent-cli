@@ -8,13 +8,6 @@ import { runExpoAsync } from '../../utils/expoCli';
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn() }));
-// The real exit never settles; this one records the forwarded code and lets the command finish.
-vi.mock('../../exitCodes', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../exitCodes')>()),
-  exitWithAnyCodeAsync: vi.fn(async (code: number) => {
-    process.exitCode = code;
-  }),
-}));
 
 // path.resolve so the expectation matches what findUpProjectRootOrCwd returns on every
 // platform (win32 resolves '/project' to '<drive>:\\project').
@@ -25,12 +18,10 @@ beforeEach(() => {
   vol.fromJSON({ 'package.json': JSON.stringify({ name: 'app' }) }, projectRoot);
   vi.spyOn(process, 'cwd').mockReturnValue(projectRoot);
   vi.mocked(runExpoAsync).mockResolvedValue(0);
-  process.exitCode = undefined;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-  process.exitCode = undefined;
 });
 
 describe(agentCliExpoPassthrough, () => {
@@ -49,9 +40,7 @@ describe(agentCliExpoPassthrough, () => {
   it(`should forward the exit code of the expo CLI`, async () => {
     vi.mocked(runExpoAsync).mockResolvedValue(9);
 
-    await agentCliExpoPassthrough('export')(['--platform', 'web']);
-
-    expect(process.exitCode).toBe(9);
+    expect(await agentCliExpoPassthrough('export')(['--platform', 'web'])).toBe(9);
   });
 
   it(`should emit one event naming the forwarded command`, async () => {

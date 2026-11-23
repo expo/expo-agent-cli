@@ -60,8 +60,7 @@ export const agentCliStart: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli start -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
-  const { exitWithAnyCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
+  const { forwardedExit } = require('../exitCodes') as typeof import('../exitCodes');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
   const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
@@ -77,6 +76,6 @@ export const agentCliStart: Command = async (argv) => {
     // shares a name with an `expo` command behaves like it. Neither the probe nor the plan engine
     // is loaded here, so `expo start` is reached as fast as running it directly.
     const { startAsync } = require('./startAsync') as typeof import('./startAsync');
-    await exitWithAnyCodeAsync(await startAsync(projectRoot, options));
-  })().catch(logCmdError);
+    return forwardedExit(await startAsync(projectRoot, options));
+  })();
 };

@@ -112,22 +112,17 @@ export const agentCliReload: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli runtime:reload -h` shows as fast as possible.
-  const { logCmdError } = require('../../utils/errors') as typeof import('../../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../../utils/findUp') as typeof import('../../utils/findUp');
   const { resolveReloadOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
   const { reloadAsync } = require('./reloadAsync') as typeof import('./reloadAsync');
-  const { EXIT_OK, exitWithCodeAsync } =
-    require('../../exitCodes') as typeof import('../../exitCodes');
 
   return (async () => {
     const options = resolveReloadOptions(argv ?? []);
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const code = await reloadAsync(projectRoot, options);
-    if (code !== EXIT_OK) {
-      // An outcome, not an error: the command has already printed everything it has to say, and
-      // the code is what the caller branches on (llp/0010 §Exit codes).
-      await exitWithCodeAsync(code);
-    }
-  })().catch(logCmdError);
+    // An outcome, not an error: the command has already printed everything it has to say, and
+    // the code is what the caller branches on (llp/0010 §Exit codes).
+    return code;
+  })();
 };
