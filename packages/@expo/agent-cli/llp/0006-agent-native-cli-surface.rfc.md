@@ -118,7 +118,7 @@ What is forwarded is a list, not a fallback. It is the `commands` map of `packag
 
 ### Auth fallback
 
-A forwarded command that acts on the machine rather than on the project falls back to the EAS CLI, rather than failing for want of a project one. [confirmed, Kudo, 2026-08-26] The four are `login`, `logout`, `register`, and `whoami`. The project's own `expo` wins whenever there is one. They read and write `~/.expo/state.json`, a file that exists on the machine whether or not the current directory has an Expo app in it. Both CLIs resolve that file identically.
+A forwarded command that acts on the machine rather than on the project falls back to the EAS CLI, rather than failing for want of a project one. [confirmed, Kudo, 2026-08-26] The four are `login`, `logout`, `register`, and `whoami`. The project's own `expo` wins whenever there is one. They read and write `~/.expo/state.json`, a file that exists on the machine whether or not the current directory has an Expo app in it. Both CLIs resolve that file identically. `whoami --json` is answered by this CLI, because neither CLI has the flag. A signed-out machine is the `eas-login` or `expo-login` handoff, exit 7, after the CLI that answered (e2e `auth-test.ts`).
 
 `prebuild` and `export` get none of this. They act on the project, so "there is no project CLI here" is a real answer.
 

@@ -24,6 +24,9 @@
 
 import path from 'path';
 
+import type { OutcomeExitCode } from '../exitCodes';
+import { PROGRAM_PREFIX } from '../programName';
+
 import type { Command } from '../types';
 import { easCliInvocation } from '../utils/easCli';
 import { getExpoHomeDirectory } from '../utils/expoHome';
@@ -246,7 +249,8 @@ export function authFallbackNotice(cli: AuthCli, command: string): string | null
 export function agentCliAuthPassthrough(command: string): Command {
   return async (argv) => {
     const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
-    const { exitWithAnyCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
+    const { exitWithAnyCodeAsync, exitWithCodeAsync } =
+      require('../exitCodes') as typeof import('../exitCodes');
     const { event } = require('../events') as typeof import('../events');
     const Log = require('../log') as typeof import('../log');
     const { runInheritedAsync } =
@@ -283,7 +287,7 @@ export function agentCliAuthPassthrough(command: string): Command {
       // was ignored, and an agent that asked for one object got a line of prose at exit 0
       // [observed — live run S7]. `whoami` is a *read*, so this one can be answered here.
       if (command === 'whoami' && args.includes('--json')) {
-        await exitWithAnyCodeAsync(await printWhoamiJsonAsync(projectRoot, cli, args));
+        await exitWithCodeAsync(await printWhoamiJsonAsync(projectRoot, cli, args));
         return;
       }
 
@@ -304,8 +308,8 @@ export function agentCliAuthPassthrough(command: string): Command {
  * always present, and a fact the run does not have is null.
  */
 export interface WhoamiResultJson {
-  /** Whether the CLI that answered says this machine is signed in. */
-  loggedIn: boolean;
+  /** Always true: a signed-out machine is the `EAS_LOGIN_REQUIRED` or `EXPO_LOGIN_REQUIRED` error. */
+  loggedIn: true;
   /** The account name, or null when the answer named none. */
   user: string | null;
   /** Which CLI answered, e.g. `expo whoami`. */
@@ -323,15 +327,18 @@ export interface WhoamiResultJson {
  * this run owns stdout, and the prose the CLI prints is the thing being turned into the object.
  * `--json` is dropped from the argv it forwards, because neither CLI has it.
  *
- * The exit code stays the answering CLI's, so the two forms of this command agree: a signed-out
- * machine is `1` here exactly as it is without `--json`.
+ * A signed-out machine is a step only a person can complete, so it throws the login handoff: exit
+ * `7` with the `--json` envelope (llp/0010 §Exit codes).
  */
 async function printWhoamiJsonAsync(
   projectRoot: string,
   cli: AuthCli,
   args: string[]
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const Log = require('../log') as typeof import('../log');
+  const { needsHumanError } =
+    require('../needsHuman/error') as typeof import('../needsHuman/error');
+  const { EXIT_OK } = require('../exitCodes') as typeof import('../exitCodes');
   const { parseWhoamiUser } =
     require('../needsHuman/preflight') as typeof import('../needsHuman/preflight');
 
@@ -342,19 +349,28 @@ async function printWhoamiJsonAsync(
     { cwd: projectRoot, output: 'capture' }
   );
 
+  const source = `${cli.tool} whoami`;
+  if (result.exitCode !== 0) {
+    const said = `${result.stderr}${result.stdout}`.trim();
+    const error = needsHumanError(cli.tool === 'eas' ? 'eas-login' : 'expo-login', {
+      detectedBy: 'preflight',
+      message: [
+        `No Expo account is signed in on this machine.`,
+        `Why: "${source}" exited ${result.exitCode}${said ? ` and said: ${said}` : ''}.`,
+        `How: sign in with "${PROGRAM_PREFIX} login", or, on a machine with nobody at the keyboard, set EXPO_TOKEN to an access token from expo.dev.`,
+      ].join('\n'),
+    });
+    error.data = { source, sessionFile: sessionFilePath(), cli: authCliLabel(cli) };
+    throw error;
+  }
+
   const report: WhoamiResultJson = {
-    loggedIn: result.exitCode === 0,
-    user: result.exitCode === 0 ? parseWhoamiUser(result.stdout) : null,
-    source: `${cli.tool} whoami`,
+    loggedIn: true,
+    user: parseWhoamiUser(result.stdout),
+    source,
     sessionFile: sessionFilePath(),
     cli: authCliLabel(cli),
   };
   Log.log(JSON.stringify(report, null, 2));
-  // What the CLI said, on stderr, where it cannot break the parse: a signed-out machine's reason
-  // is its own sentence and this object does not carry prose.
-  const said = `${result.stderr}${result.stdout}`.trim();
-  if (result.exitCode !== 0 && said) {
-    Log.error(said);
-  }
-  return result.exitCode ?? 1;
+  return EXIT_OK;
 }

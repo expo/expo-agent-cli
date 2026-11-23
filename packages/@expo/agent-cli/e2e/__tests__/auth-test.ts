@@ -93,6 +93,10 @@ fs.appendFileSync(
 const rest = args[0] === '--yes' ? args.slice(1) : args;
 const spec = rest[0] || '';
 const verb = rest[1];
+if (verb === 'whoami' && process.env.STUB_SIGNED_OUT === '1') {
+  process.stdout.write('Not logged in\\n');
+  process.exit(1);
+}
 if (spec.startsWith('eas-cli') && verb === 'whoami') {
   process.stdout.write('alice\\nalice@example.com\\n\\nAccounts:\\n• alice (Role: Owner)\\n');
 }
@@ -185,6 +189,32 @@ describe('auth commands outside an Expo project', () => {
     });
     // The flag is this CLI's, so it is not passed on to a CLI that has no such option.
     expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami']);
+  });
+
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — signing in is a step only a person can
+  // do, so a signed-out machine is exit 7 with the login handoff, not a report at exit 1.
+  it(`should answer a signed-out whoami --json with the login handoff`, async () => {
+    const dir = await setupBareDirAsync(['eas']);
+
+    const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
+      env: { ...realHomeEnv(dir), STUB_SIGNED_OUT: '1' },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(7);
+    expect(JSON.parse(result.stdout)).toEqual({
+      error: {
+        code: 'EAS_LOGIN_REQUIRED',
+        message: expect.stringContaining('Not logged in'),
+        suggestedCommand: 'npx @expo/agent-cli login',
+        needsHuman: expect.objectContaining({ scenario: 'eas-login' }),
+        data: {
+          source: 'eas whoami',
+          sessionFile: path.join(os.homedir(), '.expo', 'state.json'),
+          cli: expect.stringContaining('eas'),
+        },
+      },
+    });
   });
 
   it.each([
