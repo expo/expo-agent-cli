@@ -152,7 +152,7 @@ Four layers, in priority order:
    - A rung that cannot answer passes to the next: no binary, an `eas` that needs a download, a run past the deadline, or a binary that is not the CLI.
    - "Not the CLI" needs both: output with nothing that looks like that CLI's, _and_ a wrapper's exit (`101`, `126`, `127`, `134`, `139`, or a panic signature).
    - When no rung answers, `loggedIn` is `null`, never `false`. A CLI that ran and could not verify the account (a network failure, a stop, a timeout) also makes `EXPO_TOKEN` alone no answer, because the CLI most likely failed on that token.
-   - On `false`, the command stops with `eas-login`, exit `7`, before it spends anything. A rejected `EXPO_TOKEN` stops with `expo-token-rejected` instead, which names no command (e2e `deploy-test.ts`). On `null`, it runs, and layer 3 recognises a real sign-in failure.
+   - On `false`, the command stops with `eas-login`, exit `7`, before it spends anything. A rejected `EXPO_TOKEN` stops with `expo-token-rejected` instead, which names no command. Layer 3 recognises the same text in a command's own output (e2e `deploy-test.ts`). On `null`, it runs, and layer 3 recognises a real sign-in failure.
 2. **Nobody can answer.** A captured child gets no stdin, and its stdout is a pipe, never a terminal.
    - An `eas` command that can prompt also gets `--non-interactive`, or `--json`, which implies it.
    - An `expo` command gets `CI=1` in its environment, because the Expo CLI rejects `--non-interactive`.

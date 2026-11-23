@@ -88,8 +88,9 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     url: ACCESS_TOKENS_URL,
     unattendedEnv: ['EXPO_TOKEN'],
     resumable: true,
-    tools: [],
-    signatures: [],
+    tools: ['eas', 'expo'],
+    // What both CLIs print for a rejected token [observed — eas-cli 27.7.2, expo 58.1.4 whoami].
+    signatures: [/The bearer token is invalid\./],
   },
   {
     id: 'macos-automation',

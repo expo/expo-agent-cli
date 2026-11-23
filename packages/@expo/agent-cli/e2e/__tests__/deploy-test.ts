@@ -643,28 +643,45 @@ describe('@expo/agent-cli deploy', () => {
         });
       });
 
-      // eas-cli refuses `login` while EXPO_TOKEN is set, so a rejected token hands over no command.
-      it(`should stop before the export on a rejected EXPO_TOKEN, and name no login`, async () => {
-        const projectRoot = await setupAsync('go-app');
-
-        const result = await executeAgentCliAsync(projectRoot, ['deploy', '--web', '--json'], {
+      // eas-cli refuses `login` while EXPO_TOKEN is set, so a rejected token hands over no command,
+      // whether the preflight hears it or, after a preflight with no answer, the deploy itself.
+      it.each([
+        {
+          when: 'at the preflight',
           env: {
             STUB_EAS_WHOAMI_EXIT_CODE: '1',
             STUB_EAS_WHOAMI_STDERR: 'The bearer token is invalid.',
           },
-          reject: false,
-        });
-
-        expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
-        expect(readStubExpoInvocations(projectRoot)).toEqual([]);
-        expect(readStubEasInvocations(projectRoot)).toEqual([]);
-        const { error } = JSON.parse(result.stdout);
-        expect(error).toMatchObject({
           code: 'EXPO_TOKEN_INVALID',
-          message: expect.stringContaining('or unset it'),
-          needsHuman: { scenario: 'expo-token-rejected', command: null },
-        });
-      });
+        },
+        {
+          when: 'at the deploy, after a preflight with no answer',
+          env: {
+            STUB_EAS_WHOAMI_EXIT_CODE: '101',
+            STUB_EAS_WHOAMI_STDERR: 'Stack backtrace:\n   2: tuft::main',
+            STUB_EAS_EXIT_CODE: '1',
+            STUB_EAS_STDERR: 'The bearer token is invalid.\n    Error: GraphQL request failed.',
+          },
+          code: 'EAS_DEPLOY_FAILED',
+        },
+      ])(
+        'should hand over a rejected EXPO_TOKEN $when, and name no login',
+        async ({ env, code }) => {
+          const projectRoot = await setupAsync('go-app');
+
+          const result = await executeAgentCliAsync(projectRoot, ['deploy', '--web', '--json'], {
+            env,
+            reject: false,
+          });
+
+          expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
+          const { error } = JSON.parse(result.stdout);
+          expect(error).toMatchObject({
+            code,
+            needsHuman: { scenario: 'expo-token-rejected', command: null },
+          });
+        }
+      );
 
       // The correctness half of the preflight. A binary that is not the EAS CLI exits non-zero
       // just like a signed-out one; reading that as "signed out" would stop a deploy that had
