@@ -924,7 +924,10 @@ describeLive('live-project', gate)(
           expect(payload.sessionFile).toContain('state.json');
         } else {
           expectExit(json, 7);
-          expect(payload.error.needsHuman.scenario).toMatch(/^(eas|expo)-login$/);
+          // The runner inherits EXPO_TOKEN, so an expired one is the token handoff.
+          expect(payload.error.needsHuman.scenario).toMatch(
+            /^(eas-login|expo-login|expo-token-rejected)$/
+          );
           expect(payload.error.data.sessionFile).toContain('state.json');
         }
       });
