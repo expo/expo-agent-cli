@@ -74,7 +74,7 @@ describe(logCmdError, () => {
   });
 
   /** Run the error path and wait for the flush the exit is chained onto. */
-  async function exitCodeOfAsync(error: Error): Promise<unknown> {
+  async function exitCodeOfAsync(error: unknown): Promise<unknown> {
     logCmdError(error);
     await new Promise((resolve) => setImmediate(resolve));
     return process.exitCode;
@@ -159,12 +159,15 @@ describe(logCmdError, () => {
       expect(stdoutObject()).toBeNull();
     });
 
-    // An `Error` that is not a `CommandError` is a defect: the crash report, then the event and the
-    // flush that only this asynchronous path can afford.
-    it('reports a plain Error as a crash, emits cli:error and flushes before the exit', async () => {
+    // Anything that is not a `CommandError` is a defect, a rejected string too: the crash report,
+    // then the event and the flush that only this asynchronous path can afford.
+    it.each([
+      ['a plain Error', new Error('injected defect')],
+      ['a rejected string', 'injected defect'],
+    ])('reports %s as a crash, emits cli:error and flushes before the exit', async (_, thrown) => {
       setJsonRequested(true);
 
-      expect(await exitCodeOfAsync(new Error('injected defect'))).toBe(EXIT_ERROR);
+      expect(await exitCodeOfAsync(thrown)).toBe(EXIT_ERROR);
       expect(stdoutObject().error.code).toBe(UNCAUGHT_EXCEPTION_CODE);
       expect(emitted).toEqual([
         { name: 'cli:error', payload: expect.objectContaining({ code: UNCAUGHT_EXCEPTION_CODE }) },

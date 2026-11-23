@@ -226,10 +226,8 @@ export function jsonErrorEnvelope({
   };
 }
 
-export function logCmdError(error: any): never {
-  if (!(error instanceof Error)) {
-    throw error;
-  }
+export function logCmdError(thrown: unknown): never {
+  const error: any = asError(thrown);
   if (
     error instanceof CommandError ||
     error instanceof AssertionError ||
@@ -299,7 +297,7 @@ export function logCmdError(error: any): never {
   // Any other `Error` is a defect that reached the top through a command's `.catch`: the same
   // crash report as `handleUncaughtException`, plus the event and the flush, which this
   // asynchronous path can afford.
-  const message = printCrashReport(error);
+  const message = printCrashReport(error, thrown);
   cliEvent('error', {
     code: UNCAUGHT_EXCEPTION_CODE,
     message,
