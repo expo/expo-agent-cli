@@ -203,7 +203,7 @@ describe(readDetachedLogSync, () => {
 
   // Metro colours its output and draws progress bars with cursor moves. Neither is text.
   it(`strips the escape codes a bundler writes`, () => {
-    vol.fromJSON({ [detachedLogPath(projectRoot)]: '[32mBundled 1200ms[0m\n' });
+    vol.fromJSON({ [detachedLogPath(projectRoot)]: '\u001b[32mBundled 1200ms\u001b[0m\n' });
 
     expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual(['Bundled 1200ms']);
   });

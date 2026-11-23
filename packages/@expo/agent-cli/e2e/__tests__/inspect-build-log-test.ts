@@ -131,8 +131,8 @@ describe('@expo/agent-cli inspect:build-log --file', () => {
       confidence: 'high',
     });
     expect(report.source).toMatchObject({ kind: 'file', truncated: false });
-    // Real ANSI in the recording, and none of it in the payload.
-    expect(JSON.stringify(report)).not.toMatch(/\[/);
+    // Real ANSI in the recording, and none of it in the payload. JSON writes ESC as `\u001b`.
+    expect(result.stdout).not.toContain('\\u001b');
 
     const events = readEvents(eventsFile);
     expect(events.find((entry) => entry._e === 'cli:build_explain')).toMatchObject({

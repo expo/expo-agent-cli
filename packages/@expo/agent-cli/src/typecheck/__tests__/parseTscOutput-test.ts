@@ -69,7 +69,7 @@ describe(parseTscOutput, () => {
   it(`should strip the colors of a pretty run`, () => {
     for (const error of parseTscOutput(PRETTY)) {
       expect(error.file).toBe('src/app/notes.tsx');
-      expect(JSON.stringify(error)).not.toContain('\u001b');
+      expect(JSON.stringify(error)).not.toContain('\\u001b');
     }
   });
 

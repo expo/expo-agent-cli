@@ -52,8 +52,8 @@ describe(createExpoOutputFilter, () => {
   });
 
   it('recognises the marker through the colors the tool wrote it in', () => {
-    expect(filtered('[1m✅ Your project is ready![22m\nnpm run ios')).toBe(
-      '[1m✅ Your project is ready![22m'
+    expect(filtered('\u001b[1m✅ Your project is ready!\u001b[22m\nnpm run ios')).toBe(
+      '\u001b[1m✅ Your project is ready!\u001b[22m'
     );
   });
 

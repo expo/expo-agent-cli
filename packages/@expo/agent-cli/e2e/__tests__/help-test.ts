@@ -152,14 +152,12 @@ describe('npx @expo/agent-cli help <command>', () => {
 // are piped, so chalk would already be off — what they pin is that nothing on these paths reaches
 // for an escape sequence unconditionally.
 describe('colour', () => {
-  const ESCAPE = /\[/;
-
   it('puts no escape sequences in a piped help screen', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     const result = await executeAgentCliAsync(projectRoot, ['--help']);
 
-    expect(result.stdout).not.toMatch(ESCAPE);
+    expect(result.stdout).not.toContain('\u001b[');
   });
 
   it('puts no escape sequences in a --json report, and stdout parses', async () => {
@@ -167,7 +165,8 @@ describe('colour', () => {
 
     const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
 
-    expect(result.stdout).not.toMatch(ESCAPE);
+    // JSON writes ESC as `\u001b`, and JSON.parse rejects a raw one.
+    expect(result.stdout).not.toContain('\\u001b');
     expect(() => JSON.parse(result.stdout)).not.toThrow();
   });
 });

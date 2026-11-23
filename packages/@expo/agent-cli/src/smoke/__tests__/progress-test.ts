@@ -4,6 +4,7 @@
 // module was written for: nothing goes to stdout, a bound is printed only when it is real, and the
 // `app` phase's two very different steps read as two different sentences.
 
+import { stripVTControlCharacters } from 'node:util';
 import { buildSmokeProgress } from '../progress';
 import type { SmokeOptions } from '../resolveOptions';
 import * as Log from '../../log';
@@ -39,8 +40,7 @@ function said(build: (say: ReturnType<typeof buildSmokeProgress>) => void): stri
   } finally {
     progress.mockRestore();
   }
-  // eslint-disable-next-line no-control-regex
-  return lines.map((line) => line.replace(/\[[0-9;]*m/g, ''));
+  return lines.map((line) => stripVTControlCharacters(line));
 }
 
 describe(buildSmokeProgress, () => {
