@@ -117,11 +117,14 @@ Run the command a user runs, through `run`. Do not call a function from `src/` a
 node $V cleanup
 ```
 
-1. Runs `dev:stop --release` in the app. That command signals only the process that the project's own dev-server lock names. It shuts down the simulator that this checkout created and ends the emulator that this checkout started.
-2. Copies screenshots and the log to the evidence directory, and ends the run.
-3. Compares the uncommitted state of the app, file content included, with the state at `launch`. When they differ, cleanup exits `125` and lists the changed files. The run has ended at that point. Cleanup never changes the app: undo a recipe edit yourself.
+1. Runs `dev:stop --release` in the app. That command signals only the process that the project's own dev-server lock names. It shuts down the simulator that this checkout created and ends the emulator that this checkout started. Then it does the same clean of device bindings as `dev`, for all projects on the machine: it shuts down a simulator, or ends an emulator, whose binding expired, and deletes the simulator of a worktree that no longer exists.
+2. Copies screenshots and the log to the evidence directory.
+3. Compares the uncommitted state of the app, file content included, with the state at `launch`. When they differ, cleanup exits `125` and lists the changed files, and the run stays open. Cleanup never changes the app: undo a recipe edit yourself, then run cleanup again.
+4. Ends the run.
 
-The native projects, the build cache and the evidence stay. `node $V purge` deletes `ios/`, `android/` and `.expo/` of the app in this checkout, when no run is in progress and no dev server runs. The shared build cache stays. To force a full build, delete the matching entry in the build cache directory by hand.
+Tell the user before the first cleanup when a simulator from another checkout is booted.
+
+The native projects, the build cache and the evidence stay. `node $V purge` deletes `ios/`, `android/` and `.expo/` of the app in this checkout, when no run is in progress and `status --json` reports no dev server for the app. When `status` gives no report, `purge` exits `125` and deletes nothing. The shared build cache stays. To force a full build, delete the matching entry in the build cache directory by hand.
 
 When `dev:stop` does not exit 0, cleanup stops and changes nothing else. Read the `cleanup-dev-stop` evidence file, fix the cause, and run cleanup again. Never kill a process by name, and never run `xcrun simctl shutdown all` or `adb emu kill` on a device that this run did not start: other worktrees have their own servers and devices.
 

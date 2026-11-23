@@ -33,9 +33,16 @@ const HELPER_ERROR = 125;
 const KILL_GRACE = 10;
 const STATUS = ['status', '--json', '--no-followups'];
 
+class HelperError extends Error {}
+
+/** End the helper with exit 125. The last lines of the file print the message. */
 function fail(message) {
-  process.stderr.write(`verify: ${message}\n`);
-  process.exit(HELPER_ERROR);
+  throw new HelperError(message);
+}
+
+/** The dev server of this project. A server of another project on the same port does not count. */
+function ownServer(devServer) {
+  return devServer?.running && devServer.projectRootMatched !== false ? devServer : null;
 }
 
 /** The run in progress, or null. */
@@ -198,9 +205,11 @@ function record(run, result, label, note) {
 async function poll(argv, accept, { timeout, interval, killAfter = 60 }) {
   const deadline = Date.now() + timeout * 1000;
   for (let attempts = 1; ; attempts++) {
-    const result = await execCli(argv, { killAfter });
+    // An attempt does not run past the deadline.
+    const left = Math.max(1, Math.ceil((deadline - Date.now()) / 1000));
+    const result = await execCli(argv, { killAfter: Math.min(killAfter, left) });
     const matched = accept(result);
-    if (matched || Date.now() > deadline) return { result, matched, attempts };
+    if (matched || Date.now() + interval * 1000 >= deadline) return { result, matched, attempts };
     await new Promise((resolve) => setTimeout(resolve, interval * 1000));
   }
 }
@@ -213,18 +222,29 @@ function isCompleteBuild(entry) {
   return spawnSync(check[0], check.slice(1), { stdio: 'ignore' }).status === 0;
 }
 
-/** The entry gets its name by a rename, so the shared cache never holds a partial build. */
+/**
+ * The entry gets its name by a rename, so the shared cache never holds a partial build. Two
+ * checkouts can do this at the same time: each stages in its own directory, and a complete entry
+ * of the other checkout stays.
+ */
 function moveInto(source, target) {
-  const staged = path.join(home, `incoming-${process.pid}`);
-  fs.rmSync(staged, { recursive: true, force: true });
+  const stage = fs.mkdtempSync(path.join(home, 'incoming-'));
+  const staged = path.join(stage, path.basename(target));
   try {
     fs.renameSync(source, staged);
   } catch (error) {
     if (error.code !== 'EXDEV') throw error;
     fs.cpSync(source, staged, { recursive: true });
   }
-  fs.rmSync(target, { recursive: true, force: true });
-  fs.renameSync(staged, target);
+  if (!isCompleteBuild(target)) {
+    fs.rmSync(target, { recursive: true, force: true });
+    try {
+      fs.renameSync(staged, target);
+    } catch (error) {
+      if (!isCompleteBuild(target)) throw error;
+    }
+  }
+  fs.rmSync(stage, { recursive: true, force: true });
 }
 
 /** Make `.expo/build-cache` of the app a link to the shared cache. Builds already there move over. */
@@ -361,11 +381,7 @@ async function doctor() {
 async function waitServer(args) {
   const run = requireRun();
   const minutes = seconds(args[0] ?? 25, 'wait-server');
-  // A server of another project on the same port does not count.
-  const serverOf = ({ stdout }) => {
-    const devServer = parseJson(stdout)?.devServer;
-    return devServer?.running && devServer.projectRootMatched !== false ? devServer : null;
-  };
+  const serverOf = ({ stdout }) => ownServer(parseJson(stdout)?.devServer);
   const { result, matched } = await poll(STATUS, (status) => serverOf(status) !== null, {
     timeout: minutes * 60,
     interval: 15,
@@ -402,22 +418,26 @@ async function cleanup() {
       }
     }
   }
-  fs.rmSync(pointerFile);
   process.stdout.write(`verify: evidence kept at ${run.evidenceDir}\n`);
   const app = appState();
   if (app.appHash !== run.appHash) {
     fail(
-      `apps/eas-example changed during the run. Cleanup does not touch it. Undo a recipe edit by hand:\n${app.appStatus}`
+      `apps/eas-example changed during the run. Cleanup does not touch it. Undo a recipe edit by hand, then run cleanup again:\n${app.appStatus}`
     );
   }
+  fs.rmSync(pointerFile);
 }
 
 /** Delete the generated native projects and the CLI's records. The shared build cache stays. */
 async function purge() {
   if (currentRun()) fail('a run is in progress. Run "verify.mjs cleanup" first.');
-  if (fs.existsSync(bundle) && parseJson((await execCli(STATUS)).stdout)?.devServer?.running) {
-    fail('a dev server runs for the app. Stop it with "dev:stop" first.');
+  // Only a status report that shows no dev server of this project permits the delete.
+  const status = await execCli(STATUS, { killAfter: 60 });
+  const devServer = status.code === 0 ? parseJson(status.stdout)?.devServer : null;
+  if (typeof devServer?.running !== 'boolean') {
+    fail(`status --json gave no report (exit ${status.code}). Nothing was deleted.`);
   }
+  if (ownServer(devServer)) fail('a dev server runs for the app. Stop it with "dev:stop" first.');
   for (const dir of ['ios', 'android', '.expo']) {
     fs.rmSync(path.join(projectDir, dir), { recursive: true, force: true });
   }
@@ -433,8 +453,14 @@ const commands = {
   cleanup,
   purge,
 };
-if (!Object.hasOwn(commands, command ?? '')) {
-  fail(`usage: verify.mjs <${Object.keys(commands).join('|')}>`);
+try {
+  if (!Object.hasOwn(commands, command ?? '')) {
+    fail(`usage: verify.mjs <${Object.keys(commands).join('|')}>`);
+  }
+  // `process.exit` would cut output that a pipe has not read yet.
+  process.exitCode = (await commands[command](rest)) ?? 0;
+} catch (error) {
+  if (!(error instanceof HelperError)) throw error;
+  process.stderr.write(`verify: ${error.message}\n`);
+  process.exitCode = HELPER_ERROR;
 }
-// `process.exit` would cut output that a pipe has not read yet.
-process.exitCode = (await commands[command](rest)) ?? 0;
