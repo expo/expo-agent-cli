@@ -217,7 +217,7 @@ describe(readAuthPreflightAsync, () => {
     });
   });
 
-  it('reports a rejected EXPO_TOKEN as signed out', async () => {
+  it('reports a rejected EXPO_TOKEN as signed out, and says the token was rejected', async () => {
     withPinnedEasCli();
     process.env.EXPO_TOKEN = 'bogus';
     mockWhoami({
@@ -225,7 +225,10 @@ describe(readAuthPreflightAsync, () => {
       stderr: 'The bearer token is invalid.\n    Error: GraphQL request failed.\n',
     });
 
-    await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({ loggedIn: false });
+    await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({
+      loggedIn: false,
+      tokenRejected: true,
+    });
   });
 
   it('answers "unknown" when the CLI could not be started', async () => {

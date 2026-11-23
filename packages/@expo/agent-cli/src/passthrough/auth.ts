@@ -328,7 +328,8 @@ export interface WhoamiResultJson {
  * `--json` is dropped from the argv it forwards, because neither CLI has it.
  *
  * A signed-out machine is a step only a person can complete, so it throws the login handoff: exit
- * `7` with the `--json` envelope (llp/0010 §Exit codes). A run that names no account for another
+ * `7` with the `--json` envelope (llp/0010 §Exit codes). A rejected `EXPO_TOKEN` is the same exit
+ * with `EXPO_TOKEN_INVALID`, which names no login. A run that names no account for another
  * reason (`classifyWhoami`) is `WHOAMI_FAILED`, exit `1`.
  */
 async function printWhoamiJsonAsync(
@@ -376,6 +377,16 @@ async function printWhoamiJsonAsync(
         ? { code: result.spawnError.code ?? null, message: result.spawnError.message }
         : null,
     };
+    throw error;
+  }
+  if (answer === 'token-rejected') {
+    const { tokenRejectedError } =
+      require('../needsHuman/assertAuth') as typeof import('../needsHuman/assertAuth');
+    const error = tokenRejectedError(
+      'so no account is signed in',
+      `"${source}" exited ${result.exitCode} and said`
+    );
+    error.data = data;
     throw error;
   }
   if (answer === 'signed-out') {

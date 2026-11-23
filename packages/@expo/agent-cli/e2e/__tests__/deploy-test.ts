@@ -643,6 +643,29 @@ describe('@expo/agent-cli deploy', () => {
         });
       });
 
+      // eas-cli refuses `login` while EXPO_TOKEN is set, so a rejected token hands over no command.
+      it(`should stop before the export on a rejected EXPO_TOKEN, and name no login`, async () => {
+        const projectRoot = await setupAsync('go-app');
+
+        const result = await executeAgentCliAsync(projectRoot, ['deploy', '--web', '--json'], {
+          env: {
+            STUB_EAS_WHOAMI_EXIT_CODE: '1',
+            STUB_EAS_WHOAMI_STDERR: 'The bearer token is invalid.',
+          },
+          reject: false,
+        });
+
+        expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
+        expect(readStubExpoInvocations(projectRoot)).toEqual([]);
+        expect(readStubEasInvocations(projectRoot)).toEqual([]);
+        const { error } = JSON.parse(result.stdout);
+        expect(error).toMatchObject({
+          code: 'EXPO_TOKEN_INVALID',
+          message: expect.stringContaining('or unset it'),
+          needsHuman: { scenario: 'expo-token-rejected', command: null },
+        });
+      });
+
       // The correctness half of the preflight. A binary that is not the EAS CLI exits non-zero
       // just like a signed-out one; reading that as "signed out" would stop a deploy that had
       // every right to run, on a machine whose `eas` is a broken shim.

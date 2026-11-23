@@ -32,6 +32,11 @@ export interface AuthPreflight {
    * question asked of the CLI the project actually installed.
    */
   source: 'eas whoami' | 'expo whoami' | 'EXPO_TOKEN' | null;
+  /**
+   * Set when the service rejected `EXPO_TOKEN`. A login cannot fix that: eas-cli refuses to log in
+   * while the variable is set [observed — eas-cli `account/login.js`].
+   */
+  tokenRejected?: true;
 }
 
 /**
@@ -136,14 +141,14 @@ async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Aske
 /**
  * What a `whoami` run answered.
  *
- * `signed-out` only for the two texts the CLIs print for nobody signed in [observed — eas-cli
- * 27.7.2 and expo 58.1.4: `Not logged in` for no session, `The bearer token is invalid.` for a
- * rejected `EXPO_TOKEN`, both at exit 1]. A network failure exits 1 as well, and a child a signal
+ * Only the two texts the CLIs print for nobody signed in say no [observed — eas-cli 27.7.2 and
+ * expo 58.1.4, both at exit 1]: `Not logged in` is `signed-out`, and `The bearer token is
+ * invalid.` is `token-rejected`, which a login cannot fix. A network failure exits 1 as well, and a child a signal
  * stopped can report exit 0, so both are `failed`: neither says who is signed in.
  */
 export function classifyWhoami(
   result: Pick<SubprocessResult, 'exitCode' | 'stdout' | 'stderr' | 'signal'>
-): 'signed-in' | 'signed-out' | 'failed' {
+): 'signed-in' | 'signed-out' | 'token-rejected' | 'failed' {
   if (result.signal) {
     return 'failed';
   }
@@ -153,10 +158,11 @@ export function classifyWhoami(
   // Colour wraps the text in escapes when the CLI thinks it writes to a terminal [observed —
   // eas-cli with FORCE_COLOR=1 prints `\x1b[33mNot logged in\x1b[39m`].
   const said = stripVTControlCharacters(`${result.stdout}\n${result.stderr}`);
-  return SIGNED_OUT_ANSWERS.some((answer) => answer.test(said)) ? 'signed-out' : 'failed';
+  if (/The bearer token is invalid\./.test(said)) {
+    return 'token-rejected';
+  }
+  return /^Not logged in\s*$/m.test(said) ? 'signed-out' : 'failed';
 }
-
-const SIGNED_OUT_ANSWERS = [/^Not logged in\s*$/m, /The bearer token is invalid\./];
 
 /**
  * What the **project's own** `expo whoami` said, or null when it said nothing.
@@ -202,6 +208,8 @@ function fromWhoami(result: SubprocessResult, source: 'eas whoami' | 'expo whoam
       return { loggedIn: true, user: parseWhoamiUser(result.stdout), source };
     case 'signed-out':
       return { loggedIn: false, user: null, source };
+    case 'token-rejected':
+      return { loggedIn: false, user: null, source, tokenRejected: true };
     case 'failed':
       return UNVERIFIED;
   }

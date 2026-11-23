@@ -221,34 +221,49 @@ describe('auth commands outside an Expo project', () => {
   // reason is a tool error (1): a login would send the user the wrong way.
   it.each(
     [
-      { stub: 'signed-out', exitCode: 7, code: 'EAS_LOGIN_REQUIRED', says: 'Not logged in' },
+      {
+        stub: 'signed-out',
+        exitCode: 7,
+        code: 'EAS_LOGIN_REQUIRED',
+        says: 'Not logged in',
+        handoff: { scenario: 'eas-login', command: 'npx @expo/agent-cli login' },
+      },
+      // eas-cli refuses `login` while EXPO_TOKEN is set, so this handoff names no command.
       {
         stub: 'bad-token',
         exitCode: 7,
-        code: 'EAS_LOGIN_REQUIRED',
-        says: 'bearer token is invalid',
+        code: 'EXPO_TOKEN_INVALID',
+        says: 'or unset it',
+        handoff: { scenario: 'expo-token-rejected', command: null },
       },
-      { stub: 'network', exitCode: 1, code: 'WHOAMI_FAILED', says: 'ENOTFOUND' },
-      { stub: 'killed', exitCode: 1, code: 'WHOAMI_FAILED', says: 'SIGTERM' },
+      { stub: 'network', exitCode: 1, code: 'WHOAMI_FAILED', says: 'ENOTFOUND', handoff: null },
+      { stub: 'killed', exitCode: 1, code: 'WHOAMI_FAILED', says: 'SIGTERM', handoff: null },
       // A signal does not survive the Windows `.cmd` shim of the stub runner.
     ].filter(({ stub }) => process.platform !== 'win32' || stub !== 'killed')
-  )('should answer whoami --json for $stub with $code', async ({ stub, exitCode, code, says }) => {
-    const dir = await setupBareDirAsync(['eas']);
+  )(
+    'should answer whoami --json for $stub with $code',
+    async ({ stub, exitCode, code, says, handoff }) => {
+      const dir = await setupBareDirAsync(['eas']);
 
-    const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
-      env: { ...realHomeEnv(dir), STUB_WHOAMI: stub },
-      reject: false,
-    });
+      const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
+        env: { ...realHomeEnv(dir), STUB_WHOAMI: stub },
+        reject: false,
+      });
 
-    expect(result.exitCode).toBe(exitCode);
-    const { error } = JSON.parse(result.stdout);
-    expect(error).toMatchObject({
-      code,
-      message: expect.stringContaining(says),
-      data: expect.objectContaining({ source: 'eas whoami' }),
-    });
-    expect(error.needsHuman?.scenario ?? null).toBe(exitCode === 7 ? 'eas-login' : null);
-  });
+      expect(result.exitCode).toBe(exitCode);
+      const { error } = JSON.parse(result.stdout);
+      expect(error).toMatchObject({
+        code,
+        message: expect.stringContaining(says),
+        data: expect.objectContaining({ source: 'eas whoami' }),
+      });
+      expect(
+        error.needsHuman
+          ? { scenario: error.needsHuman.scenario, command: error.needsHuman.command }
+          : null
+      ).toEqual(handoff);
+    }
+  );
 
   it.each([
     ['EXPO_STAGING', ''],

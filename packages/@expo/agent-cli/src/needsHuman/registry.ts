@@ -80,6 +80,18 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     signatures: [/\bnot logged in\b/i, /needs? to be (?:logged in|authenticated)/i],
   },
   {
+    id: 'expo-token-rejected',
+    code: 'EXPO_TOKEN_INVALID',
+    need: 'Replace EXPO_TOKEN with a valid access token, or unset it and sign in.',
+    // No command: the fix is to the environment, and a login fails while the variable is set.
+    command: null,
+    url: ACCESS_TOKENS_URL,
+    unattendedEnv: ['EXPO_TOKEN'],
+    resumable: true,
+    tools: [],
+    signatures: [],
+  },
+  {
     id: 'macos-automation',
     code: 'MACOS_AUTOMATION_REQUIRED',
     need: 'Allow the terminal running this command to control Simulator.app, in macOS System Settings › Privacy & Security › Automation.',
