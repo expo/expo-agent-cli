@@ -191,6 +191,19 @@ describe('auth commands outside an Expo project', () => {
     expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami']);
   });
 
+  // A `--json` after `--` belongs to the forwarded CLI, as it does for every other command
+  // (`argvRequestsJson`), so it is forwarded, not answered here.
+  it(`should forward whoami -- --json rather than answer it`, async () => {
+    const dir = await setupBareDirAsync(['eas']);
+
+    const result = await executeAgentCliAsync(dir, ['whoami', '--', '--json'], {
+      env: realHomeEnv(dir),
+    });
+
+    expect(result.stdout).toContain('alice@example.com');
+    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami', '--', '--json']);
+  });
+
   // @ref llp/0010-agent-conventions.rfc.md §Exit codes — signing in is a step only a person can
   // do, so a signed-out machine is exit 7 with the login handoff, not a report at exit 1.
   it(`should answer a signed-out whoami --json with the login handoff`, async () => {

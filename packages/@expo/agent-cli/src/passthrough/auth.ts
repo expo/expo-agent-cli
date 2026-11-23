@@ -33,6 +33,7 @@ import { getExpoHomeDirectory } from '../utils/expoHome';
 import { type Invoker } from '../utils/invoker';
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { resolveProjectBin } from '../utils/projectBin';
+import { argvRequestsJson } from '../utils/jsonMode';
 import { spawnSubprocessAsync } from '../utils/subprocess';
 
 /**
@@ -286,7 +287,7 @@ export function agentCliAuthPassthrough(command: string): Command {
       // neither `expo whoami` nor `eas whoami` has such a flag, so the flag reached the other CLI,
       // was ignored, and an agent that asked for one object got a line of prose at exit 0
       // [observed — live run S7]. `whoami` is a *read*, so this one can be answered here.
-      if (command === 'whoami' && args.includes('--json')) {
+      if (command === 'whoami' && argvRequestsJson(args)) {
         await exitWithCodeAsync(await printWhoamiJsonAsync(projectRoot, cli, args));
         return;
       }
@@ -342,7 +343,9 @@ async function printWhoamiJsonAsync(
   const { parseWhoamiUser } =
     require('../needsHuman/preflight') as typeof import('../needsHuman/preflight');
 
-  const forwarded = args.filter((arg) => arg !== '--json');
+  // Only this CLI's own `--json`, before any `--`: what follows the separator is the other CLI's.
+  const separator = args.indexOf('--');
+  const forwarded = args.filter((arg, i) => arg !== '--json' || (separator >= 0 && i > separator));
   const result = await spawnSubprocessAsync(
     cli.command,
     [...cli.prefixArgs, 'whoami', ...forwarded],
