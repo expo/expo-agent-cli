@@ -8,7 +8,7 @@
 // is the rest of the contract: that a help request exits 0, that it is on stdout, that the on-ramp
 // is reachable by all three spellings a caller will try, and that a `--json` run in a pipe carries
 // no escape sequences into the object.
-import { executeAgentCliAsync, setupFixtureAsync } from '../utils';
+import { executeAgentCliAsync, readStubExpoInvocations, setupFixtureAsync } from '../utils';
 
 describe('npx @expo/agent-cli --help', () => {
   let projectRoot: string;
@@ -125,6 +125,19 @@ describe('npx @expo/agent-cli help <command>', () => {
     for (const section of ['Usage', 'Options', 'Examples', 'Typically next', 'JSON (--json)']) {
       expect(viaCommand.stdout).toContain(section);
     }
+  });
+
+  // `help prebuild` runs `expo prebuild --help` and ends with that CLI's code. Help returns the
+  // inner command's result, and an adapter that awaited it and returned its own 0 still typechecks,
+  // so only a run can tell.
+  it('ends with the code of the expo CLI it asked for help', async () => {
+    const result = await executeAgentCliAsync(projectRoot, ['help', 'prebuild'], {
+      env: { STUB_EXPO_EXIT_CODE: '37' },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(37);
+    expect(readStubExpoInvocations(projectRoot)[0]?.args).toEqual(['prebuild', '--help']);
   });
 
   it('lists the actions of a group, then the options of the action its bare name runs', async () => {
