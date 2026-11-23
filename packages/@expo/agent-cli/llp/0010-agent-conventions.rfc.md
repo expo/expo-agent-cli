@@ -36,12 +36,13 @@ A unit test fails when loadable source starts to use `21`. `dev --plan` runs not
 
 The one exception to the `125` ceiling is `dev`, which follows the shell's convention for signals. A signal at any other time exits `128` plus the signal number. During a step, the error is `DEV_INTERRUPTED`. A signal that ends the dev-server step is the stop the caller asked for: exit `0`.
 
-A command ends in one of two ways:
+A command ends in one of three ways:
 
-- A **tool error** is printed and exits with the code it carries, or `1` when it carries none.
-- An **outcome** is not an error. The command prints its report and exits `0`, `20` or `22`.
+- A **tool error** is a throw. It is printed and exits with the code it carries, or `1` when it carries none.
+- An **outcome** is not an error. The command prints its report and returns `0`, `20` or `22`.
+- A **forwarded code** is the exit code of the CLI the command handed the run to (§Forwarded codes), returned unchanged.
 
-Both flush the event stream before the process exits.
+A command returns its code and never exits by itself. The dispatcher is the one place a finished command exits, and it flushes the event stream first. The command type accepts only an outcome or a code marked as forwarded, and every path must return one, so a returned `1` or a body that falls off the end does not compile (type test in `__tests__/exitCodes-test.ts`). The same file has a sweep that keeps the exits the type cannot see in the files that need them. One drop still compiles: a command that awaits another command and returns its own `0`. The e2e `help-test.ts` case for `help <forwarded command>` guards the one place that does this.
 
 ### An empty target list is inconclusive
 

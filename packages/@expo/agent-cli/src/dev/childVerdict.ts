@@ -7,7 +7,7 @@
 // *is* being read says `Bundler ready` and exits 0 [observed — friction run 7, F61; live run,
 // S4]. The verdict is not missing. It is in the wrong place.
 //
-// So this reads it back. The two lines it looks for are written by `logCmdError` and
+// So this reads it back. The two lines it looks for are written by `reportCmdError` and
 // `formatNeedsHumanBlock` (`src/utils/errors.ts`), which is a *format of this CLI's own* — the
 // round-trip test in `__tests__/childVerdict-test.ts` builds the log out of those functions and
 // parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
@@ -30,7 +30,7 @@ export interface DetachedChildVerdict {
   /** The child's own message, as it printed it, without the handoff block under it. */
   message: string;
   /**
-   * The `CommandError` code and exit of the child's failure, from the row `logCmdError` writes
+   * The `CommandError` code and exit of the child's failure, from the row `reportCmdError` writes
    * for a detached child alone, so a device refusal reaches the parent's caller unchanged
    * (llp/0035 §Output and errors). Null for a log written by nothing of this CLI's.
    */
@@ -94,7 +94,7 @@ export function parseDetachedChildVerdict(
       code = coded[1]!;
       exitCode = Number(coded[2]);
       data = parseData(coded[3]);
-      // `logCmdError` writes the `Try:` line right above the code row; one elsewhere is output of
+      // `reportCmdError` writes the `Try:` line right above the code row; one elsewhere is output of
       // another program, or of an earlier failure.
       suggestedCommand = tryAt === index - 1 ? lastTry : null;
       continue;

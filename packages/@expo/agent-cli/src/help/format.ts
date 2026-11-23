@@ -115,7 +115,7 @@ function section(title: string, body: string[]): string[] {
  * Print one command's help and exit 0.
  *
  * Every command's `--help` branch ends here, the way every command's failure ends in
- * `logCmdError`: the exit code of a help request is 0 on all of them, and the block is on stdout on
+ * `reportCmdError`: the exit code of a help request is 0 on all of them, and the block is on stdout on
  * all of them, because a caller asked for it and got it.
  */
 export function printCommandHelp(help: CommandHelp): never {

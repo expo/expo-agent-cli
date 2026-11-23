@@ -135,7 +135,7 @@ export async function waitForChildVerdictAsync(
 ): Promise<DetachedChildVerdict | null> {
   let verdict = readChildVerdictSync(projectRoot, since);
   const deadline = Date.now() + VERDICT_WAIT_MS;
-  // The code row is the last line `logCmdError` writes, so a verdict with one is complete.
+  // The code row is the last line `reportCmdError` writes, so a verdict with one is complete.
   while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
     verdict = readChildVerdictSync(projectRoot, since) ?? verdict;
@@ -224,7 +224,7 @@ export function resolveDetachFailure({
   verdict,
   statusAnswering,
 }: DetachCheck): DetachFailureKind | null {
-  // The handoff block is written by `logCmdError` and by nothing else, so a log that has one is the
+  // The handoff block is written by `reportCmdError` and by nothing else, so a log that has one is the
   // log of a process on its way out — conclusive whether or not its exit has been observed yet.
   if (verdict?.scenario != null) {
     return 'needs-human';

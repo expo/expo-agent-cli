@@ -271,7 +271,7 @@ function printable(scanned: string): string {
  * What the literal is used as, read from the syntax around it.
  *
  * Syntax rather than a naming convention, because the two roles that matter are both *contracts*:
- * `suggestedCommand` is the field `logCmdError` prints as `Try:`, and a `command` sitting beside a
+ * `suggestedCommand` is the field `reportCmdError` prints as `Try:`, and a `command` sitting beside a
  * `why` is a `FollowUp`. Anything a builder returns through either of those reaches a caller as an
  * instruction, however the function that built it is named.
  */

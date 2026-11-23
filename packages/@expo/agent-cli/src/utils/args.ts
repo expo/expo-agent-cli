@@ -73,7 +73,7 @@ export function assertWithOptionsArgs(
       throw error;
     }
     // Thrown, not printed and exited: `cli.ts` catches what a command rejects with and runs it
-    // through `logCmdError`, which is what attaches the `cli:error` event, the `Try:` line, the
+    // through `reportCmdError`, which is what attaches the `cli:error` event, the `Try:` line, the
     // exit code and the `--json` envelope. This used to call `Log.exit` with the parser's own
     // sentence, so a `--json` run printed nothing at all on stdout (llp/0010 §The `--json` error
     // envelope) [observed — friction run 4, 2026-08-23: `typecheck --json --bogus`].
@@ -84,9 +84,8 @@ export function assertWithOptionsArgs(
   // stray argument and `--help` still prints the help — a caller reading the usage is not the one
   // this protects.
   if (positionalArgs === 'none' && !result['--help'] && result._.length > 0) {
-    // Thrown, like the parse failure above: `logCmdError` flushes the event log before it exits, so
-    // it does not end the process on this tick — reporting here and carrying on meant the command
-    // body ran anyway, in the window before the exit fired.
+    // Thrown, like the parse failure above: a throw ends the command body here, so it never runs
+    // with the argument dropped.
     throw strayArgumentError(command, result._, { hint: strayHint });
   }
 
