@@ -121,11 +121,6 @@ export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 export const INSTALLED_READ_TIMEOUT_MS = 15_000;
 
 export interface StatusOptions {
-  /**
-   * Where the report puts work it starts and does not await (the early fingerprints), so the
-   * command can let it finish before the process exits and closes its sockets.
-   */
-  backgroundWork?: Promise<unknown>[];
   /** Explicit --dev-server-url; null lets the probe scan the ports `expo start` uses. */
   devServerUrl: string | null;
   /** Print the report as JSON instead of one line per section. */
@@ -178,8 +173,7 @@ export interface StatusOptions {
 
 /** Gather the report, emit it for agents, and print it for humans. */
 export async function printStatusAsync(projectRoot: string, options: StatusOptions): Promise<void> {
-  const backgroundWork: Promise<unknown>[] = [];
-  const report = await collectStatusReportAsync(projectRoot, { ...options, backgroundWork });
+  const { report, fingerprints } = await collectStatusReportAsync(projectRoot, options);
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — status already carries "next" by
   // design, so these are the actions that line does not name, and only the machine channels
   // (`--json` and the event) carry them.
@@ -224,7 +218,7 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
   reportFollowUps('status', followups, { silent: true });
   // The exit closes every socket, the fingerprint subprocess's pipes too, so let the early
   // fingerprints finish and write their cache entry first, as the event loop did before.
-  await Promise.allSettled(backgroundWork);
+  await fingerprints;
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   // The one path out of this command that is not 0, and it exists only because the caller asked
@@ -261,7 +255,11 @@ function readOrphanSessions(
 export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
-): Promise<StatusReport> {
+): Promise<{
+  report: StatusReport;
+  /** The early fingerprints. Always fulfills: they are best effort, and the report is out first. */
+  fingerprints: Promise<void>;
+}> {
   const easProject = readEasProject(projectRoot);
   const projectRead = attemptAsync(() => readProjectAsync(projectRoot, options));
   const authRead = attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot));
@@ -281,7 +279,12 @@ export async function collectStatusReportAsync(
       )
     );
   });
-  options.backgroundWork?.push(early);
+  // Handled now, not when the caller awaits it: a failure here must not surface as an unhandled
+  // rejection while the report is still being read.
+  const fingerprints = early.then(
+    () => {},
+    () => {}
+  );
 
   const saved = readLastDevRequest(projectRoot);
   const request =
@@ -547,7 +550,7 @@ export async function collectStatusReportAsync(
     report.assertion = buildAssertStatus(options.assert, report.freshness);
   }
 
-  return report;
+  return { report, fingerprints };
 }
 
 /**

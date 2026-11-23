@@ -15,6 +15,7 @@ import * as Log from '../../log';
 import { readAuthPreflightAsync } from '../../needsHuman/preflight';
 import { readLastBuildRecord } from '../../plan/lastBuild';
 import * as appConfig from '../../project/appConfig';
+import { generateFingerprintAsync } from '../../project/fingerprint';
 import { probeProjectStateAsync } from '../../project/probe';
 import type { ProjectState } from '../../project/types';
 import { type DevServerDiscovery } from '../../runtime/devServer';
@@ -23,6 +24,7 @@ import { probeTargetLivenessAsync } from '../../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { getPersistedAgentIdsAsync } from '../../skills/agents';
 import { discoverSkillsAsync } from '../../skills/discovery';
+import { platformsToFingerprintEarly } from '../easBuilds';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import { createProjectState } from '../../project/__tests__/projectStateFixture';
@@ -55,6 +57,10 @@ vi.mock('../easBuilds', async () => ({
   ...((await vi.importActual('../easBuilds')) as object),
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
   platformsToFingerprintEarly: vi.fn(() => []),
+}));
+vi.mock('../../project/fingerprint', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../project/fingerprint')>()),
+  generateFingerprintAsync: vi.fn(),
 }));
 vi.mock('../../impact/fromRecord', async () => ({
   ...((await vi.importActual('../../impact/fromRecord')) as object),
@@ -218,6 +224,41 @@ describe(printStatusAsync, () => {
   });
 });
 
+// The early fingerprints write the cache entry the next run reads, and the exit closes their pipes,
+// so the command waits for them. The report does not: it is printed while they still run.
+describe('status early fingerprints', () => {
+  it('prints the report first, and settles only after the fingerprints finish', async () => {
+    vi.mocked(platformsToFingerprintEarly).mockReturnValueOnce(['ios']);
+    let finish!: () => void;
+    vi.mocked(generateFingerprintAsync).mockReturnValueOnce(
+      new Promise((resolve) => (finish = () => resolve(undefined as never)))
+    );
+    let settled = false;
+
+    const run = printStatusAsync(projectRoot, { ...options, json: true }).then(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => expect(Log.log).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+
+    finish();
+    await run;
+    expect(settled).toBe(true);
+  });
+
+  it('is best effort: a failed early step does not fail a printed report', async () => {
+    vi.mocked(platformsToFingerprintEarly).mockImplementationOnce(() => {
+      throw new Error('no platforms');
+    });
+
+    await expect(
+      printStatusAsync(projectRoot, { ...options, json: true })
+    ).resolves.toBeUndefined();
+    expect(Log.log).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe(collectStatusReportAsync, () => {
   // `status` has no platform flag, so only this input reaches the branch: a platform the caller
   // names is a stated fact, and no EAS lookup overrules it.
@@ -231,7 +272,7 @@ describe(collectStatusReportAsync, () => {
       error: null,
     });
 
-    const report = await collectStatusReportAsync(projectRoot, {
+    const { report } = await collectStatusReportAsync(projectRoot, {
       ...options,
       buildId: 'build-1',
       platform: 'android',
@@ -402,7 +443,7 @@ describe('status retains discovery results at its deadline', () => {
       expect(discoverySettled).toBe(false);
       expect(aborted).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
-      const report = await pendingReport;
+      const { report } = await pendingReport;
 
       expect(report.devServer).toMatchObject({
         running: true,
@@ -435,7 +476,7 @@ describe('status retains discovery results at its deadline', () => {
       devServerTimeoutMs: 100,
     });
     await vi.advanceTimersByTimeAsync(200);
-    expect((await pendingReport).devServer).toMatchObject({
+    expect((await pendingReport).report.devServer).toMatchObject({
       running: true,
       url: 'http://127.0.0.1:8082',
       source: 'scan',
@@ -454,7 +495,7 @@ describe('status retains discovery results at its deadline', () => {
       devServerTimeoutMs: 100,
     });
     await vi.advanceTimersByTimeAsync(200);
-    expect((await pendingReport).devServer).toMatchObject({
+    expect((await pendingReport).report.devServer).toMatchObject({
       running: false,
       source: 'default',
       reason: expect.stringContaining('did not answer'),
@@ -470,7 +511,7 @@ describe('status retains discovery results at its deadline', () => {
       devServerTimeoutMs: 100,
     });
     await vi.advanceTimersByTimeAsync(200);
-    const report = await pendingReport;
+    const { report } = await pendingReport;
     expect(report.devServer).toMatchObject({
       running: true,
       url: 'http://127.0.0.1:8082',
