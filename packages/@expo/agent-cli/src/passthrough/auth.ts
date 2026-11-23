@@ -23,6 +23,7 @@
 // keeps the `npx expo` rung the other three gave up, and says on stderr that it is paying for it.
 
 import path from 'path';
+import { stripVTControlCharacters } from 'util';
 
 import type { OutcomeExitCode } from '../exitCodes';
 import { PROGRAM_PREFIX } from '../programName';
@@ -354,7 +355,7 @@ async function printWhoamiJsonAsync(
 
   const source = `${cli.tool} whoami`;
   const answer = classifyWhoami(result);
-  const said = `${result.stderr}${result.stdout}`.trim();
+  const said = stripVTControlCharacters(`${result.stderr}${result.stdout}`).trim();
   const data = { source, sessionFile: sessionFilePath(), cli: authCliLabel(cli) };
   // A run that said nothing about who is signed in is a tool error, never a login: a network
   // failure exits 1 like a signed-out machine, and a stopped child can report exit 0.
