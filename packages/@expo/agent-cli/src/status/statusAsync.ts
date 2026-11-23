@@ -121,6 +121,11 @@ export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 export const INSTALLED_READ_TIMEOUT_MS = 15_000;
 
 export interface StatusOptions {
+  /**
+   * Where the report puts work it starts and does not await (the early fingerprints), so the
+   * command can let it finish before the process exits and closes its sockets.
+   */
+  backgroundWork?: Promise<unknown>[];
   /** Explicit --dev-server-url; null lets the probe scan the ports `expo start` uses. */
   devServerUrl: string | null;
   /** Print the report as JSON instead of one line per section. */
@@ -173,7 +178,8 @@ export interface StatusOptions {
 
 /** Gather the report, emit it for agents, and print it for humans. */
 export async function printStatusAsync(projectRoot: string, options: StatusOptions): Promise<void> {
-  const report = await collectStatusReportAsync(projectRoot, options);
+  const backgroundWork: Promise<unknown>[] = [];
+  const report = await collectStatusReportAsync(projectRoot, { ...options, backgroundWork });
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — status already carries "next" by
   // design, so these are the actions that line does not name, and only the machine channels
   // (`--json` and the event) carry them.
@@ -216,6 +222,9 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
   // Silent on purpose: repeating the plan the `next` line already names would be noise, so the
   // follow-ups reach a driving agent through the event and the JSON report only.
   reportFollowUps('status', followups, { silent: true });
+  // The exit closes every socket, the fingerprint subprocess's pipes too, so let the early
+  // fingerprints finish and write their cache entry first, as the event loop did before.
+  await Promise.allSettled(backgroundWork);
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   // The one path out of this command that is not 0, and it exists only because the caller asked
@@ -259,17 +268,20 @@ export async function collectStatusReportAsync(
   // Start the per-platform fingerprints the EAS lookup will need once auth and the project hash say
   // it will run, while the slower probes finish; the lookup joins them through the memo (llp/0023
   // §Layer 1). The hash is what tells a record entry for an older native surface from a usable one.
-  void Promise.all([projectRead, authRead]).then(([project, auth]) => {
-    const early = platformsToFingerprintEarly(projectRoot, {
+  const early = Promise.all([projectRead, authRead]).then(([project, auth]) => {
+    const platforms = platformsToFingerprintEarly(projectRoot, {
       auth: 'value' in auth ? auth.value : null,
       easProject,
       fingerprintCache: options.fingerprintCache,
       projectHash: 'value' in project ? project.value.state.fingerprint.hash : null,
     });
-    for (const platform of early) {
-      void generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache });
-    }
+    return Promise.allSettled(
+      platforms.map((platform) =>
+        generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache })
+      )
+    );
   });
+  options.backgroundWork?.push(early);
 
   const saved = readLastDevRequest(projectRoot);
   const request =

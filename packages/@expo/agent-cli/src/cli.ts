@@ -11,7 +11,7 @@ import {
   unknownCommandSuggestion,
 } from './commandErrors';
 import { commandGroups, resolveCommand } from './commandRegistry';
-import { EXIT_OK } from './exitCodes';
+import { EXIT_OK, exitWithCodeAsync } from './exitCodes';
 import { formatGroupHelp, formatTopLevelHelp } from './help/listing';
 import * as Log from './log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
@@ -157,13 +157,7 @@ switch (resolution.kind) {
   // no `Try:` line and, under `--json`, nothing at all on stdout. Every command funnels through
   // this one line, so the envelope is guaranteed rather than per command.
   case 'command':
-    resolution
-      .load()
-      .then((exec) => exec(resolution.argv))
-      .catch((error: unknown) => {
-        const { logCmdError } = require('./utils/errors') as typeof import('./utils/errors');
-        logCmdError(error);
-      });
+    runCommand(resolution.load().then((exec) => exec(resolution.argv)));
     break;
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules — the listing, and then the options of
@@ -178,7 +172,7 @@ switch (resolution.kind) {
       process.exit(EXIT_OK);
     }
     // The action's own `--help` path prints its block and exits 0, so nothing follows this.
-    actions[defaultAction]!.load().then((exec) => exec(['--help']));
+    runCommand(actions[defaultAction]!.load().then((exec) => exec(['--help'])));
     break;
   }
 
@@ -225,6 +219,24 @@ switch (resolution.kind) {
   }
 
   case 'passthrough':
-    import('./passthrough').then((i) => i.agentCliPassthrough(resolution.command)(resolution.argv));
+    runCommand(
+      import('./passthrough').then((i) =>
+        i.agentCliPassthrough(resolution.command)(resolution.argv)
+      )
+    );
     break;
+}
+
+/**
+ * The one end of every command: one that settles exits 0 with the events flushed, and anything it
+ * throws, its loading and argument parsing included, is `logCmdError`'s.
+ */
+function runCommand(run: Promise<void>): void {
+  run.then(
+    () => exitWithCodeAsync(EXIT_OK),
+    (error: unknown) => {
+      const { logCmdError } = require('./utils/errors') as typeof import('./utils/errors');
+      logCmdError(error);
+    }
+  );
 }

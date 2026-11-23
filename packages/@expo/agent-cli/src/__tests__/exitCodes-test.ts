@@ -11,6 +11,7 @@ import {
   EXIT_OUTCOME_TIMEOUT,
   exitWithCodeAsync,
 } from '../exitCodes';
+import type { Command } from '../types';
 import type { MockInstance } from 'vitest';
 
 vi.mock('2g', () => ({ flushEventLogger: vi.fn(async () => {}) }));
@@ -120,6 +121,14 @@ describe('exit codes', () => {
     );
 
     expect(users).toEqual(files.map((file) => path.normalize(file)));
+  });
+
+  // A command that returned a code would exit 0: `cli.ts` exits 0 when a command settles. So the
+  // type refuses the return value, and the code goes through an exit call or a throw.
+  it('refuses a command that returns an exit code', () => {
+    // @ts-expect-error — a returned code would never be read.
+    const command: Command = async () => EXIT_OUTCOME_FAILED;
+    expect(command).toBeTypeOf('function');
   });
 
   it('names every code once', () => {
