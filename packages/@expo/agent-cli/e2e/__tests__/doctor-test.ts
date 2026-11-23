@@ -242,21 +242,6 @@ describe('@expo/agent-cli doctor:check', () => {
     expect(event).toMatchObject({ passed: 1, failed: 2, parse: 'full', exitCode: 1 });
   });
 
-  // A parse that found nothing must not report zeroes that look like a clean project.
-  it('admits a failed parse, keeps raw, and still reports the failed outcome', async () => {
-    const projectRoot = await setupAsync('go-app');
-
-    const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
-      env: { STUB_DOCTOR_MODE: 'garbage' },
-      reject: false,
-    });
-
-    expect(result.exitCode).toBe(20);
-    const payload: DoctorPayload = JSON.parse(result.stdout);
-    expect(payload).toMatchObject({ passed: 0, failed: 0, checks: [], parse: 'failed' });
-    expect(payload.raw).toContain('TypeError: Cannot read properties of undefined');
-  });
-
   // 127 is the shell's "command not found", so expo-doctor never ran. Mirroring it would hand the
   // caller a code that looks like a verdict on the project, and it is a verdict on the machine.
   it('reports a machine where expo-doctor could not run at all, and exits 1', async () => {
@@ -273,31 +258,26 @@ describe('@expo/agent-cli doctor:check', () => {
     expect(result.all).toContain('Try: npm install --save-dev expo-doctor');
   });
 
-  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a check a signal stopped said nothing about
-  // the project, so it is a tool error: the envelope, never a report with exit 20. The `.cmd` shim
-  // on Windows turns the signal into an exit code.
-  it.skipIf(process.platform === 'win32')(
-    'prints the error envelope when a signal stops expo-doctor',
-    async () => {
-      const projectRoot = await setupAsync('go-app');
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a run that stopped before its summary
+  // said nothing about the project, so it is a tool error: the envelope, never a report with exit
+  // 20. On Windows the `.cmd` shim turns the signal into an exit code, which the `garbage` row is.
+  it.each([
+    { mode: 'killed', why: process.platform === 'win32' ? 'without the summary line' : 'signal' },
+    { mode: 'garbage', why: 'exited 1 without the summary line' },
+  ])('prints the error envelope when expo-doctor stops early ($mode)', async ({ mode, why }) => {
+    const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
-        env: { STUB_DOCTOR_MODE: 'killed' },
-        reject: false,
-      });
+    const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
+      env: { STUB_DOCTOR_MODE: mode },
+      reject: false,
+    });
 
-      expect(result.exitCode).toBe(1);
-      expect(JSON.parse(result.stdout)).toEqual({
-        error: {
-          code: 'EXPO_DOCTOR_KILLED',
-          message: expect.stringContaining('this project was not checked'),
-          suggestedCommand: null,
-          needsHuman: null,
-          data: { signal: 'SIGKILL' },
-        },
-      });
-    }
-  );
+    expect(result.exitCode).toBe(1);
+    const { error } = JSON.parse(result.stdout);
+    expect(error).toMatchObject({ code: 'EXPO_DOCTOR_NO_REPORT', needsHuman: null });
+    expect(error.message).toContain('this project was not checked');
+    expect(error.message).toContain(why);
+  });
 
   it('runs doctor:check for the bare group name', async () => {
     const projectRoot = await setupAsync('go-app');

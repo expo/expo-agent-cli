@@ -60,7 +60,7 @@ export function resolveExpoDoctorCli(projectRoot: string): ExpoDoctorCli {
  * this reports as a `CommandError` is not being able to start the tool at all.
  *
  * @throws {CommandError} `EXPO_DOCTOR_NOT_FOUND` when the CLI could not be spawned.
- * @throws {CommandError} `EXPO_DOCTOR_KILLED` when a signal stopped it.
+ * @throws {CommandError} `EXPO_DOCTOR_NO_REPORT` when it stopped before it printed its summary.
  */
 export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorReport> {
   const cli = resolveExpoDoctorCli(projectRoot);
@@ -90,18 +90,29 @@ export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorRe
     throw notFoundError(cli, `running it exited 127, which is "command not found"`);
   }
 
-  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a run a signal stopped did not finish its
-  // checks, so it says nothing about the project: a tool error, not a report.
-  if (result.signal || result.exitCode == null) {
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a run that stopped before its summary
+  // line did not finish its checks, so it says nothing about the project: a tool error, not a
+  // report. A signal is one such stop; a crash is another, and so is a kill on Windows, where the
+  // `.cmd` shim turns the signal into an exit code.
+  if (
+    result.signal ||
+    result.exitCode == null ||
+    (result.exitCode !== 0 && parsed.parse === 'failed')
+  ) {
+    const why = result.signal
+      ? `the ${result.signal} signal ended the process, for example a kill or an out-of-memory stop`
+      : result.exitCode == null
+        ? 'a signal ended the process, for example a kill or an out-of-memory stop'
+        : `it exited ${result.exitCode} without the summary line that closes every finished run`;
     const error = new CommandError(
-      'EXPO_DOCTOR_KILLED',
+      'EXPO_DOCTOR_NO_REPORT',
       [
         `expo-doctor (${cli.command}) stopped before it finished, so this project was not checked.`,
-        `Why: ${result.signal ? `the ${result.signal} signal` : 'a signal'} ended the process, for example a kill or an out-of-memory stop.`,
+        `Why: ${why}.`,
         `How: run this command again. If it stops again, run "npx expo-doctor" by hand to see where it stops.`,
       ].join('\n')
     );
-    error.data = { signal: result.signal ?? null };
+    error.data = { signal: result.signal ?? null, exitCode: result.exitCode, raw };
     throw error;
   }
 
