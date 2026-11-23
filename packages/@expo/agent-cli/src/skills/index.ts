@@ -145,8 +145,7 @@ export const agentCliSkills: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli skills:sync -h` shows as fast as possible.
-  const { logCmdError, CommandError } =
-    require('../utils/errors') as typeof import('../utils/errors');
+  const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
@@ -157,64 +156,60 @@ export const agentCliSkills: Command = async (argv) => {
     require('../project/expoApp') as typeof import('../project/expoApp');
   const skillsAsync = require('./skillsAsync') as typeof import('./skillsAsync');
 
-  try {
-    const projectRoot = findUpProjectRootOrAssert(process.cwd());
-    // The registry hands the action over as the first argument, whichever spelling was used
-    // (`skills:list`, `skills list`, or the `sync` default of the bare `skills`).
-    const action = args._[0] ?? 'sync';
-    const options = {
-      agents: args['--agent'] ?? [],
-      dryRun: !!args['--dry-run'],
-      followups: !args['--no-followups'],
-      json: !!args['--json'],
-    };
+  const projectRoot = findUpProjectRootOrAssert(process.cwd());
+  // The registry hands the action over as the first argument, whichever spelling was used
+  // (`skills:list`, `skills list`, or the `sync` default of the bare `skills`).
+  const action = args._[0] ?? 'sync';
+  const options = {
+    agents: args['--agent'] ?? [],
+    dryRun: !!args['--dry-run'],
+    followups: !args['--no-followups'],
+    json: !!args['--json'],
+  };
 
-    // Only `show` names something; the other three act on the whole project. An argument on one of
-    // those named nothing and was dropped, which read as a run that had understood it (llp/0010).
-    const assertNoTarget = (name: string) => {
-      const stray = args._.slice(1);
-      if (stray.length > 0) {
-        throw strayArgumentError(`skills:${name}`, stray, {
-          hint: `this command acts on the whole project. To read one package's skill, run "${PROGRAM_PREFIX} skills:show ${stray[0]}".`,
-        });
-      }
-    };
-
-    // `clean` removes what an earlier run linked here, which is cleanup rather than action on an
-    // app — the same reason `dev:stop` answers in a directory that holds none. Everything else
-    // needs the installed `expo` package to discover anything at all.
-    if (action !== 'clean') {
-      assertExpoAppSync(projectRoot);
-      assertDependenciesInstalledSync(projectRoot);
+  // Only `show` names something; the other three act on the whole project. An argument on one of
+  // those named nothing and was dropped, which read as a run that had understood it (llp/0010).
+  const assertNoTarget = (name: string) => {
+    const stray = args._.slice(1);
+    if (stray.length > 0) {
+      throw strayArgumentError(`skills:${name}`, stray, {
+        hint: `this command acts on the whole project. To read one package's skill, run "${PROGRAM_PREFIX} skills:show ${stray[0]}".`,
+      });
     }
+  };
 
-    switch (action) {
-      case 'sync':
-        assertNoTarget('sync');
-        return await skillsAsync.syncSkillsAsync(projectRoot, options);
-      case 'list':
-        assertNoTarget('list');
-        return await skillsAsync.listSkillsAsync(projectRoot, { json: !!args['--json'] });
-      case 'show': {
-        const packageName = args._[1];
-        if (!packageName) {
-          throw new CommandError(
-            'BAD_ARGS',
-            `Missing package name. Usage: ${PROGRAM_PREFIX} skills:show <package> [skill]`
-          );
-        }
-        return await skillsAsync.showSkillsAsync(projectRoot, packageName, args._[2]);
-      }
-      case 'clean':
-        assertNoTarget('clean');
-        return await skillsAsync.cleanSkillsAsync(projectRoot, options);
-      default:
+  // `clean` removes what an earlier run linked here, which is cleanup rather than action on an
+  // app — the same reason `dev:stop` answers in a directory that holds none. Everything else
+  // needs the installed `expo` package to discover anything at all.
+  if (action !== 'clean') {
+    assertExpoAppSync(projectRoot);
+    assertDependenciesInstalledSync(projectRoot);
+  }
+
+  switch (action) {
+    case 'sync':
+      assertNoTarget('sync');
+      return await skillsAsync.syncSkillsAsync(projectRoot, options);
+    case 'list':
+      assertNoTarget('list');
+      return await skillsAsync.listSkillsAsync(projectRoot, { json: !!args['--json'] });
+    case 'show': {
+      const packageName = args._[1];
+      if (!packageName) {
         throw new CommandError(
           'BAD_ARGS',
-          `Unknown action: ${action}. Expected one of: skills:sync, skills:list, skills:show, skills:clean`
+          `Missing package name. Usage: ${PROGRAM_PREFIX} skills:show <package> [skill]`
         );
+      }
+      return await skillsAsync.showSkillsAsync(projectRoot, packageName, args._[2]);
     }
-  } catch (error: any) {
-    logCmdError(error);
+    case 'clean':
+      assertNoTarget('clean');
+      return await skillsAsync.cleanSkillsAsync(projectRoot, options);
+    default:
+      throw new CommandError(
+        'BAD_ARGS',
+        `Unknown action: ${action}. Expected one of: skills:sync, skills:list, skills:show, skills:clean`
+      );
   }
 };

@@ -101,6 +101,12 @@ describe('exit codes', () => {
       ],
     },
     {
+      // A command that calls it and goes on settles, and `cli.ts` then exits 0 over its code.
+      exit: 'logCmdError(',
+      pattern: /(?<!\.catch\()\blogCmdError\(/,
+      files: ['cli.ts', 'utils/errors.ts'],
+    },
+    {
       exit: 'process.exit(',
       pattern: /process\.exit\(/,
       // Help (exit 0), the crash handler, a signal relay, and scripts this CLI writes for a child.
