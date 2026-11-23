@@ -30,6 +30,7 @@ const buildCacheDir = path.join(home, 'build-cache');
 // The helper's own exit codes. They are outside the exit codes of the CLI.
 const NO_RESULT = 124;
 const HELPER_ERROR = 125;
+const KILL_GRACE = 10;
 const STATUS = ['status', '--json', '--no-followups'];
 
 function fail(message) {
@@ -66,12 +67,24 @@ function parseJson(text) {
 
 /** The uncommitted state of the app: the changed files, and a hash that also covers their content. */
 function appState() {
-  const git = (...args) =>
-    spawnSync('git', [...args, '--', 'apps/eas-example'], { cwd: repoRoot, encoding: 'utf8' })
-      .stdout;
-  const status = git('status', '--porcelain').trimEnd();
+  const git = (...args) => {
+    const { status, error, stdout, stderr } = spawnSync('git', args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
+    });
+    if (status !== 0) fail(`git ${args[0]} failed: ${error?.message ?? stderr.trim()}`);
+    return stdout;
+  };
+  const app = ['--', 'apps/eas-example'];
+  const status = git('status', '--porcelain', ...app).trimEnd();
+  // `git diff` does not show the content of an untracked file.
+  const untracked = git('ls-files', '--others', '--exclude-standard', '-z', ...app)
+    .split('\0')
+    .filter(Boolean);
   const hash = createHash('sha1')
-    .update(status + git('diff', 'HEAD'))
+    .update(status + git('diff', 'HEAD', ...app))
+    .update(untracked.length > 0 ? git('hash-object', '--', ...untracked) : '')
     .digest('hex');
   return { appStatus: status, appHash: hash };
 }
@@ -110,8 +123,9 @@ function buildIsStale() {
 }
 
 /**
- * Run the built CLI in the app. A command that does not exit within `killAfter` seconds is killed:
- * only the CLI process, so a detached dev server that it started stays up.
+ * Run the built CLI in the app. A command that does not exit within `killAfter` seconds gets
+ * SIGTERM, so the CLI ends its own children, each of which leads its own process group. SIGKILL
+ * follows when the CLI still runs after `KILL_GRACE` seconds.
  */
 async function execCli(argv, { echo = false, killAfter = 600 } = {}) {
   if (!fs.existsSync(bundle)) fail('the CLI bundle is missing. Run "verify.mjs launch".');
@@ -129,15 +143,18 @@ async function execCli(argv, { echo = false, killAfter = 600 } = {}) {
     });
   }
   let killed = false;
+  let hardKill;
   const timer = setTimeout(() => {
     killed = true;
-    child.kill('SIGKILL');
+    child.kill('SIGTERM');
+    hardKill = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE * 1000);
   }, killAfter * 1000);
   const { code, signal } = await new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (exitCode, sig) => resolve({ code: exitCode, signal: sig }));
   });
   clearTimeout(timer);
+  clearTimeout(hardKill);
   return {
     argv,
     ...out,
@@ -188,17 +205,26 @@ async function poll(argv, accept, { timeout, interval, killAfter = 60 }) {
   }
 }
 
+/** A killed copy leaves a partial entry: an `.app` that fails its code seal, or a cut archive. */
+function isCompleteBuild(entry) {
+  const stat = fs.statSync(entry, { throwIfNoEntry: false });
+  if (!stat) return false;
+  const check = stat.isDirectory() ? ['codesign', '--verify', entry] : ['unzip', '-tqq', entry];
+  return spawnSync(check[0], check.slice(1), { stdio: 'ignore' }).status === 0;
+}
+
+/** The entry gets its name by a rename, so the shared cache never holds a partial build. */
 function moveInto(source, target) {
+  const staged = path.join(home, `incoming-${process.pid}`);
+  fs.rmSync(staged, { recursive: true, force: true });
   try {
-    fs.renameSync(source, target);
+    fs.renameSync(source, staged);
   } catch (error) {
     if (error.code !== 'EXDEV') throw error;
-    // Another volume: copy next to the cache first, then rename.
-    const staged = path.join(home, `incoming-${process.pid}`);
-    fs.rmSync(staged, { recursive: true, force: true });
     fs.cpSync(source, staged, { recursive: true });
-    fs.renameSync(staged, target);
   }
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.renameSync(staged, target);
 }
 
 /** Make `.expo/build-cache` of the app a link to the shared cache. Builds already there move over. */
@@ -211,10 +237,10 @@ function linkBuildCache() {
     if (fs.readlinkSync(link) === buildCacheDir) return;
     fs.rmSync(link);
   } else if (stat) {
-    // A rename is atomic, so the shared cache never holds a partial build.
     for (const name of fs.readdirSync(link)) {
+      const source = path.join(link, name);
       const target = path.join(buildCacheDir, name);
-      if (!fs.existsSync(target)) moveInto(path.join(link, name), target);
+      if (isCompleteBuild(source) && !isCompleteBuild(target)) moveInto(source, target);
     }
     fs.rmSync(link, { recursive: true });
   }
