@@ -58,8 +58,9 @@ export function resolveExpoDoctorCli(projectRoot: string): ExpoDoctorCli {
 /**
  * Run `expo-doctor` and normalize what it printed.
  *
- * Never throws for a failing check: a check that fails is the answer, not an error. The one failure
- * this reports as a `CommandError` is not being able to start the tool at all.
+ * Never throws for a failing check: a check that fails is the answer, not an error. Two failures
+ * are a `CommandError`, because neither says anything about the project: the tool could not be
+ * started, or the run stopped before it printed a summary.
  *
  * @throws {CommandError} `EXPO_DOCTOR_NOT_FOUND` when the CLI could not be spawned.
  * @throws {CommandError} `EXPO_DOCTOR_NO_REPORT` when it stopped before it printed its summary.
