@@ -83,6 +83,25 @@ export function readEasAccounts(output: string): string[] {
   );
 }
 
+/** Use a placeholder when an account cannot be pasted as one argument on every supported shell. */
+function createProjectGuidance(account: string): { command: string; note: string } {
+  const printable = /^\w[\w.-]*$/.test(account) || account === '<account-name>';
+  const argument = printable ? account : '<account-name>';
+  return {
+    command: `${easCommandPrefix()} init --account ${argument} --non-interactive`,
+    note: printable ? '' : ` The eligible account is ${JSON.stringify(account)}.`,
+  };
+}
+
+/** A build lookup that knows which account can create the project, or only how to link an existing one. */
+export function unlinkedProjectSummary(account: string | null): string {
+  if (account === null) {
+    return `this project is not linked to an EAS project — to link an existing project, run "${easCommandPrefix()} init --id <project-id> --non-interactive"`;
+  }
+  const { command, note } = createProjectGuidance(account);
+  return `this project is not linked to an EAS project — link it once with "${command}" (or --id <project-id> for one that exists)${note}`;
+}
+
 const SIGNATURES: readonly EasFailureSignature[] = [
   {
     // `EAS project not configured.` — printed with the two `eas init` forms that fix it, on
@@ -96,18 +115,25 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     // line below that.
     cause: (output) => {
       const accounts = readEasAccounts(output);
-      // A single account is not a choice, so the line has no hole in it and an agent can run it.
+      const linkCommand = `${easCommandPrefix()} init --id <project-id> --non-interactive`;
+      const linkOnly =
+        output.includes('eas init --id <project-id> --non-interactive') &&
+        !output.includes('eas init --account') &&
+        !accounts.length;
       const account = accounts.length === 1 ? accounts[0]! : '<account-name>';
+      const { command: createCommand, note } = createProjectGuidance(account);
       return {
         id: 'eas-project-unlinked',
-        summary: `this project is not linked to an EAS project — link it once with "${easCommandPrefix()} init --account ${account} --non-interactive" (or --id <project-id> for one that exists)`,
+        summary: unlinkedProjectSummary(linkOnly ? null : account),
         why: 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to act on. This is not about being signed in.',
-        how: `link it once, which writes the project id into the app config: "${easCommandPrefix()} init --account ${account} --non-interactive" creates a new project under that account, and "${easCommandPrefix()} init --id <project-id> --non-interactive" links one that already exists. Then run this command again.${
-          accounts.length > 1
-            ? ` The EAS CLI listed these accounts: ${accounts.join(', ')} — only a person can choose which one this project belongs to.`
-            : ''
-        }`,
-        command: `${easCommandPrefix()} init --account ${account} --non-interactive`,
+        how: linkOnly
+          ? `link the existing project with "${linkCommand}", then run this command again.`
+          : `link it once, which writes the project id into the app config: "${createCommand}" creates a new project under that account, and "${linkCommand}" links one that already exists. Then run this command again.${note}${
+              accounts.length > 1
+                ? ` The EAS CLI listed these accounts: ${accounts.join(', ')} — only a person can choose which one this project belongs to.`
+                : ''
+            }`,
+        command: linkOnly ? linkCommand : createCommand,
       };
     },
   },

@@ -8,7 +8,7 @@
 // implication is the other CLI's and this one does not depend on it.
 
 import { easCliArgs, easCliLabel, mayDownloadEasCli, type EasCli } from '../utils/easCli';
-import { readEasFailure } from '../utils/easFailure';
+import { readEasFailure, unlinkedProjectSummary } from '../utils/easFailure';
 import { spawnSubprocessAsync } from '../utils/subprocess';
 import { looksLikeWrapperCrash, runnerCrashReason, runnerNoiseReason } from '../utils/wrapperCrash';
 import type { CachedBuild } from './types';
@@ -258,6 +258,10 @@ export function describeLookupFailure(
   result: { exitCode: number | null; stdout: string; stderr: string },
   invocation: string
 ): string {
+  const projectReason = readUnlinkedProjectReason(result.stdout);
+  if (projectReason) {
+    return projectReason;
+  }
   const said = readEasFailure(result);
   switch (said.kind) {
     case 'runner-only':
@@ -275,6 +279,39 @@ export function describeLookupFailure(
     case 'nothing':
       return 'the EAS CLI refused the lookup and printed nothing';
   }
+}
+
+/** Read the build:list failure contract. Older EAS CLIs report this refusal as prose. */
+function readUnlinkedProjectReason(stdout: string): string | null {
+  let error: { code?: unknown; eligibleAccounts?: unknown; accountName?: unknown } | undefined;
+  try {
+    error = JSON.parse(stdout)?.error;
+  } catch {
+    return null;
+  }
+  if (error?.code !== 'EAS_PROJECT_NOT_CONFIGURED') {
+    return null;
+  }
+  const { eligibleAccounts, accountName } = error;
+  if (
+    !Array.isArray(eligibleAccounts) ||
+    !eligibleAccounts.every((account): account is string => typeof account === 'string') ||
+    (accountName !== undefined && typeof accountName !== 'string')
+  ) {
+    return null;
+  }
+
+  if (
+    eligibleAccounts.length === 0 ||
+    (accountName !== undefined && !eligibleAccounts.includes(accountName))
+  ) {
+    return unlinkedProjectSummary(null);
+  }
+  if (accountName === undefined && eligibleAccounts.length > 1) {
+    const choices = eligibleAccounts.map((account) => JSON.stringify(account)).join(', ');
+    return `${unlinkedProjectSummary('<account-name>')}. Choose an eligible account for <account-name> from ${choices}.`;
+  }
+  return unlinkedProjectSummary(accountName ?? eligibleAccounts[0]!);
 }
 
 /**

@@ -24,6 +24,57 @@ describe(describeLookupFailure, () => {
     expect(reason).not.toContain('Run one of the following');
   });
 
+  it.each([
+    { eligibleAccounts: ['one-org'], accountName: undefined, account: 'one-org' },
+    { eligibleAccounts: ['one org'], accountName: undefined, account: '<account-name>' },
+    { eligibleAccounts: ['one-org', 'two-orgs'], accountName: 'two-orgs', account: 'two-orgs' },
+  ])(
+    'uses the accounts reported by build:list --json: $eligibleAccounts',
+    ({ eligibleAccounts, accountName, account }) => {
+      const stdout = JSON.stringify({
+        error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts, accountName },
+      });
+      const reason = describeLookupFailure(
+        { exitCode: 1, stdout, stderr: 'Not logged in' },
+        INVOCATION
+      );
+      expect(reason).toContain(`init --account ${account} --non-interactive`);
+      expect(reason).toContain(accountName ?? eligibleAccounts[0]!);
+    }
+  );
+
+  it('lists the eligible choices when the owner is unspecified', () => {
+    const stdout = JSON.stringify({
+      error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts: ['one-org', 'two-orgs'] },
+    });
+    const reason = describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION);
+    expect(reason).toContain('init --account <account-name>');
+    expect(reason).toContain('"one-org", "two-orgs"');
+  });
+
+  it.each([
+    { eligibleAccounts: [], accountName: undefined },
+    { eligibleAccounts: ['different org'], accountName: 'owner' },
+  ])(
+    'suggests linking when the project cannot be created under the requested owner: $eligibleAccounts',
+    ({ eligibleAccounts, accountName }) => {
+      const stdout = JSON.stringify({
+        error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts, accountName },
+      });
+      const reason = describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION);
+      expect(reason).toContain('init --id <project-id> --non-interactive');
+      expect(reason).not.toContain('init --account');
+    }
+  );
+
+  it.each([
+    JSON.stringify({ error: { code: 'SOMETHING_ELSE', eligibleAccounts: ['bob'] } }),
+    JSON.stringify({ error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts: [false] } }),
+  ])('keeps the EAS diagnostic for an unrecognized failure payload %s', (stdout) => {
+    const stderr = 'Build lookup failed.';
+    expect(describeLookupFailure({ exitCode: 1, stdout, stderr }, INVOCATION)).toBe(stderr);
+  });
+
   it('quotes the explanation the CLI put on stdout, not the one sentence on stderr', () => {
     expect(
       describeLookupFailure(

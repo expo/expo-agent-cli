@@ -71,6 +71,28 @@ describe(classifyEasFailure, () => {
     expect(cause?.command).toBe('npx --yes eas-cli init --account bob --non-interactive');
   });
 
+  it('keeps an account name that needs quoting out of the suggested command', () => {
+    const cause = classifyEasFailure(
+      'EAS project not configured.\nAccounts you can create projects in: one org'
+    );
+    expect(cause?.command).toBe(
+      'npx --yes eas-cli init --account <account-name> --non-interactive'
+    );
+    expect(cause?.how).toContain('"one org"');
+    expect(cause?.summary).toContain('"one org"');
+  });
+
+  it('keeps link-only recovery when EAS offers no create command', () => {
+    const cause = classifyEasFailure(
+      'EAS project not configured. To link an existing project:\n\n  eas init --id <project-id> --non-interactive'
+    );
+    const command = 'npx --yes eas-cli init --id <project-id> --non-interactive';
+    expect(cause?.command).toBe(command);
+    expect(cause?.summary).toContain(command);
+    expect(cause?.how).toContain(command);
+    expect(cause?.how).not.toContain('--account');
+  });
+
   it.each([
     ['You are not logged in. Run "eas login".'],
     ['Error: Not logged in'],
