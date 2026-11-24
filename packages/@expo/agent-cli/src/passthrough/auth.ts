@@ -23,7 +23,6 @@
 // keeps the `npx expo` rung the other three gave up, and says on stderr that it is paying for it.
 
 import path from 'path';
-import { stripVTControlCharacters } from 'util';
 
 import type { OutcomeExitCode } from '../exitCodes';
 import { PROGRAM_PREFIX } from '../programName';
@@ -320,6 +319,9 @@ export interface WhoamiResultJson {
   cli: string;
 }
 
+/** How much of a `whoami` run's output an error repeats. */
+const WHOAMI_TAIL_LINES = 10;
+
 /**
  * Answer `whoami --json` from the same CLI the forwarded form would have run.
  *
@@ -356,7 +358,13 @@ async function printWhoamiJsonAsync(
 
   const source = `${cli.tool} whoami`;
   const answer = classifyWhoami(result);
-  const said = stripVTControlCharacters(`${result.stderr}${result.stdout}`).trim();
+  const { outputTail } = require('../deploy/parseOutput') as typeof import('../deploy/parseOutput');
+  const { wrapUntrustedAppOutput } =
+    require('../runtime/untrusted') as typeof import('../runtime/untrusted');
+  // Another program's bytes, so they are fenced below this CLI's own sentences, never inside one
+  // (llp/0008-guardrails.rfc.md §Untrusted-content marking).
+  const tail = outputTail(`${result.stderr}${result.stdout}`, WHOAMI_TAIL_LINES);
+  const printed = tail ? [`What "${cli.tool} whoami" printed:`, wrapUntrustedAppOutput(tail)] : [];
   const data = { source, sessionFile: sessionFilePath(), cli: authCliLabel(cli) };
   // A run that said nothing about who is signed in is a tool error, never a login: a network
   // failure exits 1 like a signed-out machine, and a stopped child can report exit 0.
@@ -365,8 +373,9 @@ async function printWhoamiJsonAsync(
       'WHOAMI_FAILED',
       [
         `"${source}" did not say who is signed in on this machine.`,
-        `Why: it ${howItEnded(result)}${said ? ` and said: ${said}` : ''}.`,
+        `Why: it ${howItEnded(result)}.`,
         `How: fix what it names (often the network), then run this command again.`,
+        ...printed,
       ].join('\n')
     );
     error.data = {
@@ -394,8 +403,9 @@ async function printWhoamiJsonAsync(
       detectedBy: 'preflight',
       message: [
         `No Expo account is signed in on this machine.`,
-        `Why: "${source}" exited ${result.exitCode}${said ? ` and said: ${said}` : ''}.`,
+        `Why: "${source}" exited ${result.exitCode}.`,
         `How: sign in with "${PROGRAM_PREFIX} login", or, on a machine with nobody at the keyboard, set EXPO_TOKEN to an access token from expo.dev.`,
+        ...printed,
       ].join('\n'),
     });
     error.data = data;

@@ -17,6 +17,7 @@ import {
   pathEnvVars,
   setupFixtureAsync,
 } from '../utils';
+import { wrapUntrustedAppOutput } from '../../src/runtime/untrusted';
 
 /** One recorded invocation of a stub bin. */
 type StubInvocation = { bin: string; args: string[]; cwd: string };
@@ -225,7 +226,8 @@ describe('auth commands outside an Expo project', () => {
         stub: 'signed-out',
         exitCode: 7,
         code: 'EAS_LOGIN_REQUIRED',
-        says: 'Not logged in',
+        // The child's words travel fenced, below this CLI's own sentences.
+        says: wrapUntrustedAppOutput('Not logged in'),
         handoff: { scenario: 'eas-login', command: 'npx @expo/agent-cli login' },
       },
       // eas-cli refuses `login` while EXPO_TOKEN is set, so this handoff names no command.
@@ -236,7 +238,15 @@ describe('auth commands outside an Expo project', () => {
         says: 'or unset it',
         handoff: { scenario: 'expo-token-rejected', command: null },
       },
-      { stub: 'network', exitCode: 1, code: 'WHOAMI_FAILED', says: 'ENOTFOUND', handoff: null },
+      {
+        stub: 'network',
+        exitCode: 1,
+        code: 'WHOAMI_FAILED',
+        says: wrapUntrustedAppOutput(
+          'request to https://api.expo.dev/graphql failed, reason: getaddrinfo ENOTFOUND api.expo.dev'
+        ),
+        handoff: null,
+      },
       { stub: 'killed', exitCode: 1, code: 'WHOAMI_FAILED', says: 'SIGTERM', handoff: null },
       // A signal does not survive the Windows `.cmd` shim of the stub runner.
     ].filter(({ stub }) => process.platform !== 'win32' || stub !== 'killed')
