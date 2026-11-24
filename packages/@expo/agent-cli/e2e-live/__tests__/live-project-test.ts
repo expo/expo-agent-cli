@@ -917,9 +917,19 @@ describeLive('live-project', gate)(
           label: 'whoami-json',
         });
         const payload = parseJson(json);
-        // The one documented exception to bare forwarding: this CLI answers with one object.
-        expect(typeof payload.loggedIn).toBe('boolean');
-        expect(payload.sessionFile).toContain('state.json');
+        // The one documented exception to bare forwarding: this CLI answers with one object, the
+        // report when signed in and the login handoff (7) when not.
+        if (json.exitCode === 0) {
+          expect(payload.loggedIn).toBe(true);
+          expect(payload.sessionFile).toContain('state.json');
+        } else {
+          expectExit(json, 7);
+          // The runner inherits EXPO_TOKEN, so an expired one is the token handoff.
+          expect(payload.error.needsHuman.scenario).toMatch(
+            /^(eas-login|expo-login|expo-token-rejected)$/
+          );
+          expect(payload.error.data.sessionFile).toContain('state.json');
+        }
       });
     });
   }

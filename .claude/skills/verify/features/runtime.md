@@ -46,6 +46,6 @@ Preconditions:
 - On the Android emulator, a reload can exceed the 8 seconds that `runtime:reload` waits for the app to reconnect. The command then reports `method: "device"`: it stopped and relaunched the app. The exit code is still `0`, but the relaunch is a cold start of about two minutes. Record which method the proof saw. A proof of the dev-server reload needs `method: "dev-server"`.
 - On iOS, every reload reported `method: "dev-server"` in under one second.
 - `runtime:tap` calls the prop. It does not touch the screen. `runtime:tap --verify` reports `nothing in the interactive projection changed` for a handler that changes nothing in the component tree.
-- `runtime:eval` of an expression that throws exits `1` and prints the error in the untrusted block.
+- `runtime:eval` of an expression that throws exits `20` and prints the error in the untrusted block.
 - `runtime:errors` reads a window that opens when the command starts. An error thrown before it is not there. Reproduce the error while a longer window listens: `--duration 4000`.
 - The app resumes on the route it was launched with after a reload. Run `navigate` again when the recipe needs another screen.

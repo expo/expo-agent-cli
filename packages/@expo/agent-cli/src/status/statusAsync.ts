@@ -24,7 +24,7 @@ import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import type { DevServerLockInfo } from '../devLock';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
-import { exitWithCodeAsync } from '../exitCodes';
+import { EXIT_OK, type OutcomeExitCode } from '../exitCodes';
 import { buildStatusFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { ImpactClass } from '../impact/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
@@ -172,8 +172,11 @@ export interface StatusOptions {
 }
 
 /** Gather the report, emit it for agents, and print it for humans. */
-export async function printStatusAsync(projectRoot: string, options: StatusOptions): Promise<void> {
-  const report = await collectStatusReportAsync(projectRoot, options);
+export async function printStatusAsync(
+  projectRoot: string,
+  options: StatusOptions
+): Promise<OutcomeExitCode> {
+  const { report, fingerprints } = await collectStatusReportAsync(projectRoot, options);
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — status already carries "next" by
   // design, so these are the actions that line does not name, and only the machine channels
   // (`--json` and the event) carry them.
@@ -216,14 +219,15 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
   // Silent on purpose: repeating the plan the `next` line already names would be noise, so the
   // follow-ups reach a driving agent through the event and the JSON report only.
   reportFollowUps('status', followups, { silent: true });
+  // The exit closes every socket, the fingerprint subprocess's pipes too, so let the early
+  // fingerprints finish and write their cache entry first, as the event loop did before.
+  await fingerprints;
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   // The one path out of this command that is not 0, and it exists only because the caller asked
   // for a verdict. The report is printed first either way: a gate that failed is still a report,
   // and an agent reading the exit code needs the reasons above it.
-  if (report.assertion && !report.assertion.ok) {
-    await exitWithCodeAsync(report.assertion.exitCode);
-  }
+  return report.assertion && !report.assertion.ok ? report.assertion.exitCode : EXIT_OK;
 }
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
@@ -252,24 +256,36 @@ function readOrphanSessions(
 export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
-): Promise<StatusReport> {
+): Promise<{
+  report: StatusReport;
+  /** The early fingerprints. Always fulfills: they are best effort, and the report is out first. */
+  fingerprints: Promise<void>;
+}> {
   const easProject = readEasProject(projectRoot);
   const projectRead = attemptAsync(() => readProjectAsync(projectRoot, options));
   const authRead = attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot));
   // Start the per-platform fingerprints the EAS lookup will need once auth and the project hash say
   // it will run, while the slower probes finish; the lookup joins them through the memo (llp/0023
   // §Layer 1). The hash is what tells a record entry for an older native surface from a usable one.
-  void Promise.all([projectRead, authRead]).then(([project, auth]) => {
-    const early = platformsToFingerprintEarly(projectRoot, {
+  const early = Promise.all([projectRead, authRead]).then(([project, auth]) => {
+    const platforms = platformsToFingerprintEarly(projectRoot, {
       auth: 'value' in auth ? auth.value : null,
       easProject,
       fingerprintCache: options.fingerprintCache,
       projectHash: 'value' in project ? project.value.state.fingerprint.hash : null,
     });
-    for (const platform of early) {
-      void generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache });
-    }
+    return Promise.allSettled(
+      platforms.map((platform) =>
+        generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache })
+      )
+    );
   });
+  // Handled now, not when the caller awaits it: a failure here must not surface as an unhandled
+  // rejection while the report is still being read.
+  const fingerprints = early.then(
+    () => {},
+    () => {}
+  );
 
   const saved = readLastDevRequest(projectRoot);
   const request =
@@ -535,7 +551,7 @@ export async function collectStatusReportAsync(
     report.assertion = buildAssertStatus(options.assert, report.freshness);
   }
 
-  return report;
+  return { report, fingerprints };
 }
 
 /**

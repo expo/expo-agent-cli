@@ -36,12 +36,13 @@ A unit test fails when loadable source starts to use `21`. `dev --plan` runs not
 
 The one exception to the `125` ceiling is `dev`, which follows the shell's convention for signals. A signal at any other time exits `128` plus the signal number. During a step, the error is `DEV_INTERRUPTED`. A signal that ends the dev-server step is the stop the caller asked for: exit `0`.
 
-A command ends in one of two ways:
+A command ends in one of three ways:
 
-- A **tool error** is printed and exits with the code it carries, or `1` when it carries none.
-- An **outcome** is not an error. The command prints its report and exits `0`, `20` or `22`.
+- A **tool error** is a throw. It is printed and exits with the code it carries, or `1` when it carries none.
+- An **outcome** is not an error. The command prints its report and returns `0`, `20` or `22`.
+- A **forwarded code** is the exit code of the CLI the command handed the run to (§Forwarded codes), returned unchanged.
 
-Both flush the event stream before the process exits.
+A command returns its code and never exits by itself. The dispatcher is the one place a finished command exits, and it flushes the event stream first. The command type accepts only an outcome or a code marked as forwarded, and every path must return one, so a returned `1` or a body that falls off the end does not compile (type test in `__tests__/exitCodes-test.ts`). The same file has a sweep that keeps the exits the type cannot see in the files that need them. One drop still compiles: a command that awaits another command and returns its own `0`. The e2e `help-test.ts` case for `help <forwarded command>` guards the one place that does this.
 
 ### An empty target list is inconclusive
 
@@ -150,8 +151,8 @@ Four layers, in priority order:
    - The rungs, in order: `eas whoami`, then the project's own `expo whoami`, then `EXPO_TOKEN`.
    - A rung that cannot answer passes to the next: no binary, an `eas` that needs a download, a run past the deadline, or a binary that is not the CLI.
    - "Not the CLI" needs both: output with nothing that looks like that CLI's, _and_ a wrapper's exit (`101`, `126`, `127`, `134`, `139`, or a panic signature).
-   - When no rung answers, `loggedIn` is `null`, never `false`.
-   - On `false`, the command stops with `eas-login`, exit `7`, before it spends anything. On `null`, it runs, and layer 3 recognises a real sign-in failure.
+   - When no rung answers, `loggedIn` is `null`, never `false`. A CLI that ran and could not verify the account (a network failure, a stop, a timeout) also makes `EXPO_TOKEN` alone no answer, because the CLI most likely failed on that token.
+   - On `false`, the command stops with `eas-login`, exit `7`, before it spends anything. A rejected `EXPO_TOKEN` stops with `expo-token-rejected` instead, which names no command. Layer 3 recognises the same text in a command's own output (e2e `deploy-test.ts`). On `null`, it runs, and layer 3 recognises a real sign-in failure.
 2. **Nobody can answer.** A captured child gets no stdin, and its stdout is a pipe, never a terminal.
    - An `eas` command that can prompt also gets `--non-interactive`, or `--json`, which implies it.
    - An `expo` command gets `CI=1` in its environment, because the Expo CLI rejects `--non-interactive`.
@@ -193,6 +194,7 @@ A command with its own `--json` prints one JSON object on stdout under `--json`,
 - Argument parsing is covered. An unknown option or a stray positional is a tool error, caught where every command is invoked. A bad option gets `Try: <command> --help`, or names the command that has it, such as `--port` on `dev`. A unit test checks that each named command resolves.
 - `--json` is read from the raw arguments, because the error path can run before the command parses its own. Only the arguments after the command name and before any `--` count: in `install -- --json`, the flag is npm's.
 - An `Error` that is not a `CommandError` is a defect: `UNCAUGHT_EXCEPTION`, exit `1`, the same envelope as a crash.
+- A command returns only an outcome (`0`, `20`, `22`). A tool error or a step for a person is a throw, so it always gets the envelope and the flush. The type checker refuses a returned `1`. `exitCodes-test.ts` keeps every other way out (`process.exitCode`, `process.exit`, a forwarded child code) in a named list of files.
 - `dev --json` prints exactly one object at the end: the plan with step results, or the envelope. `dev --plan --json` prints the plan. The `cli:start_plan` event carries the plan before the first step.
 
 The exit code is still the first thing to read. The envelope explains a failure; it does not signal one.

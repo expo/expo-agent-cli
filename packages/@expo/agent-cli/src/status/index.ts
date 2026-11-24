@@ -101,7 +101,6 @@ export const agentCliStatus: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli status -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveDevServerUrlFlag } =
@@ -121,7 +120,7 @@ export const agentCliStatus: Command = async (argv) => {
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const explicitDevServerUrl =
       args['--dev-server-url'] != null ? resolveDevServerUrlFlag(args['--dev-server-url']) : null;
-    await printStatusAsync(projectRoot, {
+    return await printStatusAsync(projectRoot, {
       devServerUrl: explicitDevServerUrl,
       json: !!args['--json'],
       assert: assertClass,
@@ -133,5 +132,5 @@ export const agentCliStatus: Command = async (argv) => {
       // still decides: a flag that was not passed states nothing.
       fingerprintCache: args['--no-fingerprint-cache'] ? false : undefined,
     });
-  })().catch(logCmdError);
+  })();
 };

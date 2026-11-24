@@ -8,7 +8,7 @@ import * as Log from '../../log';
 import {
   formatErrorCodeRow,
   formatNeedsHumanBlock,
-  logCmdError,
+  reportCmdError,
   type CommandError,
 } from '../../utils/errors';
 import {
@@ -21,13 +21,9 @@ import {
 
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn() }));
-vi.mock('../../exitCodes', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../exitCodes')>()),
-  exitWithCodeAsync: vi.fn(() => new Promise<never>(() => {})),
-}));
 
 /**
- * The log a detached child writes for a failure, produced by `logCmdError` itself under
+ * The log a detached child writes for a failure, produced by `reportCmdError` itself under
  * `__EXPO_AGENT_CLI_DETACHED=1` and captured off the log module, line by line.
  */
 function childLogOf(error: CommandError): string[] {
@@ -35,7 +31,7 @@ function childLogOf(error: CommandError): string[] {
   vi.mocked(Log.warn).mockClear();
   process.env.__EXPO_AGENT_CLI_DETACHED = '1';
   try {
-    void logCmdError(error);
+    void reportCmdError(error);
   } finally {
     delete process.env.__EXPO_AGENT_CLI_DETACHED;
   }
@@ -49,7 +45,7 @@ function childLogOf(error: CommandError): string[] {
  * The log a child writes when it fails, built out of the functions that write it.
  *
  * This is the round trip the parser depends on: `Log.exception` prints `Error.toString()` and
- * `logCmdError` prints the handoff block under it, so a log is assembled here from those two rather
+ * `reportCmdError` prints the handoff block under it, so a log is assembled here from those two rather
  * than from a string somebody typed. The pair drifts, this test fails.
  */
 function childLog(error: Error, needsHuman: ReturnType<typeof formatNeedsHumanBlock> | null) {
@@ -97,7 +93,7 @@ describe(parseDetachedChildVerdict, () => {
     });
   });
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the row `logCmdError`
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the row `reportCmdError`
   // writes for a detached child alone, read back with the `Try:` line, so a device refusal
   // reaches the parent's caller as the child raised it.
   it(`should read the code, the exit, the data and the Try line of a device refusal`, () => {

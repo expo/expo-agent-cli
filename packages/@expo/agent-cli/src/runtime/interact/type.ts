@@ -106,20 +106,15 @@ export const agentCliRuntimeType: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli runtime:type -h` shows as fast as possible.
-  const { logCmdError } = require('../../utils/errors') as typeof import('../../utils/errors');
   const { findUpProjectRootOrCwd } =
     require('../../utils/findUp') as typeof import('../../utils/findUp');
   const { resolveTypeOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
   const { runtimeTypeAsync } = require('./interactAsync') as typeof import('./interactAsync');
-  const { EXIT_OK, exitWithCodeAsync } =
-    require('../../exitCodes') as typeof import('../../exitCodes');
 
   return (async () => {
     const options = resolveTypeOptions(argv ?? []);
     const context = { projectRoot: findUpProjectRootOrCwd(process.cwd()) };
     const code = await runtimeTypeAsync(options, context);
-    if (code !== EXIT_OK) {
-      await exitWithCodeAsync(code);
-    }
-  })().catch(logCmdError);
+    return code;
+  })();
 };

@@ -113,12 +113,10 @@ export const agentCliSmoke: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli smoke -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
   const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
-  const { EXIT_OK, exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   const { resolveSmokeOptions, withConfiguredDevice } =
     require('./resolveOptions') as typeof import('./resolveOptions');
   const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
@@ -133,10 +131,8 @@ export const agentCliSmoke: Command = async (argv) => {
 
     const { smokeAsync } = require('./smokeAsync') as typeof import('./smokeAsync');
     const code = await smokeAsync(projectRoot, options);
-    if (code !== EXIT_OK) {
-      // An outcome, not an error: it has already printed everything it has to say, and the code is
-      // what the caller branches on (llp/0010 §Exit codes).
-      await exitWithCodeAsync(code);
-    }
-  })().catch(logCmdError);
+    // An outcome, not an error: it has already printed everything it has to say, and the code is
+    // what the caller branches on (llp/0010 §Exit codes).
+    return code;
+  })();
 };

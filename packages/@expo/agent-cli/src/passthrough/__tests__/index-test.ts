@@ -18,12 +18,10 @@ beforeEach(() => {
   vol.fromJSON({ 'package.json': JSON.stringify({ name: 'app' }) }, projectRoot);
   vi.spyOn(process, 'cwd').mockReturnValue(projectRoot);
   vi.mocked(runExpoAsync).mockResolvedValue(0);
-  process.exitCode = undefined;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-  process.exitCode = undefined;
 });
 
 describe(agentCliExpoPassthrough, () => {
@@ -42,9 +40,7 @@ describe(agentCliExpoPassthrough, () => {
   it(`should forward the exit code of the expo CLI`, async () => {
     vi.mocked(runExpoAsync).mockResolvedValue(9);
 
-    await agentCliExpoPassthrough('export')(['--platform', 'web']);
-
-    expect(process.exitCode).toBe(9);
+    expect(await agentCliExpoPassthrough('export')(['--platform', 'web'])).toBe(9);
   });
 
   it(`should emit one event naming the forwarded command`, async () => {

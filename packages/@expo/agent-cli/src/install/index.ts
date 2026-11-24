@@ -81,7 +81,7 @@ export const agentCliInstall: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli install -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
+  const { forwardedExit } = require('../exitCodes') as typeof import('../exitCodes');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveInstallPlan } = require('./resolveOptions') as typeof import('./resolveOptions');
@@ -89,7 +89,6 @@ export const agentCliInstall: Command = async (argv) => {
 
   return (async () => {
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
-    const exitCode = await installAsync(projectRoot, resolveInstallPlan(argv ?? []));
-    process.exitCode = exitCode;
-  })().catch(logCmdError);
+    return forwardedExit(await installAsync(projectRoot, resolveInstallPlan(argv ?? [])));
+  })();
 };

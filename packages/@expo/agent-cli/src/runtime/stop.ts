@@ -88,7 +88,6 @@ export const agentCliRuntimeStop: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli runtime:stop -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveRuntimeStopOptions } =
@@ -98,6 +97,6 @@ export const agentCliRuntimeStop: Command = async (argv) => {
   return (async () => {
     const options = resolveRuntimeStopOptions(argv ?? []);
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
-    process.exitCode = await runtimeStopAsync(projectRoot, options);
-  })().catch(logCmdError);
+    return await runtimeStopAsync(projectRoot, options);
+  })();
 };

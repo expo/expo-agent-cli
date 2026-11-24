@@ -11,6 +11,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { EXIT_OK, type OutcomeExitCode } from '../exitCodes';
 
 export const inspectConfigPluginsHelp: CommandHelp = {
   command: 'inspect:config-plugins',
@@ -87,13 +88,12 @@ export const agentCliInspectConfigPlugins: Command = async (argv) => {
 
   // Load modules after the help prompt so `npx @expo/agent-cli inspect:config-plugins -h` shows as fast as
   // possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { printEffectiveConfigAsync } =
     require('./effectiveAsync') as typeof import('./effectiveAsync');
 
-  return (async () => {
+  return (async (): Promise<OutcomeExitCode> => {
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     await printEffectiveConfigAsync(projectRoot, {
       platform: args['--platform'],
@@ -101,5 +101,6 @@ export const agentCliInspectConfigPlugins: Command = async (argv) => {
       json: !!args['--json'],
       followups: !args['--no-followups'],
     });
-  })().catch(logCmdError);
+    return EXIT_OK;
+  })();
 };

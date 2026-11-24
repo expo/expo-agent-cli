@@ -67,6 +67,7 @@ import type {
   TreeMatchJson,
   TreeNodeJson,
 } from './types';
+import type { OutcomeExitCode } from '../../exitCodes';
 
 /**
  * How long the app is given to commit before `--verify` looks again.
@@ -235,7 +236,7 @@ async function askAppAsync(
     );
   }
 
-  if (result.exceptionText) {
+  if (result.exceptionText !== undefined) {
     // The walk itself raised inside the app, which is this CLI's bug or a fiber shape it has never
     // met — not something the caller can fix by passing a different flag.
     throw new CommandError(
@@ -305,7 +306,7 @@ function nodesOf(answer: RawAnswer, key: string): TreeNodeJson[] {
 function refuseForBundle(
   report: RuntimeTreeJson | RuntimeTapJson | RuntimeTypeJson,
   { json, what, rerun }: { json: boolean; what: string; rerun: string }
-): number {
+): OutcomeExitCode {
   if (json) {
     Log.log(JSON.stringify(report, null, 2));
   } else {
@@ -358,7 +359,7 @@ function unreadTreeReport(
 export async function runtimeTreeAsync(
   options: RuntimeTreeOptions,
   context: RuntimeContext = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { devServerUrl, client, bundle, refusal } = await openAppAsync(options, context);
   if (refusal != null) {
     return refuseForBundle(unreadTreeReport(options, devServerUrl, bundle, refusal), {
@@ -552,7 +553,7 @@ function unreadCallFields(
 export async function runtimeTapAsync(
   options: RuntimeTapOptions,
   context: RuntimeContext = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { devServerUrl, client, bundle, refusal } = await openAppAsync(options, context);
   if (refusal != null) {
     return refuseForBundle(
@@ -643,7 +644,7 @@ export async function runtimeTapAsync(
 export async function runtimeTypeAsync(
   options: RuntimeTypeOptions,
   context: RuntimeContext = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { devServerUrl, client, bundle, refusal } = await openAppAsync(options, context);
   if (refusal != null) {
     return refuseForBundle(

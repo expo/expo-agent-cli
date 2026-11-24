@@ -4,6 +4,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { EXIT_OK } from '../exitCodes';
 
 export const docsSyncHelp: CommandHelp = {
   command: 'docs:sync',
@@ -98,18 +99,14 @@ export const agentCliDocsSync: Command = async (argv) => {
     printCommandHelp(docsSyncHelp);
   }
 
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { runDocsSyncAsync } = require('./docsAsync') as typeof import('./docsAsync');
-  try {
-    await runDocsSyncAsync({
-      sdkFlag: args['--sdk'],
-      force: !!args['--force'],
-      json: !!args['--json'],
-      followups: !args['--no-followups'],
-    });
-  } catch (error: any) {
-    logCmdError(error);
-  }
+  await runDocsSyncAsync({
+    sdkFlag: args['--sdk'],
+    force: !!args['--force'],
+    json: !!args['--json'],
+    followups: !args['--no-followups'],
+  });
+  return EXIT_OK;
 };
 
 export const agentCliDocsSearch: Command = async (argv) => {
@@ -129,18 +126,14 @@ export const agentCliDocsSearch: Command = async (argv) => {
     printCommandHelp(docsSearchHelp);
   }
 
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { runDocsSearchAsync } = require('./docsAsync') as typeof import('./docsAsync');
-  try {
-    await runDocsSearchAsync({
-      query: args._.join(' '),
-      regex: !!args['--regex'],
-      sdkFlag: args['--sdk'],
-      limit: args['--limit'],
-      json: !!args['--json'],
-      followups: !args['--no-followups'],
-    });
-  } catch (error: any) {
-    logCmdError(error);
-  }
+  await runDocsSearchAsync({
+    query: args._.join(' '),
+    regex: !!args['--regex'],
+    sdkFlag: args['--sdk'],
+    limit: args['--limit'],
+    json: !!args['--json'],
+    followups: !args['--no-followups'],
+  });
+  return EXIT_OK;
 };

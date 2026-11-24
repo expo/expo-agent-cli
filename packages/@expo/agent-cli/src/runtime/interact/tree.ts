@@ -98,13 +98,10 @@ export const agentCliRuntimeTree: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli runtime:tree -h` shows as fast as possible.
-  const { logCmdError } = require('../../utils/errors') as typeof import('../../utils/errors');
   const { findUpProjectRootOrCwd } =
     require('../../utils/findUp') as typeof import('../../utils/findUp');
   const { resolveTreeOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
   const { runtimeTreeAsync } = require('./interactAsync') as typeof import('./interactAsync');
-  const { EXIT_OK, exitWithCodeAsync } =
-    require('../../exitCodes') as typeof import('../../exitCodes');
 
   return (async () => {
     const options = resolveTreeOptions(argv ?? []);
@@ -112,10 +109,8 @@ export const agentCliRuntimeTree: Command = async (argv) => {
     // project is not an error — it only means there is no dev-server lock to ask.
     const context = { projectRoot: findUpProjectRootOrCwd(process.cwd()) };
     const code = await runtimeTreeAsync(options, context);
-    if (code !== EXIT_OK) {
-      // An outcome, not an error: the command has already printed everything it has to say
-      // (llp/0010 §Exit codes).
-      await exitWithCodeAsync(code);
-    }
-  })().catch(logCmdError);
+    // An outcome, not an error: the command has already printed everything it has to say
+    // (llp/0010 §Exit codes).
+    return code;
+  })();
 };

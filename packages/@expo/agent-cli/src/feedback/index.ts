@@ -8,6 +8,7 @@ import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
 import { isTelemetryDisabled } from '../utils/env';
 import { withStdoutRedirectedAsync } from '../utils/stdout';
+import { EXIT_OK } from '../exitCodes';
 
 const { version } = require('../../package.json') as { version: string };
 
@@ -89,7 +90,7 @@ export const agentCliFeedback: Command = async (argv) => {
   }
   if (args['--version']) {
     Log.log(version);
-    return;
+    return EXIT_OK;
   }
 
   const {
@@ -105,7 +106,7 @@ export const agentCliFeedback: Command = async (argv) => {
     if (args['--json']) {
       Log.log(JSON.stringify({ sent: false, feedbackId: null }));
     }
-    return;
+    return EXIT_OK;
   }
 
   if (args._.length > 0 && args['--message'] === undefined) {
@@ -149,4 +150,5 @@ export const agentCliFeedback: Command = async (argv) => {
       `To continue the feedback session use:\n${PROGRAM_PREFIX} feedback --resume ${metadata.feedbackId} --message "<message>"`
     );
   }
+  return EXIT_OK;
 };

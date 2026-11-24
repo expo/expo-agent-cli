@@ -11,6 +11,7 @@ import { parseDetachedChildPort } from './childVerdict';
 import type { DevAppReport } from './waitForDevApp';
 import { readDetachedLogSync, type DetachedLogRead } from './logFile';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /** A dev server that is not on the port the caller expected. */
 export interface PortMove {
@@ -115,7 +116,7 @@ export function reportDetached(
     /** Reuse the caller’s full log read to avoid reading compiler output twice. */
     log?: DetachedLogRead | null;
   }
-): number {
+): OutcomeExitCode {
   const report: DevDetachResultJson = {
     url: lock.url,
     port: lock.port,

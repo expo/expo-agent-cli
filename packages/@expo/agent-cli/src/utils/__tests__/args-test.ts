@@ -5,14 +5,7 @@ import {
   resolveDuration,
   strayArgumentError,
 } from '../args';
-import { CommandError, logCmdError as logCmdErrorFn } from '../errors';
-
-const logCmdError = vi.mocked(logCmdErrorFn);
-
-vi.mock('../errors', async () => {
-  const actual = await vi.importActual('../errors');
-  return { ...actual, logCmdError: vi.fn() };
-});
+import { CommandError } from '../errors';
 
 const HELP_SCHEMA = { '--help': Boolean, '--id': String, '-h': '--help' };
 
@@ -40,13 +33,10 @@ describe(strayArgumentError, () => {
 });
 
 describe(assertWithOptionsArgs, () => {
-  beforeEach(() => logCmdError.mockClear());
-
   // The whole of F22: `checkpoint:undo <id>` dropped the argument and restored the newest
   // checkpoint over the working tree, and reported that it had worked.
   //
-  // Thrown rather than reported: `logCmdError` exits on a later tick, so a caller that carried on
-  // ran the command body in the window before the exit fired.
+  // Thrown rather than reported, so the command body never runs with the argument dropped.
   it(`throws for a stray argument on a command that reads none`, () => {
     const run = () =>
       assertWithOptionsArgs(HELP_SCHEMA, {
@@ -59,7 +49,6 @@ describe(assertWithOptionsArgs, () => {
     expect(run).toThrow(CommandError);
     expect(run).toThrow(/Unexpected argument: abc123/);
     expect(run).toThrow(/name it with --id\./);
-    expect(logCmdError).not.toHaveBeenCalled();
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope — the parser's own
@@ -84,7 +73,6 @@ describe(assertWithOptionsArgs, () => {
       positionalArgs: 'none',
     });
     expect(args['--id']).toBe('abc123');
-    expect(logCmdError).not.toHaveBeenCalled();
   });
 
   // A caller reading the usage is not the one this protects, and the help is the recovery it names.
@@ -95,7 +83,6 @@ describe(assertWithOptionsArgs, () => {
       positionalArgs: 'none',
     });
     expect(args['--help']).toBe(true);
-    expect(logCmdError).not.toHaveBeenCalled();
   });
 
   // A permissive parse cannot tell an unrecognized flag from a positional: `arg` puts both in `_`.
@@ -107,7 +94,6 @@ describe(assertWithOptionsArgs, () => {
       positionalArgs: 'own',
     });
     expect(args._).toEqual(['/profile/42', '--json']);
-    expect(logCmdError).not.toHaveBeenCalled();
   });
 });
 

@@ -16,6 +16,7 @@ import { defaultSmokePlatformAsync } from '../smoke/suggest';
 import { runTypeCheckAsync } from './checkAsync';
 import { formatTypeCheckReport } from './format';
 import type { TypeCheckPayload } from './types';
+import type { OutcomeExitCode } from '../exitCodes';
 
 export interface TypeCheckOptions {
   json?: boolean;
@@ -32,7 +33,7 @@ export interface TypeCheckOptions {
 export async function printTypeCheckAsync(
   projectRoot: string,
   options: TypeCheckOptions
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const report = await runTypeCheckAsync(projectRoot);
 
   // Counts only: a diagnostic quotes the project's own identifiers and types, which is not

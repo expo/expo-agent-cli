@@ -5,7 +5,7 @@
 
 import type { DevServerLogEntry } from '../dev/logErrors';
 import { event } from '../events';
-import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
+import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { buildRuntimeErrorsFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
 import type { NativePlatform } from '../plan/types';
@@ -32,6 +32,7 @@ import type { RuntimeEvalOptions, RuntimeErrorsOptions } from './resolveOptions'
 import { CdpRuntimeErrorCollector, type RuntimeErrorRecord } from './runtimeErrorCollector';
 import { symbolicateRuntimeErrorsAsync } from './symbolicate';
 import { classifyTargets } from './targetSelection';
+import type { OutcomeExitCode } from '../exitCodes';
 
 // The family's shared type, re-exported from where it was first defined so that the commands and
 // the modules that call them keep importing it from one place (`./preflight` owns it now, because
@@ -41,13 +42,13 @@ export type { RuntimeContext };
 /**
  * Evaluate an expression in the running app and print the value it returned.
  *
- * @returns the exit code: `1` when the expression threw inside the app, so a script can branch
- * on the outcome without parsing the output.
+ * @returns the exit code: `20` when the expression threw inside the app. The tool worked and the
+ * exception is the answer, so the report stays on stdout (llp/0010 §Exit codes).
  */
 export async function runtimeEvalAsync(
   options: RuntimeEvalOptions,
   context: RuntimeContext = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { expression, timeoutMs, awaitPromise, json } = options;
   // One preflight, one read of the target list (`./preflight`): the dev server, the app and the
   // device facts come back together, so the platform this command was told about is the platform
@@ -94,7 +95,7 @@ export async function runtimeEvalAsync(
 
   event('runtime_eval', {
     devServerUrl,
-    threw: !!result.exceptionText,
+    threw: result.exceptionText !== undefined,
     type: result.type ?? 'undefined',
     promise: result.promise?.state ?? null,
   });
@@ -108,7 +109,9 @@ export async function runtimeEvalAsync(
   // A rejected promise is the asynchronous form of a throw, so it exits the same way: an agent
   // gating on `runtime:eval` must not read a failed `fetch` as a pass. The two are still told apart
   // in the report itself — `threw` for one, `promise.state` for the other.
-  return result.exceptionText || result.promise?.state === 'rejected' ? 1 : 0;
+  return result.exceptionText !== undefined || result.promise?.state === 'rejected'
+    ? EXIT_OUTCOME_FAILED
+    : EXIT_OK;
 }
 
 /**
@@ -208,7 +211,7 @@ function runtimeErrorsFailedError(devServerUrl: string, error: unknown): Command
 export async function runtimeErrorsAsync(
   options: RuntimeErrorsOptions,
   context: RuntimeContext = {}
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   const { durationMs, json, failOnError } = options;
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — friction run 4, F39.

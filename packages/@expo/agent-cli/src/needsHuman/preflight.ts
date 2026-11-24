@@ -9,9 +9,11 @@
 // Nothing here ever throws. A preflight that cannot run is not an answer of "no": it is no answer,
 // and the caller falls back to recognising the failure when it happens (layer 3).
 
+import { stripVTControlCharacters } from 'util';
+
 import { easCliArgs, mayDownloadEasCli, resolveEasCli } from '../utils/easCli';
 import { resolveProjectBin } from '../utils/projectBin';
-import { spawnSubprocessAsync } from '../utils/subprocess';
+import { spawnSubprocessAsync, type SubprocessResult } from '../utils/subprocess';
 import { looksLikeWrapperCrash } from '../utils/wrapperCrash';
 
 /** Who the Expo CLI family acts as on this machine. */
@@ -30,6 +32,11 @@ export interface AuthPreflight {
    * question asked of the CLI the project actually installed.
    */
   source: 'eas whoami' | 'expo whoami' | 'EXPO_TOKEN' | null;
+  /**
+   * Set when the service rejected `EXPO_TOKEN`. A login cannot fix that: eas-cli refuses to log in
+   * while the variable is set [observed — eas-cli `account/login.js`].
+   */
+  tokenRejected?: true;
 }
 
 /**
@@ -71,16 +78,28 @@ export function resetAuthPreflightCache(): void {
   cache.clear();
 }
 
+/** A CLI ran and said nothing about who is signed in: a network failure, a stop, a timeout. */
+const UNVERIFIED = 'unverified';
+type Asked = AuthPreflight | typeof UNVERIFIED | null;
+
 async function probeAsync(projectRoot: string, timeoutMs: number): Promise<AuthPreflight> {
   const fromEas = await askEasAsync(projectRoot, timeoutMs);
-  if (fromEas) {
+  if (fromEas && fromEas !== UNVERIFIED) {
     return fromEas;
   }
-  // The EAS CLI could not be asked, or what answered was not the EAS CLI. The project's own Expo
-  // CLI reads the same session file, and it is the rung `@expo/agent-cli whoami` uses (`passthrough/auth.ts`
-  // §resolveAuthCliAsync), so the two commands stop disagreeing about who this machine is (F65).
+  // The EAS CLI gave no answer. The project's own Expo CLI reads the same session file, and it is
+  // the rung `@expo/agent-cli whoami` uses (`passthrough/auth.ts` §resolveAuthCliAsync), so the two
+  // commands stop disagreeing about who this machine is (F65).
   const fromExpo = await askProjectExpoAsync(projectRoot, timeoutMs);
-  return fromExpo ?? fromTokenAlone();
+  if (fromExpo && fromExpo !== UNVERIFIED) {
+    return fromExpo;
+  }
+  // A CLI that ran and could not verify the account most likely failed on that very token, so
+  // the bare variable is no answer then.
+  if (fromEas === UNVERIFIED || fromExpo === UNVERIFIED) {
+    return { loggedIn: null, user: null, source: null };
+  }
+  return fromTokenAlone();
 }
 
 /**
@@ -101,7 +120,7 @@ async function probeAsync(projectRoot: string, timeoutMs: number): Promise<AuthP
  * install answers directly. It is the same
  * judgement `askProjectExpoAsync` below already makes for `expo`.
  */
-async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<AuthPreflight | null> {
+async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Asked> {
   const easCli = resolveEasCli(projectRoot);
   if (!easCli || mayDownloadEasCli(easCli)) {
     return null;
@@ -113,15 +132,36 @@ async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Auth
     timeoutMs,
   });
 
-  if (result.spawnError || result.timedOut || looksLikeWrapperCrash({ tool: 'eas', ...result })) {
+  if (result.spawnError || looksLikeWrapperCrash({ tool: 'eas', ...result })) {
     return null;
   }
-  if (result.exitCode !== 0) {
-    // The CLI answered, and the answer was no — including a run with an `EXPO_TOKEN` that the
-    // service rejected, which is exactly the case a bare "the variable is set" would get wrong.
-    return { loggedIn: false, user: null, source: 'eas whoami' };
+  return fromWhoami(result, 'eas whoami');
+}
+
+/**
+ * What a `whoami` run answered.
+ *
+ * Only the two texts the CLIs print for nobody signed in say no [observed — eas-cli 27.7.2 and
+ * expo 58.1.4, both at exit 1]: `Not logged in` is `signed-out`, and `The bearer token is
+ * invalid.` is `token-rejected`, which a login cannot fix. A network failure exits 1 as well, and a child a signal
+ * stopped can report exit 0, so both are `failed`: neither says who is signed in.
+ */
+export function classifyWhoami(
+  result: Pick<SubprocessResult, 'exitCode' | 'stdout' | 'stderr' | 'signal'>
+): 'signed-in' | 'signed-out' | 'token-rejected' | 'failed' {
+  if (result.signal) {
+    return 'failed';
   }
-  return { loggedIn: true, user: parseWhoamiUser(result.stdout), source: 'eas whoami' };
+  if (result.exitCode === 0) {
+    return 'signed-in';
+  }
+  // Colour wraps the text in escapes when the CLI thinks it writes to a terminal [observed —
+  // eas-cli with FORCE_COLOR=1 prints `\x1b[33mNot logged in\x1b[39m`].
+  const said = stripVTControlCharacters(`${result.stdout}\n${result.stderr}`);
+  if (/The bearer token is invalid\./.test(said)) {
+    return 'token-rejected';
+  }
+  return /^Not logged in\s*$/m.test(said) ? 'signed-out' : 'failed';
 }
 
 /**
@@ -136,10 +176,7 @@ async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Auth
  * a free answer and report auth as unknown in a repository where `@expo/agent-cli whoami` names the user
  * [observed — 2026-08-27, F113].
  */
-async function askProjectExpoAsync(
-  projectRoot: string,
-  timeoutMs: number
-): Promise<AuthPreflight | null> {
+async function askProjectExpoAsync(projectRoot: string, timeoutMs: number): Promise<Asked> {
   const bin = resolveProjectBin(projectRoot, 'expo');
   if (!bin) {
     return null;
@@ -151,13 +188,31 @@ async function askProjectExpoAsync(
     timeoutMs,
     env: { CI: '1' },
   });
-  if (result.spawnError || result.timedOut || looksLikeWrapperCrash({ tool: 'expo', ...result })) {
+  if (result.spawnError || looksLikeWrapperCrash({ tool: 'expo', ...result })) {
     return null;
   }
-  if (result.exitCode !== 0) {
-    return { loggedIn: false, user: null, source: 'expo whoami' };
+  return fromWhoami(result, 'expo whoami');
+}
+
+/**
+ * The preflight's answer from one `whoami` run, or `UNVERIFIED` when the run said nothing about who
+ * is signed in. A rejected `EXPO_TOKEN` is "signed out", which is exactly the case a bare "the
+ * variable is set" would get wrong.
+ */
+function fromWhoami(result: SubprocessResult, source: 'eas whoami' | 'expo whoami'): Asked {
+  if (result.timedOut) {
+    return UNVERIFIED;
   }
-  return { loggedIn: true, user: parseWhoamiUser(result.stdout), source: 'expo whoami' };
+  switch (classifyWhoami(result)) {
+    case 'signed-in':
+      return { loggedIn: true, user: parseWhoamiUser(result.stdout), source };
+    case 'signed-out':
+      return { loggedIn: false, user: null, source };
+    case 'token-rejected':
+      return { loggedIn: false, user: null, source, tokenRejected: true };
+    case 'failed':
+      return UNVERIFIED;
+  }
 }
 
 /**

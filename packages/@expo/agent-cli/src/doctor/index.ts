@@ -54,8 +54,6 @@ export const agentCliDoctorCheck: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli doctor:check -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
-  const { exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app — this command acts on the app, so it stops in a
   // directory that holds no app rather than planning work against whatever is there.
   const { assertDependenciesInstalledSync, findUpExpoAppRootOrAssert } =
@@ -69,8 +67,6 @@ export const agentCliDoctorCheck: Command = async (argv) => {
       json: !!args['--json'],
       followups: !args['--no-followups'],
     });
-    if (exitCode !== 0) {
-      await exitWithCodeAsync(exitCode);
-    }
-  })().catch(logCmdError);
+    return exitCode;
+  })();
 };

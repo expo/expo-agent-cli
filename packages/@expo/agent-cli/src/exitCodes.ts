@@ -18,8 +18,11 @@
 // - `20`–`29` — the tool worked and the outcome was not success. Retrying is meaningful; the
 //   payload says what went wrong with the *subject*, not with the CLI.
 //
-// Nothing outside this file spells an exit code as a literal, and nothing leaves the process with
-// one except through `exitWithCodeAsync` or a `CommandError` carrying an `exitCode`.
+// A command returns its outcome (`0`, `20`, `22`), or a forwarded child's code through
+// `forwardedExit`; the `Command` type refuses anything else. A tool error is a throw, so
+// `reportCmdError` prints the `--json` envelope. Only `cli.ts` exits, through `exitAsync`, which
+// flushes the events. `src/__tests__/exitCodes-test.ts` keeps every other exit path out of the
+// commands.
 
 import { flushEventLogger } from '2g';
 
@@ -79,29 +82,50 @@ export const EXIT_OUTCOME_CANCELED = 21;
 export const EXIT_OUTCOME_TIMEOUT = 22;
 
 /**
- * Leave the process with one of the codes above, without losing the events of the run.
+ * The codes a command may return: the tool worked. A tool error (`1`) and a step for a person
+ * (`7`) are a thrown `CommandError`, so the `--json` envelope reports them.
+ */
+export type OutcomeExitCode =
+  | typeof EXIT_OK
+  | typeof EXIT_OUTCOME_FAILED
+  | typeof EXIT_OUTCOME_TIMEOUT;
+
+declare const forwarded: unique symbol;
+
+/** A child CLI's exit code that a command passes on unchanged (llp/0010 §Forwarded codes). */
+export type ForwardedExitCode = number & { readonly [forwarded]: true };
+
+/**
+ * Mark a child's exit code as forwarded. Only the commands that hand a run to another CLI (`start`,
+ * `install`, `new`, the `expo` and auth passthroughs) call it; the sweep in
+ * `src/__tests__/exitCodes-test.ts` names them.
+ */
+export function forwardedExit(code: number): ForwardedExitCode {
+  return code as ForwardedExitCode;
+}
+
+/** What a command returns: its outcome, or the code of the child it forwarded to. */
+export type CommandExit = OutcomeExitCode | ForwardedExitCode;
+
+/**
+ * Set the exit code of the process without losing the events of the run. Only `cli.ts` calls it,
+ * once, when a command has returned or thrown.
  *
  * `process.exit` drops whatever the event logger has buffered, so an agent reading `LOG_EVENTS`
  * would lose the very events that explain the code it just read. It also aborts Node on Windows
- * when an Undici socket is still closing. Set `process.exitCode`, flush, and let the event loop
- * finish naturally instead. The returned promise never settles, so the caller has nothing further
- * to run, the same way `logCmdError` ends a failing command; a pending promise alone does not keep
- * the event loop alive.
- *
- * A command reporting a *tool* error throws a `CommandError` instead — with an `exitCode` when it
- * is not {@link EXIT_ERROR} — so the error is printed and put on the event stream first.
+ * when an Undici socket is still closing. So this sets `process.exitCode`, flushes, closes the
+ * sockets, and lets the event loop finish naturally.
  */
-export function exitWithCodeAsync(code: number): Promise<never> {
+export async function exitAsync(code: number): Promise<void> {
   process.exitCode = code;
-  flushEventLogger()
-    .catch(() => {})
-    .finally(() => {
-      // A fetch keep-alive socket would keep the process around after the report is complete.
-      // Close sockets, then let Node leave naturally with process.exitCode. Calling process.exit
-      // while Undici is closing one of these aborts with STATUS_STACK_BUFFER_OVERRUN on Windows.
-      destroyActiveSockets();
-    });
-  return new Promise<never>(() => {});
+  try {
+    await flushEventLogger();
+  } catch {
+    // Best effort: a flush that fails must not turn an outcome into a hung process.
+  } finally {
+    // A fetch keep-alive socket would keep the process around after the report is complete.
+    destroyActiveSockets();
+  }
 }
 
 function destroyActiveSockets(): void {

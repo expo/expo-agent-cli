@@ -1,8 +1,8 @@
 import * as Log from '../../log';
-import { logCmdError, type CommandError } from '../../utils/errors';
+import { reportCmdError, type CommandError } from '../../utils/errors';
 
 /**
- * The log a detached child writes for `error`, line by line, as `logCmdError` prints it. The
+ * The log a detached child writes for `error`, line by line, as `reportCmdError` prints it. The
  * calling test mocks `../../log`.
  */
 export function childLogOf(error: CommandError): string[] {
@@ -10,7 +10,7 @@ export function childLogOf(error: CommandError): string[] {
   vi.mocked(Log.warn).mockClear();
   process.env.__EXPO_AGENT_CLI_DETACHED = '1';
   try {
-    void logCmdError(error);
+    void reportCmdError(error);
   } finally {
     delete process.env.__EXPO_AGENT_CLI_DETACHED;
   }

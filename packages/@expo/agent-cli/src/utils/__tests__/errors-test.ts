@@ -6,11 +6,10 @@ import {
   formatNeedsHumanBlock,
   handleUncaughtException,
   isNeedsHumanError,
-  logCmdError,
+  reportCmdError,
   type NeedsHuman,
   UNCAUGHT_EXCEPTION_CODE,
 } from '../errors';
-import { flushEventLogger } from '2g';
 
 import { setJsonRequested } from '../jsonMode';
 import type { MockInstance } from 'vitest';
@@ -59,29 +58,14 @@ function needsHuman(overrides: Partial<NeedsHuman> = {}): NeedsHuman {
   };
 }
 
-describe(logCmdError, () => {
-  let originalExitCode: typeof process.exitCode;
-
+describe(reportCmdError, () => {
   beforeEach(() => {
     emitted.length = 0;
     vi.clearAllMocks();
-    originalExitCode = process.exitCode;
-    process.exitCode = undefined;
   });
-
-  afterEach(() => {
-    process.exitCode = originalExitCode;
-  });
-
-  /** Run the error path and wait for the flush the exit is chained onto. */
-  async function exitCodeOfAsync(error: unknown): Promise<unknown> {
-    logCmdError(error);
-    await new Promise((resolve) => setImmediate(resolve));
-    return process.exitCode;
-  }
 
   it('exits 1 for an error that names no code', async () => {
-    expect(await exitCodeOfAsync(new CommandError('BAD_ARGS', 'nope'))).toBe(1);
+    expect(reportCmdError(new CommandError('BAD_ARGS', 'nope'))).toBe(1);
   });
 
   // The band an error opts into: a step only a person can finish is not a tool failure
@@ -90,19 +74,17 @@ describe(logCmdError, () => {
     const error = new CommandError('NEEDS_HUMAN', 'Finish the login in your browser.');
     error.exitCode = EXIT_NEEDS_HUMAN;
 
-    expect(await exitCodeOfAsync(error)).toBe(7);
+    expect(reportCmdError(error)).toBe(7);
   });
 
   it('exits 7 for a needs-human error without being told the code', async () => {
     const error = new NeedsHumanError('EAS_LOGIN_REQUIRED', 'Nobody is signed in.', needsHuman());
 
-    expect(await exitCodeOfAsync(error)).toBe(EXIT_NEEDS_HUMAN);
+    expect(reportCmdError(error)).toBe(EXIT_NEEDS_HUMAN);
   });
 
   it('emits cli:error and then cli:needs_human, with the whole handoff', async () => {
-    await exitCodeOfAsync(
-      new NeedsHumanError('EAS_LOGIN_REQUIRED', 'Nobody is signed in.', needsHuman())
-    );
+    reportCmdError(new NeedsHumanError('EAS_LOGIN_REQUIRED', 'Nobody is signed in.', needsHuman()));
 
     expect(emitted.map((entry) => entry.name)).toEqual(['cli:error', 'cli:needs_human']);
     expect(emitted[0]!.payload).toEqual({
@@ -124,16 +106,14 @@ describe(logCmdError, () => {
   });
 
   it('marks an ordinary error as not needing a human', async () => {
-    await exitCodeOfAsync(new CommandError('BAD_ARGS', 'nope'));
+    reportCmdError(new CommandError('BAD_ARGS', 'nope'));
 
     expect(emitted.map((entry) => entry.name)).toEqual(['cli:error']);
     expect(emitted[0]!.payload).toMatchObject({ needsHuman: false });
   });
 
   it('prints the three-line block instead of the Try line', async () => {
-    await exitCodeOfAsync(
-      new NeedsHumanError('EAS_LOGIN_REQUIRED', 'Nobody is signed in.', needsHuman())
-    );
+    reportCmdError(new NeedsHumanError('EAS_LOGIN_REQUIRED', 'Nobody is signed in.', needsHuman()));
 
     expect(vi.mocked(warn).mock.calls.map(([line]) => line)).toEqual([
       'Needs a human   eas-login',
@@ -154,25 +134,24 @@ describe(logCmdError, () => {
     }
 
     it('prints nothing on stdout when JSON was not asked for', async () => {
-      await exitCodeOfAsync(new CommandError('BAD_ARGS', 'nope'));
+      reportCmdError(new CommandError('BAD_ARGS', 'nope'));
 
       expect(stdoutObject()).toBeNull();
     });
 
     // Anything that is not a `CommandError` is a defect, a rejected string too: the crash report,
-    // then the event and the flush that only this asynchronous path can afford.
+    // then the event that only this asynchronous path can afford.
     it.each([
       ['a plain Error', new Error('injected defect')],
       ['a rejected string', 'injected defect'],
-    ])('reports %s as a crash, emits cli:error and flushes before the exit', async (_, thrown) => {
+    ])('reports %s as a crash and emits cli:error', async (_, thrown) => {
       setJsonRequested(true);
 
-      expect(await exitCodeOfAsync(thrown)).toBe(EXIT_ERROR);
+      expect(reportCmdError(thrown)).toBe(EXIT_ERROR);
       expect(stdoutObject().error.code).toBe(UNCAUGHT_EXCEPTION_CODE);
       expect(emitted).toEqual([
         { name: 'cli:error', payload: expect.objectContaining({ code: UNCAUGHT_EXCEPTION_CODE }) },
       ]);
-      expect(flushEventLogger).toHaveBeenCalled();
     });
 
     it('prints one object with the stable key set', async () => {
@@ -180,7 +159,7 @@ describe(logCmdError, () => {
       const error = new CommandError('PROJECT_NOT_FOUND', 'Project root directory not found.');
       error.suggestedCommand = 'npx @expo/agent-cli new my-app';
 
-      await exitCodeOfAsync(error);
+      reportCmdError(error);
 
       expect(stdoutObject()).toEqual({
         error: {
@@ -201,7 +180,7 @@ describe(logCmdError, () => {
       const error = new CommandError('NO_APP_CONNECTED', 'No app is connected.');
       error.data = { devServerUrl: 'http://127.0.0.1:8081', debuggerTargets: 0 };
 
-      await exitCodeOfAsync(error);
+      reportCmdError(error);
 
       expect(stdoutObject().error.data).toEqual({
         devServerUrl: 'http://127.0.0.1:8081',
@@ -212,7 +191,7 @@ describe(logCmdError, () => {
     it('carries the whole handoff for a needs-human failure', async () => {
       setJsonRequested(true);
 
-      await exitCodeOfAsync(
+      reportCmdError(
         new NeedsHumanError('EAS_LOGIN_REQUIRED', 'Nobody is signed in.', needsHuman())
       );
 
@@ -230,7 +209,7 @@ describe(logCmdError, () => {
     it('reports a null suggestedCommand rather than dropping the key', async () => {
       setJsonRequested(true);
 
-      await exitCodeOfAsync(new CommandError('BAD_ARGS', 'nope'));
+      reportCmdError(new CommandError('BAD_ARGS', 'nope'));
 
       expect(stdoutObject().error).toHaveProperty('suggestedCommand', null);
     });

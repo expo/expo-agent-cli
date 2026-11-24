@@ -106,9 +106,14 @@ describe(readAuthPreflightAsync, () => {
     });
   });
 
-  it('reports a signed-out machine as signed out', async () => {
+  // The coloured form is what eas-cli prints under FORCE_COLOR=1 [observed — global eas-cli,
+  // empty HOME].
+  it.each([
+    ['plain', 'Not logged in\n'],
+    ['coloured', '\u001b[33mNot logged in\u001b[39m\n'],
+  ])('reports a signed-out machine as signed out (%s)', async (_, stderr) => {
     withPinnedEasCli();
-    mockWhoami({ exitCode: 1, stderr: 'Not logged in\n' });
+    mockWhoami({ exitCode: 1, stderr });
 
     await expect(readAuthPreflightAsync(projectRoot)).resolves.toEqual({
       loggedIn: false,
@@ -167,13 +172,6 @@ describe(readAuthPreflightAsync, () => {
     });
   });
 
-  it('answers "unknown" when the CLI took too long', async () => {
-    withPinnedEasCli();
-    mockWhoami({ exitCode: null, timedOut: true });
-
-    await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({ loggedIn: null });
-  });
-
   // The difference that matters: a binary that is not the EAS CLI exits non-zero exactly like a
   // signed-out one, and calling that "signed out" would stop a command that had every right to
   // run and hand the user a login they do not need.
@@ -189,6 +187,47 @@ describe(readAuthPreflightAsync, () => {
       loggedIn: null,
       user: null,
       source: null,
+    });
+  });
+
+  // Only the two answers the CLIs print for "nobody is signed in" are "signed out" [observed —
+  // eas-cli 27.7.2, expo 58.1.4]. Anything else is a CLI that could not answer: a login handoff for
+  // a network failure, or "signed in" for a stopped child, sends the user the wrong way.
+  it.each([
+    [
+      'an unreachable API',
+      {
+        exitCode: 1,
+        stderr:
+          'request to http://127.0.0.1:3000/graphql failed, reason: connect ECONNREFUSED 127.0.0.1:3000\n    Error: GraphQL request failed.\n',
+      },
+    ],
+    ['a child a signal stopped', { exitCode: 0, signal: 'SIGTERM' as const, stdout: '' }],
+    ['a CLI that took too long', { exitCode: null, timedOut: true }],
+  ])('answers "unknown" for %s, even with EXPO_TOKEN set', async (_, result) => {
+    withPinnedEasCli();
+    // A CLI that ran and could not verify the account most likely failed on this very token.
+    process.env.EXPO_TOKEN = 'set';
+    mockWhoami(result);
+
+    await expect(readAuthPreflightAsync(projectRoot)).resolves.toEqual({
+      loggedIn: null,
+      user: null,
+      source: null,
+    });
+  });
+
+  it('reports a rejected EXPO_TOKEN as signed out, and says the token was rejected', async () => {
+    withPinnedEasCli();
+    process.env.EXPO_TOKEN = 'bogus';
+    mockWhoami({
+      exitCode: 1,
+      stderr: 'The bearer token is invalid.\n    Error: GraphQL request failed.\n',
+    });
+
+    await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({
+      loggedIn: false,
+      tokenRejected: true,
     });
   });
 
@@ -242,6 +281,28 @@ describe(readAuthPreflightAsync, () => {
         source: 'expo whoami',
       });
     });
+
+    const UNREACHABLE = {
+      exitCode: 1,
+      stderr: 'request to https://api.expo.dev/graphql failed, reason: getaddrinfo ENOTFOUND\n',
+    };
+
+    it.each([
+      [
+        'the Expo CLI verifies it',
+        { exitCode: 0, stdout: 'alice\n' },
+        { loggedIn: true, user: 'alice', source: 'expo whoami' },
+      ],
+      ['neither CLI verifies it', UNREACHABLE, { loggedIn: null, user: null, source: null }],
+    ])(
+      'after an EAS CLI that could not verify the account, with EXPO_TOKEN set: %s',
+      async (_, expo, expected) => {
+        process.env.EXPO_TOKEN = 'set';
+        mockBothAsync({ eas: UNREACHABLE, expo });
+
+        await expect(readAuthPreflightAsync(projectRoot)).resolves.toEqual(expected);
+      }
+    );
 
     it('reports a signed-out machine the Expo CLI answered for', async () => {
       mockBothAsync({

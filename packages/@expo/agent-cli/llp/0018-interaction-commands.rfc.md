@@ -115,10 +115,9 @@ this section.
    index out of range, disabled, no handler, no submit handler, and a handler that
    threw.
 
-5. A handler that threw is 20. `runtime:eval` exits 1 when the expression throws,
-   because the expression is the caller's own code. Here the handler is the app's code
-   and the tap did land, reporting `called: true` with a `threw`. That is an outcome of
-   the app. The report keeps the two facts apart: the call was made, and it raised.
+5. A handler that threw is 20, as is a `runtime:eval` expression that threw: in both
+   the runtime ran the code and answered. The tap did land, so it reports `called: true`
+   with a `threw`. The report keeps the two facts apart: the call was made, and it raised.
 
 6. `runtime:tree --testID` is a tap without the tap. It reports the matched elements'
    own subtrees plus one summary row each: the component, the group size, the handler

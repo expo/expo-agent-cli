@@ -60,7 +60,6 @@ export const agentCliDevLogs: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli dev:logs -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveDevLogsOptions } =
@@ -72,6 +71,6 @@ export const agentCliDevLogs: Command = async (argv) => {
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
 
     const { devLogsAsync } = require('./logsAsync') as typeof import('./logsAsync');
-    process.exitCode = await devLogsAsync(projectRoot, options);
-  })().catch(logCmdError);
+    return await devLogsAsync(projectRoot, options);
+  })();
 };

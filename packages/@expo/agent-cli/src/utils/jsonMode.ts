@@ -5,11 +5,8 @@
 // each of them (which payload, which subprocess output mode). The *error* path cannot: it is one
 // function that every command funnels into, and it runs after the command module has already
 // thrown — often before the command ever parsed its arguments. So the launcher answers the
-// question once, from the raw argv, and `logCmdError` reads the answer here.
-//
-// A flag, not a parameter threaded through every call site: the alternative is an argument on
-// `logCmdError` and on every `.catch(logCmdError)` in the CLI, which is thirty edits to carry one
-// boolean that never changes during a run.
+// question once, from the raw argv, and `reportCmdError` and `handleUncaughtException` read the
+// answer here. The second runs from a process handler, where no argument can reach it.
 
 /** Set by the launcher, read by the error path. `false` until something says otherwise. */
 let jsonRequested = false;
@@ -17,7 +14,7 @@ let jsonRequested = false;
 /**
  * Whether `--json` was on the command line, wherever the argument parsing got to.
  *
- * Read by {@link import('./errors').logCmdError} to decide whether the failure also travels as a
+ * Read by {@link import('./errors').reportCmdError} to decide whether the failure also travels as a
  * JSON object on stdout.
  */
 export function isJsonRequested(): boolean {

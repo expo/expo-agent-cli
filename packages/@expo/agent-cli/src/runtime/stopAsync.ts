@@ -22,6 +22,7 @@ import { debugEvent, event } from './events';
 import { preflightRuntimeAsync } from './preflight';
 import type { RuntimeStopOptions } from './resolveStopOptions';
 import { cloudSessionListCommand } from '../device/cloudSimulator';
+import type { OutcomeExitCode } from '../exitCodes';
 
 /**
  * Machine shape of `@expo/agent-cli runtime:stop --json`.
@@ -97,7 +98,7 @@ export interface RuntimeStopResultJson {
 export async function runtimeStopAsync(
   projectRoot: string,
   options: RuntimeStopOptions
-): Promise<number> {
+): Promise<OutcomeExitCode> {
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
   // `required` and never `fallback`: a session bills by the minute, so a machine with no local
   // device is told it has none rather than quietly handed a paid device it did not ask for. The

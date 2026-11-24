@@ -15,6 +15,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
 import { easCommandPrefix } from '../utils/easCli';
+import { EXIT_OK, type OutcomeExitCode } from '../exitCodes';
 
 export const inspectBuildLogHelp: CommandHelp = {
   command: 'inspect:build-log',
@@ -85,17 +86,17 @@ export const agentCliInspectBuildLog: Command = async (argv) => {
   }
 
   // Load modules after the help prompt so `npx @expo/agent-cli inspect:build-log -h` shows as fast as possible.
-  const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { resolveExplainOptions } =
     require('./explain/resolveOptions') as typeof import('./explain/resolveOptions');
   const { explainAsync } =
     require('./explain/explainAsync') as typeof import('./explain/explainAsync');
 
-  return (async () => {
+  return (async (): Promise<OutcomeExitCode> => {
     const options = resolveExplainOptions(argv ?? [], {
       stdinIsTTY: !!process.stdin.isTTY,
       cwd: process.cwd(),
     });
     await explainAsync(options);
-  })().catch(logCmdError);
+    return EXIT_OK;
+  })();
 };

@@ -17,6 +17,7 @@ import {
   pathEnvVars,
   setupFixtureAsync,
 } from '../utils';
+import { wrapUntrustedAppOutput } from '../../src/runtime/untrusted';
 
 /** One recorded invocation of a stub bin. */
 type StubInvocation = { bin: string; args: string[]; cwd: string };
@@ -93,6 +94,22 @@ fs.appendFileSync(
 const rest = args[0] === '--yes' ? args.slice(1) : args;
 const spec = rest[0] || '';
 const verb = rest[1];
+// The answers eas-cli 27.7.2 gave when it could not name an account [observed — 2026-11-23].
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'signed-out') {
+  process.stdout.write('Not logged in\\n');
+  process.exit(1);
+}
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'bad-token') {
+  process.stderr.write('The bearer token is invalid.\\n    Error: GraphQL request failed.\\n');
+  process.exit(1);
+}
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'network') {
+  process.stderr.write('request to https://api.expo.dev/graphql failed, reason: getaddrinfo ENOTFOUND api.expo.dev\\n');
+  process.exit(1);
+}
+if (verb === 'whoami' && process.env.STUB_WHOAMI === 'killed') {
+  process.kill(process.pid, 'SIGTERM');
+}
 if (spec.startsWith('eas-cli') && verb === 'whoami') {
   process.stdout.write('alice\\nalice@example.com\\n\\nAccounts:\\n• alice (Role: Owner)\\n');
 }
@@ -186,6 +203,77 @@ describe('auth commands outside an Expo project', () => {
     // The flag is this CLI's, so it is not passed on to a CLI that has no such option.
     expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami']);
   });
+
+  // A `--json` after `--` belongs to the forwarded CLI, as it does for every other command
+  // (`argvRequestsJson`), so it is forwarded, not answered here.
+  it(`should forward whoami -- --json rather than answer it`, async () => {
+    const dir = await setupBareDirAsync(['eas']);
+
+    const result = await executeAgentCliAsync(dir, ['whoami', '--', '--json'], {
+      env: realHomeEnv(dir),
+    });
+
+    expect(result.stdout).toContain('alice@example.com');
+    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami', '--', '--json']);
+  });
+
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — signing in is a step only a person can
+  // do, so a signed-out machine is the login handoff (7). A run that names no account for another
+  // reason is a tool error (1): a login would send the user the wrong way.
+  it.each(
+    [
+      {
+        stub: 'signed-out',
+        exitCode: 7,
+        code: 'EAS_LOGIN_REQUIRED',
+        // The child's words travel fenced, below this CLI's own sentences.
+        says: wrapUntrustedAppOutput('Not logged in'),
+        handoff: { scenario: 'eas-login', command: 'npx @expo/agent-cli login' },
+      },
+      // eas-cli refuses `login` while EXPO_TOKEN is set, so this handoff names no command.
+      {
+        stub: 'bad-token',
+        exitCode: 7,
+        code: 'EXPO_TOKEN_INVALID',
+        says: 'or unset it',
+        handoff: { scenario: 'expo-token-rejected', command: null },
+      },
+      {
+        stub: 'network',
+        exitCode: 1,
+        code: 'WHOAMI_FAILED',
+        says: wrapUntrustedAppOutput(
+          'request to https://api.expo.dev/graphql failed, reason: getaddrinfo ENOTFOUND api.expo.dev'
+        ),
+        handoff: null,
+      },
+      { stub: 'killed', exitCode: 1, code: 'WHOAMI_FAILED', says: 'SIGTERM', handoff: null },
+      // A signal does not survive the Windows `.cmd` shim of the stub runner.
+    ].filter(({ stub }) => process.platform !== 'win32' || stub !== 'killed')
+  )(
+    'should answer whoami --json for $stub with $code',
+    async ({ stub, exitCode, code, says, handoff }) => {
+      const dir = await setupBareDirAsync(['eas']);
+
+      const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
+        env: { ...realHomeEnv(dir), STUB_WHOAMI: stub },
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(exitCode);
+      const { error } = JSON.parse(result.stdout);
+      expect(error).toMatchObject({
+        code,
+        message: expect.stringContaining(says),
+        data: expect.objectContaining({ source: 'eas whoami' }),
+      });
+      expect(
+        error.needsHuman
+          ? { scenario: error.needsHuman.scenario, command: error.needsHuman.command }
+          : null
+      ).toEqual(handoff);
+    }
+  );
 
   it.each([
     ['EXPO_STAGING', ''],

@@ -245,6 +245,26 @@ describe(agentCliPassthrough, () => {
     expect(runInheritedAsync).toHaveBeenCalled();
   });
 
+  // A CLI that never started has no exit code and said nothing: the reason is the spawn error.
+  it(`should name the spawn error when the whoami --json CLI cannot start`, async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(path.resolve('/elsewhere'));
+    const spawnError = Object.assign(new Error('spawn npx ENOENT'), { code: 'ENOENT' });
+    vi.spyOn(subprocess, 'spawnSubprocessAsync').mockImplementation(async (_command, args) =>
+      args.includes('whoami')
+        ? { exitCode: null, stdout: '', stderr: '', spawnError }
+        : { exitCode: 0, stdout: '', stderr: '' }
+    );
+
+    const run = agentCliPassthrough('whoami')(['--json']);
+
+    await expect(run).rejects.toMatchObject({
+      code: 'WHOAMI_FAILED',
+      message: expect.stringContaining('spawn npx ENOENT'),
+      data: { spawnError: { code: 'ENOENT' } },
+    });
+    await expect(run).rejects.not.toThrow('exited null');
+  });
+
   it(`should leave every other forwarded command on the expo path`, async () => {
     vi.spyOn(process, 'cwd').mockReturnValue(path.resolve('/elsewhere'));
     vi.mocked(runExpoAsync).mockResolvedValue(0);

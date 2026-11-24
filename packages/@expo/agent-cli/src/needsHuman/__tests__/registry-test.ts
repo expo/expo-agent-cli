@@ -62,10 +62,11 @@ describe('needsHumanScenarios', () => {
     }
   });
 
-  it('holds the fifteen scenarios of the protocol', () => {
+  it('holds the sixteen scenarios of the protocol', () => {
     expect(needsHumanScenarios.map((scenario) => scenario.id)).toEqual([
       'eas-login',
       'expo-login',
+      'expo-token-rejected',
       'macos-automation',
       'asc-api-key-create',
       'apple-auth',

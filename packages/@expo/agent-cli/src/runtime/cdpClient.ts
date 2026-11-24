@@ -140,7 +140,10 @@ export interface CdpEvaluateResult {
    */
   description?: string;
 
-  /** Message of the exception the expression threw, when it threw. */
+  /**
+   * Message of the exception the expression threw, set exactly when it threw. `throw ""` sets it
+   * to `""`, so test it with `!== undefined`, never for truthiness.
+   */
   exceptionText?: string;
 
   /** Stack of the exception the expression threw, when the runtime reported one. */
