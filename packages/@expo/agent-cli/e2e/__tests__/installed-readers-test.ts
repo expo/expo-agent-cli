@@ -10,6 +10,7 @@ import path from 'node:path';
 import { listConnectedIosDevicesAsync } from '../../src/device/devicectl';
 import { readInstalledFingerprintAndroidAsync } from '../../src/installedApp/android';
 import { readInstalledFingerprintIosAsync } from '../../src/installedApp/ios';
+import { resolvePrivateLanHost } from '../../src/installedApp/fingerprintCallbackServer';
 import { readInstalledFingerprintIosDeviceAsync } from '../../src/installedApp/iosDevice';
 import { getTemporaryPath, pathEnvVars, expoHomeOf } from '../utils';
 import {
@@ -166,7 +167,9 @@ describe('the simulator reader over a stub xcrun', () => {
 // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read — iOS device
 // The phone probe over a real socket: the stub `devicectl` receives the launch, reads the callback
 // URL and nonce out of the payload URL, and POSTs the way the dev-launcher responder does.
-describe('the phone probe over a stub devicectl', () => {
+// The probe advertises only a private LAN address, so a host with none (a cloud sandbox) cannot
+// run it. `NO_LAN_ADDRESS` is a unit-tested refusal, not a regression of this tier.
+describe.skipIf(resolvePrivateLanHost() === null)('the phone probe over a stub devicectl', () => {
   let root: string;
   let restore: () => void;
 
