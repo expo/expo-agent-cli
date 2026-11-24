@@ -378,24 +378,10 @@ export async function openRouteAsync(
         : Math.max(budgetMs - (Date.now() - startedAt), ROUTE_ATTACH_FLOOR_MS),
   });
 
-  cliEvent('navigate', {
-    route: projectOpen ? null : resolved.route,
-    url: openedUrl,
-    devServerUrl,
-    devServerSource: resolved.devServerSource,
-    deviceBackend: device.backend,
-    platform: device.platform,
-    deviceId: device.deviceId,
-    exitCode: result.exitCode,
-    reversedPort: reverse?.port ?? null,
-    attached: attach.confirmed,
-    appLoaded: attach.loaded,
-    launchUrl: plan.kind === 'route' ? null : plan.launcherUrl,
-  });
-
-  return {
+  const opened: OpenRouteResult = {
     ...resolved,
     ...projectOpen,
+    ...result,
     reverse,
     launch,
     attach,
@@ -405,11 +391,26 @@ export async function openRouteAsync(
     deviceId: device.deviceId,
     deviceName: device.name,
     appId: appId ?? null,
-    command: result.command,
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
   };
+  recordNavigateEvent(opened, plan);
+  return opened;
+}
+
+function recordNavigateEvent(opened: OpenRouteResult, plan: OpenPlan): void {
+  cliEvent('navigate', {
+    route: opened.expoGoProjectOpen ? null : opened.route,
+    url: opened.url,
+    devServerUrl: opened.devServerUrl,
+    devServerSource: opened.devServerSource,
+    deviceBackend: opened.deviceBackend,
+    platform: opened.platform,
+    deviceId: opened.deviceId,
+    exitCode: opened.exitCode,
+    reversedPort: opened.reverse?.port ?? null,
+    attached: opened.attach.confirmed,
+    appLoaded: opened.attach.loaded,
+    launchUrl: plan.kind === 'route' ? null : plan.launcherUrl,
+  });
 }
 
 /**
