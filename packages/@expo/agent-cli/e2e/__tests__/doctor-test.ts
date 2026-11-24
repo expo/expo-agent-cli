@@ -32,7 +32,8 @@ const STUB_LOG_NAME = 'stub-expo-doctor-invocations.jsonl';
  * with the closing summary on stderr and a non-zero exit, exactly as `Log.exit` leaves it.
  *
  * Environment variables the tests steer it with:
- * - STUB_DOCTOR_MODE: `failing` (default), `passing`, `garbage` for output nothing can parse, or
+ * - STUB_DOCTOR_MODE: `failing` (default), `passing`, `threw` for a run whose failing check threw,
+ *   `garbage` for output nothing can parse, or
  *   `killed` for a run a signal stops
  */
 const STUB_DOCTOR = `#!/usr/bin/env node
@@ -58,6 +59,19 @@ if (mode === 'not-found') {
 if (mode === 'killed') {
   process.stdout.write('Running 3 checks on your project...\\n');
   process.kill(process.pid, 'SIGKILL');
+}
+
+// A check that threw has no issues, so expo-doctor 1.21.8 prints no counts line, only the closing
+// one [observed — \`actionAsync\` and \`printCheckResultSummaryOnComplete\` in \`build/index.js\`].
+if (mode === 'threw') {
+  process.stdout.write('Running 3 checks on your project...\\n');
+  process.stdout.write('✔ Check for common project setup issues\\n');
+  process.stdout.write('✔ Check for lock file\\n');
+  process.stdout.write('✖ Check that packages match versions required by installed Expo SDK\\n');
+  process.stderr.write("Unexpected error while running 'Check that packages match versions required by installed Expo SDK' check:\\n");
+  process.stderr.write('Error: getaddrinfo ENOTFOUND api.expo.dev\\n');
+  process.stderr.write('1 check failed, indicating possible issues with the project.\\n');
+  process.exit(1);
 }
 
 if (mode === 'garbage') {
@@ -182,6 +196,22 @@ describe('@expo/agent-cli doctor:check', () => {
     expect(payload.raw).toContain('expo-camera  expected 17.0.1  found 17.0.0');
     // The closing line goes to stderr, and it is part of the answer too.
     expect(payload.raw).toContain('2 checks failed, indicating possible issues with the project.');
+  });
+
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a run whose only failing check threw
+  // finished every check, so it is a report (20), not a run that stopped early (1).
+  it('reports a run whose failing check threw as a finished check', async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
+      env: { STUB_DOCTOR_MODE: 'threw' },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(20);
+    const payload: DoctorPayload = JSON.parse(result.stdout);
+    expect(payload).toMatchObject({ passed: 2, failed: 1, parse: 'best-effort' });
+    expect(payload.raw).toContain('ENOTFOUND api.expo.dev');
   });
 
   it('exits 0 when every check passed', async () => {
