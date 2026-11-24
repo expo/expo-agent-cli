@@ -22,6 +22,12 @@ An LLP holds what the code cannot say: the problem, the decision, the rejected o
 - To place a sentence, ask: would a refactor that keeps the behavior make it false? Then it belongs in the code.
 - An LLP is design, not history. Write no "was wrong until" sentences; history goes in commits.
 
+## Consuming Expo tool output
+
+Flag every case you encounter where this package relies on output from Expo CLI, Expo Doctor, EAS CLI, or any other Expo-owned tool and cannot reliably determine the result from a documented machine-readable interface. This includes existing consumers you encounter during implementation or review, even when their workaround currently passes tests.
+
+Report the gap explicitly in your findings. Name the command, explain what the consumer needs to know and what it currently has to guess from wording, formatting, log order, or an ambiguous exit code. Recommend the smallest change in the upstream tool that would make the decision deterministic, such as a stable JSON field, a diagnostic code, or a documented exit status. If a local workaround is needed, report the upstream recommendation alongside it.
+
 ## Code and tests
 
 These rules apply to new code and new tests. Do not rewrite old code or old tests only to follow them.
