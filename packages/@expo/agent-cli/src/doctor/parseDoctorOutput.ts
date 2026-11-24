@@ -28,6 +28,18 @@ const FAILURE_SUMMARY = /^(\d+)\/(\d+) checks passed\. (\d+) checks? failed\./m;
 /** The counts line of a run with no failures. */
 const SUCCESS_SUMMARY = /^(\d+)\/(\d+) checks passed\. No issues detected!/m;
 
+/**
+ * The closing line, which is the only summary of a run whose failed checks all threw.
+ *
+ * A check that throws is failed with no issues, and `expo-doctor` prints the counts line only when
+ * some failed check has issues [observed — `actionAsync` in expo-doctor 1.21.8 `build/index.js`].
+ * A network error inside a check throws, so an offline run ends this way.
+ */
+const CLOSING_SUMMARY = /^(\d+) checks? failed, indicating possible issues with the project\./;
+
+/** The first line of every run, and the total when the closing line is the only summary. */
+const RUNNING_LINE = /^Running (\d+) checks? on your project/;
+
 /** The line that opens a failed check's detail block. */
 const FAILED_BLOCK = /^✖\s+(.+)$/;
 
@@ -85,6 +97,8 @@ interface Summary {
   passed: number;
   total: number;
   failed: number;
+  /** The counts came from the closing line, so what each thrown check said is only in `raw`. */
+  closingOnly?: true;
 }
 
 /** The counts line, in either of its two spellings. */
@@ -110,7 +124,18 @@ function readSummary(lines: string[]): Summary | null {
       };
     }
   }
-  return null;
+  return readClosingSummary(lines);
+}
+
+function readClosingSummary(lines: string[]): Summary | null {
+  const index = lines.findIndex((line) => CLOSING_SUMMARY.test(line));
+  const running = lines.map((line) => RUNNING_LINE.exec(line)).find(Boolean);
+  if (index < 0 || !running) {
+    return null;
+  }
+  const failed = Number(CLOSING_SUMMARY.exec(lines[index]!)![1]);
+  const total = Number(running[1]);
+  return { index, passed: total - failed, total, failed, closingOnly: true };
 }
 
 /** The `✔`/`✖` lines above the summary, which `--verbose` prints one per finished check. */
@@ -219,6 +244,9 @@ function quality({
 }): 'full' | 'best-effort' {
   const failed = checks.filter((check) => check.status === 'failed').length;
   const complete =
-    checks.length === summary.total && failed === summary.failed && matchedBlocks === blockCount;
+    !summary.closingOnly &&
+    checks.length === summary.total &&
+    failed === summary.failed &&
+    matchedBlocks === blockCount;
   return complete ? 'full' : 'best-effort';
 }

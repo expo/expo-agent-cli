@@ -1,28 +1,10 @@
 // Common utilities for interacting with `args` library.
 // These functions should be used by every command.
 import arg from 'arg';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
 
-import * as Log from '../log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { CommandError } from './errors';
 import { argParseError } from './unknownOption';
-
-/**
- * Parse the first argument as a project directory.
- *
- * @returns valid project directory.
- */
-export function getProjectRoot(args: arg.Result<arg.Spec>) {
-  const projectRoot = resolve(args._[0] || '.');
-
-  if (!existsSync(projectRoot)) {
-    Log.exit(`Invalid project root: ${projectRoot}`);
-  }
-
-  return projectRoot;
-}
 
 /**
  * What a command does with the arguments that are not options.

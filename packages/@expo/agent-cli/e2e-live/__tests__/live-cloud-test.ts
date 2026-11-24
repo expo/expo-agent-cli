@@ -632,12 +632,12 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       expect(report.url).toContain(publicHost);
       expect(report.hostType).toBe('tunnel');
     }
-    // The `open` itself succeeded: this is the half `--expo-go` fixed, and the half that answered
-    // `LSApplicationWorkspaceErrorDomain error 115` without it.
-    expect(report.exitCode).toBe(0);
     // `attached` is **not** asserted true: S11 says a cloud simulator registers zero CDP targets, so 22
     // with `attached: false` is the honest outcome today. If this ever becomes 0-and-attached, the wall
     // has moved and the branch below is what will say so.
+    // Either code also says the `open` itself succeeded: a refused open is the error envelope, exit
+    // 1. That is the half `--expo-go` fixed, and the half that answered
+    // `LSApplicationWorkspaceErrorDomain error 115` without it.
     expect([0, 22]).toContain(result.exitCode);
     if (result.exitCode === 22) {
       expect(report.attached).toBe(false);

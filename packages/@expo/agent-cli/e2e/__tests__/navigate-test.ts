@@ -39,7 +39,6 @@ type NavigateReport = {
   deviceId: string;
   appId: string | null;
   command: string;
-  exitCode: number | null;
   routeCheck: {
     checked: boolean;
     ok: boolean | null;

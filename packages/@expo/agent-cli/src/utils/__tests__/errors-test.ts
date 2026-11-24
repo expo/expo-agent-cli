@@ -8,7 +8,10 @@ import {
   isNeedsHumanError,
   logCmdError,
   type NeedsHuman,
+  UNCAUGHT_EXCEPTION_CODE,
 } from '../errors';
+import { flushEventLogger } from '2g';
+
 import { setJsonRequested } from '../jsonMode';
 import type { MockInstance } from 'vitest';
 import { mockPlatform } from './mockPlatform';
@@ -71,7 +74,7 @@ describe(logCmdError, () => {
   });
 
   /** Run the error path and wait for the flush the exit is chained onto. */
-  async function exitCodeOfAsync(error: Error): Promise<unknown> {
+  async function exitCodeOfAsync(error: unknown): Promise<unknown> {
     logCmdError(error);
     await new Promise((resolve) => setImmediate(resolve));
     return process.exitCode;
@@ -154,6 +157,22 @@ describe(logCmdError, () => {
       await exitCodeOfAsync(new CommandError('BAD_ARGS', 'nope'));
 
       expect(stdoutObject()).toBeNull();
+    });
+
+    // Anything that is not a `CommandError` is a defect, a rejected string too: the crash report,
+    // then the event and the flush that only this asynchronous path can afford.
+    it.each([
+      ['a plain Error', new Error('injected defect')],
+      ['a rejected string', 'injected defect'],
+    ])('reports %s as a crash, emits cli:error and flushes before the exit', async (_, thrown) => {
+      setJsonRequested(true);
+
+      expect(await exitCodeOfAsync(thrown)).toBe(EXIT_ERROR);
+      expect(stdoutObject().error.code).toBe(UNCAUGHT_EXCEPTION_CODE);
+      expect(emitted).toEqual([
+        { name: 'cli:error', payload: expect.objectContaining({ code: UNCAUGHT_EXCEPTION_CODE }) },
+      ]);
+      expect(flushEventLogger).toHaveBeenCalled();
     });
 
     it('prints one object with the stable key set', async () => {

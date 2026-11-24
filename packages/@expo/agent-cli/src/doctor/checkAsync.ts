@@ -5,6 +5,8 @@
 
 import { stripVTControlCharacters } from 'util';
 
+import { outputTail } from '../deploy/parseOutput';
+import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { CommandError } from '../utils/errors';
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { resolveProjectBin } from '../utils/projectBin';
@@ -56,10 +58,12 @@ export function resolveExpoDoctorCli(projectRoot: string): ExpoDoctorCli {
 /**
  * Run `expo-doctor` and normalize what it printed.
  *
- * Never throws for a failing check: a check that fails is the answer, not an error. The one failure
- * this reports as a `CommandError` is not being able to start the tool at all.
+ * Never throws for a failing check: a check that fails is the answer, not an error. Two failures
+ * are a `CommandError`, because neither says anything about the project: the tool could not be
+ * started, or the run stopped before it printed a summary.
  *
  * @throws {CommandError} `EXPO_DOCTOR_NOT_FOUND` when the CLI could not be spawned.
+ * @throws {CommandError} `EXPO_DOCTOR_NO_REPORT` when it stopped before it printed its summary.
  */
 export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorReport> {
   const cli = resolveExpoDoctorCli(projectRoot);
@@ -89,8 +93,39 @@ export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorRe
     throw notFoundError(cli, `running it exited 127, which is "command not found"`);
   }
 
+  // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a run that stopped before its summary
+  // line did not finish its checks, so it says nothing about the project: a tool error, not a
+  // report. A signal is one such stop; a crash is another, and so is a kill on Windows, where the
+  // `.cmd` shim turns the signal into an exit code.
+  if (
+    result.signal ||
+    result.exitCode == null ||
+    (result.exitCode !== 0 && parsed.parse === 'failed')
+  ) {
+    const why = result.signal
+      ? `the ${result.signal} signal ended the process, for example a kill or an out-of-memory stop`
+      : result.exitCode == null
+        ? 'a signal ended the process, for example a kill or an out-of-memory stop'
+        : `it exited ${result.exitCode} without the summary line that closes every finished run`;
+    const tail = outputTail(raw, NO_REPORT_TAIL_LINES);
+    const error = new CommandError(
+      'EXPO_DOCTOR_NO_REPORT',
+      [
+        `expo-doctor (${cli.command}) stopped before it finished, so this project was not checked.`,
+        `Why: ${why}.`,
+        `How: run this command again. If it stops again, run "npx expo-doctor" by hand to see where it stops.`,
+        ...(tail ? ['What expo-doctor printed:', wrapUntrustedAppOutput(tail)] : []),
+      ].join('\n')
+    );
+    error.data = { signal: result.signal ?? null, exitCode: result.exitCode, raw };
+    throw error;
+  }
+
   return { projectRoot, exitCode: result.exitCode, raw, ...parsed };
 }
+
+/** How much of a stopped run's output the error repeats; `data.raw` keeps all of it. */
+const NO_REPORT_TAIL_LINES = 10;
 
 /** The error for a machine where expo-doctor could not be run at all. */
 function notFoundError(cli: ExpoDoctorCli, why: string): CommandError {

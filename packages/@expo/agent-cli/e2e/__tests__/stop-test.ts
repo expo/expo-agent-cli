@@ -322,7 +322,6 @@ describe('@expo/agent-cli runtime:stop', () => {
         deviceId: SIMULATOR_UDID,
         bundleId: 'host.exp.Exponent',
         bundleIdSource: 'dev-server',
-        reason: null,
         followups: [
           // The platform is carried: this stop was on the iOS simulator, so the way back is too (F103).
           {
@@ -366,7 +365,6 @@ describe('@expo/agent-cli runtime:stop', () => {
         'deviceId',
         'followups',
         'platform',
-        'reason',
         'stopped',
         'wasRunning',
       ]);
@@ -458,7 +456,6 @@ describe('@expo/agent-cli runtime:stop', () => {
       expect(JSON.parse(result.stdout)).toMatchObject({
         stopped: true,
         wasRunning: false,
-        reason: null,
         appIdMismatch: false,
         connectedAppIds: [],
       });

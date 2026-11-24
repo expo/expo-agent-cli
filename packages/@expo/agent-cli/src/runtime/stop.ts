@@ -47,7 +47,6 @@ export const runtimeStopHelp: CommandHelp = {
       'bundleIdSource',
       'bundleIdReason',
       'command',
-      'reason',
       'connectedAppIds',
       'appIdMismatch',
       'followups',
