@@ -11,6 +11,7 @@ import type { SmokeRunReport } from './walk';
  */
 export class AppSession {
   #opened = false;
+  #routeSent = false;
   #moved = false;
   #devLauncherLeftOnScreen = false;
   #settled = false;
@@ -20,6 +21,10 @@ export class AppSession {
     private readonly report: SmokeRunReport,
     private readonly remaining: () => number
   ) {}
+
+  get routeSent(): boolean {
+    return this.#routeSent;
+  }
 
   /**
    * Whether this run put the app on the screen. A run with no `--route` still opens the root route
@@ -45,6 +50,7 @@ export class AppSession {
   /** This run opened the app, on the root route or the one it was given. */
   noteOpened(opened: OpenRouteResult): void {
     this.#opened = true;
+    this.#routeSent = !opened.expoGoProjectOpen && opened.exitCode === 0;
     this.#moved = true;
     // @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it. What a
     // development build shows when the launcher URL this run opened never produced a loaded app is

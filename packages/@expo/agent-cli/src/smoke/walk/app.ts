@@ -13,6 +13,7 @@ const ROOT_ROUTE = '/';
 
 /** What the `app` phase came to, and what the device said if it refused the deep link. */
 interface AppOpen {
+  pendingRoute?: string;
   connection: AppConnectionResult;
   /**
    * Null when the device was not asked. Otherwise why it refused this run's deep link, when the
@@ -28,7 +29,7 @@ interface AppOpen {
 // ---- Phase 5: is an app attached, and can one be opened if not? ---------------------------
 export async function appStep(walk: PhaseWalk, ready: DeviceReady): Promise<Step<SmokePhase>> {
   const {
-    value: { connection, refused },
+    value: { connection, refused, pendingRoute },
     phase,
   } = await walk.record(
     'app',
@@ -41,6 +42,10 @@ export async function appStep(walk: PhaseWalk, ready: DeviceReady): Promise<Step
   Object.assign(walk.report, { appsConnected, skippedApps });
   if (appsConnected === 0) {
     return { stop: await noAppExit(walk, phase, refused) };
+  }
+  if (pendingRoute != null) {
+    walk.skipRest('reload', 'the project was not ready for the requested route', 'screenshot');
+    return { stop: await stopWithPicture(walk, 'inconclusive', 'route-pending') };
   }
   return { next: phase };
 }
@@ -97,7 +102,8 @@ async function openAppAsync(
   const opened = await deps.openRoute(
     options.route ?? ROOT_ROUTE,
     devServerUrl,
-    Math.max(0, attachDeadline - deps.now())
+    Math.max(0, attachDeadline - deps.now()),
+    options.route == null ? 'project-only' : 'project-then-route'
   );
   walk.app.noteOpened(opened);
   if (opened.exitCode !== 0) {
@@ -118,7 +124,10 @@ async function openAppAsync(
       ]
         .filter(Boolean)
         .join(' · '),
-      value: { connection: first, refused: { fit } },
+      value: {
+        connection: appReplaced ? { ...first, appsConnected: 0 } : first,
+        refused: { fit },
+      },
     };
   }
 
@@ -131,6 +140,17 @@ async function openAppAsync(
     devServerUrl,
     Math.max(0, attachDeadline - deps.now())
   );
+  if (
+    opened.expoGoProjectOpen === 'project-then-route' &&
+    second.appsConnected > 0 &&
+    opened.attach.loaded !== true
+  ) {
+    return {
+      status: 'inconclusive',
+      reason: opened.attach.reason ?? 'could not confirm that the Expo Go project loaded',
+      value: { connection: second, refused: null, pendingRoute: opened.route },
+    };
+  }
   return second.appsConnected > 0
     ? {
         status: 'ok' as const,

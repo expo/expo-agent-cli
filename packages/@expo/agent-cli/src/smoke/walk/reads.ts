@@ -105,13 +105,12 @@ export async function routeStep(walk: PhaseWalk): Promise<Step<null>> {
     });
     return { next: null };
   }
-  // A `--route` was given, so an app the `app` phase opened was opened on it.
-  if (walk.app.openedByThisRun) {
+  if (walk.app.routeSent) {
     phases.push({
       id: 'route',
       status: 'ok',
       ms: 0,
-      reason: 'it was the route the app was opened on, above',
+      reason: `sent ${options.route}`,
     });
     return { next: null };
   }
@@ -120,7 +119,7 @@ export async function routeStep(walk: PhaseWalk): Promise<Step<null>> {
     const result = await deps.openRoute(route, walk.report.devServerUrl, walk.attachBudget());
     walk.app.noteOpened(result);
     return result.exitCode === 0
-      ? { status: 'ok' as const, reason: `opened ${result.url}`, value: result }
+      ? { status: 'ok' as const, reason: `sent ${result.url}`, value: result }
       : {
           status: 'failed' as const,
           reason: `the device refused the deep link ("${result.command}" exited ${result.exitCode ?? 'on a signal'})`,
@@ -136,7 +135,7 @@ export async function routeStep(walk: PhaseWalk): Promise<Step<null>> {
     'screenshot'
   );
   // The route was refused, so whatever is on screen is not the route under test.
-  return { stop: await stopWithPicture(walk, 'failed', walk.app.showingWithoutApp()) };
+  return { stop: await stopWithPicture(walk, 'failed', 'route-pending') };
 }
 
 /**

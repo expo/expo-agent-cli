@@ -109,12 +109,18 @@ export async function waitForLoadedAppAsync(
   {
     stillWanted = () => true,
     staleTargetIds = [],
-  }: { stillWanted?: () => boolean; staleTargetIds?: readonly string[] } = {}
+    requireLoaded = false,
+  }: {
+    stillWanted?: () => boolean;
+    staleTargetIds?: readonly string[];
+    /** Keep polling an unreadable runtime until it confirms bundle execution or time runs out. */
+    requireLoaded?: boolean;
+  } = {}
 ): Promise<LoadedAppWait> {
   const stale = new Set(staleTargetIds);
   // An app that a poll saw stays the answer when the list is empty for the last read: a short gap
   // in the list must not start a recovery that stops a loading app.
-  let seen: Extract<LoadedAppWait, { kind: 'not-loaded' }> | null = null;
+  let seen: Extract<LoadedAppWait, { kind: 'loaded' | 'not-loaded' }> | null = null;
   let reached = false;
   for (;;) {
     const probe = await probeUntilAsync(devServerUrl, deadline, stillWanted);
@@ -123,8 +129,12 @@ export async function waitForLoadedAppAsync(
     const read = scoped.filter((target) => !stale.has(target.id));
     if (read.length > 0) {
       const loaded = await readAppLoadedAsync(read, deadline);
-      if (loaded !== false) return { kind: 'loaded', targets: read.length, loaded };
-      seen = { kind: 'not-loaded', targets: read.length };
+      if (loaded === false) {
+        seen = { kind: 'not-loaded', targets: read.length };
+      } else {
+        seen = { kind: 'loaded', targets: read.length, loaded };
+        if (loaded || !requireLoaded) return seen;
+      }
     }
     if (!stillWanted()) return { kind: 'abandoned' };
     if (Date.now() >= deadline) {

@@ -33,7 +33,8 @@ import {
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
 import { scopedAppReaderAsync, type LoadedAppWaiter } from '../runtime/scopedAppReader';
 import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
-import { openUrlOnDeviceAsync } from './deepLink';
+import { automationConnectUrl } from './connectUrl';
+import { isFullUrlRoute, openUrlOnDeviceAsync } from './deepLink';
 import {
   resolveDeviceAsync,
   type DeviceBackend,
@@ -49,6 +50,8 @@ import {
   type RouteUrlOptions,
 } from './routeResolution';
 
+export type ExpoGoProjectOpen = 'project-only' | 'project-then-route';
+
 export interface OpenRouteOptions extends RouteUrlOptions {
   /**
    * How long to wait for an app on this platform to register a debugger target, in milliseconds.
@@ -59,6 +62,8 @@ export interface OpenRouteOptions extends RouteUrlOptions {
    * landed on Expo Go's error screen and reported success [friction run 6, F50].
    */
   confirmAttachMs?: number;
+  /** Cold smoke bootstrap. Its route phase sends the route after the project loads. */
+  expoGoProjectOpen?: ExpoGoProjectOpen;
   /**
    * Stop the app and open the link again when the first one did not attach.
    *
@@ -100,6 +105,8 @@ export interface DevLauncherOpen {
 
 /** Everything one open amounts to, with nothing printed. */
 export interface OpenRouteResult extends ResolvedRoute {
+  /** The Expo Go project open attempted on this device, when the project URL was used. */
+  expoGoProjectOpen?: ExpoGoProjectOpen;
   /**
    * Which device layer acted: `local-ios`, `local-android`, or `cloud`.
    *
@@ -250,6 +257,26 @@ export interface AlertCheck {
   reason: string;
 }
 
+/** Select the project URL only for smoke opening a local iOS Expo Go project. */
+export function expoGoProjectOpenOf(
+  backend: DeviceBackend,
+  { expoGoProjectOpen, scheme }: Pick<OpenRouteOptions, 'expoGoProjectOpen' | 'scheme'>,
+  resolved: Pick<ResolvedRoute, 'isExpoGo' | 'route' | 'connect'>,
+  automation: boolean
+) {
+  if (
+    !expoGoProjectOpen ||
+    backend !== 'local-ios' ||
+    !resolved.isExpoGo ||
+    scheme ||
+    isFullUrlRoute(resolved.route)
+  ) {
+    return null;
+  }
+  const project = resolved.connect.find((entry) => entry.target === 'expo-go');
+  return project ? { url: automationConnectUrl(project.url, automation), expoGoProjectOpen } : null;
+}
+
 /**
  * Resolve a deep link for a route and open it on a device.
  *
@@ -322,9 +349,11 @@ export async function openRouteAsync(
     budgetMs,
   });
 
+  const projectOpen = expoGoProjectOpenOf(device.backend, options, resolved, facts.automation);
+  const openedUrl = projectOpen?.url ?? resolved.url;
   const result = await openUrlOnBackendAsync(
     device,
-    linkOpenOf(plan, { projectRoot, options, device, appId, routeUrl: resolved.url })
+    linkOpenOf(plan, { projectRoot, options, device, appId, routeUrl: openedUrl })
   );
 
   const attach = await confirmAttachAsync({
@@ -333,7 +362,10 @@ export async function openRouteAsync(
     device,
     devServerUrl,
     waitAsync,
-    url: resolved.url,
+    waitOptions: {
+      requireLoaded: projectOpen?.expoGoProjectOpen === 'project-then-route',
+    },
+    url: openedUrl,
     isExpoGo: resolved.isExpoGo,
     openedOk: result.exitCode === 0,
     // What is left of the caller's budget. A launcher open that attached in four seconds leaves
@@ -347,8 +379,8 @@ export async function openRouteAsync(
   });
 
   cliEvent('navigate', {
-    route: resolved.route,
-    url: resolved.url,
+    route: projectOpen ? null : resolved.route,
+    url: openedUrl,
     devServerUrl,
     devServerSource: resolved.devServerSource,
     deviceBackend: device.backend,
@@ -363,6 +395,7 @@ export async function openRouteAsync(
 
   return {
     ...resolved,
+    ...projectOpen,
     reverse,
     launch,
     attach,
@@ -671,6 +704,7 @@ async function confirmAttachAsync({
   device,
   devServerUrl,
   waitAsync,
+  waitOptions,
   url,
   isExpoGo,
   openedOk,
@@ -681,6 +715,7 @@ async function confirmAttachAsync({
   device: NavigateDevice;
   devServerUrl: string;
   waitAsync: LoadedAppWaiter;
+  waitOptions?: Parameters<LoadedAppWaiter>[1];
   url: string;
   /** The link this run opened targets Expo Go, whatever the app config names. */
   isExpoGo: boolean;
@@ -698,7 +733,7 @@ async function confirmAttachAsync({
   const startedAt = Date.now();
 
   // `stillWanted` is never passed here, so no wait ends `abandoned`.
-  let wait: LoadedAppWait = await waitAsync(startedAt + budgetMs);
+  let wait: LoadedAppWait = await waitAsync(startedAt + budgetMs, waitOptions);
   let recovery: AttachRecovery = null;
   let alert: AlertCheck | null = null;
 

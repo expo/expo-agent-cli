@@ -15,8 +15,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { automationConnectUrl } from '../../src/navigate/connectUrl';
 import { smokeHelp } from '../../src/smoke';
-import { bindOtherWorktreeAsync } from '../runtimeTargetFixtures';
+import { appRuntime, bindOtherWorktreeAsync, expoGoRuntimeTarget } from '../runtimeTargetFixtures';
 import {
   breakXcodeSelectAsync,
   executeAgentCliAsync,
@@ -587,8 +588,7 @@ describe('@expo/agent-cli smoke', () => {
         'simctl',
         'openurl',
         SIMULATOR_UDID,
-        // The root route needs the `?` marker for Expo Go, per llp/0005 §navigate.
-        `exp://127.0.0.1:${stub.port}/--/?`,
+        automationConnectUrl(`exp://127.0.0.1:${stub.port}`, true),
       ]);
     });
   });
@@ -898,17 +898,45 @@ describe('@expo/agent-cli smoke', () => {
         expoGoMissing: true,
       });
       const readNpx = await installStubNpxAsync(projectRoot);
+      await writeRoutesAsync(projectRoot, ['explore.tsx']);
+      const runtime = appRuntime({ __r() {} });
+      const bundleProbes: { answer: unknown; opens: number }[] = [];
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: () => [
-          { ...EXPO_GO_TARGET, deviceName: readBinding(projectRoot)?.device.name ?? '' },
-        ],
-        targetsAppearWithFile: opened,
+        targets: () => {
+          if (!readXcrun().some((argv) => argv[1] === 'install')) return [];
+          return [
+            expoGoRuntimeTarget('ios', { deviceName: readBinding(projectRoot)?.device.name ?? '' }),
+          ];
+        },
+        inspectorEvaluate(expression) {
+          const answer = runtime.evaluate(expression);
+          if (answer !== 'bundle:ran') return answer;
+          // A relaunched process can register under the same debugger page ID.
+          const loaded = fs.existsSync(opened) && bundleProbes.length > 0 ? answer : null;
+          bundleProbes.push({
+            answer: loaded,
+            opens: readXcrun().filter((argv) => argv[1] === 'openurl').length,
+          });
+          return loaded;
+        },
       });
 
       try {
         expect(fs.existsSync(opened)).toBe(false);
-        const report = await runAsync(projectRoot, stub);
+        const report = await runAsync(projectRoot, stub, [
+          '--route',
+          '/explore',
+          '--timeout',
+          '20s',
+        ]);
+        expect(bundleProbes.slice(0, 2)).toEqual([
+          { answer: null, opens: 1 },
+          { answer: 'bundle:ran', opens: 1 },
+        ]);
+        expect(report.phases).toContainEqual(
+          expect.objectContaining({ id: 'route', status: 'ok' })
+        );
         const binding = readBinding(projectRoot);
         expect(binding).toMatchObject({ device: { udid: 'E2E-CREATED-1', origin: 'created' } });
         const udid = binding!.device.udid;
@@ -1457,31 +1485,135 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    // Expo Go's own form already carries the dev server, so there is nothing to point it at first
-    // and the ladder must not fire — `exp://<host>/--/<route>` *is* the loading link there.
-    it('opens only the exp:// link for an Expo Go project', async () => {
+    async function smokeExploreAsync(state: 'warm' | 'unreadable') {
       const projectRoot = await setupFixtureAsync('go-app');
+      await writeRoutesAsync(projectRoot, ['explore.tsx']);
       const readXcrun = await installStubXcrunAsync(projectRoot);
-      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [expoGoRuntimeTarget('ios')],
+        targetsAppearWithFile: state === 'warm' ? undefined : appStartedMarkerPath(projectRoot),
+        inspectorEvaluate: state === 'warm' ? appRuntime({ __r() {} }).evaluate : () => null,
+      });
       const release = await holdLockForAsync(projectRoot, stub);
-
       try {
-        await executeAgentCliAsync(
+        const result = await executeAgentCliAsync(
           projectRoot,
-          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '6s'],
+          [
+            'smoke',
+            '--ios',
+            '--no-start',
+            '--no-reload',
+            '--route',
+            '/explore',
+            '--json',
+            '--no-screenshot',
+            '--timeout',
+            '8s',
+          ],
           { env: stubExpoEnv(projectRoot), reject: false }
         );
-
         const opens = readXcrun()
-          .filter((argv) => argv[1] === 'openurl')
-          .map((argv) => argv[3]);
-        expect(opens).toEqual([`exp://127.0.0.1:${stub.port}/--/?`]);
-        expect(opens.join(' ')).not.toContain('__expo_url=');
+          .filter((args) => args[1] === 'openurl')
+          .map((args) => args[3]);
+        const origin = `exp://127.0.0.1:${stub.port}`;
+        return {
+          origin,
+          opens,
+          phases: JSON.parse(result.stdout).phases,
+          exitCode: result.exitCode,
+        };
       } finally {
         release();
         await stub.close();
       }
+    }
+
+    it('sends only the route URL when Expo Go is warm', async () => {
+      const { origin, opens, phases } = await smokeExploreAsync('warm');
+      expect(opens).toEqual([`${origin}/--/explore`]);
+      expect(phases).toContainEqual(expect.objectContaining({ id: 'route', status: 'ok' }));
     });
+
+    it('skips the route when cold Expo Go remains unreadable', async () => {
+      const { origin, opens, phases, exitCode } = await smokeExploreAsync('unreadable');
+      expect(opens).toEqual([automationConnectUrl(origin, true)]);
+      expect(exitCode).toBe(22);
+      expect(phases).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'app', status: 'inconclusive' }),
+          expect.objectContaining({ id: 'route', status: 'skipped' }),
+        ])
+      );
+    });
+
+    it.each([
+      {
+        route: '/explore?q=a%2Bb&q=two#details',
+        allowDevMenu: false,
+        routePath: '/--/explore?q=a%2Bb&q=two#details',
+      },
+      { route: '/', allowDevMenu: true, routePath: '/--/?' },
+    ])(
+      'connects cold Expo Go before sending $route',
+      async ({ route, allowDevMenu, routePath }) => {
+        const projectRoot = await setupFixtureAsync('go-app');
+        await writeRoutesAsync(projectRoot, ['index.tsx', 'explore.tsx']);
+        const readXcrun = await installStubXcrunAsync(projectRoot);
+        const eventsPath = path.join(projectRoot, 'events.jsonl');
+        const runtime = appRuntime({ __r() {} });
+        let firstBundleProbe = true;
+        const stub = await startStubDevServerAsync({
+          projectRoot,
+          targets: [expoGoRuntimeTarget('ios')],
+          targetsAppearWithFile: appStartedMarkerPath(projectRoot),
+          inspectorEvaluate(expression) {
+            const answer = runtime.evaluate(expression);
+            if (answer === 'bundle:ran' && firstBundleProbe) {
+              firstBundleProbe = false;
+              return null;
+            }
+            return answer;
+          },
+        });
+        const release = await holdLockForAsync(projectRoot, stub);
+        try {
+          const result = await executeAgentCliAsync(
+            projectRoot,
+            ['smoke', '--ios', '--route', route, '--json', '--no-screenshot', '--timeout', '20s'],
+            {
+              env: {
+                ...stubExpoEnv(projectRoot),
+                LOG_EVENTS: eventsPath,
+                EXPO_NO_DEV_MENU: allowDevMenu ? '0' : '1',
+              },
+              reject: false,
+            }
+          );
+          const origin = `exp://127.0.0.1:${stub.port}`;
+          const opens = readXcrun()
+            .filter((argv) => argv[1] === 'openurl')
+            .map((argv) => argv[3]);
+          expect(opens).toEqual([automationConnectUrl(origin, !allowDevMenu), origin + routePath]);
+          expect(
+            readEvents(eventsPath).filter((event) => event._e === 'cli:navigate')
+          ).toMatchObject([
+            { route: null, url: opens[0] },
+            { route, url: opens[1] },
+          ]);
+          expect(JSON.parse(result.stdout).phases).toContainEqual(
+            expect.objectContaining({
+              id: 'route',
+              status: 'ok',
+              reason: `sent ${origin}${routePath}`,
+            })
+          );
+        } finally {
+          release();
+          await stub.close();
+        }
+      }
+    );
   });
 
   describe('the entry bundle', () => {

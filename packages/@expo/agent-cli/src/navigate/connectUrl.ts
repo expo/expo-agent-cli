@@ -36,6 +36,17 @@ export function openInPhrase(target: string): string {
   return target === 'expo-go' ? 'Expo Go' : 'the development build';
 }
 
+/** Reserved launch parameters consumed by the native client before the app receives the URL. */
+export function automationConnectUrl(url: string, automation: boolean): string {
+  if (!automation) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return (
+    url +
+    separator +
+    '__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
+  );
+}
+
 /** The Expo Go connect URL: the dev server host under the `exp` scheme. */
 export function expoGoConnectUrl(host: string): string {
   return `exp://${host}`;
@@ -59,9 +70,7 @@ export function devClientConnectUrl(
   const url = `${scheme}://?__expo_url=${encodeURIComponent(origin)}`;
   // FAB and auto-launch overrides apply only to this process; onboarding is marked completed.
   // https://docs.expo.dev/develop/development-builds/development-workflows/#using-launch-urls-in-automation-scenarios
-  return automation
-    ? `${url}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`
-    : url;
+  return automationConnectUrl(url, automation);
 }
 
 export interface BuildConnectUrlsParams {

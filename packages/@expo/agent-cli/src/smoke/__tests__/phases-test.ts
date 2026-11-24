@@ -1439,6 +1439,62 @@ describe(runSmokePhasesAsync, () => {
   // so a cold development build got the link only a loaded app understands and sat on the dev
   // launcher's own screen.
   describe('loading the app rather than navigating it', () => {
+    async function runWithExpoGoBundle(loaded: boolean | null) {
+      const explainSilentApp = vi.fn();
+      const project = opened({
+        expoGoProjectOpen: 'project-then-route',
+        attach: { ...opened().attach, checked: true, targets: 1, loaded },
+      });
+      const openRoute = vi
+        .fn()
+        .mockResolvedValueOnce(project)
+        .mockResolvedValue(opened({ exitCode: 1 }));
+      const run = await runSmokePhasesAsync(
+        deps({
+          openRoute,
+          explainSilentApp,
+          waitForAppConnection: vi
+            .fn()
+            .mockResolvedValueOnce({
+              appsConnected: 0,
+              timedOut: true,
+              waitedMs: 1,
+              skippedApps: [],
+            })
+            .mockResolvedValue({
+              appsConnected: 1,
+              timedOut: false,
+              waitedMs: 1,
+              skippedApps: [],
+            }),
+        }),
+        options({ route: '/explore' })
+      );
+      return { run, openRoute, explainSilentApp };
+    }
+    it.each([false, null])(
+      'skips the pending route when bundle readiness is %s',
+      async (loaded) => {
+        const { run, openRoute } = await runWithExpoGoBundle(loaded);
+        expect(statusOf(run, 'app')).toBe('inconclusive');
+        expect(statusOf(run, 'route')).toBe('skipped');
+        expect(openRoute).toHaveBeenCalledTimes(1);
+        expect(run.phases.find((phase) => phase.id === 'screenshot')?.reason).toContain(
+          'before the requested route could be delivered'
+        );
+      }
+    );
+
+    it('reports a refused route separately when the Expo Go project has loaded', async () => {
+      const { run, explainSilentApp } = await runWithExpoGoBundle(true);
+      expect(statusOf(run, 'app')).toBe('ok');
+      expect(statusOf(run, 'route')).toBe('failed');
+      expect(explainSilentApp).not.toHaveBeenCalled();
+      expect(run.phases.find((phase) => phase.id === 'screenshot')?.reason).toContain(
+        'before the requested route could be delivered'
+      );
+    });
+
     it(`gives the open a budget, so the loading link is opened first`, async () => {
       const budgets: number[] = [];
       let booted = false;
@@ -1715,7 +1771,12 @@ describe(runSmokePhasesAsync, () => {
         options()
       );
 
-      expect(openRoute).toHaveBeenCalledWith('/', 'http://127.0.0.1:8081', expect.any(Number));
+      expect(openRoute).toHaveBeenCalledWith(
+        '/',
+        'http://127.0.0.1:8081',
+        expect.any(Number),
+        'project-only'
+      );
       expect(run.outcome).toBe('passed');
       expect(run.appsConnected).toBe(1);
       expect(run.phases.find((phase) => phase.id === 'app')!.reason).toContain('to connect one');
@@ -1741,7 +1802,12 @@ describe(runSmokePhasesAsync, () => {
       );
 
       expect(openRoute).toHaveBeenCalledTimes(1);
-      expect(openRoute).toHaveBeenCalledWith('/notes', 'http://127.0.0.1:8081', expect.any(Number));
+      expect(openRoute).toHaveBeenCalledWith(
+        '/notes',
+        'http://127.0.0.1:8081',
+        expect.any(Number),
+        'project-then-route'
+      );
       expect(statusOf(run, 'route')).toBe('ok');
       expect(run.routeCheck).toMatchObject({ ok: true });
     });
@@ -2892,6 +2958,26 @@ describe(`${runSmokePhasesAsync.name} and the app the install replaced`, () => {
     installApp: async () => ({ ok: true, version: '57.0.9', replaced: '54.0.7', reason: null }),
   });
 
+  it('does not report a pending route when the device disappears after install on bare smoke', async () => {
+    let installed = false;
+    const run = await runSmokePhasesAsync(
+      deps({
+        ...attachedThenReplaced(),
+        installApp: async () => {
+          installed = true;
+          return { ok: true, version: '57.0.9', replaced: '54.0.7', reason: null };
+        },
+        probeDevice: async () =>
+          installed
+            ? { deviceId: null, backend: null, reason: 'device disappeared' }
+            : { deviceId: 'SIM-1', backend: 'local-ios', reason: null },
+      }),
+      options({ bootstrap: true })
+    );
+    expect(run.phases.find((phase) => phase.id === 'app')?.reason).toContain('device disappeared');
+    expect(run.phases.find((phase) => phase.id === 'route')?.reason).toContain('no --route');
+  });
+
   it(`opens the app again after replacing it, rather than trusting the earlier probe`, async () => {
     const openRoute = vi.fn(async (route: string) => opened({ route }));
     const run = await runSmokePhasesAsync(
@@ -2910,9 +2996,33 @@ describe(`${runSmokePhasesAsync.name} and the app the install replaced`, () => {
       options({ bootstrap: true })
     );
 
-    expect(openRoute).toHaveBeenCalled();
+    expect(openRoute).toHaveBeenCalledWith(
+      '/',
+      'http://127.0.0.1:8081',
+      expect.any(Number),
+      'project-only'
+    );
     expect(run.phases.find((phase) => phase.id === 'app')?.reason).toContain('to connect one');
     expect(run.outcome).toBe('passed');
+  });
+
+  it('skips the route when iOS refuses to open the replacement and Metro still lists the old app', async () => {
+    const run = await runSmokePhasesAsync(
+      deps({
+        ...attachedThenReplaced(),
+        waitForAppConnection: async () => ({
+          appsConnected: 1,
+          timedOut: false,
+          waitedMs: 1,
+          skippedApps: [],
+        }),
+        openRoute: async () => opened({ expoGoProjectOpen: 'project-then-route', exitCode: 115 }),
+      }),
+      options({ bootstrap: true, route: '/explore' })
+    );
+    expect(run.appsConnected).toBe(0);
+    expect(statusOf(run, 'app')).toBe('failed');
+    expect(statusOf(run, 'route')).toBe('skipped');
   });
 
   // And the app it opened is one this run moved, so it owes the settle and the runtime poll — and

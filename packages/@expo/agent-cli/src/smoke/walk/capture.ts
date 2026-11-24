@@ -1,6 +1,6 @@
 import type { ScreenshotResult } from '../../device/screenshot';
 import type { DeviceBackend } from '../../navigate/device';
-import { noScreenshot, showingReason } from '../results';
+import { noScreenshot, showingReason, type ScreenshotSubject } from '../results';
 import type { SmokeOutcome, SmokePhaseStatus } from '../types';
 import type { PhaseWalk, SmokeRunReport, WalkRun } from './walk';
 
@@ -30,12 +30,8 @@ async function captureIfPossible(
    * What the picture is a picture *of*, as far as this run can tell.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it
-   * Three cases, because a reader believes a screenshot without checking it and all three look
-   * plausible: the project's own screen, the **dev launcher's** screen — which is what a
-   * development build shows when the loading link was opened and the bundle did not arrive — and
-   * a device with neither on it.
    */
-  showing: 'project' | 'dev-launcher' | 'device'
+  showing: ScreenshotSubject
 ): Promise<CaptureOutcome> {
   const { deps, options, phases } = walk;
   const { deviceId, deviceBackend } = walk.report;
@@ -99,7 +95,7 @@ async function captureIfPossible(
 export async function stopWithPicture(
   walk: PhaseWalk,
   outcome: SmokeOutcome,
-  showing: 'project' | 'dev-launcher' | 'device',
+  showing: ScreenshotSubject,
   extra: Partial<SmokeRunReport> = {}
 ): Promise<WalkRun> {
   const captured = await captureIfPossible(walk, showing);
