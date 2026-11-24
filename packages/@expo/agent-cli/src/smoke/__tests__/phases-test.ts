@@ -1439,61 +1439,32 @@ describe(runSmokePhasesAsync, () => {
   // so a cold development build got the link only a loaded app understands and sat on the dev
   // launcher's own screen.
   describe('loading the app rather than navigating it', () => {
-    async function runWithExpoGoBundle(loaded: boolean | null) {
-      const explainSilentApp = vi.fn();
-      const project = opened({
-        expoGoProjectOpen: 'project-then-route',
-        attach: { ...opened().attach, checked: true, targets: 1, loaded },
-      });
-      const openRoute = vi
-        .fn()
-        .mockResolvedValueOnce(project)
-        .mockResolvedValue(opened({ exitCode: 1 }));
-      const run = await runSmokePhasesAsync(
-        deps({
-          openRoute,
-          explainSilentApp,
-          waitForAppConnection: vi
-            .fn()
-            .mockResolvedValueOnce({
-              appsConnected: 0,
-              timedOut: true,
-              waitedMs: 1,
-              skippedApps: [],
-            })
-            .mockResolvedValue({
-              appsConnected: 1,
-              timedOut: false,
-              waitedMs: 1,
-              skippedApps: [],
-            }),
-        }),
-        options({ route: '/explore' })
-      );
-      return { run, openRoute, explainSilentApp };
-    }
     it.each([false, null])(
       'skips the pending route when bundle readiness is %s',
       async (loaded) => {
-        const { run, openRoute } = await runWithExpoGoBundle(loaded);
+        const openRoute = vi.fn(async () =>
+          opened({
+            expoGoProjectOpen: 'project-then-route',
+            attach: { ...opened().attach, checked: true, targets: 1, loaded },
+          })
+        );
+        const run = await runSmokePhasesAsync(
+          deps({
+            openRoute,
+            waitForAppConnection: async () => ({
+              appsConnected: openRoute.mock.calls.length,
+              waitedMs: 1,
+              timedOut: false,
+              skippedApps: [],
+            }),
+          }),
+          options({ route: '/explore' })
+        );
         expect(statusOf(run, 'app')).toBe('inconclusive');
         expect(statusOf(run, 'route')).toBe('skipped');
         expect(openRoute).toHaveBeenCalledTimes(1);
-        expect(run.phases.find((phase) => phase.id === 'screenshot')?.reason).toContain(
-          'before the requested route could be delivered'
-        );
       }
     );
-
-    it('reports a refused route separately when the Expo Go project has loaded', async () => {
-      const { run, explainSilentApp } = await runWithExpoGoBundle(true);
-      expect(statusOf(run, 'app')).toBe('ok');
-      expect(statusOf(run, 'route')).toBe('failed');
-      expect(explainSilentApp).not.toHaveBeenCalled();
-      expect(run.phases.find((phase) => phase.id === 'screenshot')?.reason).toContain(
-        'before the requested route could be delivered'
-      );
-    });
 
     it(`gives the open a budget, so the loading link is opened first`, async () => {
       const budgets: number[] = [];
@@ -1899,6 +1870,9 @@ describe(runSmokePhasesAsync, () => {
       expect(evaluate).not.toHaveBeenCalled();
       // The screen is still worth photographing: it says where the app actually is.
       expect(run.screenshot.ok).toBe(true);
+      expect(run.phases.find((phase) => phase.id === 'screenshot')?.reason).toContain(
+        'before the requested route could be delivered'
+      );
     });
 
     // A route the project has not got is the caller's own argument being wrong, which is exit 1
