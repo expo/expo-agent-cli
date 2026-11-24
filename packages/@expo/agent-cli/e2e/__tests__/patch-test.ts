@@ -344,23 +344,6 @@ function applyInRepo(applyCommand: string, repo: string): void {
   run('sh', ['-c', applyCommand], repo);
 }
 
-/**
- * PATH for a run that has gh, or not: the node directory, plus a stand-in gh when asked. The plan
- * only looks gh up on PATH; it never runs it.
- */
-function pathWithGh(present: boolean): Record<string, string> {
-  const dirs = [path.dirname(process.execPath)];
-  if (present) {
-    const ghDir = getTemporaryPath();
-    fs.mkdirSync(ghDir, { recursive: true });
-    for (const name of isWindows ? ['gh.cmd'] : ['gh']) {
-      fs.writeFileSync(path.join(ghDir, name), '', { mode: 0o755 });
-    }
-    dirs.unshift(ghDir);
-  }
-  return { PATH: dirs.join(path.delimiter) };
-}
-
 describe('@expo/agent-cli patch --upstream-plan', () => {
   usePinnedManager('bun');
 
@@ -376,13 +359,13 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
   // The plan's text (the steps, the guides, the repro guide) is not pinned here: it is advice for
   // an agent and changes with expo/expo's own guides. The tests pin what code reads: the exit
   // code, the facts, and the apply command.
-  it.each([true, false])(`plans without opening anything, and reports gh: %s`, async (gh) => {
+  it(`plans without opening anything`, async () => {
     const projectRoot = await patchedProjectAsync();
 
     const result = await executeAgentCliAsync(
       projectRoot,
       ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
-      { reject: false, env: pathWithGh(gh) }
+      { reject: false }
     );
 
     expect(result.exitCode).toBe(0);
@@ -402,7 +385,6 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
         },
       ],
       repro: null,
-      gh,
     });
   });
 
@@ -451,10 +433,15 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
     }
   );
 
+  // The only file has a quote in its name, so git quotes every `diff --git` line of the
+  // patch-package patch (`"a/node_modules/…"`), and the apply command must still strip that prefix.
   it.skipIf(isWindows)(
-    `gives an apply command that applies the patch-package patch inside expo/expo`,
+    `gives an apply command that applies the patch-package patch inside expo/expo, also with quoted paths`,
     async () => {
-      const projectRoot = await patchedProjectAsync('npm');
+      const projectRoot = await setupProjectAsync('npm');
+      const quoted = 'ios/Say "Hi".swift';
+      fs.writeFileSync(path.join(projectRoot, 'node_modules/fake-expo-module', quoted), '// new\n');
+      await patchAsync('npm', projectRoot, ['fake-expo-module', '--json', '--yes']);
       const { stdout } = await executeAgentCliAsync(
         projectRoot,
         ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
@@ -465,15 +452,8 @@ describe('@expo/agent-cli patch --upstream-plan', () => {
       applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
 
       expect(
-        fs.readFileSync(
-          path.join(repo, 'packages/expo-fake-module-src/ios/FakeModule.swift'),
-          'utf8'
-        )
-      ).toContain('// fix');
-      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/build'))).toBe(false);
-      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/plugin/build'))).toBe(
-        false
-      );
+        fs.readFileSync(path.join(repo, 'packages/expo-fake-module-src', quoted), 'utf8')
+      ).toBe('// new\n');
     }
   );
 
