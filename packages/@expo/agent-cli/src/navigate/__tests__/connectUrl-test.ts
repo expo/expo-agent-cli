@@ -2,6 +2,8 @@
 
 import { buildConnectUrls, devClientConnectUrl, expoGoConnectUrl } from '../connectUrl';
 
+import { expoGoProjectOpenOf } from '../openRoute';
+
 describe(expoGoConnectUrl, () => {
   it(`is the dev server host under the exp scheme`, () => {
     expect(expoGoConnectUrl('192.168.1.5:8081')).toBe('exp://192.168.1.5:8081');
@@ -133,5 +135,24 @@ describe(buildConnectUrls, () => {
 
     expect(urls[0]!.url).toBe('exp://abc.boltexpo.dev');
     expect(urls[1]!.url).toBe('myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev');
+  });
+});
+
+describe(expoGoProjectOpenOf, () => {
+  const resolved = {
+    isExpoGo: true,
+    route: '/explore',
+    connect: [{ target: 'expo-go' as const, label: 'Expo Go', url: 'exp://localhost:8081' }],
+  };
+  const options = { expoGoProjectOpen: 'project-then-route' as const };
+  it.each([
+    ['Android', 'local-android', options, resolved],
+    ['cloud', 'cloud', options, resolved],
+    ['standalone navigate', 'local-ios', {}, resolved],
+    ['development build', 'local-ios', options, { ...resolved, isExpoGo: false }],
+    ['explicit scheme', 'local-ios', { ...options, scheme: 'example' }, resolved],
+    ['full URL', 'local-ios', options, { ...resolved, route: 'exp://localhost:8081/--/explore' }],
+  ] as const)('leaves %s on the direct dispatch path', (_name, backend, openOptions, route) => {
+    expect(expoGoProjectOpenOf(backend, openOptions, route, true)).toBeNull();
   });
 });

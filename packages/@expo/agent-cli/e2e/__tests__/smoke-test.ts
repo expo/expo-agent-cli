@@ -15,8 +15,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { automationConnectUrl } from '../../src/navigate/connectUrl';
 import { smokeHelp } from '../../src/smoke';
-import { bindOtherWorktreeAsync } from '../runtimeTargetFixtures';
+import { appRuntime, bindOtherWorktreeAsync, expoGoRuntimeTarget } from '../runtimeTargetFixtures';
 import {
   breakXcodeSelectAsync,
   executeAgentCliAsync,
@@ -583,12 +584,13 @@ describe('@expo/agent-cli smoke', () => {
         reject: false,
       });
 
-      expect(readXcrun()).toContainEqual([
-        'simctl',
-        'openurl',
-        SIMULATOR_UDID,
-        // The root route needs the `?` marker for Expo Go, per llp/0005 §navigate.
-        `exp://127.0.0.1:${stub.port}/--/?`,
+      expect(readXcrun().filter((argv) => argv[1] === 'openurl')).toEqual([
+        [
+          'simctl',
+          'openurl',
+          SIMULATOR_UDID,
+          automationConnectUrl(`exp://127.0.0.1:${stub.port}`, true),
+        ],
       ]);
     });
   });
@@ -898,17 +900,44 @@ describe('@expo/agent-cli smoke', () => {
         expoGoMissing: true,
       });
       const readNpx = await installStubNpxAsync(projectRoot);
+      await writeRoutesAsync(projectRoot, ['index.tsx']);
+      const eventsPath = path.join(projectRoot, 'events.jsonl');
+      const runtime = appRuntime({ __r() {} });
+      const bundleProbes: { answer: unknown; opens: number }[] = [];
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: () => [
-          { ...EXPO_GO_TARGET, deviceName: readBinding(projectRoot)?.device.name ?? '' },
-        ],
-        targetsAppearWithFile: opened,
+        targets: () => {
+          if (!readXcrun().some((argv) => argv[1] === 'install')) return [];
+          return [
+            expoGoRuntimeTarget('ios', { deviceName: readBinding(projectRoot)?.device.name ?? '' }),
+          ];
+        },
+        inspectorEvaluate(expression) {
+          const answer = runtime.evaluate(expression);
+          if (answer !== 'bundle:ran') return answer;
+          // A relaunched process can register under the same debugger page ID.
+          const loaded = fs.existsSync(opened) && bundleProbes.length > 0 ? answer : null;
+          bundleProbes.push({
+            answer: loaded,
+            opens: readXcrun().filter((argv) => argv[1] === 'openurl').length,
+          });
+          return loaded;
+        },
       });
 
       try {
         expect(fs.existsSync(opened)).toBe(false);
-        const report = await runAsync(projectRoot, stub);
+        const report = await runAsync(projectRoot, stub, ['--route', '/', '--timeout', '20s'], {
+          LOG_EVENTS: eventsPath,
+          EXPO_NO_DEV_MENU: '0',
+        });
+        expect(bundleProbes.slice(0, 2)).toEqual([
+          { answer: null, opens: 1 },
+          { answer: 'bundle:ran', opens: 1 },
+        ]);
+        expect(report.phases).toContainEqual(
+          expect.objectContaining({ id: 'route', status: 'ok' })
+        );
         const binding = readBinding(projectRoot);
         expect(binding).toMatchObject({ device: { udid: 'E2E-CREATED-1', origin: 'created' } });
         const udid = binding!.device.udid;
@@ -931,12 +960,17 @@ describe('@expo/agent-cli smoke', () => {
         ]);
         const openAt = calls.findIndex((argv) => argv[1] === 'openurl');
         expect(openAt).toBeGreaterThan(installAt);
-        expect(calls[openAt]).toEqual([
-          'simctl',
-          'openurl',
-          udid,
-          expect.stringMatching(/^exp:\/\//),
+        const origin = `exp://127.0.0.1:${stub.port}`;
+        expect(calls.filter((argv) => argv[1] === 'openurl')).toEqual([
+          ['simctl', 'openurl', udid, origin],
+          ['simctl', 'openurl', udid, origin + '/--/?'],
         ]);
+        expect(readEvents(eventsPath).filter((event) => event._e === 'cli:navigate')).toMatchObject(
+          [
+            { route: null, url: origin },
+            { route: '/', url: origin + '/--/?' },
+          ]
+        );
         for (const scheme of ['exp', 'exps']) {
           const approval = [
             'simctl',
@@ -1451,32 +1485,6 @@ describe('@expo/agent-cli smoke', () => {
         // And the route link after it, into the app the first one loaded — the pair is the finding,
         // and a run that opened only one of them would be the F123 shape either way round.
         expect(opens[1]).toBe('exp+dev-client-fresh-app://');
-      } finally {
-        release();
-        await stub.close();
-      }
-    });
-
-    // Expo Go's own form already carries the dev server, so there is nothing to point it at first
-    // and the ladder must not fire — `exp://<host>/--/<route>` *is* the loading link there.
-    it('opens only the exp:// link for an Expo Go project', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
-      const readXcrun = await installStubXcrunAsync(projectRoot);
-      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
-      const release = await holdLockForAsync(projectRoot, stub);
-
-      try {
-        await executeAgentCliAsync(
-          projectRoot,
-          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '6s'],
-          { env: stubExpoEnv(projectRoot), reject: false }
-        );
-
-        const opens = readXcrun()
-          .filter((argv) => argv[1] === 'openurl')
-          .map((argv) => argv[3]);
-        expect(opens).toEqual([`exp://127.0.0.1:${stub.port}/--/?`]);
-        expect(opens.join(' ')).not.toContain('__expo_url=');
       } finally {
         release();
         await stub.close();

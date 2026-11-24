@@ -763,6 +763,34 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     }
   });
 
+  it('cold Expo Go opens the lab screen from smoke', async () => {
+    // runtime:stop just closed the project. Let Metro remove its previous target.
+    expect(
+      await waitForAsync(async () => {
+        const response = await fetch(`http://127.0.0.1:${PORT}/json/list`);
+        const targets = await response.json();
+        return response.ok && Array.isArray(targets) && targets.length === 0;
+      }, BOUND_MS)
+    ).toBe(true);
+
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['smoke', '--ios', '--no-start', '--route', LAB_ROUTE, '--json'],
+      { label: 'smoke-cold-lab' }
+    );
+    expectExit(result, 0);
+    // A recovery navigate here would conceal the original regression.
+    const tree = await runLiveAsync(run, projectRoot, ['runtime:tree', '--json'], {
+      label: 'smoke-cold-lab-tree',
+    });
+    expectExit(tree, 0);
+    expect(parseJson(tree)).toMatchObject({
+      focusedScreen: 'lab',
+      nodes: expect.arrayContaining([expect.objectContaining({ testID: 'inc-btn' })]),
+    });
+  });
+
   it('dev:stop ends the dev server it started, and the port is free after', async () => {
     // The **effect**, which is what this command is for and which holds on every run observed —
     // including the ones where the report itself crashed (F94, below): the process is killed before the

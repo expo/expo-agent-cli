@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
+import { devClientConnectUrl } from '../../src/navigate/connectUrl';
 import {
   cloudBindingFile,
   installStubEasAsync,
@@ -584,8 +585,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         'build-e2e',
       ]);
       expect(start[start.indexOf('--open-url') + 1]).toBe(
-        `devclient://?__expo_url=${encodeURIComponent(`https://${TUNNEL_HOST}`)}` +
-          '&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
+        devClientConnectUrl('devclient', TUNNEL_HOST, 'tunnel', true)
       );
       expect(start).toContain('--non-interactive');
       // The dev server was tunnelled, which is what makes that URL reachable.

@@ -521,7 +521,8 @@ declare module '2g' {
       phases: { id: string; status: string; ms: number }[];
     };
     'cli:navigate': {
-      route: string;
+      /** The dispatched route; null when this open only connected Expo Go to the project. */
+      route: string | null;
       url: string;
       /** Dev server the URL was built from. */
       devServerUrl: string;

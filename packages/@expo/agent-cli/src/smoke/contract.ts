@@ -7,7 +7,7 @@
 import type { ScreenshotResult } from '../device/screenshot';
 import type { AcquireAction, ReleasedDevice } from '../deviceBinding';
 import type { CloudPreference, DeviceBackend } from '../navigate/device';
-import type { OpenRouteResult } from '../navigate/openRoute';
+import type { ExpoGoProjectOpen, OpenRouteResult } from '../navigate/openRoute';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../runtime/devServer';
@@ -295,7 +295,8 @@ export interface SmokeDeps {
      * bundle it fetches. A run that passed none — which `smoke` did — handed a cold app the link
      * only a loaded app understands and landed on the launcher's own screen.
      */
-    attachBudgetMs: number
+    attachBudgetMs: number,
+    expoGoProjectOpen?: ExpoGoProjectOpen
   ): Promise<OpenRouteResult>;
   /**
    * Whether the app that answered is one this project can actually run.

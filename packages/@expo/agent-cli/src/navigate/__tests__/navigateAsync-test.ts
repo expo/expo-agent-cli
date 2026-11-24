@@ -1,6 +1,7 @@
 import { getConfig } from '@expo/config';
 import { spawn } from 'child_process';
 import { vol } from 'memfs';
+import { devClientConnectUrl } from '../connectUrl';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
@@ -814,7 +815,7 @@ describe(navigateAsync, () => {
         {
           target: 'dev-build',
           label: 'development build',
-          url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
+          url: devClientConnectUrl('demoapp', '127.0.0.1:8081', 'localhost', true),
         },
       ]);
       // Never the other app's form.
@@ -832,7 +833,7 @@ describe(navigateAsync, () => {
       );
 
       expect(JSON.parse(printed()).connect[0].url).toBe(
-        'demoapp://?__expo_url=https%3A%2F%2Fznakdiwe5j2n5o0.boltexpo.dev&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
+        devClientConnectUrl('demoapp', 'znakdiwe5j2n5o0.boltexpo.dev', 'tunnel', true)
       );
     });
 
@@ -921,7 +922,7 @@ describe(navigateAsync, () => {
         {
           target: 'dev-build',
           label: 'development build',
-          url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
+          url: devClientConnectUrl('demoapp', '127.0.0.1:8081', 'localhost', true),
         },
       ]);
     });

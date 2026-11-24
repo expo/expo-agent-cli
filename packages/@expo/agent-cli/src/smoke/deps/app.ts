@@ -55,7 +55,7 @@ async function waitForAppConnection(
 // lookup that failed is not kept, so this one looks again, and throws its own refusal.
 async function openRoute(
   ctx: SmokeDepsContext,
-  ...[route, devServerUrl, attachBudgetMs]: Parameters<SmokeDeps['openRoute']>
+  ...[route, devServerUrl, attachBudgetMs, expoGoProjectOpen]: Parameters<SmokeDeps['openRoute']>
 ): ReturnType<SmokeDeps['openRoute']> {
   const { projectRoot, options } = ctx;
   const lookup = await ctx.deviceAsync();
@@ -77,6 +77,7 @@ async function openRoute(
     // and is `navigate`'s; passing the budget is how this command joins it rather than building
     // a second URL of its own (F96).
     confirmAttachMs: attachBudgetMs,
+    expoGoProjectOpen,
   });
 }
 
@@ -323,8 +324,7 @@ export function createAppDeps(ctx: SmokeDepsContext) {
   return {
     waitForAppConnection: (devServerUrl, timeoutMs) =>
       waitForAppConnection(ctx, devServerUrl, timeoutMs),
-    openRoute: (route, devServerUrl, attachBudgetMs) =>
-      openRoute(ctx, route, devServerUrl, attachBudgetMs),
+    openRoute: (...args) => openRoute(ctx, ...args),
     checkAppFitsProject: (devServerUrl) => checkAppFitsProject(ctx, devServerUrl),
     reloadApp: (devServerUrl, timeoutMs) => reloadApp(ctx, devServerUrl, timeoutMs),
     evaluate: (devServerUrl) => evaluate(ctx, devServerUrl),

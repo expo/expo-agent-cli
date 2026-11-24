@@ -62,11 +62,15 @@ export function appendReason(phase: SmokePhase, finding: string): void {
   phase.reason = phase.reason == null ? finding : `${phase.reason} · ${finding}`;
 }
 
+export type ScreenshotSubject = 'project' | 'dev-launcher' | 'device' | 'route-pending';
+
 /** What an `ok` screenshot says it captured, or null when it is the app itself. */
-export function showingReason(showing: 'project' | 'dev-launcher' | 'device'): string | null {
+export function showingReason(showing: ScreenshotSubject): string | null {
   switch (showing) {
     case 'project':
       return null;
+    case 'route-pending':
+      return "the device's screen before the requested route could be delivered";
     case 'dev-launcher':
       return `the dev launcher's own screen — the loading link was opened and this project's bundle never ran, so this is not a picture of the app`;
     case 'device':
