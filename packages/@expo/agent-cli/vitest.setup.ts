@@ -1,6 +1,6 @@
 import Module from 'node:module';
 import path from 'node:path';
-import { afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 
 import { resetInvokerCache } from './src/utils/invoker';
 
@@ -27,6 +27,14 @@ delete process.env.npm_execpath;
 // Setup and `new` sync the Expo docs, and `fetch` is not mocked: no unit test may reach the network.
 process.env.AGENT_CLI_NO_DOCS_SYNC = '1';
 resetInvokerCache();
+
+// `Log.progress` writes straight to `process.stderr`, which Vitest does not capture, so every
+// progress line of every test lands in the run's output with no test name on it. Drop those
+// writes. A test that checks stderr spies on it itself; to debug, use `console.error`, which
+// Vitest still prints with the test name.
+beforeEach(() => {
+  vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+});
 
 // A test pins `process.platform` with `mockPlatform` or `Object.defineProperty`; it need not restore it.
 const realPlatform = process.platform;
