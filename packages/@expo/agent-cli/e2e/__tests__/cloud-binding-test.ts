@@ -1,6 +1,7 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §EAS session binding
 import fs from 'node:fs';
 import path from 'node:path';
+import { devClientConnectUrl } from '../../src/navigate/connectUrl';
 import { guardedCloudArgs } from '../../src/device/cloudCommand';
 import { readLastDevRequest } from '../../src/dev/lastRequest';
 import type { Binding } from '../../src/deviceBinding/types';
@@ -201,7 +202,7 @@ it.each(['ios', 'android'] as const)(
     const initialOpens = readStubEasInvocations(root).filter((i) => i.executedSessionId);
     expect(initialOpens).toHaveLength(1);
     expect(initialOpens[0]!.args).toContain(
-      'myapp://?__expo_url=https%3A%2F%2Fold.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
+      devClientConnectUrl('myapp', 'old.tunnel.example', 'tunnel', true)
     );
     const originalBinding = readBinding(root, platform);
     const stopped = await executeAgentCliAsync(root, ['dev:stop', '--json'], { env });
@@ -229,7 +230,7 @@ it.each(['ios', 'android'] as const)(
     expect(opens[1]!.args).toEqual([
       '__controller',
       'open',
-      'myapp://?__expo_url=https%3A%2F%2Fnew.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
+      devClientConnectUrl('myapp', 'new.tunnel.example', 'tunnel', true),
       '--platform',
       platform,
     ]);

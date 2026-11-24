@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { devClientConnectUrl } from '../../src/navigate/connectUrl';
 import { appRuntime, expoGoRuntimeTarget, runtimeTarget } from '../runtimeTargetFixtures';
 import {
   executeAgentCliAsync,
@@ -92,18 +93,9 @@ describe('@expo/agent-cli navigate', () => {
 
         expect(result.exitCode).toBe(0);
         const report = JSON.parse(result.stdout);
-        const launch = new URL(report.launch.url);
-        expect(launch.hostname).toBe('');
-        expect(Object.fromEntries(launch.searchParams)).toEqual({
-          __expo_url: stub.url,
-          ...(automation
-            ? {
-                __expo_disable_onboarding: '1',
-                __expo_disable_fab: '1',
-                __expo_disable_auto_launch: '1',
-              }
-            : {}),
-        });
+        expect(report.launch.url).toBe(
+          devClientConnectUrl('demoapp', new URL(stub.url).host, 'localhost', automation)
+        );
         expect(
           readXcrun()
             .filter((args) => args[1] === 'openurl')
