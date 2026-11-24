@@ -5,6 +5,8 @@
 
 import { stripVTControlCharacters } from 'util';
 
+import { outputTail } from '../deploy/parseOutput';
+import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { CommandError } from '../utils/errors';
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { resolveProjectBin } from '../utils/projectBin';
@@ -104,12 +106,14 @@ export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorRe
       : result.exitCode == null
         ? 'a signal ended the process, for example a kill or an out-of-memory stop'
         : `it exited ${result.exitCode} without the summary line that closes every finished run`;
+    const tail = outputTail(raw, NO_REPORT_TAIL_LINES);
     const error = new CommandError(
       'EXPO_DOCTOR_NO_REPORT',
       [
         `expo-doctor (${cli.command}) stopped before it finished, so this project was not checked.`,
         `Why: ${why}.`,
         `How: run this command again. If it stops again, run "npx expo-doctor" by hand to see where it stops.`,
+        ...(tail ? ['What expo-doctor printed:', wrapUntrustedAppOutput(tail)] : []),
       ].join('\n')
     );
     error.data = { signal: result.signal ?? null, exitCode: result.exitCode, raw };
@@ -118,6 +122,9 @@ export async function runDoctorCheckAsync(projectRoot: string): Promise<DoctorRe
 
   return { projectRoot, exitCode: result.exitCode, raw, ...parsed };
 }
+
+/** How much of a stopped run's output the error repeats; `data.raw` keeps all of it. */
+const NO_REPORT_TAIL_LINES = 10;
 
 /** The error for a machine where expo-doctor could not be run at all. */
 function notFoundError(cli: ExpoDoctorCli, why: string): CommandError {

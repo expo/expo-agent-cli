@@ -22,7 +22,7 @@ Preconditions:
 - The baseline of [README.md](./README.md).
 - [dev-server.md](./dev-server.md) `dev-start` is done for `$PF`. `status` shows `bundler ready`.
 
-- **Open.** Open the root route. Run `node $V run --label navigate-open-$PF -- navigate / --$PF --json`. Exit code `0`. The object has `exitCode: 0`, `attached: true`, `routeCheck.matched: "/"`, and a target of `dev-build`. The `command` starts with `xcrun simctl openurl` on iOS and with `adb -s emulator-… shell am start` on Android.
+- **Open.** Open the root route. Run `node $V run --label navigate-open-$PF -- navigate / --$PF --json`. Exit code `0`. The object has `attached: true`, `routeCheck.matched: "/"`, and a target of `dev-build`. The `command` starts with `xcrun simctl openurl` on iOS and with `adb -s emulator-… shell am start` on Android.
 - **Second view.** Wait for the first screen. Run `node $V run --until "EAS Example home" --timeout 240 -- runtime:tree --all --$PF`. The untrusted block has `screen=index`.
 - **Other route.** Open the second screen. Run `node $V run --label navigate-route-$PF -- navigate /explore --$PF`. Exit code `0`. Then run `node $V run --until "EAS Example explore" -- runtime:tree --all --$PF`. It matches, with `screen=explore`.
 - **Unknown route.** Open a route that has no file. Run `node $V run --label navigate-unknown-$PF -- navigate /nope --$PF`. Exit code `1`. stderr has `"/nope" is not a route of this project, so nothing was opened.` and lists `/, /_sitemap, /explore`.

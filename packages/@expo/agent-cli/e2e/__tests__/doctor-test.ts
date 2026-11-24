@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { executeAgentCliAsync, installStubBinAsync, readEvents, setupFixtureAsync } from '../utils';
+import { wrapUntrustedAppOutput } from '../../src/runtime/untrusted';
 
 /** The shape `doctor:check --json` prints, per `src/doctor/types.ts`. */
 type DoctorPayload = {
@@ -262,22 +263,35 @@ describe('@expo/agent-cli doctor:check', () => {
   // said nothing about the project, so it is a tool error: the envelope, never a report with exit
   // 20. On Windows the `.cmd` shim turns the signal into an exit code, which the `garbage` row is.
   it.each([
-    { mode: 'killed', why: process.platform === 'win32' ? 'without the summary line' : 'signal' },
-    { mode: 'garbage', why: 'exited 1 without the summary line' },
-  ])('prints the error envelope when expo-doctor stops early ($mode)', async ({ mode, why }) => {
-    const projectRoot = await setupAsync('go-app');
+    {
+      mode: 'killed',
+      why: process.platform === 'win32' ? 'without the summary line' : 'signal',
+      printed: 'Running 3 checks on your project...',
+    },
+    {
+      mode: 'garbage',
+      why: 'exited 1 without the summary line',
+      printed: "TypeError: Cannot read properties of undefined (reading 'exp')",
+    },
+  ])(
+    'prints the error envelope when expo-doctor stops early ($mode)',
+    async ({ mode, why, printed }) => {
+      const projectRoot = await setupAsync('go-app');
 
-    const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
-      env: { STUB_DOCTOR_MODE: mode },
-      reject: false,
-    });
+      const result = await executeAgentCliAsync(projectRoot, ['doctor:check', '--json'], {
+        env: { STUB_DOCTOR_MODE: mode },
+        reject: false,
+      });
 
-    expect(result.exitCode).toBe(1);
-    const { error } = JSON.parse(result.stdout);
-    expect(error).toMatchObject({ code: 'EXPO_DOCTOR_NO_REPORT', needsHuman: null });
-    expect(error.message).toContain('this project was not checked');
-    expect(error.message).toContain(why);
-  });
+      expect(result.exitCode).toBe(1);
+      const { error } = JSON.parse(result.stdout);
+      expect(error).toMatchObject({ code: 'EXPO_DOCTOR_NO_REPORT', needsHuman: null });
+      expect(error.message).toContain('this project was not checked');
+      expect(error.message).toContain(why);
+      expect(error.message).toContain(wrapUntrustedAppOutput(printed));
+      expect(error.data.raw).toContain(printed);
+    }
+  );
 
   it('runs doctor:check for the bare group name', async () => {
     const projectRoot = await setupAsync('go-app');
