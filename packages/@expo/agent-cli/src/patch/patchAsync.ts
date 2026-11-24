@@ -103,7 +103,7 @@ function printReport(report: PatchReport, json: boolean): void {
   ];
   for (const change of report.buildFromSource) {
     lines.push(
-      `Added ${change.added.join(', ')} to expo.autolinking.${change.platform}.buildFromSource in package.json, so the ${
+      `Added ${change.added.join(', ')} to expo.autolinking.${change.key}.buildFromSource in package.json, so the ${
         change.platform === 'ios' ? 'iOS' : 'Android'
       } build compiles the patched source instead of the precompiled binary.`
     );
@@ -165,7 +165,8 @@ export async function patchAsync(
     ? buildPatchFollowUps({
         packageName,
         native: native.length > 0,
-        hashedByFingerprint: isUnder(result.patchFile, path.join(packageManager.root, 'patches')),
+        // @expo/fingerprint hashes `<projectRoot>/patches` (sourcer/PatchPackage), not the workspace root's.
+        hashedByFingerprint: isUnder(result.patchFile, path.join(projectRoot, 'patches')),
       })
     : [];
 

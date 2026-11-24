@@ -108,12 +108,39 @@ function isCovered(entries: string[], packageName: string): boolean {
 
 export interface BuildFromSourceChange {
   platform: NativePlatform;
+  /** The key under `expo.autolinking` this run wrote: `ios`, `apple` or `android`. */
+  key: string;
   /** Entries this run added. */
   added: string[];
 }
 
+function isObject(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
- * Add the packages to `expo.autolinking.<platform>.buildFromSource` of the project `package.json`.
+ * The list autolinking uses for a platform, and the key it reads it from. Observed in
+ * expo-modules-autolinking 58.0.9 `parsePackageJsonOptions`: iOS reads `apple`, and `ios` only when
+ * `apple` is missing; the platform object is spread over the top level, so a platform list
+ * replaces the top-level `buildFromSource` and is not merged with it.
+ */
+function effectiveBuildFromSource(
+  autolinking: unknown,
+  platform: NativePlatform
+): { key: string; list: unknown[] } {
+  const options = isObject(autolinking) ? autolinking : {};
+  const key = platform === 'android' ? 'android' : isObject(options.apple) ? 'apple' : 'ios';
+  const own = isObject(options[key]) ? options[key].buildFromSource : undefined;
+  if (Array.isArray(own)) {
+    return { key, list: own };
+  }
+  return { key, list: Array.isArray(options.buildFromSource) ? options.buildFromSource : [] };
+}
+
+/**
+ * Add the packages to the `buildFromSource` list that autolinking reads for each platform, in the
+ * project `package.json`. A new platform list starts as a copy of the top-level list, so the
+ * modules that list builds from source still do.
  *
  * Keeps every existing entry and the key order of the file, and adds nothing an existing entry
  * already matches.
@@ -134,10 +161,8 @@ export function addBuildFromSource(
   const changes: BuildFromSourceChange[] = [];
 
   for (const platform of platforms) {
-    const existing: unknown = pkg.expo?.autolinking?.[platform]?.buildFromSource;
-    const entries = Array.isArray(existing)
-      ? existing.filter((e): e is string => typeof e === 'string')
-      : [];
+    const { key, list } = effectiveBuildFromSource(pkg.expo?.autolinking, platform);
+    const entries = list.filter((e): e is string => typeof e === 'string');
     const added = packageNames
       .filter((name) => !isCovered(entries, name))
       .map(buildFromSourceEntry);
@@ -146,12 +171,9 @@ export function addBuildFromSource(
     }
     pkg.expo ??= {};
     pkg.expo.autolinking ??= {};
-    pkg.expo.autolinking[platform] ??= {};
-    pkg.expo.autolinking[platform].buildFromSource = [
-      ...(Array.isArray(existing) ? existing : []),
-      ...added,
-    ];
-    changes.push({ platform, added });
+    pkg.expo.autolinking[key] ??= {};
+    pkg.expo.autolinking[key].buildFromSource = [...list, ...added];
+    changes.push({ platform, key, added });
   }
 
   if (changes.length) {

@@ -1,4 +1,11 @@
-import { buildFromSourceGroup, nativePlatformsOfFile } from '../buildFromSource';
+import fs from 'fs';
+import path from 'path';
+
+import {
+  addBuildFromSource,
+  buildFromSourceGroup,
+  nativePlatformsOfFile,
+} from '../buildFromSource';
 
 describe(nativePlatformsOfFile, () => {
   it.each([
@@ -28,5 +35,47 @@ describe(buildFromSourceGroup, () => {
     ['expo-image', 'ios', ['expo-image']],
   ] as const)('%s on %s → %j', (packageName, platform, group) => {
     expect(buildFromSourceGroup(packageName, platform)).toEqual(group);
+  });
+});
+
+describe(addBuildFromSource, () => {
+  // `fs` is memfs in unit tests. The rules are those of expo-modules-autolinking 58.0.9
+  // `parsePackageJsonOptions`: iOS reads `apple` before `ios`, and a platform list replaces the
+  // top-level one.
+  const root = path.resolve('/project');
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    { name: 'no config', autolinking: undefined, after: { ios: { buildFromSource: ['x'] } } },
+    {
+      name: 'an `apple` object, which iOS reads first',
+      autolinking: { apple: { exclude: [] }, ios: { buildFromSource: ['y'] } },
+      after: { apple: { exclude: [], buildFromSource: ['x'] }, ios: { buildFromSource: ['y'] } },
+    },
+    {
+      name: 'a top-level list, copied into the new platform list',
+      autolinking: { buildFromSource: ['y'] },
+      after: { buildFromSource: ['y'], ios: { buildFromSource: ['y', 'x'] } },
+    },
+    {
+      name: 'a top-level entry that already matches',
+      autolinking: { buildFromSource: ['.*'] },
+      after: { buildFromSource: ['.*'] },
+    },
+    {
+      name: 'a platform list, which replaces the top-level one',
+      autolinking: { buildFromSource: ['.*'], ios: { buildFromSource: ['y'] } },
+      after: { buildFromSource: ['.*'], ios: { buildFromSource: ['y', 'x'] } },
+    },
+  ])('$name', ({ autolinking, after }) => {
+    fs.mkdirSync(root, { recursive: true });
+    const file = path.join(root, 'package.json');
+    fs.writeFileSync(file, JSON.stringify({ name: 'app', expo: autolinking && { autolinking } }));
+
+    addBuildFromSource(root, ['x'], ['ios']);
+
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).expo?.autolinking).toEqual(after);
   });
 });

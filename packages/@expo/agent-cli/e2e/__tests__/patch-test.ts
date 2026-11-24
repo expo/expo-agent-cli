@@ -371,6 +371,14 @@ describe.each([
     const pkg = readJson(path.join(projectRoot, 'package.json'));
     expect(pkg.scripts.postinstall).toBe('patch-package --error-on-fail');
     expect(Object.keys(pkg.devDependencies)).toEqual(hooks);
+    // A frozen install (`npm ci`, EAS Build) needs the new devDependencies in the lockfile.
+    const lockfile = fs.readFileSync(
+      path.join(projectRoot, manager === 'npm' ? 'package-lock.json' : 'yarn.lock'),
+      'utf8'
+    );
+    for (const name of hooks) {
+      expect(lockfile).toContain(manager === 'npm' ? `"node_modules/${name}"` : `${name}@^`);
+    }
 
     // The project's install of patch-package would come from the registry, so the fresh install
     // leaves it out, and the pinned patch-package applies the patch the way postinstall would.

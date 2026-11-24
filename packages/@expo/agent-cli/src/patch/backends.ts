@@ -31,6 +31,7 @@ import * as Log from '../log';
 import { CommandError } from '../utils/errors';
 import { findExecutableOnPath } from '../utils/pathLookup';
 import { spawnSubprocessAsync } from '../utils/subprocess';
+import { findPatchFile, patchPackageFileName } from './registry';
 import {
   applyTreeDiff,
   copyTree,
@@ -131,13 +132,8 @@ async function saveWithBunAsync(target: PatchTarget): Promise<BackendResult> {
       }
       applyTreeDiff(diff, edited, target.packageDir);
 
-      const before = snapshotPatchDirs(root);
       await runBunAsync(['patch', '--commit', relative], root);
-      return {
-        status: 'saved',
-        patchFile: findWrittenPatch(root, before),
-        files: filesOfDiff(diff),
-      };
+      return { status: 'saved', patchFile: findSavedPatch(target), files: filesOfDiff(diff) };
     } catch (error) {
       restoreTree(edited, target.packageDir);
       throw error;
@@ -245,7 +241,6 @@ async function saveWithEditDirAsync(
     }
     applyTreeDiff(diff, target.packageDir, editDir);
 
-    const before = snapshotPatchDirs(root);
     if (tool === 'pnpm') {
       await runToolAsync('pnpm', ['patch-commit', editDir], root);
     } else if (tool === 'npm') {
@@ -253,7 +248,7 @@ async function saveWithEditDirAsync(
     } else {
       await runToolAsync('yarn', ['patch-commit', '-s', editDir], root);
     }
-    return { status: 'saved', patchFile: findWrittenPatch(root, before), files: filesOfDiff(diff) };
+    return { status: 'saved', patchFile: findSavedPatch(target), files: filesOfDiff(diff) };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -298,6 +293,7 @@ async function saveWithPatchPackageFormatAsync(
   reason: string
 ): Promise<BackendResult> {
   const root = target.packageManager.root;
+  assertTopLevelCopy(target);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-'));
   try {
     const cleanDir = await fetchCleanCopyAsync(target, scratch);
@@ -336,15 +332,81 @@ async function saveWithPatchPackageFormatAsync(
     fs.mkdirSync(path.dirname(patchFile), { recursive: true });
     fs.writeFileSync(patchFile, patchText);
     applyPackageJsonChanges(root, setup);
+    if (setup.some((change) => change.dependency)) {
+      await updateLockfileAsync(root, target.packageManager.name, patchFile);
+    }
     return { status: 'saved', patchFile, files };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 }
 
-/** patch-package's file name: `@scope+name+1.2.3.patch`. */
-export function patchPackageFileName(packageName: string, version: string): string {
-  return `${packageName.replace(/\//g, '+')}+${version}.patch`;
+/**
+ * patch-package applies `patches/<name>+<version>.patch` to `<root>/node_modules/<name>`, whatever
+ * version is there. A workspace package can have its own, nested copy at another version, and the
+ * patch would then go to the root's copy.
+ */
+function assertTopLevelCopy(target: PatchTarget): void {
+  const topLevel = path.join(
+    target.packageManager.root,
+    'node_modules',
+    ...target.packageName.split('/')
+  );
+  const real = (dir: string) => (fs.existsSync(dir) ? fs.realpathSync(dir) : path.resolve(dir));
+  if (real(target.packageDir) !== real(topLevel)) {
+    const error = new CommandError(
+      'PATCH_NESTED_COPY',
+      [
+        `${target.packageName}@${target.version} is a nested copy in ${target.packageDir}, and patch-package applies a patch only to ${topLevel}. So the patch was not saved.`,
+        `How: make the workspace use one version of ${target.packageName}, so the copy at the root is the one that is used, then edit that copy and run this again.`,
+      ].join('\n')
+    );
+    error.data = { packageDir: target.packageDir, topLevel };
+    throw error;
+  }
+}
+
+/** The command that adds the new devDependencies to the lockfile, and the lockfile. */
+const LOCKFILE_UPDATE: Record<'npm' | 'yarn-classic', { lockfile: string; args: string[] }> = {
+  npm: {
+    lockfile: 'package-lock.json',
+    args: ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
+  },
+  // yarn 1 has no lockfile-only install. Its `postinstall` applies the patches again.
+  'yarn-classic': { lockfile: 'yarn.lock', args: ['install', '--non-interactive'] },
+};
+
+/** Add patch-package to the lockfile, so a frozen install (`npm ci`, CI, EAS Build) still works. */
+async function updateLockfileAsync(
+  root: string,
+  manager: DetectedPackageManager['name'],
+  patchFile: string
+): Promise<void> {
+  if (manager !== 'npm' && manager !== 'yarn-classic') {
+    return;
+  }
+  const { lockfile, args } = LOCKFILE_UPDATE[manager];
+  if (!fs.existsSync(path.join(root, lockfile))) {
+    return;
+  }
+  const tool = manager === 'npm' ? 'npm' : 'yarn';
+  const result = await spawnSubprocessAsync(requireTool(tool), args, {
+    cwd: root,
+    output: 'capture',
+  });
+  if (result.exitCode !== 0) {
+    const command = `${tool} ${args.join(' ')}`;
+    const error = new CommandError(
+      'PATCH_LOCKFILE_FAILED',
+      [
+        `The patch was saved to ${patchFile} and package.json was updated, but "${command}" exited with ${result.exitCode}, so ${lockfile} does not list patch-package yet, and a frozen install fails.`,
+        `${result.stderr}\n${result.stdout}`.trim(),
+        `How: fix the error, then run "${command}" in ${root}.`,
+      ].join('\n')
+    );
+    error.data = { patchFile, exitCode: result.exitCode };
+    throw error;
+  }
 }
 
 /**
@@ -591,6 +653,8 @@ function copyInto(fromRoot: string, toRoot: string, file: string): void {
 interface PackageJsonChange {
   /** What a person reads in the plan. */
   description: string;
+  /** It adds a dependency, so the lockfile has to be updated too. */
+  dependency?: boolean;
   apply: (pkg: Record<string, any>) => void;
 }
 
@@ -628,7 +692,8 @@ function patchPackageSetup(
   for (const [name, range] of devDependencies) {
     if (!pkg.devDependencies?.[name] && !pkg.dependencies?.[name]) {
       changes.push({
-        description: `devDependencies.${name}: "${range}" (install it before the next fresh install)`,
+        description: `devDependencies.${name}: "${range}", and the lockfile is updated to match`,
+        dependency: true,
         apply: (json) => {
           json.devDependencies ??= {};
           json.devDependencies[name] = range;
@@ -655,44 +720,24 @@ function applyPackageJsonChanges(root: string, changes: PackageJsonChange[]): vo
 
 // ---- shared ----
 
-/** The directories package managers write patch files to, relative to their root. */
-const PATCH_DIRS = ['patches', path.join('.yarn', 'patches')];
-
-type Snapshot = Map<string, string>;
-
-function snapshotPatchDirs(root: string): Snapshot {
-  const snapshot: Snapshot = new Map();
-  for (const dir of PATCH_DIRS) {
-    const full = path.join(root, dir);
-    if (!fs.existsSync(full)) {
-      continue;
+/** The patch file the package manager just registered: the one the next install applies. */
+function findSavedPatch(target: PatchTarget): string {
+  try {
+    return findPatchFile(
+      target.packageManager.root,
+      target.packageName,
+      target.version,
+      target.projectRoot
+    );
+  } catch (error) {
+    if (error instanceof CommandError && error.code === 'PATCH_NOT_FOUND') {
+      throw new CommandError(
+        'PATCH_NOT_WRITTEN',
+        `The package manager reported success, but registered no patch file for ${target.packageName}@${target.version}.`
+      );
     }
-    // Nested: npm 12.2.3 writes a scoped patch to `patches/@scope/name@version.patch`.
-    for (const name of fs.readdirSync(full, { recursive: true }) as string[]) {
-      const file = path.join(full, name);
-      const stat = fs.statSync(file);
-      if (stat.isFile()) {
-        snapshot.set(file, `${stat.size}:${stat.mtimeMs}`);
-      }
-    }
+    throw error;
   }
-  return snapshot;
-}
-
-/** The patch file the package manager just wrote or rewrote. */
-function findWrittenPatch(root: string, before: Snapshot): string {
-  const after = snapshotPatchDirs(root);
-  for (const [file, stamp] of after) {
-    if (before.get(file) !== stamp) {
-      return file;
-    }
-  }
-  throw new CommandError(
-    'PATCH_NOT_WRITTEN',
-    `The package manager reported success, but no patch file appeared in ${PATCH_DIRS.join(
-      ' or '
-    )}.`
-  );
 }
 
 /** Files of the diff that are a symlink in the clean or the edited tree. */
