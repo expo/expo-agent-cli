@@ -25,27 +25,46 @@ describe(describeLookupFailure, () => {
   });
 
   it.each([
-    { eligibleAccounts: ['one-org'], accountName: undefined, account: 'one-org' },
-    { eligibleAccounts: ['one org'], accountName: undefined, account: '<account-name>' },
-    { eligibleAccounts: ['one-org', 'two-orgs'], accountName: 'two-orgs', account: 'two-orgs' },
+    {
+      accountsWithProjectCreationPermission: ['one-org'],
+      accountName: undefined,
+      account: 'one-org',
+    },
+    {
+      accountsWithProjectCreationPermission: ['one org'],
+      accountName: undefined,
+      account: '<account-name>',
+    },
+    {
+      accountsWithProjectCreationPermission: ['one-org', 'two-orgs'],
+      accountName: 'two-orgs',
+      account: 'two-orgs',
+    },
   ])(
-    'uses the accounts reported by build:list --json: $eligibleAccounts',
-    ({ eligibleAccounts, accountName, account }) => {
+    'uses the accounts reported by build:list --json: $accountsWithProjectCreationPermission',
+    ({ accountsWithProjectCreationPermission, accountName, account }) => {
       const stdout = JSON.stringify({
-        error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts, accountName },
+        error: {
+          code: 'EAS_PROJECT_NOT_CONFIGURED',
+          accountsWithProjectCreationPermission,
+          accountName,
+        },
       });
       const reason = describeLookupFailure(
         { exitCode: 1, stdout, stderr: 'Not logged in' },
         INVOCATION
       );
       expect(reason).toContain(`init --account ${account} --non-interactive`);
-      expect(reason).toContain(accountName ?? eligibleAccounts[0]!);
+      expect(reason).toContain(accountName ?? accountsWithProjectCreationPermission[0]!);
     }
   );
 
   it('lists the eligible choices when the owner is unspecified', () => {
     const stdout = JSON.stringify({
-      error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts: ['one-org', 'two-orgs'] },
+      error: {
+        code: 'EAS_PROJECT_NOT_CONFIGURED',
+        accountsWithProjectCreationPermission: ['one-org', 'two-orgs'],
+      },
     });
     const reason = describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION);
     expect(reason).toContain('init --account <account-name>');
@@ -53,13 +72,17 @@ describe(describeLookupFailure, () => {
   });
 
   it.each([
-    { eligibleAccounts: [], accountName: undefined },
-    { eligibleAccounts: ['different org'], accountName: 'owner' },
+    { accountsWithProjectCreationPermission: [], accountName: undefined },
+    { accountsWithProjectCreationPermission: ['different org'], accountName: 'owner' },
   ])(
-    'suggests linking when the project cannot be created under the requested owner: $eligibleAccounts',
-    ({ eligibleAccounts, accountName }) => {
+    'suggests linking when the project cannot be created under the requested owner: $accountsWithProjectCreationPermission',
+    ({ accountsWithProjectCreationPermission, accountName }) => {
       const stdout = JSON.stringify({
-        error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts, accountName },
+        error: {
+          code: 'EAS_PROJECT_NOT_CONFIGURED',
+          accountsWithProjectCreationPermission,
+          accountName,
+        },
       });
       const reason = describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION);
       expect(reason).toContain('init --id <project-id> --non-interactive');
@@ -68,8 +91,12 @@ describe(describeLookupFailure, () => {
   );
 
   it.each([
-    JSON.stringify({ error: { code: 'SOMETHING_ELSE', eligibleAccounts: ['bob'] } }),
-    JSON.stringify({ error: { code: 'EAS_PROJECT_NOT_CONFIGURED', eligibleAccounts: [false] } }),
+    JSON.stringify({
+      error: { code: 'SOMETHING_ELSE', accountsWithProjectCreationPermission: ['bob'] },
+    }),
+    JSON.stringify({
+      error: { code: 'EAS_PROJECT_NOT_CONFIGURED', accountsWithProjectCreationPermission: [false] },
+    }),
   ])('keeps the EAS diagnostic for an unrecognized failure payload %s', (stdout) => {
     const stderr = 'Build lookup failed.';
     expect(describeLookupFailure({ exitCode: 1, stdout, stderr }, INVOCATION)).toBe(stderr);

@@ -283,7 +283,9 @@ export function describeLookupFailure(
 
 /** Read the build:list failure contract. Older EAS CLIs report this refusal as prose. */
 function readUnlinkedProjectReason(stdout: string): string | null {
-  let error: { code?: unknown; eligibleAccounts?: unknown; accountName?: unknown } | undefined;
+  let error:
+    | { code?: unknown; accountsWithProjectCreationPermission?: unknown; accountName?: unknown }
+    | undefined;
   try {
     error = JSON.parse(stdout)?.error;
   } catch {
@@ -292,26 +294,30 @@ function readUnlinkedProjectReason(stdout: string): string | null {
   if (error?.code !== 'EAS_PROJECT_NOT_CONFIGURED') {
     return null;
   }
-  const { eligibleAccounts, accountName } = error;
+  const { accountsWithProjectCreationPermission, accountName } = error;
   if (
-    !Array.isArray(eligibleAccounts) ||
-    !eligibleAccounts.every((account): account is string => typeof account === 'string') ||
+    !Array.isArray(accountsWithProjectCreationPermission) ||
+    !accountsWithProjectCreationPermission.every(
+      (account): account is string => typeof account === 'string'
+    ) ||
     (accountName !== undefined && typeof accountName !== 'string')
   ) {
     return null;
   }
 
   if (
-    eligibleAccounts.length === 0 ||
-    (accountName !== undefined && !eligibleAccounts.includes(accountName))
+    accountsWithProjectCreationPermission.length === 0 ||
+    (accountName !== undefined && !accountsWithProjectCreationPermission.includes(accountName))
   ) {
     return unlinkedProjectSummary(null);
   }
-  if (accountName === undefined && eligibleAccounts.length > 1) {
-    const choices = eligibleAccounts.map((account) => JSON.stringify(account)).join(', ');
+  if (accountName === undefined && accountsWithProjectCreationPermission.length > 1) {
+    const choices = accountsWithProjectCreationPermission
+      .map((account) => JSON.stringify(account))
+      .join(', ');
     return `${unlinkedProjectSummary('<account-name>')}. Choose an eligible account for <account-name> from ${choices}.`;
   }
-  return unlinkedProjectSummary(accountName ?? eligibleAccounts[0]!);
+  return unlinkedProjectSummary(accountName ?? accountsWithProjectCreationPermission[0]!);
 }
 
 /**
