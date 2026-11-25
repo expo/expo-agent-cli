@@ -2054,7 +2054,6 @@ describe('@expo/agent-cli status', () => {
     it.each([
       ['EAS_LOGIN_REQUIRED', 'EXPO_TOKEN'],
       ['EAS_PERMISSION_DENIED', 'grant access'],
-      ['EAS_INPUT_REQUIRED', 'missing arguments'],
     ])('chooses the fingerprint comparison recovery from %s', async (errorCode, recovery) => {
       const projectRoot = await setupCompareAsync();
       const result = await runBuildAsync(projectRoot, ['--json'], {

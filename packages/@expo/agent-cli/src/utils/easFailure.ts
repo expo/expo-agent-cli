@@ -244,15 +244,6 @@ export function readEasJsonFailure(result: { stdout: string; stderr: string }): 
           summary: 'EAS denied access — use an account or token with permission for this project',
         },
       };
-    case 'EAS_INPUT_REQUIRED':
-      return {
-        kind: 'cause',
-        cause: {
-          how: 'supply the missing arguments to the EAS command or run it interactively to answer the prompt.',
-          summary:
-            'EAS needs more input — supply the missing arguments or run the EAS command interactively',
-        },
-      };
   }
   if (typeof error?.message === 'string' && error.message.trim()) {
     const message = stripVTControlCharacters(error.message).trim();
