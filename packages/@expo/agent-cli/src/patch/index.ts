@@ -1,5 +1,6 @@
 // @ref llp/0037-patch-command.rfc.md §Command surface
 
+import { EXIT_OK, type OutcomeExitCode } from '../exitCodes';
 import { printCommandHelp } from '../help/format';
 import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
@@ -68,12 +69,11 @@ export const agentCliPatch: Command = async (argv) => {
     printCommandHelp(patchHelp);
   }
 
-  const { logCmdError, CommandError } =
-    require('../utils/errors') as typeof import('../utils/errors');
+  const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
 
-  return (async () => {
+  return (async (): Promise<OutcomeExitCode> => {
     if (args._.length !== 1) {
       const error = new CommandError(
         'BAD_ARGS',
@@ -100,7 +100,8 @@ export const agentCliPatch: Command = async (argv) => {
       yes: !!args['--yes'],
       followups: !args['--no-followups'],
     });
-  })().catch(logCmdError);
+    return EXIT_OK;
+  })();
 };
 
 /**
