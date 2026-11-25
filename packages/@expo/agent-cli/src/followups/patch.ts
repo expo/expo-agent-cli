@@ -5,7 +5,7 @@ import { capFollowUps, type FollowUp } from './types';
 
 export interface PatchFollowUpInput {
   packageName: string;
-  /** The patch changes native files, from the diff. */
+  /** The patch changes native code or native config (a config plugin, `expo-module.config.json`), from the diff. */
   native: boolean;
   /**
    * The patch file is under `patches/`, which `@expo/fingerprint` hashes as one source
@@ -28,7 +28,7 @@ export function buildPatchFollowUps({
     followups.push({
       id: 'dev',
       command: `${PROGRAM_PREFIX} dev`,
-      why: `The patch changes native code of ${packageName}, and the app that runs now was built without it: this plans and makes the development build that has it. Expo Go cannot load a patched native module.`,
+      why: `The patch changes native code or native config of ${packageName}, and the app that runs now was built without it: this plans and makes the development build that has it. Expo Go cannot load a patched native module.`,
     });
   } else {
     followups.push({

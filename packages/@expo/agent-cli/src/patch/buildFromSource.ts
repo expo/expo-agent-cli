@@ -8,6 +8,9 @@
 import fs from 'fs';
 import path from 'path';
 
+import { readJsonFileSync } from '../project/nodeModules';
+import type { PackageJsonEdit } from './packageJson';
+
 export type NativePlatform = 'ios' | 'android';
 
 /**
@@ -52,6 +55,22 @@ export function nativePlatformsOfFile(file: string): NativePlatform[] {
   return [];
 }
 
+/**
+ * Files that change the native project without being native code: the config plugin, which runs at
+ * prebuild, and the files autolinking reads. A patch to one needs a new build, not a reload.
+ */
+export function isNativeConfigFile(file: string): boolean {
+  const normalized = file.replace(/\\/g, '/');
+  return NATIVE_CONFIG_FILES.has(normalized) || normalized.startsWith('plugin/');
+}
+
+const NATIVE_CONFIG_FILES = new Set([
+  'app.plugin.js',
+  'expo-module.config.json',
+  'package.json',
+  'react-native.config.js',
+]);
+
 /** The native platforms a set of patched files touches, in a stable order. */
 export function nativePlatformsOfFiles(files: string[]): NativePlatform[] {
   const found = new Set(files.flatMap(nativePlatformsOfFile));
@@ -82,6 +101,38 @@ export function buildFromSourceGroup(packageName: string, platform: NativePlatfo
   return group ?? [packageName];
 }
 
+interface ExpoModuleConfig {
+  android?: { name?: string; projects?: { name?: string; publication?: unknown }[] };
+}
+
+/**
+ * The names `buildFromSource` is matched against for a package on a platform. iOS matches the npm
+ * name. Android matches the Gradle project name, which autolinking makes from the npm name
+ * (`@expo/ui` → `expo-ui`) unless `expo-module.config.json` names it, plus each extra project with
+ * a publication [observed — expo-modules-autolinking `convertPackageToProjectName`,
+ * `ExpoModuleConfig.androidProjects`, `SettingsManager.kt`].
+ */
+export function buildFromSourceNames(
+  packageName: string,
+  packageDir: string,
+  platform: NativePlatform
+): string[] {
+  if (platform === 'ios') {
+    return buildFromSourceGroup(packageName, platform);
+  }
+  const config = readJsonFileSync<ExpoModuleConfig>(
+    path.join(packageDir, 'expo-module.config.json')
+  );
+  const projects = (config?.android?.projects ?? [])
+    .filter((project) => project.publication && typeof project.name === 'string')
+    .map((project) => project.name!);
+  return [...new Set([config?.android?.name ?? androidProjectName(packageName), ...projects])];
+}
+
+function androidProjectName(packageName: string): string {
+  return packageName.replace(/^@/g, '').replace(/\W+/g, '-');
+}
+
 /**
  * The entry that names exactly one package.
  *
@@ -94,12 +145,12 @@ export function buildFromSourceEntry(packageName: string): string {
   return packageName.replace(/[.]/g, '\\.');
 }
 
-/** Whether an existing entry already makes this package build from source on both platforms. */
-function isCovered(entries: string[], packageName: string): boolean {
+/** Whether an existing entry already matches this name. */
+function isCovered(entries: string[], name: string): boolean {
   return entries.some((entry) => {
     try {
       // Android's rule is the stricter one: a match of the whole name.
-      return new RegExp(`^(?:${entry})$`).test(packageName);
+      return new RegExp(`^(?:${entry})$`).test(name);
     } catch {
       return false;
     }
@@ -137,48 +188,40 @@ function effectiveBuildFromSource(
   return { key, list: Array.isArray(options.buildFromSource) ? options.buildFromSource : [] };
 }
 
-/**
- * Add the packages to the `buildFromSource` list that autolinking reads for each platform, in the
- * project `package.json`. A new platform list starts as a copy of the top-level list, so the
- * modules that list builds from source still do.
- *
- * Keeps every existing entry and the key order of the file, and adds nothing an existing entry
- * already matches.
- *
- * @returns what changed, per platform; empty when the file already said all of it.
- */
-export function addBuildFromSource(
-  projectRoot: string,
-  packageNames: string[],
-  platforms: NativePlatform[]
-): BuildFromSourceChange[] {
-  if (!platforms.length || !packageNames.length) {
-    return [];
-  }
-  const file = path.join(projectRoot, 'package.json');
-  const text = fs.readFileSync(file, 'utf8');
-  const pkg = JSON.parse(text);
-  const changes: BuildFromSourceChange[] = [];
+export interface BuildFromSourceTarget {
+  platform: NativePlatform;
+  /** What autolinking matches the entries against on that platform (`buildFromSourceNames`). */
+  names: string[];
+}
 
-  for (const platform of platforms) {
+/**
+ * Plan the additions to the `buildFromSource` list that autolinking reads for each platform. A new
+ * platform list starts as a copy of the top-level list, so the modules that list builds from source
+ * still do. Keeps every existing entry, and adds nothing an existing entry already matches.
+ *
+ * @returns what changes, per platform, and the edit that makes those changes.
+ */
+export function planBuildFromSource(
+  pkg: Record<string, any>,
+  targets: BuildFromSourceTarget[]
+): { changes: BuildFromSourceChange[]; edit: PackageJsonEdit } {
+  const changes: BuildFromSourceChange[] = [];
+  for (const { platform, names } of targets) {
     const { key, list } = effectiveBuildFromSource(pkg.expo?.autolinking, platform);
     const entries = list.filter((e): e is string => typeof e === 'string');
-    const added = packageNames
-      .filter((name) => !isCovered(entries, name))
-      .map(buildFromSourceEntry);
-    if (!added.length) {
-      continue;
+    const added = names.filter((name) => !isCovered(entries, name)).map(buildFromSourceEntry);
+    if (added.length) {
+      changes.push({ platform, key, added });
     }
-    pkg.expo ??= {};
-    pkg.expo.autolinking ??= {};
-    pkg.expo.autolinking[key] ??= {};
-    pkg.expo.autolinking[key].buildFromSource = [...list, ...added];
-    changes.push({ platform, key, added });
   }
-
-  if (changes.length) {
-    const indent = /^[ \t]+/m.exec(text)?.[0] ?? '  ';
-    fs.writeFileSync(file, `${JSON.stringify(pkg, null, indent)}\n`);
-  }
-  return changes;
+  const edit: PackageJsonEdit = (json) => {
+    for (const { platform, key, added } of changes) {
+      const { list } = effectiveBuildFromSource(json.expo?.autolinking, platform);
+      json.expo ??= {};
+      json.expo.autolinking ??= {};
+      json.expo.autolinking[key] ??= {};
+      json.expo.autolinking[key].buildFromSource = [...list, ...added];
+    }
+  };
+  return { changes, edit };
 }

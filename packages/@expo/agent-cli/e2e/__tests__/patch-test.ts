@@ -4,7 +4,7 @@
 // under test is the boundary: the patch file each manager writes, the registration it reads, and
 // that a fresh install applies the patch again. A stub would only prove the argv.
 //
-// The two packages are packed from `fixtures/patch-packages` into local tarballs and installed as
+// The fake packages are packed from `fixtures/patch-packages` into local tarballs and installed as
 // `file:` dependencies. Every manager, npm too, is installed from the npm registry at a pinned
 // version into a cache directory before its tests, so they run the same on every machine and on CI.
 // npm 12 refuses to patch a `file:` package, so its save test patches a small scoped registry package.
@@ -124,14 +124,14 @@ function patchAsync(
   });
 }
 
-/** A project with the two fake packages installed by `manager`. */
+/** A project with the fake packages installed by `manager`. */
 async function setupProjectAsync(
   manager: Manager,
   installArgs = INSTALL[manager]
 ): Promise<string> {
   const projectRoot = path.join(getTemporaryPath(), `patch-${manager}`);
   fs.mkdirSync(projectRoot, { recursive: true });
-  for (const name of ['fake-expo-module', 'fake-js-lib']) {
+  for (const name of ['fake-expo-module', 'fake-js-lib', 'fake-scoped-expo-module']) {
     run(
       'npm',
       ['pack', path.join(fixturesDir, 'patch-packages', name), '--pack-destination', projectRoot],
@@ -155,6 +155,7 @@ async function setupProjectAsync(
         dependencies: {
           'fake-expo-module': 'file:./fake-expo-module-1.0.0.tgz',
           'fake-js-lib': 'file:./fake-js-lib-2.1.0.tgz',
+          '@fake/scoped-expo-module': 'file:./fake-scoped-expo-module-1.0.0.tgz',
         },
       },
       null,
@@ -249,6 +250,47 @@ describe('@expo/agent-cli patch — bun', () => {
     expect(readJson(pkgPath).expo.autolinking).toEqual({ android: { buildFromSource: ['.*'] } });
   });
 
+  it(`builds a scoped Expo module from source on Android under its Gradle project name`, async () => {
+    const projectRoot = await setupProjectAsync('bun');
+    edit(
+      projectRoot,
+      '@fake/scoped-expo-module/android/src/main/java/expo/modules/scoped/ScopedModule.kt',
+      '// fix\n'
+    );
+
+    const result = await patchAsync('bun', projectRoot, ['@fake/scoped-expo-module', '--json']);
+    const report = JSON.parse(result.stdout);
+
+    // Autolinking names the Gradle project `fake-scoped-expo-module`, and matches the whole name.
+    expect(report.buildFromSource).toEqual([
+      { platform: 'android', key: 'android', added: ['fake-scoped-expo-module'] },
+    ]);
+    expect(readJson(path.join(projectRoot, 'package.json')).expo.autolinking).toEqual({
+      android: { buildFromSource: ['fake-scoped-expo-module'] },
+    });
+  });
+
+  it(`asks for a new build, not a reload, for a config plugin edit`, async () => {
+    const projectRoot = await setupProjectAsync('bun');
+    edit(projectRoot, 'fake-expo-module/app.plugin.js', '// fix\n');
+
+    const result = await patchAsync('bun', projectRoot, ['fake-expo-module', '--json']);
+    const report = JSON.parse(result.stdout);
+
+    expect(report).toMatchObject({ files: ['app.plugin.js'], native: [], buildFromSource: [] });
+    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev']);
+  });
+
+  it.each(['../fake-js-lib', 'fake-js-lib/', 'a/b'])(
+    `refuses %s, which is not a package name`,
+    async (name) => {
+      const result = await patchAsync('bun', TEMP_DIR, [name, '--json'], false);
+
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout).error.code).toBe('BAD_ARGS');
+    }
+  );
+
   it(`refuses a package with no edits`, async () => {
     const projectRoot = await setupProjectAsync('bun');
 
@@ -339,13 +381,20 @@ describe.each([
     edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '++ b/fix\n');
     fs.writeFileSync(path.join(pkgDir, 'ios/New File.swift'), '// new\n');
     fs.rmSync(path.join(pkgDir, 'src/index.ts'));
+    edit(projectRoot, 'fake-expo-module/build/index.js', '// fix\n');
 
-    // Git variables of the caller that would change the patch, or the index it is checked in.
+    // Git settings of the caller that would change the patch, or the index it is checked in. The
+    // user's XDG `git/ignore` and `git/attributes` would drop the `build/` edit or call it binary.
+    const xdg = path.join(projectRoot, 'xdg');
+    fs.mkdirSync(path.join(xdg, 'git'), { recursive: true });
+    fs.writeFileSync(path.join(xdg, 'git', 'ignore'), 'build/\n');
+    fs.writeFileSync(path.join(xdg, 'git', 'attributes'), '*.js -diff\n');
     const callerGit = {
       GIT_INDEX_FILE: path.join(projectRoot, 'no-such-dir', 'index'),
       GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'diff.noprefix',
       GIT_CONFIG_VALUE_0: 'true',
+      XDG_CONFIG_HOME: xdg,
     };
     const result = await patchAsync(
       manager,
@@ -361,6 +410,7 @@ describe.each([
       buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
     });
     expect([...report.files].sort()).toEqual([
+      'build/index.js',
       'ios/FakeModule.swift',
       'ios/New File.swift',
       'src/index.ts',
@@ -390,6 +440,7 @@ describe.each([
       /\n\+\+ b\/fix\n$/
     );
     expect(fs.readFileSync(path.join(pkgDir, 'ios/New File.swift'), 'utf8')).toBe('// new\n');
+    expect(fs.readFileSync(path.join(pkgDir, 'build/index.js'), 'utf8')).toMatch(/\/\/ fix\n$/);
     expect(fs.existsSync(path.join(pkgDir, 'src/index.ts'))).toBe(false);
   });
 

@@ -10,7 +10,7 @@ import { resolvePackageManager, resolveWorkspaceRoot } from '@expo/package-manag
 import fs from 'fs';
 import path from 'path';
 
-import { CommandError } from './errors';
+import { CommandError } from '../utils/errors';
 
 export type PackageManagerName = 'bun' | 'pnpm' | 'yarn-berry' | 'yarn-classic' | 'npm';
 

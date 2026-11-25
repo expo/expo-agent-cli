@@ -83,6 +83,14 @@ export const agentCliPatch: Command = async (argv) => {
       throw error;
     }
     const packageName = args._[0]!;
+    if (!isPackageName(packageName)) {
+      const error = new CommandError(
+        'BAD_ARGS',
+        `"${packageName}" is not an npm package name. patch takes the name as it is in package.json, e.g. "expo-image" or "@expo/ui".`
+      );
+      error.suggestedCommand = `${PROGRAM_PREFIX} patch --help`;
+      throw error;
+    }
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const json = !!args['--json'];
 
@@ -94,3 +102,11 @@ export const agentCliPatch: Command = async (argv) => {
     });
   })().catch(logCmdError);
 };
+
+/**
+ * npm's rules for a package name, with upper case allowed for old packages. The name becomes a path
+ * under `node_modules`, so `..`, a leading `.` and a stray `/` are refused here.
+ */
+export function isPackageName(name: string): boolean {
+  return /^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/i.test(name);
+}

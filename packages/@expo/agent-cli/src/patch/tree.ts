@@ -72,6 +72,17 @@ export function isEmptyDiff(diff: TreeDiff): boolean {
   return !diff.changed.length && !diff.added.length && !diff.removed.length;
 }
 
+export function filesOfDiff(diff: TreeDiff): string[] {
+  return [...diff.changed, ...diff.added, ...diff.removed].sort();
+}
+
+/** Files of the diff that are a symlink in the clean or the edited tree. */
+export function symlinksOf(diff: TreeDiff, cleanRoot: string, editedRoot: string): string[] {
+  const isLink = (root: string, file: string) =>
+    fs.lstatSync(path.join(root, file), { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
+  return filesOfDiff(diff).filter((file) => isLink(cleanRoot, file) || isLink(editedRoot, file));
+}
+
 /** Make `targetRoot` hold the edits of `diff`, copied from `editedRoot`. */
 export function applyTreeDiff(diff: TreeDiff, editedRoot: string, targetRoot: string): void {
   for (const file of [...diff.changed, ...diff.added]) {
@@ -83,7 +94,7 @@ export function applyTreeDiff(diff: TreeDiff, editedRoot: string, targetRoot: st
 }
 
 /** Copy one file, or one symlink as a symlink. */
-function copyEntry(from: string, to: string): void {
+export function copyEntry(from: string, to: string): void {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.rmSync(to, { force: true });
   if (fs.lstatSync(from).isSymbolicLink()) {

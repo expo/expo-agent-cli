@@ -121,11 +121,14 @@ describe('the flags this CLI writes onto a command line', () => {
     // of `installExpoGo.ts` in the same change, which is why that file no longer has a row for it:
     // the approval is not about installs, it is about every local iOS open.
     //
-    // The `src/patch/backends.ts` rows are git's, from the scratch repository that writes the
-    // patch-package patch (`diff`, `apply --check --cached`), and `npm patch --help`. git is not a
-    // package, so the run the rule asks for is the e2e itself [observed — 2026-11-19, git 2.54 on
-    // macOS: `e2e/__tests__/patch-test.ts` saves a real package, and patch-package 8.0.1 applies the
-    // patch to a fresh install; npm 11.20.0 exits 1 and npm 12.2.3 exits 0 on `npm patch --help`].
+    // The `src/patch/backends.ts` and `src/patch/patchPackage.ts` rows are the package managers'
+    // patch commands (`pnpm patch --edit-dir`, `npm patch add --edit-dir`, `yarn patch --json`,
+    // `yarn patch-commit -s`, `npm patch --help`), `npm pack --json --pack-destination`, `tar -xzf
+    // -C`, and git's, from the scratch repository that writes the patch-package patch (`diff`,
+    // `apply --check --cached`). The run the rule asks for is the e2e itself, which drives each pinned
+    // manager [observed — 2026-11-25, git 2.54 on macOS: `e2e/__tests__/patch-test.ts` saves with
+    // bun 1.4.4, pnpm 12.2.1, yarn 4.18.1, npm 12.2.3, npm 11.20.0 and yarn 1.22.22, and
+    // patch-package 8.0.1 applies the patch to a fresh install].
     //
     // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
     // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
@@ -146,10 +149,12 @@ describe('the flags this CLI writes onto a command line', () => {
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
-          "--cached  src/patch/backends.ts",
-          "--check  src/patch/backends.ts",
+          "--cached  src/patch/patchPackage.ts",
+          "--check  src/patch/patchPackage.ts",
           "--detach  src/smoke/deps/startArgs.ts",
           "--device  src/device/installDevBuild.ts",
+          "--edit-dir  src/patch/backends.ts",
+          "--edit-dir  src/patch/backends.ts",
           "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
           "--help  src/patch/backends.ts",
@@ -161,16 +166,19 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/docs/autoSync.ts",
           "--json  src/impact/runtimeVersion.ts",
           "--json  src/install/resolveOptions.ts",
+          "--json  src/patch/backends.ts",
+          "--json  src/patch/patchPackage.ts",
           "--no-bundler  src/device/installDevBuild.ts",
-          "--no-color  src/patch/backends.ts",
-          "--no-ext-diff  src/patch/backends.ts",
+          "--no-color  src/patch/patchPackage.ts",
+          "--no-ext-diff  src/patch/patchPackage.ts",
           "--no-followups  src/docs/autoSync.ts",
           "--no-install  src/new/createExpo.ts",
           "--no-open  src/smoke/deps/startArgs.ts",
-          "--no-renames  src/patch/backends.ts",
-          "--no-textconv  src/patch/backends.ts",
+          "--no-renames  src/patch/patchPackage.ts",
+          "--no-textconv  src/patch/patchPackage.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",
+          "--pack-destination  src/patch/patchPackage.ts",
           "--platform  src/deploy/deployAsync.ts",
           "--platform  src/project/fingerprint.ts",
           "--port  src/dev/forwardedArgs.ts",
@@ -187,6 +195,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--yes  src/device/installExpoGo.ts",
           "--yes  src/new/createExpo.ts",
           "--yes  src/utils/easCli.ts",
+          "-C  src/patch/patchPackage.ts",
           "-Fpc  src/dev/portListener.ts",
           "-a  src/dev/openApp.ts",
           "-a  src/dev/openApp.ts",
@@ -218,11 +227,13 @@ describe('the flags this CLI writes onto a command line', () => {
           "-s  src/deviceBinding/android.ts",
           "-s  src/deviceBinding/emulator.ts",
           "-s  src/navigate/adbReverse.ts",
+          "-s  src/patch/backends.ts",
           "-s  src/runtime/appProcess.ts",
           "-sTCP:LISTEN  src/dev/portListener.ts",
           "-string  src/device/approveScheme.ts",
           "-version  src/toolchain/detect.ts",
           "-version  src/toolchain/detect.ts",
+          "-xzf  src/patch/patchPackage.ts",
         ]
       `);
   });

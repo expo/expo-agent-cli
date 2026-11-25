@@ -2,25 +2,29 @@
 // `patch <pkg>`: the agent has already edited `node_modules/<pkg>`; this saves the edits with the
 // project's package manager, makes the native build use them, and says what to do next.
 
-import fs from 'fs';
 import path from 'path';
 
 import { buildPatchFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
-import { PROGRAM_PREFIX } from '../programName';
+import { readJsonFileSync } from '../project/nodeModules';
 import { consentRerunCommand } from '../utils/consent';
+import { isPathInside } from '../utils/dir';
 import { CommandError } from '../utils/errors';
-import { detectPackageManager, type PackageManagerName } from '../utils/packageManager';
 import { savePatchAsync, type PatchTarget } from './backends';
 import {
-  addBuildFromSource,
-  buildFromSourceGroup,
+  buildFromSourceNames,
+  isNativeConfigFile,
   isPrecompiledOn,
   nativePlatformsOfFiles,
+  planBuildFromSource,
   type BuildFromSourceChange,
   type NativePlatform,
 } from './buildFromSource';
+import { resolveInstalledPackage } from './installed';
+import { editPackageJson, type PackageJsonEdit } from './packageJson';
+import { detectPackageManager, type PackageManagerName } from './packageManager';
+import { updateLockfileAsync } from './patchPackage';
 import { findLinkedFiles } from './tree';
 
 export interface PatchOptions {
@@ -39,31 +43,6 @@ export interface PatchReport {
   native: NativePlatform[];
   buildFromSource: BuildFromSourceChange[];
   followups: FollowUp[];
-}
-
-/** The installed copy of a package, as the project resolves it. */
-export function resolveInstalledPackage(
-  projectRoot: string,
-  packageName: string,
-  roots: string[]
-): { packageDir: string; version: string; manifest: Record<string, any> } {
-  for (const root of roots) {
-    const packageDir = path.join(root, 'node_modules', ...packageName.split('/'));
-    const manifestPath = path.join(packageDir, 'package.json');
-    if (fs.existsSync(manifestPath)) {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      return { packageDir, version: String(manifest.version), manifest };
-    }
-  }
-  const error = new CommandError(
-    'PATCH_NOT_INSTALLED',
-    [
-      `${packageName} is not installed in ${projectRoot}, so there is nothing to patch.`,
-      `How: install it first, edit its files in node_modules/${packageName}, then run this again.`,
-    ].join('\n')
-  );
-  error.suggestedCommand = `${PROGRAM_PREFIX} install ${packageName}`;
-  throw error;
 }
 
 /** Refuse a package whose files are hard links into the store: no clean copy is left to diff. */
@@ -117,10 +96,11 @@ export async function patchAsync(
   options: PatchOptions
 ): Promise<void> {
   const packageManager = detectPackageManager(projectRoot);
-  const { packageDir, version } = resolveInstalledPackage(projectRoot, packageName, [
+  const { packageDir, version } = resolveInstalledPackage(
     projectRoot,
-    packageManager.root,
-  ]);
+    packageName,
+    packageManager.root
+  );
 
   assertNotLinked(packageDir, packageName, packageManager.name);
 
@@ -155,18 +135,40 @@ export async function patchAsync(
     throw error;
   }
 
-  const buildFromSource = native
-    .filter((platform) => isPrecompiledOn(packageName, packageDir, platform))
-    .flatMap((platform) =>
-      addBuildFromSource(projectRoot, buildFromSourceGroup(packageName, platform), [platform])
-    );
+  const projectPackageJson = path.join(projectRoot, 'package.json');
+  const plan = planBuildFromSource(
+    readJsonFileSync<Record<string, any>>(projectPackageJson) ?? {},
+    native
+      .filter((platform) => isPrecompiledOn(packageName, packageDir, platform))
+      .map((platform) => ({
+        platform,
+        names: buildFromSourceNames(packageName, packageDir, platform),
+      }))
+  );
+  // One write per package.json: the patch-package setup (workspace root) and buildFromSource
+  // (project) are often the same file.
+  const edits = new Map<string, PackageJsonEdit[]>();
+  const addEdits = (file: string, more: PackageJsonEdit[]) =>
+    edits.set(file, [...(edits.get(file) ?? []), ...more]);
+  if (result.setup) {
+    addEdits(path.join(result.setup.root, 'package.json'), result.setup.edits);
+  }
+  if (plan.changes.length) {
+    addEdits(projectPackageJson, [plan.edit]);
+  }
+  for (const [file, fileEdits] of edits) {
+    editPackageJson(file, fileEdits);
+  }
+  if (result.setup?.updatesLockfile) {
+    await updateLockfileAsync(result.setup, result.patchFile);
+  }
 
   const followups: FollowUp[] = followUpsEnabled(options.followups)
     ? buildPatchFollowUps({
         packageName,
-        native: native.length > 0,
+        native: native.length > 0 || result.files.some(isNativeConfigFile),
         // @expo/fingerprint hashes `<projectRoot>/patches` (sourcer/PatchPackage), not the workspace root's.
-        hashedByFingerprint: isUnder(result.patchFile, path.join(projectRoot, 'patches')),
+        hashedByFingerprint: isPathInside(result.patchFile, path.join(projectRoot, 'patches')),
       })
     : [];
 
@@ -178,15 +180,10 @@ export async function patchAsync(
     patchFile: result.patchFile,
     files: result.files,
     native,
-    buildFromSource,
+    buildFromSource: plan.changes,
     followups,
   };
 
   printReport(report, options.json);
   reportFollowUps('patch', followups, { json: options.json });
-}
-
-function isUnder(file: string, dir: string): boolean {
-  const relative = path.relative(dir, file);
-  return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
