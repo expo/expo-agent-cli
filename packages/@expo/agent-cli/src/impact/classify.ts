@@ -269,7 +269,7 @@ export interface DiffClassification {
  * splits "Fast Refresh picks it up" from "restart Metro".
  */
 export function classifyFingerprintDiff(items: FingerprintDiffItem[]): DiffClassification {
-  const changedSources = items.map(classifyDiffItem);
+  const changedSources = items.filter(isHashed).map(classifyDiffItem);
 
   let impactClass: ImpactClass = IMPACT_CLASS_ORDER[0]!;
   for (const source of changedSources) {
@@ -279,6 +279,17 @@ export function classifyFingerprintDiff(items: FingerprintDiffItem[]): DiffClass
   }
 
   return { class: impactClass, changedSources, reasons: describeChanges(changedSources) };
+}
+
+/**
+ * Whether a diff item can have moved the fingerprint hash.
+ *
+ * `@expo/fingerprint` leaves a source with a null hash out of the fingerprint hash. In a CNG project
+ * that is the gitignored `ios/` or `android/` (`bareNativeDir`), which appears after a prebuild and
+ * disappears after a clean, while the hash stays the same.
+ */
+function isHashed(item: FingerprintDiffItem): boolean {
+  return item.op === 'changed' || diffItemSource(item).hash !== null;
 }
 
 /** One sentence per kind, naming what carried it. */

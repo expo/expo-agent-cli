@@ -232,6 +232,24 @@ describe(classifyFingerprintDiff, () => {
     );
   });
 
+  const cngIosDir: FingerprintSource = {
+    type: 'dir',
+    filePath: 'ios',
+    reasons: ['bareNativeDir'],
+    hash: null,
+  };
+
+  it.each<FingerprintDiffItem>([
+    { op: 'added', addedSource: cngIosDir },
+    { op: 'removed', removedSource: cngIosDir },
+  ])(`should ignore a source with no hash, which the fingerprint hash leaves out ($op)`, (item) => {
+    expect(classifyFingerprintDiff([item])).toEqual({
+      class: 'js-only',
+      changedSources: [],
+      reasons: [],
+    });
+  });
+
   it(`should say a build-config change needs no prebuild`, () => {
     const result = classifyFingerprintDiff([
       added({ type: 'file', filePath: 'eas.json', reasons: ['easBuild'] }),
