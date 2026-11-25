@@ -105,6 +105,14 @@ describe(describeLookupFailure, () => {
     expect(describeLookupFailure({ exitCode: 1, stdout, stderr }, INVOCATION)).toBe(stderr);
   });
 
+  it('preserves the stderr reason when the envelope only names the failed command', () => {
+    const stdout = JSON.stringify({ error: { message: 'build:list command failed.' } }, null, 2);
+    const stderr = 'Unable to read project configuration.\nError: build:list command failed.';
+    expect(describeLookupFailure({ exitCode: 1, stdout, stderr }, INVOCATION)).toBe(
+      'Unable to read project configuration.'
+    );
+  });
+
   it.each([undefined, 'EAS_FUTURE_CODE'])(
     'preserves the diagnostic in a multiline envelope with code %s',
     (code) => {

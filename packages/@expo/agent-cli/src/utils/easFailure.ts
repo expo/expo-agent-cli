@@ -252,6 +252,10 @@ export function readEasJsonFailure(result: { stdout: string; stderr: string }): 
   }
   if (typeof error?.message === 'string' && error.message.trim()) {
     const message = stripVTControlCharacters(error.message).trim();
+    if (error.code === undefined && EAS_CLOSING_ERROR.test(`Error: ${message}`)) {
+      // EAS exit(1) wraps a reason already printed to stderr.
+      return readEasFailure({ stdout: message, stderr: result.stderr });
+    }
     // Older versions put the eligible account names only in the message.
     const cause = classifyEasFailure(message);
     if (
