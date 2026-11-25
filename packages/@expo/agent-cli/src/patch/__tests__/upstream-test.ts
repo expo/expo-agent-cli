@@ -1,11 +1,5 @@
 import { isExpoRepoPackage } from '../installed';
-import {
-  assertReproUrl,
-  filesOfPatch,
-  mapUpstreamFile,
-  repositoryDirectory,
-  upstreamBase,
-} from '../upstream';
+import { assertReproUrl, mapUpstreamFile, repositoryDirectory, upstreamBase } from '../upstream';
 
 describe(isExpoRepoPackage, () => {
   it.each([
@@ -81,37 +75,5 @@ describe(upstreamBase, () => {
     [undefined, 'main'],
   ])('gitHead %s → %s', (gitHead, expected) => {
     expect(upstreamBase({ gitHead })).toBe(expected);
-  });
-});
-
-describe(filesOfPatch, () => {
-  it.each([
-    [
-      'git style from the package (bun, pnpm, yarn)',
-      'diff --git a/ios/X.swift b/ios/X.swift\n--- a/ios/X.swift\n+++ b/ios/X.swift\n@@ -1 +1 @@\n',
-      ['ios/X.swift'],
-    ],
-    [
-      'patch-package, scoped',
-      'diff --git a/node_modules/@expo/image/src/a.ts b/node_modules/@expo/image/src/a.ts\n--- a/node_modules/@expo/image/src/a.ts\n+++ b/node_modules/@expo/image/src/a.ts\n',
-      ['src/a.ts'],
-    ],
-    // npm 12.2.3 writes a plain unified diff with a tab after the name, and no `diff --git` line.
-    ['npm 12', '--- a/index.js\t\n+++ b/index.js\t\n@@ -15,4 +15,5 @@\n', ['index.js']],
-    ['a deleted file', '--- a/old.js\n+++ /dev/null\n', ['old.js']],
-    // Hunk lines that look like headers: an added `++ b/fix` and a removed `-- a/old`.
-    [
-      'header-like lines inside a hunk',
-      '--- a/index.js\t\n+++ b/index.js\t\n@@ -1,2 +1,2 @@\n x\n--- a/old\n+++ b/fix\n--- a/other.js\t\n+++ b/other.js\t\n@@ -1 +1,2 @@\n y\n+z\n',
-      ['index.js', 'other.js'],
-    ],
-    // Headers as git 2.54 wrote them with core.quotepath=true (the default).
-    [
-      'C-quoted paths: non-ASCII, and a quote with a space',
-      '--- "a/ios/caf\\303\\251.swift"\n+++ "b/ios/caf\\303\\251.swift"\n--- "a/ios/say \\"hi\\".swift"\t\n+++ "b/ios/say \\"hi\\".swift"\n',
-      ['ios/café.swift', 'ios/say "hi".swift'],
-    ],
-  ])('%s', (_name, patch, files) => {
-    expect(filesOfPatch(patch)).toEqual(files);
   });
 });

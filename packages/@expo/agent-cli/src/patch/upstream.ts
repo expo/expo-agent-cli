@@ -3,6 +3,8 @@
 // are agent work after the user says yes, and llp/0010 keeps exit 7 for a step only a person can finish.
 
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import * as Log from '../log';
 import { quoteArgument } from '../utils/consent';
@@ -11,6 +13,7 @@ import { detectPackageManager } from './packageManager';
 import { nativePlatformsOfFiles } from './buildFromSource';
 import { isExpoRepoPackage, resolveInstalledPackage } from './installed';
 import { findPatchFile } from './registry';
+import { runToolAsync, toolOutput } from './tools';
 
 export interface UpstreamFile {
   /** Path in the installed package. */
@@ -129,85 +132,55 @@ export function mapUpstreamFile(file: string, directory: string): UpstreamFile {
   return { file, target: `${directory}/${file}`, portTo: null };
 }
 
-const C_ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
-
 /**
- * The path of a `---` or `+++` header, or null for /dev/null. Git puts a path in C quotes when it
- * holds a quote, a backslash or a control character, and also non-ASCII unless core.quotepath is
- * false (`"a/ios/caf\303\251.swift"`). The octal escapes are the bytes of UTF-8.
+ * The files a patch changes, relative to the package root, as `git apply --numstat -z` reads them.
+ * It reads git-style patches and npm 12's plain unified diffs, and decodes quoted paths. It runs
+ * with a `GIT_DIR` that does not exist: inside a repository, git leaves out every path outside the
+ * current folder.
  */
-function headerPath(text: string, prefix: string): string | null {
-  if (text === '/dev/null') {
-    return null;
-  }
-  let file = text;
-  if (text.length > 1 && text.startsWith('"') && text.endsWith('"')) {
-    // With a capture group, split gives the text between escapes and each escape.
-    const parts = text.slice(1, -1).split(/(\\(?:[0-7]{3}|.))/);
-    file = Buffer.concat(
-      parts.map((part, index) => {
-        if (index % 2 === 0) {
-          return Buffer.from(part, 'utf8');
-        }
-        const escape = part.slice(1);
-        return Buffer.from([
-          escape.length === 3 ? parseInt(escape, 8) : (C_ESCAPES[escape] ?? escape.charCodeAt(0)),
-        ]);
-      })
-    ).toString('utf8');
-  }
-  return file.startsWith(prefix) ? file.slice(prefix.length) : file;
-}
-
-/** The files a patch changes, relative to the package root. */
-export function filesOfPatch(patch: string): string[] {
-  const files = new Set<string>();
-  // `+++ b/<file>` names the file; for a deleted file it is /dev/null and `--- a/<file>` does.
-  // git-style patches and npm 12's plain unified diffs both have these lines. Inside a hunk, an
-  // added `++ b/x` is the line `+++ b/x`, so the hunk's line counts from `@@` say where it ends.
-  let removed: string | null = null;
-  let oldLeft = 0;
-  let newLeft = 0;
-  for (const line of patch.split(/\r?\n/)) {
-    if (oldLeft > 0 || newLeft > 0) {
-      if (line.startsWith('-')) {
-        oldLeft--;
-      } else if (line.startsWith('+')) {
-        newLeft--;
-      } else if (!line.startsWith('\\')) {
-        // Context, or an empty line for an empty context line.
-        oldLeft--;
-        newLeft--;
+export async function filesOfPatchAsync(patchFile: string): Promise<string[]> {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-patch-files-'));
+  try {
+    const result = await runToolAsync(
+      'git',
+      ['apply', '--numstat', '-z', path.resolve(patchFile)],
+      {
+        cwd: scratch,
+        env: { GIT_DIR: path.join(scratch, 'no-repo') },
+        allowFailure: true,
       }
-      continue;
+    );
+    if (result.exitCode !== 0) {
+      throw new CommandError(
+        'PATCH_TOOL_FAILED',
+        `git cannot read the saved patch ${patchFile}, so the plan has no list of files.\n${toolOutput(result)}`
+      );
     }
-    const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
-    if (hunk) {
-      oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
-      newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
-      continue;
-    }
-    const from = /^--- (.+?)\t?$/.exec(line);
-    if (from) {
-      removed = headerPath(from[1]!, 'a/');
-      continue;
-    }
-    const to = /^\+\+\+ (.+?)\t?$/.exec(line);
-    if (to) {
-      const file = to[1] === '/dev/null' ? removed : headerPath(to[1]!, 'b/');
+    // Each entry is `<added>\t<deleted>\t<path>`, and a rename leaves the path empty and adds the
+    // old and the new path as two more fields.
+    const fields = result.stdout.split('\0');
+    const files = new Set<string>();
+    for (let i = 0; i < fields.length; i++) {
+      const entry = /^(?:\d+|-)\t(?:\d+|-)\t(.*)$/s.exec(fields[i]!);
+      if (!entry) {
+        continue;
+      }
+      const file = entry[1] || fields[(i += 2)];
       if (file) {
-        files.add(file.trim().replace(/^node_modules\/(?:@[^/]+\/)?[^/]+\//, ''));
+        files.add(file.replace(/^node_modules\/(?:@[^/]+\/)?[^/]+\//, ''));
       }
     }
+    return [...files].sort();
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
-  return [...files].sort();
 }
 
-export function planUpstream(
+export async function planUpstreamAsync(
   projectRoot: string,
   packageName: string,
   { repro }: { repro: string | null }
-): UpstreamPlan {
+): Promise<UpstreamPlan> {
   const packageManager = detectPackageManager(projectRoot);
   const { version, manifest } = resolveInstalledPackage(
     projectRoot,
@@ -224,7 +197,7 @@ export function planUpstream(
 
   const directory = repositoryDirectory(manifest, packageName);
   const patchText = fs.readFileSync(patchFile, 'utf8');
-  const changed = filesOfPatch(patchText);
+  const changed = await filesOfPatchAsync(patchFile);
   const files = changed.map((file) => mapUpstreamFile(file, directory));
   const platforms = nativePlatformsOfFiles(changed).map((p) =>
     p === 'ios' ? '[iOS]' : '[Android]'

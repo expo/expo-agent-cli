@@ -130,6 +130,10 @@ describe('the flags this CLI writes onto a command line', () => {
     // bun 1.4.4, pnpm 12.2.1, yarn 4.18.1, npm 12.2.3, npm 11.20.0 and yarn 1.22.22, and
     // patch-package 8.0.1 applies the patch to a fresh install].
     //
+    // The `src/patch/upstream.ts` rows are `git apply --numstat -z`, which lists the files of a saved
+    // patch [observed — 2026-11-25, git 2.55 on macOS: it reads git-style, patch-package and npm
+    // 12.2.3 patches, and `upstream-files-test.ts` runs it on each].
+    //
     // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
     // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
     // Expo-Go-54.0.8.apk` printed `Performing Streamed Install` then `Success` and exited 0 — over
@@ -178,6 +182,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--no-textconv  src/patch/patchPackage.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",
+          "--numstat  src/patch/upstream.ts",
           "--pack-destination  src/patch/patchPackage.ts",
           "--platform  src/deploy/deployAsync.ts",
           "--platform  src/project/fingerprint.ts",
@@ -234,6 +239,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-version  src/toolchain/detect.ts",
           "-version  src/toolchain/detect.ts",
           "-xzf  src/patch/patchPackage.ts",
+          "-z  src/patch/upstream.ts",
         ]
       `);
   });
