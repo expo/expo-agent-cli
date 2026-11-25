@@ -2051,6 +2051,23 @@ describe('@expo/agent-cli status', () => {
       }
     });
 
+    it.each([
+      ['EAS_LOGIN_REQUIRED', 'EXPO_TOKEN'],
+      ['EAS_PERMISSION_DENIED', 'grant access'],
+      ['EAS_INPUT_REQUIRED', 'missing arguments'],
+    ])('chooses the fingerprint comparison recovery from %s', async (code, recovery) => {
+      const projectRoot = await setupCompareAsync();
+      const result = await runBuildAsync(projectRoot, ['--json'], {
+        STUB_EAS_COMPARE_EXIT: '1',
+        STUB_EAS_COMPARE_JSON: JSON.stringify({
+          error: { code, message: 'EAS project not configured.' },
+        }),
+      });
+
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(report.errors.freshness).toContain(recovery);
+    });
+
     it('notes the failure and names the build when the comparison fails', async () => {
       const projectRoot = await setupCompareAsync();
 
@@ -2735,6 +2752,24 @@ describe('@expo/agent-cli status', () => {
         source: 'eas',
         reason: expect.any(String),
       });
+    });
+
+    it('reports denied build lookup access for both platforms', async () => {
+      const projectRoot = await setupWithEasAsync();
+      const report = await reportInAsync(projectRoot, [], {
+        STUB_EAS_BUILD_LIST_EXIT: '1',
+        STUB_EAS_BUILD_LIST_STDOUT: JSON.stringify({
+          error: { code: 'EAS_PERMISSION_DENIED', message: 'Not logged in' },
+        }),
+      });
+      for (const platform of ['ios', 'android']) {
+        expect(report.builds?.platforms.find((entry) => entry.platform === platform)).toMatchObject(
+          {
+            state: 'unknown',
+            reason: expect.stringContaining('account or token with permission'),
+          }
+        );
+      }
     });
 
     // The live case: `notesapp` has no EAS link, and the CLI refuses on stdout with exit 1.

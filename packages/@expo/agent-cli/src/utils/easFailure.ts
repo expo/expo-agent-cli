@@ -28,7 +28,7 @@ import { runnerNoiseReason, withoutRunnerNoise } from './wrapperCrash';
 
 export interface EasFailureCause {
   /** Which sentence was recognised. */
-  id: 'eas-project-unlinked' | 'eas-login';
+  id: 'eas-project-unlinked' | 'eas-login' | 'eas-permission-denied' | 'eas-input-required';
   /** The `Why:` line, in this CLI's voice, about what the tool reported. */
   why: string;
   /** The `How:` line. */
@@ -102,6 +102,16 @@ export function unlinkedProjectSummary(account: string | null): string {
   return `this project is not linked to an EAS project — link it once with "${command}" (or --id <project-id> for one that exists)${note}`;
 }
 
+function loginRequired(): EasFailureCause {
+  return {
+    id: 'eas-login',
+    summary: `this machine is not signed in to an Expo account — "${PROGRAM_PREFIX} login", or EXPO_TOKEN for a machine with nobody at it`,
+    why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
+    how: `sign in with "${PROGRAM_PREFIX} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
+    command: `${PROGRAM_PREFIX} login`,
+  };
+}
+
 const SIGNATURES: readonly EasFailureSignature[] = [
   {
     // `EAS project not configured.` — printed with the two `eas init` forms that fix it, on
@@ -136,13 +146,7 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     // explicit signed-out wording or the login/token authentication instruction establishes this.
     pattern:
       /\bnot logged in\b|\bmust be logged in\b|\blog in with ["']?eas login\b[\s\S]{0,400}\bEXPO_TOKEN\b/i,
-    cause: () => ({
-      id: 'eas-login',
-      summary: `this machine is not signed in to an Expo account — "${PROGRAM_PREFIX} login", or EXPO_TOKEN for a machine with nobody at it`,
-      why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
-      how: `sign in with "${PROGRAM_PREFIX} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
-      command: `${PROGRAM_PREFIX} login`,
-    }),
+    cause: loginRequired,
   },
 ];
 
@@ -175,7 +179,48 @@ export type EasSaid =
   | { kind: 'runner-only'; runnerLine: string }
   | { kind: 'nothing' };
 
-export function readEasFailure(result: { stdout: string; stderr: string }): EasSaid {
+/** A complete stdout envelope from an EAS --json command. Older pins can print plain text. */
+export function readEasJsonError(stdout: string): {
+  code: string;
+  eligibleAccounts?: unknown;
+  accountName?: unknown;
+} | null {
+  try {
+    const error = JSON.parse(stdout)?.error;
+    return error && typeof error === 'object' && typeof error.code === 'string' ? error : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readEasFailure(result: { stdout: string; stderr: string }, code?: string): EasSaid {
+  switch (code) {
+    case 'EAS_LOGIN_REQUIRED':
+      return { kind: 'cause', cause: loginRequired() };
+    case 'EAS_PERMISSION_DENIED':
+      return {
+        kind: 'cause',
+        cause: {
+          id: 'eas-permission-denied',
+          why: 'EAS denied access to this operation.',
+          how: 'use an account or token with permission for this project, or ask the project owner to grant access.',
+          summary: 'EAS denied access — use an account or token with permission for this project',
+          command: null,
+        },
+      };
+    case 'EAS_INPUT_REQUIRED':
+      return {
+        kind: 'cause',
+        cause: {
+          id: 'eas-input-required',
+          why: 'EAS needs more input to complete this operation.',
+          how: 'supply the missing arguments to the EAS command or run it interactively to answer the prompt.',
+          summary:
+            'EAS needs more input — supply the missing arguments or run the EAS command interactively',
+          command: null,
+        },
+      };
+  }
   // FORCE_COLOR in the caller's environment reaches eas-cli, and chalk then colors every line.
   const stdout = stripVTControlCharacters(result.stdout);
   const stderr = stripVTControlCharacters(result.stderr);
