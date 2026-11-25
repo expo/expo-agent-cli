@@ -284,14 +284,18 @@ export function describeLookupFailure(
 /** Read the build:list failure contract. Older EAS CLIs report this refusal as prose. */
 function readUnlinkedProjectReason(stdout: string): string | null {
   let error:
-    | { code?: unknown; accountsWithProjectCreationPermission?: unknown; accountName?: unknown }
+    | {
+        errorCode?: unknown;
+        accountsWithProjectCreationPermission?: unknown;
+        accountName?: unknown;
+      }
     | undefined;
   try {
     error = JSON.parse(stdout)?.error;
   } catch {
     return null;
   }
-  if (error?.code !== 'EAS_PROJECT_NOT_CONFIGURED') {
+  if (error?.errorCode !== 'EAS_PROJECT_NOT_CONFIGURED') {
     return null;
   }
   const { accountsWithProjectCreationPermission, accountName } = error;

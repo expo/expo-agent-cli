@@ -45,7 +45,7 @@ describe(describeLookupFailure, () => {
     ({ accountsWithProjectCreationPermission, accountName, account }) => {
       const stdout = JSON.stringify({
         error: {
-          code: 'EAS_PROJECT_NOT_CONFIGURED',
+          errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
           accountsWithProjectCreationPermission,
           accountName,
         },
@@ -62,7 +62,7 @@ describe(describeLookupFailure, () => {
   it('lists the eligible choices when the owner is unspecified', () => {
     const stdout = JSON.stringify({
       error: {
-        code: 'EAS_PROJECT_NOT_CONFIGURED',
+        errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
         accountsWithProjectCreationPermission: ['one-org', 'two-orgs'],
       },
     });
@@ -79,7 +79,7 @@ describe(describeLookupFailure, () => {
     ({ accountsWithProjectCreationPermission, accountName }) => {
       const stdout = JSON.stringify({
         error: {
-          code: 'EAS_PROJECT_NOT_CONFIGURED',
+          errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
           accountsWithProjectCreationPermission,
           accountName,
         },
@@ -92,10 +92,13 @@ describe(describeLookupFailure, () => {
 
   it.each([
     JSON.stringify({
-      error: { code: 'SOMETHING_ELSE', accountsWithProjectCreationPermission: ['bob'] },
+      error: { errorCode: 'SOMETHING_ELSE', accountsWithProjectCreationPermission: ['bob'] },
     }),
     JSON.stringify({
-      error: { code: 'EAS_PROJECT_NOT_CONFIGURED', accountsWithProjectCreationPermission: [false] },
+      error: {
+        errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
+        accountsWithProjectCreationPermission: [false],
+      },
     }),
   ])('keeps the EAS diagnostic for an unrecognized failure payload %s', (stdout) => {
     const stderr = 'Build lookup failed.';
