@@ -119,7 +119,7 @@ export function formatPortMove({
 /**
  * The port a plan's dev server is given, decided before any step runs.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
+ * @ref llp/0037-dev-server-lock.rfc.md §A busy port.
  * `expo run:*` answers an unanswerable port question by skipping its dev server and
  * exiting 0, after it baked the busy port into the app [observed — live suite, 2026-10-05]. With a
  * free port picked here and passed as `--port`, the question is never asked.

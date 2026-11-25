@@ -58,7 +58,7 @@ import type { OutcomeExitCode } from '../exitCodes';
  * @returns 0 after a successful foreground run or plan, or the detached parent's result.
  */
 export async function devAsync(projectRoot: string, options: DevOptions): Promise<OutcomeExitCode> {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — line 1 of the detached
   // log, so a parent can tell which run wrote it.
   if (options.detachedChild) {
     Log.progress(detachedPidLine(process.pid));
@@ -70,14 +70,14 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     await assertEasProjectConfiguredAsync(projectRoot);
   }
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — before the probe, because
   // the child does the probe: this run's whole job is to start that child and report on it. A
   // detached run reads the lock in devDetachAsync.
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
     return await devDetachAsync(projectRoot, options);
   }
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port — one dev server per project.
   // The lock is read once, before the project is probed. A run stops here on a live one and spends
   // nothing below this line, the last-request record included: a request the lock refused never
   // replaces the one that started the running server. A plan goes on, because it prints the rule

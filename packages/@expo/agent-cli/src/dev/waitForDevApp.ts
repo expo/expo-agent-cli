@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization — ready includes the app.
 import type { DevServerLockInfo } from '../devLock';
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import type { NativePlatform } from '../plan/types';

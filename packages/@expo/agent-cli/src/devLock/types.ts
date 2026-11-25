@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 
 /**
  * What the dev-server lock answers with: where the dev server of this project listens, and who
@@ -37,7 +37,7 @@ export interface DevServerLockInfo {
   /**
    * What the run that holds the lock does now.
    *
-   * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the phase table.
+   * @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the phase table.
    */
   phase: DevServerLockPhase;
 }

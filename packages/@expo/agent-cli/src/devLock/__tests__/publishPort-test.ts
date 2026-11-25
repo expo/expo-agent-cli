@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // When the lock is published: at the spawn when the arguments name a port, else when the dev
 // server reports one. Against a real lock address.
 
@@ -200,7 +200,7 @@ describe(publishDevServerPortAsync, () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the record a SIGKILL
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — the record a SIGKILL
   // leaves names the listener also when the lookup answers before the lock is taken. A named port
   // is the e2e "after a SIGKILL of a foreground dev" (`dev` always names one).
   it(`records the pid listening on the reported port when the arguments name no port`, async () => {
@@ -258,7 +258,7 @@ describe(publishDevServerPortAsync, () => {
     running = false;
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a port retry answers on
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — a port retry answers on
   // the run's lock, with no gap; a port of another project releases it.
   it.each([
     ['answers on the lock the run holds', false, { port: 8311, phase: 'serving' }],

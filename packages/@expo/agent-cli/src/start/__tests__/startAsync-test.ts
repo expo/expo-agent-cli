@@ -330,7 +330,7 @@ describe(runDevServerAsync, () => {
     );
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
   describe('the dev server lock', () => {
     it(`should publish the dev server alongside the subprocess`, async () => {
       const end = mockLongRunningStart();

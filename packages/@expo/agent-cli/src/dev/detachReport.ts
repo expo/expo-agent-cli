@@ -49,7 +49,7 @@ export interface DevDetachResultJson {
    * step, still compiles, and `serving` after. While it builds, {@link url} is where the dev server
    * will listen, not one that answers.
    *
-   * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   * @ref llp/0037-dev-server-lock.rfc.md §Daemonization
    */
   phase: 'building' | 'serving';
   /** The port the child planned or retried away from, and the port its lock names. */
@@ -72,7 +72,7 @@ export interface DevDetachResultJson {
    * The app that `--wait-ready` waited for, or null for a run with no app wait: no `--wait-ready`,
    * or a run that opens no app.
    *
-   * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   * @ref llp/0037-dev-server-lock.rfc.md §Daemonization
    */
   app: DevAppReport | null;
   /** How long the whole thing took, in milliseconds. */
@@ -183,7 +183,7 @@ function plannedPortMove(log: DetachedLogRead | null, lock: DevServerLockInfo): 
 
 function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): void {
   const label = (name: string) => name.padEnd(13);
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
   const where =
     report.phase === 'building'
       ? ' · not listening yet — the plan is still building'

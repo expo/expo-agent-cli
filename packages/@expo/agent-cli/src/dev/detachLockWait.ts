@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { PORT_WATCH_TIMEOUT_MS } from '../devLock/port';
 import { isProcessAlive } from './processLiveness';
@@ -59,7 +59,7 @@ type DetachedStartup =
 /**
  * Wait for this project's lock, past a run that builds.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — without --wait-ready a run
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — without --wait-ready a run
  * that builds is reported at once (`building`). With it the wait goes on, and a run still building
  * at the deadline is exit 22. A build that ended differs from a run with no observed lock.
  */

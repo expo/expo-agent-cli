@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // Which port the dev server actually listens on.
 //
 // The wrapper cannot know: `expo start` walks past a taken port, and `expo run:ios` starts a dev

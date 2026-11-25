@@ -371,7 +371,7 @@ describe(chooseNextAction, () => {
       command: `${PROGRAM_PREFIX} smoke --ios`,
       why: expect.stringContaining('instead of starting a second server'),
     },
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run with no dev server
+    // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — a run with no dev server
     // outranks the device steps, whose `dev` its lock would refuse.
     {
       name: 'shows the build of a run that builds before it serves',

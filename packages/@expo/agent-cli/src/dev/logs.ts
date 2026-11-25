@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 import { printCommandHelp } from '../help/format';
 import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';

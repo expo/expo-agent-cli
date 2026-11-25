@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // The lock roundtrip, against the real socket implementation of the host platform. `node:net` is
 // not mockable in any way that would still prove the property under test — that liveness is the
 // connection — so these tests bind a real address in a real temporary project.
@@ -104,7 +104,7 @@ describe('dev server lock', () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the trace a SIGKILL leaves.
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — the trace a SIGKILL leaves.
   describe('the run record', () => {
     async function heldAsync(port: number) {
       const projectRoot = makeProjectRoot();

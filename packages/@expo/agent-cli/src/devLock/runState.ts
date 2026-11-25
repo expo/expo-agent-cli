@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the transition table.
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the transition table.
 // What the run's lock says after each event. Pure: the writer (`RunLock`) does the socket work.
 
 import type { ResolvedDevServerPort } from './port';

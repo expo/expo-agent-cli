@@ -71,7 +71,7 @@ export async function startAsync(projectRoot: string, options: StartOptions): Pr
  * The delay keeps the dependency scan away from the first bundle, and the timer is
  * cancelled when the dev server exits first, so a failed start syncs nothing.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the dev-server lock of
+ * @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the dev-server lock of
  * `src/devLock/` is published here, because this is the one place that knows a dev server is
  * starting and can wait for the port it ends up on. The caller owns `lock` and ends it.
  *
@@ -143,7 +143,7 @@ export async function runDevServerAsync(
       onDevServer?.(server);
     }
   };
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a step that builds says
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — a step that builds says
   // `serving` once this project's Metro answers `/status`, and a step that opens the app opens it
   // then. The wait reads the latest port each time, so a port Metro reports later counts. Plain
   // `start` neither builds nor opens, and sends no probe.

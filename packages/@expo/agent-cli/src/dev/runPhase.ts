@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // What each phase of this project's running dev run means to a command that would start another.
 // The refusal of a second `dev`, the plan's reason, follow-up and port row, `status` and
 // `dev:stop --release` take their words and their next command from this table. The detach report

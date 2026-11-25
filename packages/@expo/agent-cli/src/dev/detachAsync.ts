@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 import { spawn } from 'child_process';
 import fs from 'fs';
@@ -116,7 +116,7 @@ export interface DevDetachOptions {
 /**
  * What a detached run does beside this project's running dev server.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a local `dev` stops on it
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — a local `dev` stops on it
  * as a foreground `dev` does, `dev --eas` opens its session on it and records the request
  * (llp/0035 §Preserved sessions), and `smoke` reuses it.
  */
@@ -527,7 +527,7 @@ async function followForeignLockAsync(
  * with no loaded app; the dev server keeps running. A dev server that dies during the wait ends it
  * with `serverGoneAsync`.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — ready includes the app.
  */
 async function appWaitAsync(
   context: DetachContext,
@@ -608,7 +608,7 @@ async function checkSpawnedReadinessAsync(
     signal: child.signal,
   });
   lock = checked.lock;
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exited during
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — Metro exited during
   // the wait, and the child still binds its session: there is no dev server to call not ready.
   if (lock.phase === 'finishing') throw lostDevServerError(lock, logFile);
   const { result } = checked;

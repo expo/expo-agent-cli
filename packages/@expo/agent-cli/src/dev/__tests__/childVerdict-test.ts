@@ -216,7 +216,7 @@ describe('parseDetachedChildPid', () => {
 
 // @ref llp/0021-honest-reports.rfc.md §The rules — F140. Which dev-server
 // steps carry work that can end the process *after* the bundler has answered.
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port —
 // the `--detach` parent computes the move from this row and the lock.
 describe(parseDetachedChildPort, () => {
   function portLog(devServerPort: StartPlan['devServerPort']): string[] {

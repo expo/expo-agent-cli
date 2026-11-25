@@ -190,7 +190,7 @@ export function childOpensPlatform(rawLines: readonly string[]): boolean {
 /**
  * Line 1 of a detached child's log, printed by `devAsync` before anything else.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — it names the run that wrote
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — it names the run that wrote
  * the log. Only line 1 is read, so output written after it cannot fake it.
  */
 export function detachedPidLine(pid: number): string {

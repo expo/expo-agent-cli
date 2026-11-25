@@ -123,7 +123,7 @@ describe(withPortArg, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port —
 // every step that serves or compiles the port in gets the one the plan picked.
 describe(withDevServerPort, () => {
   it(`should put the port on run:* and start, and leave the rest alone`, () => {

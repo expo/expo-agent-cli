@@ -307,7 +307,7 @@ function servingLock(lock: DevServerLockInfo | null): DevServerLockInfo | null {
  * The next step beside a run that builds or finishes, from its row of the phase table; null for no
  * run or one that serves.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run with no dev server
+ * @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — a run with no dev server
  * outranks every device step: each of them runs `dev`, which this run's lock refuses.
  */
 function unservedRunNext(

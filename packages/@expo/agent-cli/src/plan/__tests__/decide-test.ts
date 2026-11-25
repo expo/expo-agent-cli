@@ -825,7 +825,7 @@ describe(decideStartPlan, () => {
       ],
     ];
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+    // @ref llp/0037-dev-server-lock.rfc.md §A busy port
     // Every plan with a step has a step that serves, which is what lets a live dev-server lock stop
     // a run before the plan is resolved.
     it.each(cases)(`should describe every step of the %s plan`, (rule, state, options) => {

@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — every cell of the table.
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — every cell of the table.
 
 import {
   nextRunState,

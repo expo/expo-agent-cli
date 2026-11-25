@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app
 //
 // The two stop commands, through the published bin. What is worth pinning at this tier is what a
@@ -584,7 +584,7 @@ async function startOrphanedDevServerAsync(
   }
 }
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 describe.skipIf(process.platform === 'win32')('after a SIGKILL of a foreground dev', () => {
   it.each([
     ['with no flags', []],

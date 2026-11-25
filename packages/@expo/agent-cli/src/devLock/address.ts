@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // Where the dev-server lock of a project listens.
 //
 // The address is the entire agreement between the process that holds the lock and the process

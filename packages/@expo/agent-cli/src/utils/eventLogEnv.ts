@@ -15,7 +15,7 @@ export const DETACHED_EVENT_DEBUG_ENV = '__EXPO_AGENT_CLI_EVENT_DEBUG';
  * `2g` gives children its IPC socket, which closes when this process exits, and the child's later
  * events are lost. So the IPC variables are removed. A `LOG_EVENTS` file is given again (2g removed
  * it from `process.env` and appends to it), and otherwise the child opens its own `2g` session
- * (@ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization).
+ * (@ref llp/0037-dev-server-lock.rfc.md §Daemonization).
  *
  * The three names are internal to `2g` 1.0.x (`INTERNAL_IPC_ENV` and its neighbours), which has no
  * public way to detach a child from the parent's log yet.

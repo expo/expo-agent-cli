@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // Where a run's lock points: resolve a step's port, publish it on the run's lock, follow Metro's report.
 
 import { lockAddressOrEmpty } from './address';
@@ -100,7 +100,7 @@ export async function publishDevServerPortAsync(
  * Note in the run record which process listens on the port the dev server reported. A few tries:
  * the report can arrive a moment before the listen is visible to `lsof`.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization
  */
 async function noteServerPidAsync(
   port: number,

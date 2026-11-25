@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port
 // One dev server per project. A foreground `dev` whose plan serves stops on this project's live
 // lock: a second server could not hold it, so `status` and `dev:stop` could not see it.
 

@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // A `dev` run: its steps under one lock, the lock's take before a build step, and the stop
 // between steps on a signal.
 
@@ -29,7 +29,7 @@ export interface RunSteps {
  * The lock is taken before the first step, with phase `building`, when a step runs before the
  * dev-server step; otherwise the dev-server step takes it.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — a signal ends the step it
  * reaches, and the run starts no later step.
  */
 export async function withRunAsync<T>(

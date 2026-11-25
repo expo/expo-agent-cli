@@ -290,7 +290,7 @@ Where the fact is read:
 - The `runtime` phase of `smoke` (§The device that can open the app).
 - The proof of a reload by a new JavaScript context (§What proves a reload).
 
-- The app wait of `dev --detach --wait-ready` ([[0004-smart-start-and-project-state]] §Daemonization). It uses the poll loop of the `navigate` attach wait, and `--json` has `app.loaded`.
+- The app wait of `dev --detach --wait-ready` ([[0037-dev-server-lock]] §Daemonization). It uses the poll loop of the `navigate` attach wait, and `--json` has `app.loaded`.
 
 `status` does not read the fact: it makes no claim about the bundle.
 
@@ -771,7 +771,7 @@ When no dev server answered after a start that built, the first follow-up is `np
 
 #### A refused connection is not an answer
 
-The readiness wait asks the dev server's `/status` until the budget ends, as long as nothing is listening. A development build's start publishes the dev-server lock at the start of its step, and the port opens only when the compile ends ([[0004-smart-start-and-project-state]] §Daemonization). One request would end the wait in milliseconds.
+The readiness wait asks the dev server's `/status` until the budget ends, as long as nothing is listening. A development build's start publishes the dev-server lock at the start of its step, and the port opens only when the compile ends ([[0037-dev-server-lock]] §Daemonization). One request would end the wait in milliseconds.
 
 - **Only a connection failure retries.** A refused, reset or unreachable connection is asked again, with a growing gap of at most 1 s.
 - **An answer ends the wait.** A non-2xx status, a body that is not `packager-status:running`, a TLS failure: each is returned at once. `ENOTFOUND` is not retried, so a mistyped host does not become a 30-minute hang.

@@ -222,7 +222,7 @@ A reap reports device cleanup only (`devServerCleanup: 'not-checked'`). A delete
 ## How `dev` uses it
 
 - The start-plan resolver serves `dev`, `smoke` and `status`; only `dev` acquires. For a native platform without `--eas`, a draft binds after the `web`/`none` exit and before every other exit, so an `expo-go`, `--no-open` or EAS-build run still binds a device. The order of the other exits is in the resolver.
-- Acquisition runs only for a run that passed the dev-server lock. Beside this project's running server, a local `dev` (also `--detach`) stops on the lock before it binds a device ([[0004-smart-start-and-project-state]] §A busy port). A named `--port` that cannot bind refuses before acquisition.
+- Acquisition runs only for a run that passed the dev-server lock. Beside this project's running server, a local `dev` (also `--detach`) stops on the lock before it binds a device ([[0037-dev-server-lock]] §A busy port). A named `--port` that cannot bind refuses before acquisition.
 - A building draft acquires after the `--plan` return and after the refusals (the EAS route and project checks), so no simulator is made for a run that then refuses.
 - The probe answers `missing` without asking on a device the run just created or spawned, because a fresh device never has the app. On iOS a `Shutdown` simulator's apps are read off its disk.
 - Every `run` and `install` step of the plan is pinned to the bound device (`--device <udid or serial>`, replacing any `--device` there). The local open uses the same device and does not select or boot again.

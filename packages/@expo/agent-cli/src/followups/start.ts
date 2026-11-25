@@ -316,7 +316,7 @@ export function buildStartPlanFollowUps(
   /** The run's device is on EAS, by `--eas` or the config, so the gate reads the session. */
   { eas = false }: { eas?: boolean } = {}
 ): FollowUp[] {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — a plan that stops on this
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port — a plan that stops on this
   // project's running dev server has no steps, so the one follow-up is the one the run's error
   // suggests: the server when it answers, `status` until it does, never the command that would
   // stop in the same place. The smoke example needs a device platform, which `--web` is not: a web

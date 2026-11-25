@@ -650,7 +650,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the session cleanup
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the session cleanup
   // needs no lock, so a dev:stop during it finds no dev server to signal.
   it('cleans up its EAS session when the dev server exits normally, holding no lock meanwhile', async () => {
     const projectRoot = await setupAsync('go-app');
@@ -870,7 +870,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a `finishing` lock has
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — a `finishing` lock has
   // no dev server, so the detach that reads it reports none.
   it.skipIf(process.platform === 'win32')(
     'reports no dev server when the run it started lost Metro before the lock was read',
@@ -910,7 +910,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
   it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
     'reports a detached run that builds on EAS as building, follows it, and a plain dev:stop stops it before Metro (%s)',
     async (platform) => {
@@ -995,7 +995,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
   it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
     'reports a followed build that fails, and starts no second build (%s)',
     async (platform) => {
@@ -1153,7 +1153,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — ready includes the app.
   it('--wait-ready waits for the app of the session', async () => {
     const projectRoot = await setupAsync('go-app');
     try {

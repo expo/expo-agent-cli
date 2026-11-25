@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // "Is that process still there?", asked without touching it.
 //
 // The one question `dev:stop` has to answer to know whether its own signal worked. Everything else

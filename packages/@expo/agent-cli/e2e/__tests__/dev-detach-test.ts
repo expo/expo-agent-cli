@@ -1,5 +1,5 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 //
 // `@expo/agent-cli dev --detach` through the published bin. Everything worth pinning here is what a unit
 // test cannot see: the parent process **returns** while a dev server it started is still running,
@@ -168,7 +168,7 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
   // `@expo/cli` 58 reports its port only through `2g`. The detached run owns a `2g` session that
   // outlives this command, and the command returns once that report reaches the lock, not after
   // the `PORT_WATCH_TIMEOUT_MS` fallback.
@@ -244,7 +244,7 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
   // `bare-app`, whose plan is the single step `expo run:ios` (`plan-test.ts`), and a stub that
   // stays alive without ever serving, which is what a compiler looks like from here. The run's lock
   // says `building`, so the detach reports the run at once, with the port the dev server will take.
@@ -303,7 +303,7 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port
   // can complete — friction run 5, F48-4. The retry happens in the child, whose stderr goes to a
   // log file, so the move was announced on a stream nobody was watching: the parent printed the
   // port it landed on and never said it was not the port that was asked for.
@@ -358,7 +358,7 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port.
   // Another project's Metro held `*:8081`, and `expo run:ios` with no terminal skipped its
   // dev server, deep-linked the app to that Metro, and exited 0, so the detached run failed with no
   // lock [observed — live suite, 2026-10-05]. The port is picked before the plan runs and passed
@@ -527,7 +527,7 @@ describe('@expo/agent-cli dev --detach', () => {
       }
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a plain detach of a run
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — a plain detach of a run
     // that builds reports at once, so its port is the plan's, not the one a busy-port retry takes
     // later.
     it('reports a building run at once, then publishes the port the retry took', async () => {
@@ -635,7 +635,7 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port
   // A second foreground server could not hold the lock, so `status` and `dev:stop` could not see it.
   it('stops a foreground dev, and lists no steps under --plan, while the server runs', async () => {
     const projectRoot = await setupFixtureAsync('go-app');

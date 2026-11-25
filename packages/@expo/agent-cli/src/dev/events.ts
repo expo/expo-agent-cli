@@ -9,7 +9,7 @@ declare module '2g' {
       offeredPort: number | null;
       port: number | null;
     };
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
     'dev:detach_spawn': { logFile: string; argv: string[] };
     // `ownsTarget` is false for a lock this project holds on a port other than the one `--port`
     // named: the lock was read and deliberately not acted on (llp/0021 §The rules).

@@ -164,7 +164,7 @@ describe('@expo/agent-cli dev', () => {
       expect(run!.isTTY).toBe(false);
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `expo run:*` builds before
+    // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — `expo run:*` builds before
     // it serves, so its lock says `building` until Metro answers /status for this project. Another
     // project's dev server that answers on the port during the build and then leaves does not keep
     // the lock `building` after this project's Metro serves there.
@@ -222,7 +222,7 @@ describe('@expo/agent-cli dev', () => {
       }
     );
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a signal ends the step it
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — a signal ends the step it
     // reaches, and the run starts no later step.
     it.skipIf(process.platform === 'win32').each(['ios', 'android'] as const)(
       'stops after the %s prebuild that SIGTERM ended, and starts no later step',
@@ -253,7 +253,7 @@ describe('@expo/agent-cli dev', () => {
       }
     );
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `serving` comes from
+    // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — `serving` comes from
     // /status alone, so a port report the run cannot read does not hold the lock at `building`.
     it.each(['ios', 'android'] as const)(
       'says serving once Metro answers after run:%s, with no port report',
@@ -1162,7 +1162,7 @@ describe('@expo/agent-cli dev', () => {
       expect(invocationArgs(projectRoot)).toEqual([['start', '--go', ...PORT_ARGS]]);
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+    // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
     it('publishes the dev server it started on the project lock', async () => {
       // The dev-server step of a plan is the same wrapper `@expo/agent-cli start` uses, so it takes the
       // same lock — a `dev` run has to be findable exactly like a `start` run.
@@ -1357,9 +1357,9 @@ describe('@expo/agent-cli dev', () => {
       ]);
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — F125.
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — F125.
     //
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the install step
+    // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the install step
     // serves nothing (`--no-bundler`), so the run's lock says `building` until the step that serves.
     it('says building on the lock while the install runs, and serving when it serves', async () => {
       const { projectRoot, env } = await setupInstallAsync();
@@ -1400,7 +1400,7 @@ describe('@expo/agent-cli dev', () => {
       }
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the run's lock says
+    // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the run's lock says
     // `building` through the install and `serving` once the dev-server step answers.
     it('reports a detached install plan as serving once the app is on the device', async () => {
       const { projectRoot, env } = await setupInstallAsync();

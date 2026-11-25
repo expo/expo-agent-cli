@@ -330,7 +330,7 @@ export interface DevServerStatus {
    * outlived it, the listener is the pid that run saw, and its `/status` names this project.
    * Nothing owns it. Beside a session that run started, `next` is `dev:stop --eas`.
    *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   * @see llp/0037-dev-server-lock.rfc.md §Daemonization
    */
   ownerEnded?: true;
   /**

@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // Argument resolution for `@expo/agent-cli dev:stop`. Pure: argv in, options out, `CommandError` for
 // anything a user can get wrong.
 

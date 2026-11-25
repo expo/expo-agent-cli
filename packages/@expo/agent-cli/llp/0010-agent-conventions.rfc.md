@@ -160,7 +160,7 @@ Four layers, in priority order:
 3. **Classify the output.** Match the captured output against the registry. The patterns that matter most: eas-cli's `Either log in with … EXPO_TOKEN`, `@expo/cli`'s `is in non-interactive mode`, and the `in non-interactive mode` fragment that eas-cli's prompts share.
 4. **Generic prompt fallback.** Only for a captured child, and only when the caller opts in. If the child writes nothing for `AGENT_CLI_PROMPT_TIMEOUT_MS` (default 20 s), _and_ its last non-empty line looks like a prompt, the CLI kills the child. The line is quoted as untrusted text.
 
-A busy port, and this project's own running dev server, are recognised before the classifier runs. Neither is needs-human: no account, permission or click is involved, so the caller or this CLI can recover ([[0004-smart-start-and-project-state]] §A busy port). Neither is a negative signature, so `expo-prompt` still catches every other prompt.
+A busy port, and this project's own running dev server, are recognised before the classifier runs. Neither is needs-human: no account, permission or click is involved, so the caller or this CLI can recover ([[0037-dev-server-lock]] §A busy port). Neither is a negative signature, so `expo-prompt` still catches every other prompt.
 
 A failed `dev` plan step raises an error. The plan object prints only when every step worked.
 

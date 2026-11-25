@@ -7,7 +7,7 @@ declare module '2g' {
      * The dev server of this project is published at `address`: connecting to it answers with
      * `url`. Emitted once the dev server has reported the port it actually listens on.
      *
-     * @see llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+     * @see llp/0037-dev-server-lock.rfc.md §Dev-server lock
      */
     'cli:dev_lock_acquired': {
       address: string;
@@ -40,7 +40,7 @@ declare module '2g' {
     /**
      * A run's lock got an event that its phase has no transition for, and changed nothing.
      *
-     * @see llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+     * @see llp/0037-dev-server-lock.rfc.md §Dev-server lock
      */
     'cli:dev_lock_illegal_transition': { phase: string; event: string };
     /** The lock was released, so the address answers nothing again. */

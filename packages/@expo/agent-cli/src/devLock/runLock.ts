@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the one writer of a run's lock.
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the one writer of a run's lock.
 
 import * as Log from '../log';
 import { PROGRAM_NAME } from '../programName';
@@ -97,7 +97,7 @@ export class RunLock {
 /**
  * Run `run` with a lock of its own, and release that lock when `run` settles.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the lock belongs to the
+ * @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the lock belongs to the
  * run, from its first step to its end.
  */
 export async function withRunLockAsync<T>(

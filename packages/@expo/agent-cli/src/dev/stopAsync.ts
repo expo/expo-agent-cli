@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
 // Stop this project's dev server.
 //
@@ -383,7 +383,7 @@ async function stopLockedDevServerAsync(
   // The two facts that are about the thing this command signalled. The port is not one of them.
   if (outcome.processGone && outcome.lockGone) {
     base.stopped = true;
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a stop that ends the
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — a stop that ends the
     // holder without its cleanup (Windows `taskkill /F`) leaves its record; this stop ends it.
     clearDevRunRecord(lock.projectRoot, lock.pid);
     return { report: base, finishing: false };
@@ -447,7 +447,7 @@ async function stopUnlockedDevServerAsync(
   elsewhereLock: DevServerLockInfo | null = null
 ): Promise<DevStopResultJson> {
   const port = options.port ?? null;
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
   const untracked = await claimEndedRunAsync(projectRoot);
   if (untracked != null && servesPortOf(untracked, port)) {
     return {

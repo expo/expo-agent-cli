@@ -76,7 +76,7 @@ type StepResult = {
 /**
  * Execute the announced plan's argv under one run scope. Report ordinary failures after it closes.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+ * @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
  */
 export async function executeDevPlanAsync(
   projectRoot: string,

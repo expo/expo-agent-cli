@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port
 // The dev server port of a `dev` plan: picked before the plan is printed, and set on every step
 // that serves.
 
@@ -44,7 +44,7 @@ export async function planDevServerPortAsync(
   options: DevOptions,
   claim: UntrackedPortClaim
 ): Promise<StartPlan> {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port —
   // the port is picked here, before the plan is printed, and set on every step that
   // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
   // holds the port, and exits 0 [observed — live suite, 2026-10-05].
@@ -107,7 +107,7 @@ export async function findUntrackedDevServerAsync(
   lock: DevServerLockInfo | null,
   options: DevOptions
 ): Promise<UntrackedDevServerFinding> {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port
   if (lock) return { server: null, claim: NO_CLAIM };
   if (options.mode === 'plan') {
     const verdict = await judgeEndedRunAsync(projectRoot);
@@ -146,7 +146,7 @@ export async function replaceUntrackedDevServerAsync(
   { server }: UntrackedDevServerFinding,
   options: DevOptions
 ): Promise<StartPlan> {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port
   if (server == null || !plan.steps.some(isDevServerStep)) return plan;
   // Picked again over the run's own plan: a run adds no reasons, and the port is set on every step
   // that serves. A server was found, so no lock answered.
@@ -253,7 +253,7 @@ export async function portDemandedError(
  * Warn on stderr, including in JSON mode, when the plan or retry picks a different port.
  *
  * @param expected The port to suggest requiring, or null if it is unknown.
- * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+ * @ref llp/0037-dev-server-lock.rfc.md §A busy port
  */
 export function warnPortMove(
   move: Parameters<typeof formatPortMove>[0],

@@ -905,7 +905,7 @@ async function raceWithTimeoutAsync<T>(work: Promise<T>, timeoutMs: number): Pro
  * and the rule `dev:stop` stops it by (`src/dev/untrackedDevServer.ts`) names it on this port. The
  * rule only reads, and its reads run only when a dead run's record is there.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization
  */
 async function leftByKilledRunAsync(
   projectRoot: string,

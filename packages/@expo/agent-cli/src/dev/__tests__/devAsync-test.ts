@@ -337,7 +337,7 @@ describe(devAsync, () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — the dev server a killed run
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port — the dev server a killed run
   // left is replaced, not joined by a second one on the next port.
   describe('the dev server a killed run left', () => {
     // The e2e "after a SIGKILL of a foreground dev" proves the run's stop; a plan stops nothing.
@@ -429,7 +429,7 @@ describe(devAsync, () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port
   // One dev server per project. A run stops on the lock alone, before the project is probed and the
   // plan is resolved, so nothing below the lock read is spent on it: no probe, no resolver, no
   // toolchain, no EAS, no device.
@@ -864,7 +864,7 @@ describe('EAS session lifecycle of the dev-server step', () => {
     }
   );
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the run lets go of its
+  // @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the run lets go of its
   // lock when its open returns, so a retry after the open started would serve without one.
   it(`makes no busy-port retry after its EAS open started`, async () => {
     vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({

@@ -347,7 +347,7 @@ export function lostDevServerError(lock: DevServerLockInfo, logFile: string): Co
 /**
  * The error for a detached run whose lock still says `building` when the wait ends.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — exit 22: the run is alive,
  * and the same command follows it.
  */
 export function stillBuildingOnLockError(
@@ -374,7 +374,7 @@ export function stillBuildingOnLockError(
 /**
  * The error for a detached run that held a `building` lock and ended before it served.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the run is gone, so the
+ * @ref llp/0037-dev-server-lock.rfc.md §Daemonization — the run is gone, so the
  * build failed or was stopped: the log says which.
  */
 export function buildEndedError(lock: DevServerLockInfo, exitCode: number | null): CommandError {
@@ -437,7 +437,7 @@ export function notReadyError(
           ? `That answer came from a dev server serving ${result.reportedProjectRoot}, which is not this project — so the wait was watching somebody else's bundler and this project's may well be ready.`
           : 'The dev server is still running — this is about the wait, not about the server.'
       }`,
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+      // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
       `Note: this CLI reaches the dev server at ${lock.url}, over IPv4. A port number is not one listener — 127.0.0.1:${lock.port} and [::1]:${lock.port} are different sockets, so another process can be answering this port on the other stack while this project's dev server is fine, and neither will have reported a collision. "lsof -nP -iTCP:${lock.port} -sTCP:LISTEN" lists both.`,
       // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
       // The machine-readable follow-up must run without a platform flag.

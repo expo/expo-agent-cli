@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock
 // Holding the dev-server lock.
 //
 // The lock is a listening socket, not a file, so holding it *is* being alive. A reader learns

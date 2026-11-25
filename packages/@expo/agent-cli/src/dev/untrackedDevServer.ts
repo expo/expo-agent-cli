@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // This project's dev server that a killed run left: a SIGKILL ends the run before its cleanup, so
 // its Metro keeps serving with no lock. `dev:stop` and `dev` decide it by one rule.
 

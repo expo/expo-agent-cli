@@ -189,7 +189,7 @@ describe(devStopAsync, () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — friction run 5,
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — friction run 5,
   // F48-10. The pid answers "did my signal work"; the port answers "is that number in use", and
   // only the first is what this command was asked about.
   describe('the pid is the evidence, and the port is not', () => {
@@ -212,7 +212,7 @@ describe(devStopAsync, () => {
       expect(printed(console.error)).toContain('SIGKILL');
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — on Windows the signal is
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — on Windows the signal is
     // `taskkill /F`, which skips the holder's own cleanup, so the stop ends the record itself.
     it(`should end the record of the run it stopped through its lock`, async () => {
       const held = lock();
@@ -361,7 +361,7 @@ describe(devStopAsync, () => {
     });
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — the e2e "after a SIGKILL of
+  // @ref llp/0037-dev-server-lock.rfc.md §Daemonization — the e2e "after a SIGKILL of
   // a foreground dev" proves the stop with no flags; these are the cases e2e cannot set up.
   describe('the dev server a killed run left', () => {
     beforeEach(() => {
@@ -538,7 +538,7 @@ describe(devStopAsync, () => {
       expect(JSON.parse(printed()).detail).toContain('would not name');
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — friction run 5,
+    // @ref llp/0037-dev-server-lock.rfc.md §A busy port — friction run 5,
     // F48-1. A refusal that answers "run it again with --force" to a caller who passed --force is
     // a next action that cannot work, and it hides the only thing worth knowing: which of the two
     // proofs did not hold.

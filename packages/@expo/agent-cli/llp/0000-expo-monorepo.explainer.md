@@ -73,6 +73,7 @@ Development sessions and device ownership:
 - [[0026-dev-owns-the-open]]: opening the app after starting the development server.
 - [[0027-everything-on-eas]]: cloud builds, tunnels, simulator sessions, and cleanup.
 - [[0035-one-device-per-worktree]]: local and EAS device bindings, leases, and lifecycle.
+- [[0037-dev-server-lock]]: one dev server per project, detached `dev`, and a busy port.
 
 How every command behaves:
 

@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port
 
 import { createServer, type Server } from 'http';
 import type { AddressInfo } from 'net';
@@ -107,7 +107,7 @@ describe(devServerRunningError, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — one row per phase, read by
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — one row per phase, read by
 // the refusal, the plan's reason, its follow-up and `status` alike.
 describe('the phase table', () => {
   it.each([

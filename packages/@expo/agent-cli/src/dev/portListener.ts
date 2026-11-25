@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // Who is listening on a TCP port, asked of the operating system.
 //
 // Only `dev:stop` needs this, and only for the case the dev-server lock cannot answer: a port that

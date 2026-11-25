@@ -173,7 +173,7 @@ describe(findFreePortAsync, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port —
 // the sentence a person reads when the dev server is not on the port it wanted. It
 // carries no protocol: a `--detach` parent computes the move from the plan and the lock.
 describe(formatPortMove, () => {
@@ -198,7 +198,7 @@ describe(formatPortMove, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// @ref llp/0037-dev-server-lock.rfc.md §A busy port —
 // the port the plan's steps are given, picked before any of them runs.
 describe(resolvePlannedPortAsync, () => {
   it(`keeps the preferred port when it is free`, async () => {

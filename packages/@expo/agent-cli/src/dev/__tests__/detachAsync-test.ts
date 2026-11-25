@@ -122,7 +122,7 @@ it.each(['ios', 'android'] as const)(
   }
 );
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exits during the
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — Metro exits during the
 // wait and the run still binds its session: the detach reports no dev server, and names the stop.
 it.each([false, true])(
   'stops --wait-ready on a lock that turns finishing (reusing=%s)',

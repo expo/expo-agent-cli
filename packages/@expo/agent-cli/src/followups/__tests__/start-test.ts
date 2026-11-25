@@ -179,7 +179,7 @@ describe(buildStartFollowUps, () => {
 });
 
 describe(buildStartPlanFollowUps, () => {
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // @ref llp/0037-dev-server-lock.rfc.md §A busy port
   // The same two the run's error suggests: the server when it answers, `status` until it does. A
   // `--web` caller gets the project's default device platform by the rule the run's error uses: a
   // single checked-in native folder, whatever the host.

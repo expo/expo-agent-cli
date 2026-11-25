@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 //
 // The two halves of detaching that a unit test can see: the command line the child is started
 // with, and the log file the output goes to. The spawn itself — `detached`, `unref`, the file
@@ -252,7 +252,7 @@ describe(resolveDevLogsOptions, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — friction run 5,
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization — friction run 5,
 // F48-10. `--wait-ready` gives up for two different reasons, and the reader cannot tell them apart
 // from the outside: a bundler that is still working, and another process answering this port.
 describe(notReadyError, () => {

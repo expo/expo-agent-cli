@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the writer, against a real
+// @ref llp/0037-dev-server-lock.rfc.md §Dev-server lock — the writer, against a real
 // lock address and a real event log.
 
 import fs from 'fs';

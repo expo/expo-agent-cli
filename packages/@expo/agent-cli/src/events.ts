@@ -363,9 +363,9 @@ declare module '2g' {
     /**
      * One `@expo/agent-cli dev:stop` run: whether a dev server was stopped, whose it was, and why not.
      *
-     * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+     * @see llp/0037-dev-server-lock.rfc.md §Daemonization
      */
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
     'cli:dev_detach': {
       url: string;
       port: number;
@@ -393,7 +393,7 @@ declare module '2g' {
        */
       tunnelUrl: string | null;
     };
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    // @ref llp/0037-dev-server-lock.rfc.md §Daemonization
     'cli:dev_logs': {
       /** The file that was read, or null when the project has none. */
       logFile: string | null;

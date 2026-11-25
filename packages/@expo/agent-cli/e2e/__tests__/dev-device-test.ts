@@ -159,7 +159,7 @@ describe('@expo/agent-cli dev, with devices on', () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — ready includes the app.
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization — ready includes the app.
 describe('@expo/agent-cli dev --detach --wait-ready, with devices on', () => {
   const DEV_CLIENT_ID = 'dev.e2e.devclient';
 

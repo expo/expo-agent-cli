@@ -129,7 +129,7 @@ export interface DevOptions {
   /**
    * Run the dev server in a process of its own and give the terminal back (`--detach`).
    *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   * @see llp/0037-dev-server-lock.rfc.md §Daemonization
    */
   detach: boolean;
   /** Under `--detach`, also wait for the bundler to answer before reporting (`--wait-ready`). */

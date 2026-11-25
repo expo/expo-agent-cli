@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // The trace a lock holder leaves when it dies without its cleanup.
 //
 // The lock is a socket so that nothing claims a process is alive after it is gone. This file

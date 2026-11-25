@@ -1,5 +1,5 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
+// @ref llp/0037-dev-server-lock.rfc.md §Daemonization
 // Where a detached dev server's output goes, and how it is read back.
 //
 // One file per project, not one per port, and truncated on each run. Both follow from the rule the
