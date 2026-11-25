@@ -4,6 +4,16 @@ import { spawnSubprocessAsync } from '../subprocess';
 import { mockSpawnChild } from './fakeSpawn';
 
 describe(spawnSubprocessAsync, () => {
+  it('preserves an actor name split across UTF-8 chunks', async () => {
+    const child = mockSpawnChild();
+    const result = spawnSubprocessAsync('eas', ['whoami', '--json'], { output: 'capture' });
+    const bytes = Buffer.from('Zoë Robot');
+    child.stdout.write(bytes.subarray(0, 3));
+    child.stdout.write(bytes.subarray(3));
+    child.emit('close', 0, null);
+    await expect(result).resolves.toMatchObject({ stdout: 'Zoë Robot' });
+  });
+
   it(`should capture the output and never attach stdin`, async () => {
     const child = mockSpawnChild();
 

@@ -282,10 +282,7 @@ export function agentCliAuthPassthrough(command: string): Command {
       }
 
       // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract
-      // The one thing a forwarded command cannot forward: `--json` is this CLI's contract and
-      // neither `expo whoami` nor `eas whoami` has such a flag, so the flag reached the other CLI,
-      // was ignored, and an agent that asked for one object got a line of prose at exit 0
-      // [observed — live run S7]. `whoami` is a *read*, so this one can be answered here.
+      // Both EAS output formats and Expo's human output map to this CLI's public envelope.
       if (command === 'whoami' && argvRequestsJson(args)) {
         return await printWhoamiJsonAsync(projectRoot, cli, args);
       }
@@ -326,13 +323,12 @@ const WHOAMI_TAIL_LINES = 10;
  * Answer `whoami --json` from the same CLI the forwarded form would have run.
  *
  * Captured rather than inherited, which is the difference from every other path in this module:
- * this run owns stdout, and the prose the CLI prints is the thing being turned into the object.
- * `--json` is dropped from the argv it forwards, because neither CLI has it.
+ * this run owns stdout and returns the agent CLI's envelope.
  *
  * A signed-out machine is a step only a person can complete, so it throws the login handoff: exit
  * `7` with the `--json` envelope (llp/0010 §Exit codes). A rejected `EXPO_TOKEN` is the same exit
  * with `EXPO_TOKEN_INVALID`, which names no login. A run that names no account for another
- * reason (`classifyWhoami`) is `WHOAMI_FAILED`, exit `1`.
+ * reason is `WHOAMI_FAILED`, exit `1`.
  */
 async function printWhoamiJsonAsync(
   projectRoot: string,
@@ -343,13 +339,16 @@ async function printWhoamiJsonAsync(
   const { needsHumanError } =
     require('../needsHuman/error') as typeof import('../needsHuman/error');
   const { EXIT_OK } = require('../exitCodes') as typeof import('../exitCodes');
-  const { classifyWhoami, parseWhoamiUser } =
-    require('../needsHuman/preflight') as typeof import('../needsHuman/preflight');
+  const { readWhoamiAnswer } =
+    require('../needsHuman/whoami') as typeof import('../needsHuman/whoami');
   const { CommandError } = require('../utils/errors') as typeof import('../utils/errors');
 
   // Only this CLI's own `--json`, before any `--`: what follows the separator is the other CLI's.
   const separator = args.indexOf('--');
-  const forwarded = args.filter((arg, i) => arg !== '--json' || (separator >= 0 && i > separator));
+  const forwarded =
+    cli.tool === 'eas'
+      ? args
+      : args.filter((arg, i) => arg !== '--json' || (separator >= 0 && i > separator));
   const result = await spawnSubprocessAsync(
     cli.command,
     [...cli.prefixArgs, 'whoami', ...forwarded],
@@ -357,7 +356,7 @@ async function printWhoamiJsonAsync(
   );
 
   const source = `${cli.tool} whoami`;
-  const answer = classifyWhoami(result);
+  const answer = readWhoamiAnswer(result, cli.tool);
   const { outputTail } = require('../deploy/parseOutput') as typeof import('../deploy/parseOutput');
   const { wrapUntrustedAppOutput } =
     require('../runtime/untrusted') as typeof import('../runtime/untrusted');
@@ -368,7 +367,7 @@ async function printWhoamiJsonAsync(
   const data = { source, sessionFile: sessionFilePath(), cli: authCliLabel(cli) };
   // A run that said nothing about who is signed in is a tool error, never a login: a network
   // failure exits 1 like a signed-out machine, and a stopped child can report exit 0.
-  if (answer === 'failed') {
+  if (answer.status === 'failed' || answer.status === 'unavailable') {
     const error = new CommandError(
       'WHOAMI_FAILED',
       [
@@ -388,7 +387,7 @@ async function printWhoamiJsonAsync(
     };
     throw error;
   }
-  if (answer === 'token-rejected') {
+  if (answer.status === 'token-rejected') {
     const { tokenRejectedError } =
       require('../needsHuman/assertAuth') as typeof import('../needsHuman/assertAuth');
     const error = tokenRejectedError(
@@ -398,7 +397,7 @@ async function printWhoamiJsonAsync(
     error.data = data;
     throw error;
   }
-  if (answer === 'signed-out') {
+  if (answer.status === 'signed-out') {
     const error = needsHumanError(cli.tool === 'eas' ? 'eas-login' : 'expo-login', {
       detectedBy: 'preflight',
       message: [
@@ -414,7 +413,7 @@ async function printWhoamiJsonAsync(
 
   const report: WhoamiResultJson = {
     loggedIn: true,
-    user: parseWhoamiUser(result.stdout),
+    user: answer.user,
     ...data,
   };
   Log.log(JSON.stringify(report, null, 2));

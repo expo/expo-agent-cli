@@ -1,9 +1,10 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import type { Mock } from 'vitest';
 
 /** A child process the test drives by hand: it emits `data`, `close` and `error` itself. */
-interface FakeChild<Stream extends EventEmitter | null = EventEmitter> extends EventEmitter {
+interface FakeChild<Stream extends EventEmitter | null = PassThrough> extends EventEmitter {
   stdout: Stream;
   stderr: Stream;
   kill: Mock;
@@ -12,10 +13,10 @@ interface FakeChild<Stream extends EventEmitter | null = EventEmitter> extends E
 /** Make the next `spawn` calls return one child, and give it back so the test can emit on it. */
 export function mockSpawnChild(): FakeChild;
 export function mockSpawnChild(options: { piped: false }): FakeChild<null>;
-export function mockSpawnChild({ piped = true } = {}): FakeChild<EventEmitter | null> {
+export function mockSpawnChild({ piped = true } = {}): FakeChild<PassThrough | null> {
   const child = Object.assign(new EventEmitter(), {
-    stdout: piped ? new EventEmitter() : null,
-    stderr: piped ? new EventEmitter() : null,
+    stdout: piped ? new PassThrough() : null,
+    stderr: piped ? new PassThrough() : null,
     kill: vi.fn(),
   });
   vi.mocked(spawn).mockReturnValue(child as never);
@@ -52,8 +53,8 @@ export function mockSpawnBy(
     calls.push(call);
     const answer = answerFor(call, calls.length - 1) ?? {};
     const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
     });
     process.nextTick(() => {
       if (answer.error) {

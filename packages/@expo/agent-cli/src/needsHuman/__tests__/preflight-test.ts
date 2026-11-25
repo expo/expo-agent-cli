@@ -69,11 +69,54 @@ describe(readAuthPreflightAsync, () => {
     });
   });
 
+  it.each([
+    [
+      0,
+      JSON.stringify({
+        status: 'signed-in',
+        actor: { id: 'member', type: 'User', displayName: 'alice' },
+        accounts: [{ name: 'team' }],
+      }),
+      { loggedIn: true, user: 'alice', source: 'eas whoami' },
+    ],
+    [
+      0,
+      'Runner notice\n{"status":"signed-in","actor":{"displayName":"Zoë Robot"}}',
+      { loggedIn: true, user: 'Zoë Robot', source: 'eas whoami' },
+    ],
+    [
+      1,
+      'Runner notice\n{"status":"signed-out"}',
+      { loggedIn: false, user: null, source: 'eas whoami' },
+    ],
+    [
+      0,
+      JSON.stringify({ status: 'signed-in', actor: { displayName: 'alice\nspoof' } }),
+      { loggedIn: null, user: null, source: null },
+    ],
+    [1, '{"status":"signed-out"}', { loggedIn: false, user: null, source: 'eas whoami' }],
+    [
+      1,
+      '{"status":"token-rejected"}',
+      { loggedIn: false, user: null, source: 'eas whoami', tokenRejected: true },
+    ],
+    [1, '{"status":"indeterminate"}', { loggedIn: null, user: null, source: null }],
+    [0, '{"status":"signed-in","actor":{}}', { loggedIn: null, user: null, source: null }],
+    [0, '{"status":"signed-out"}', { loggedIn: null, user: null, source: null }],
+    [0, 'Runner notice\n["[runner@1.2] starting"]', { loggedIn: null, user: null, source: null }],
+    [0, '{"status":', { loggedIn: null, user: null, source: null }],
+  ] as const)('reads the EAS machine answer at exit %i: %s', async (exitCode, stdout, expected) => {
+    withPinnedEasCli();
+    process.env.EXPO_TOKEN = 'set';
+    mockWhoami({ exitCode, stdout, stderr: 'The bearer token is invalid.\nStack backtrace:' });
+    await expect(readAuthPreflightAsync(projectRoot)).resolves.toEqual(expected);
+  });
+
   it('skips a notice printed above the answer', async () => {
     withPinnedEasCli();
     mockWhoami({
       exitCode: 0,
-      stdout: 'A new version of eas-cli is available\nalice@example.com\n',
+      stdout: '[runner@1.2] A new version of eas-cli is available\nalice@example.com\n',
     });
 
     await expect(readAuthPreflightAsync(projectRoot)).resolves.toMatchObject({
@@ -395,7 +438,7 @@ describe(readAuthPreflightAsync, () => {
       'npx',
       // The bare spec, because this project pins the CLI: `eas-cli@latest` would run a different
       // version and ask the registry to find out which (`src/utils/easCli.ts`).
-      ['--yes', 'eas-cli', 'whoami'],
+      ['--yes', 'eas-cli', 'whoami', '--json'],
       expect.objectContaining({ timeoutMs: 1234 })
     );
   });

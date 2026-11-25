@@ -369,7 +369,7 @@ describe('@expo/agent-cli deploy', () => {
       // because this project declares `eas-cli`: `@latest` would run a different version and ask the
       // registry to find out which (`src/utils/easCli.ts`).
       expect(readStubNpxInvocations(projectRoot)).toEqual([
-        { args: ['--yes', 'eas-cli', 'whoami'], cwd: projectRoot },
+        { args: ['--yes', 'eas-cli', 'whoami', '--json'], cwd: projectRoot },
         { args: ['--yes', 'eas-cli', 'deploy', '--non-interactive'], cwd: projectRoot },
       ]);
       // The upload runs non-interactively, because nothing can answer a prompt here.
@@ -626,7 +626,7 @@ describe('@expo/agent-cli deploy', () => {
         // The preflight did ask, once.
         expect(
           readStubEasInvocations(projectRoot, { includeProbes: true }).map(({ args }) => args)
-        ).toEqual([['whoami']]);
+        ).toEqual([['whoami', '--json']]);
 
         expect(lastLines(result.stderr, 3)).toEqual([
           'Needs a human   eas-login',

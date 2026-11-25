@@ -9,6 +9,7 @@
 
 import { spawn, spawnSync } from 'child_process';
 import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 
 import { killProcessTree, USE_PROCESS_GROUP } from '../processGroup';
 import { spawnSubprocessAsync } from '../subprocess';
@@ -19,8 +20,8 @@ import { mockPlatform } from './mockPlatform';
 function fakeChild({ pid }: { pid?: number } = {}) {
   return Object.assign(new EventEmitter(), {
     pid,
-    stdout: new EventEmitter(),
-    stderr: new EventEmitter(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
     kill: vi.fn(),
   });
 }
