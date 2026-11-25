@@ -11,6 +11,8 @@ export const patchHelp: CommandHelp = {
   command: 'patch',
   usage: `${PROGRAM_PREFIX} patch <package> [options]`,
   options: [
+    `--upstream-plan   Print a plan for a pull request to expo/expo; opens nothing`,
+    `--repro <url>     With --upstream-plan: the GitHub repository with the minimal repro`,
     `-y, --yes         Consent to the patch-package setup in package.json (npm, yarn classic)`,
     `--json            Print the report as JSON`,
     `--no-followups    Leave the suggested follow-up commands out of the report`,
@@ -24,6 +26,10 @@ export const patchHelp: CommandHelp = {
     {
       run: `${PROGRAM_PREFIX} patch expo-image --json`,
       gets: 'the same, as one JSON object: the patch file, buildFromSource and the follow-ups',
+    },
+    {
+      run: `${PROGRAM_PREFIX} patch expo-image --upstream-plan --repro https://github.com/<user>/<repo>`,
+      gets: 'the facts and the steps for a pull request to expo/expo; nothing is opened',
     },
   ],
   next: ['dev', 'runtime:reload'],
@@ -39,6 +45,7 @@ export const patchHelp: CommandHelp = {
       'files',
       'native',
       'buildFromSource',
+      'upstream',
       'followups',
     ],
   },
@@ -47,6 +54,7 @@ export const patchHelp: CommandHelp = {
     `bun patch, pnpm patch, yarn patch or npm patch (npm 12) when the project has one, and in`,
     `patch-package's format otherwise (that one exits 1 until --yes allows the postinstall script).`,
     `A native change to a precompiled module also adds it to expo.autolinking.<platform>.buildFromSource.`,
+    `--upstream-plan exits 0 and opens nothing: the agent asks the user, then does the steps with git and gh.`,
   ],
 };
 
@@ -57,6 +65,8 @@ export const agentCliPatch: Command = async (argv) => {
       '--help': Boolean,
       '--json': Boolean,
       '--yes': Boolean,
+      '--upstream-plan': Boolean,
+      '--repro': String,
       '--no-followups': Boolean,
       // Aliases
       '-h': '--help',
@@ -82,6 +92,15 @@ export const agentCliPatch: Command = async (argv) => {
       error.suggestedCommand = `${PROGRAM_PREFIX} patch --help`;
       throw error;
     }
+    if (args['--repro'] && !args['--upstream-plan']) {
+      throw new CommandError('BAD_ARGS', '--repro is only read with --upstream-plan.');
+    }
+    if (args['--yes'] && args['--upstream-plan']) {
+      throw new CommandError(
+        'BAD_ARGS',
+        '--upstream-plan opens nothing, so there is nothing to consent to: ask the user, then follow its steps.'
+      );
+    }
     const packageName = args._[0]!;
     if (!isPackageName(packageName)) {
       const error = new CommandError(
@@ -93,6 +112,16 @@ export const agentCliPatch: Command = async (argv) => {
     }
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const json = !!args['--json'];
+
+    if (args['--upstream-plan']) {
+      const { planUpstreamAsync, printUpstreamPlan } =
+        require('./upstream') as typeof import('./upstream');
+      const plan = await planUpstreamAsync(projectRoot, packageName, {
+        repro: args['--repro'] ?? null,
+      });
+      printUpstreamPlan(plan, { json });
+      return EXIT_OK;
+    }
 
     const { patchAsync } = require('./patchAsync') as typeof import('./patchAsync');
     await patchAsync(projectRoot, packageName, {

@@ -197,6 +197,7 @@ describe('@expo/agent-cli patch — bun', () => {
       files: ['index.js'],
       native: [],
       buildFromSource: [],
+      upstream: false,
     });
     expect(path.dirname(fs.realpathSync.native(report.patchFile))).toBe(
       path.join(fs.realpathSync.native(projectRoot), 'patches')
@@ -224,10 +225,12 @@ describe('@expo/agent-cli patch — bun', () => {
       files: ['ios/FakeModule.swift'],
       native: ['ios'],
       buildFromSource: [{ platform: 'ios', added: ['fake-expo-module'] }],
+      upstream: true,
     });
     const pkg = readJson(path.join(projectRoot, 'package.json'));
     expect(pkg.expo.autolinking).toEqual({ ios: { buildFromSource: ['fake-expo-module'] } });
-    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev']);
+    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev', 'patch-upstream']);
+    expect(report.followups[1].command).toMatch(/patch fake-expo-module --upstream-plan$/);
   });
 
   it(`keeps an existing buildFromSource entry that already covers the module`, async () => {
@@ -278,7 +281,7 @@ describe('@expo/agent-cli patch — bun', () => {
     const report = JSON.parse(result.stdout);
 
     expect(report).toMatchObject({ files: ['app.plugin.js'], native: [], buildFromSource: [] });
-    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev']);
+    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev', 'patch-upstream']);
   });
 
   it.each(['../fake-js-lib', 'fake-js-lib/', 'a/b'])(
@@ -308,6 +311,178 @@ describe('@expo/agent-cli patch — bun', () => {
 
     expect(result.exitCode).toBe(1);
     expect(JSON.parse(result.stdout).error.code).toBe('PATCH_LINKED_STORE');
+  });
+});
+
+/**
+ * A stand-in for a clone of expo/expo: the fake package at `packages/expo-fake-module-src` (its
+ * `repository.directory`, which is not its npm name, as in expo/expo), committed,
+ * and without `build/`, which expo/expo does not commit.
+ */
+function setupFakeExpoRepo(): string {
+  const repo = path.join(getTemporaryPath(), 'expo');
+  const target = path.join(repo, 'packages', 'expo-fake-module-src');
+  fs.mkdirSync(target, { recursive: true });
+  fs.cpSync(path.join(fixturesDir, 'patch-packages', 'fake-expo-module'), target, {
+    recursive: true,
+  });
+  // expo/expo ignores `/packages/**/build/`, so the clone has no compiled output.
+  fs.rmSync(path.join(target, 'build'), { recursive: true, force: true });
+  fs.rmSync(path.join(target, 'plugin', 'build'), { recursive: true, force: true });
+  run('git', ['init', '-q'], repo);
+  run('git', ['add', '.'], repo);
+  run(
+    'git',
+    ['-c', 'user.name=e2e', '-c', 'user.email=e2e@example.com', 'commit', '-qm', 'init'],
+    repo
+  );
+  return repo;
+}
+
+/** Run the plan's `applyCommand`, which is a shell line, in the fake clone. */
+function applyInRepo(applyCommand: string, repo: string): void {
+  run('sh', ['-c', applyCommand], repo);
+}
+
+describe('@expo/agent-cli patch --upstream-plan', () => {
+  usePinnedManager('bun');
+
+  async function patchedProjectAsync(manager: Manager = 'bun'): Promise<string> {
+    const projectRoot = await setupProjectAsync(manager);
+    edit(projectRoot, 'fake-expo-module/ios/FakeModule.swift', '// fix\n');
+    edit(projectRoot, 'fake-expo-module/build/index.js', '// fix\n');
+    edit(projectRoot, 'fake-expo-module/plugin/build/index.js', '// fix\n');
+    await patchAsync(manager, projectRoot, ['fake-expo-module', '--json', '--yes']);
+    return projectRoot;
+  }
+
+  // The plan's text (the steps, the guides, the repro guide) is not pinned here: it is advice for
+  // an agent and changes with expo/expo's own guides. The tests pin what code reads: the exit
+  // code, the facts, and the apply command.
+  it(`plans without opening anything`, async () => {
+    const projectRoot = await patchedProjectAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).upstream).toMatchObject({
+      package: 'fake-expo-module',
+      repository: 'expo/expo',
+      files: [
+        { file: 'build/index.js', target: null },
+        {
+          file: 'ios/FakeModule.swift',
+          target: 'packages/expo-fake-module-src/ios/FakeModule.swift',
+        },
+        {
+          file: 'plugin/build/index.js',
+          target: null,
+          portTo: 'packages/expo-fake-module-src/plugin/src/index.ts (or .tsx)',
+        },
+      ],
+      repro: null,
+    });
+  });
+
+  it(`takes the repro as a GitHub repository URL, and refuses anything else`, async () => {
+    const projectRoot = await patchedProjectAsync();
+    const repro = 'https://github.com/someone/expo-image-crash-on-rotate';
+    const plan = (value: string) =>
+      executeAgentCliAsync(
+        projectRoot,
+        ['patch', 'fake-expo-module', '--upstream-plan', '--repro', value, '--json'],
+        { reject: false }
+      );
+
+    const accepted = await plan(repro);
+    const refused = await plan('repro.md');
+
+    expect(accepted.exitCode).toBe(0);
+    expect(JSON.parse(accepted.stdout).upstream.repro).toBe(repro);
+    expect(refused.exitCode).toBe(1);
+    expect(JSON.parse(refused.stdout).error.code).toBe('BAD_ARGS');
+  });
+
+  it.skipIf(isWindows)(
+    `gives an apply command that applies the bun patch inside expo/expo, without any build/ directory`,
+    async () => {
+      const projectRoot = await patchedProjectAsync('bun');
+      const { stdout } = await executeAgentCliAsync(
+        projectRoot,
+        ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+        { reject: false }
+      );
+      const repo = setupFakeExpoRepo();
+
+      applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
+
+      expect(
+        fs.readFileSync(
+          path.join(repo, 'packages/expo-fake-module-src/ios/FakeModule.swift'),
+          'utf8'
+        )
+      ).toContain('// fix');
+      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/build'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, 'packages/expo-fake-module-src/plugin/build'))).toBe(
+        false
+      );
+    }
+  );
+
+  // The only file has a quote in its name, so git quotes every `diff --git` line of the
+  // patch-package patch (`"a/node_modules/…"`), and the apply command must still strip that prefix.
+  it.skipIf(isWindows)(
+    `gives an apply command that applies the patch-package patch inside expo/expo, also with quoted paths`,
+    async () => {
+      const projectRoot = await setupProjectAsync('npm');
+      const quoted = 'ios/Say "Hi".swift';
+      fs.writeFileSync(path.join(projectRoot, 'node_modules/fake-expo-module', quoted), '// new\n');
+      await patchAsync('npm', projectRoot, ['fake-expo-module', '--json', '--yes']);
+      const { stdout } = await executeAgentCliAsync(
+        projectRoot,
+        ['patch', 'fake-expo-module', '--upstream-plan', '--json'],
+        { reject: false }
+      );
+      const repo = setupFakeExpoRepo();
+
+      applyInRepo(JSON.parse(stdout).upstream.applyCommand, repo);
+
+      expect(
+        fs.readFileSync(path.join(repo, 'packages/expo-fake-module-src', quoted), 'utf8')
+      ).toBe('// new\n');
+    }
+  );
+
+  it(`refuses --yes, because the plan opens nothing`, async () => {
+    const projectRoot = await patchedProjectAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-expo-module', '--upstream-plan', '--yes', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('BAD_ARGS');
+  });
+
+  it(`refuses a package that does not come from expo/expo`, async () => {
+    const projectRoot = await setupProjectAsync('bun');
+    edit(projectRoot, 'fake-js-lib/index.js', '// fix\n');
+    await patchAsync('bun', projectRoot, ['fake-js-lib']);
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['patch', 'fake-js-lib', '--upstream-plan', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('PATCH_NOT_UPSTREAM');
   });
 });
 

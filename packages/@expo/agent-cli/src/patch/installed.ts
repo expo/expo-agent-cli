@@ -40,3 +40,17 @@ export function resolveInstalledPackage(
   error.suggestedCommand = `${PROGRAM_PREFIX} install ${packageName}`;
   throw error;
 }
+
+/** Whether a package manifest says its source is the `expo/expo` repository. */
+export function isExpoRepoPackage(manifest: Record<string, any>): boolean {
+  const repository = manifest.repository;
+  const url = typeof repository === 'string' ? repository : repository?.url;
+  // A boundary before the host, so `notgithub.com/expo/expo` and `evil.example/github.com/expo/expo`
+  // do not match, while `git+https://github.com/expo/expo.git` and `git@github.com:expo/expo.git` do.
+  return (
+    typeof url === 'string' &&
+    /^(?:[a-z+]+:\/\/(?:[^@/]+@)?|[^@/:]+@)?github\.com[/:]expo\/expo(?:\.git)?\/?$/i.test(
+      url.trim()
+    )
+  );
+}
