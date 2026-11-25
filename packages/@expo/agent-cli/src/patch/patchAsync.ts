@@ -21,7 +21,7 @@ import {
   type BuildFromSourceChange,
   type NativePlatform,
 } from './buildFromSource';
-import { resolveInstalledPackage } from './installed';
+import { isExpoRepoPackage, resolveInstalledPackage } from './installed';
 import { editPackageJsonAsync, type PackageJsonEdit } from './packageJson';
 import { detectPackageManager, type PackageManagerName } from './packageManager';
 import { updateLockfileAsync } from './patchPackage';
@@ -45,20 +45,6 @@ export interface PatchReport {
   /** The package's source is `expo/expo`, so the fix can be sent there. */
   upstream: boolean;
   followups: FollowUp[];
-}
-
-/** Whether a package manifest says its source is the `expo/expo` repository. */
-export function isExpoRepoPackage(manifest: Record<string, any>): boolean {
-  const repository = manifest.repository;
-  const url = typeof repository === 'string' ? repository : repository?.url;
-  // A boundary before the host, so `notgithub.com/expo/expo` and `evil.example/github.com/expo/expo`
-  // do not match, while `git+https://github.com/expo/expo.git` and `git@github.com:expo/expo.git` do.
-  return (
-    typeof url === 'string' &&
-    /^(?:[a-z+]+:\/\/(?:[^@/]+@)?|[^@/:]+@)?github\.com[/:]expo\/expo(?:\.git)?\/?$/i.test(
-      url.trim()
-    )
-  );
 }
 
 /** Refuse a package whose files are hard links into the store: no clean copy is left to diff. */

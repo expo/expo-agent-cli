@@ -118,7 +118,7 @@ export const agentCliPatch: Command = async (argv) => {
         require('./upstream') as typeof import('./upstream');
       const plan = planUpstream(projectRoot, packageName, { repro: args['--repro'] ?? null });
       printUpstreamPlan(plan, { json });
-      return;
+      return EXIT_OK;
     }
 
     const { patchAsync } = require('./patchAsync') as typeof import('./patchAsync');

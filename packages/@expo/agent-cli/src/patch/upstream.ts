@@ -7,9 +7,9 @@ import fs from 'fs';
 import * as Log from '../log';
 import { quoteArgument } from '../utils/consent';
 import { CommandError } from '../utils/errors';
-import { detectPackageManager } from '../utils/packageManager';
+import { detectPackageManager } from './packageManager';
 import { nativePlatformsOfFiles } from './buildFromSource';
-import { isExpoRepoPackage, resolveInstalledPackage } from './patchAsync';
+import { isExpoRepoPackage, resolveInstalledPackage } from './installed';
 import { findPatchFile } from './registry';
 
 export interface UpstreamFile {
@@ -209,10 +209,11 @@ export function planUpstream(
   { repro }: { repro: string | null }
 ): UpstreamPlan {
   const packageManager = detectPackageManager(projectRoot);
-  const { version, manifest } = resolveInstalledPackage(projectRoot, packageName, [
+  const { version, manifest } = resolveInstalledPackage(
     projectRoot,
-    packageManager.root,
-  ]);
+    packageName,
+    packageManager.root
+  );
   if (!isExpoRepoPackage(manifest)) {
     throw new CommandError(
       'PATCH_NOT_UPSTREAM',
@@ -321,7 +322,7 @@ export function buildApplyCommand(
 /** The Expo SDK of the project, from its installed `expo` (the major version is the SDK). */
 function expoSdkOf(projectRoot: string, workspaceRoot: string): number | null {
   try {
-    const { version } = resolveInstalledPackage(projectRoot, 'expo', [projectRoot, workspaceRoot]);
+    const { version } = resolveInstalledPackage(projectRoot, 'expo', workspaceRoot);
     const major = Number.parseInt(version, 10);
     return Number.isFinite(major) ? major : null;
   } catch {

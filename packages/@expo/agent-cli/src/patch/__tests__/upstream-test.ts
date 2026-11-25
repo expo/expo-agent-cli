@@ -1,4 +1,4 @@
-import { isExpoRepoPackage } from '../patchAsync';
+import { isExpoRepoPackage } from '../installed';
 import {
   assertReproUrl,
   filesOfPatch,

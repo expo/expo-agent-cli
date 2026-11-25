@@ -281,7 +281,7 @@ describe('@expo/agent-cli patch — bun', () => {
     const report = JSON.parse(result.stdout);
 
     expect(report).toMatchObject({ files: ['app.plugin.js'], native: [], buildFromSource: [] });
-    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev']);
+    expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['dev', 'patch-upstream']);
   });
 
   it.each(['../fake-js-lib', 'fake-js-lib/', 'a/b'])(
