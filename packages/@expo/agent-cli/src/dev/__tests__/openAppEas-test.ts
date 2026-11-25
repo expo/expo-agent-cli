@@ -1,4 +1,5 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+import { spawn } from 'child_process';
 import fs from 'fs';
 import * as Log from '../../log';
 import {
@@ -25,7 +26,8 @@ import {
   openAppOnEasAsync,
   otherPlatformSessionAsync,
 } from '../openAppEas';
-import { buildSessionStartArgs, readSessionId, readSessionUrl } from '../easSession';
+import { buildSessionStartArgs } from '../easSession';
+import { readSessionId, readSessionUrl } from '../easSessionLifecycle';
 
 vi.mock('../../log');
 vi.mock('../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -70,6 +72,37 @@ const EAS_CLI = {
   prefixArgs: ['--yes', 'eas-cli'],
   source: 'npx --yes eas-cli',
 } as any;
+
+async function mockLifecycleStart(outcome: string) {
+  const actual = await vi.importActual<typeof import('../../utils/spawnCapture')>(
+    '../../utils/spawnCapture'
+  );
+  const childProcess = await vi.importActual<typeof import('child_process')>('child_process');
+  vi.mocked(spawn).mockImplementationOnce(childProcess.spawn);
+  // A real child with piped stderr. A stale URL in an error is not an allocation receipt.
+  const fixture = `
+      const nonce = process.env.EAS_SIMULATOR_LIFECYCLE;
+      if (!nonce || nonce === '1') process.exit(2);
+      const emit = (value, tag = nonce) => console.error('EAS_SIMULATOR_LIFECYCLE ' + tag + ' ' + JSON.stringify(value));
+      emit({ event: 'allocated', id: 'before-start' });
+      emit({ event: 'start' });
+      emit({ event: 'allocated', id: 'foreign-session' }, '00000000-0000-4000-8000-000000000000');
+      if (['stopped', 'unknown'].includes(process.argv[1])) {
+        emit({ event: 'allocated', id: 'sess-new' });
+        emit({ event: 'cleanup', id: 'sess-old', outcome: 'stopped' });
+        emit({ event: 'cleanup', id: 'sess-new', outcome: process.argv[1] });
+      }
+      console.error('Simulator startup failed. See https://expo.dev/example/simulator-sessions/sess-old');
+      if (process.argv[1] === 'unknown') console.error('\\u001b[36mhttps://expo.dev/correct/simulator-sessions/sess-new\\u001b[0m');
+      process.exitCode = process.argv[1] === 'missing-id' ? 0 : process.argv[1] === 'interrupted' ? 130 : 1;
+    `;
+  vi.mocked(spawnCaptureAsync).mockImplementationOnce((_cmd, _args, options) =>
+    actual.spawnCaptureAsync(process.execPath, ['-e', fixture, outcome], {
+      ...options,
+      cwd: process.cwd(),
+    })
+  );
+}
 
 function mockTunnel(host: string | null) {
   vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue(
@@ -495,6 +528,42 @@ describe('the session half on its own', () => {
     });
   });
 
+  it.each([
+    { platform: 'ios', outcome: 'pre-allocation', id: null, binds: false },
+    { platform: 'android', outcome: 'missing-id', id: null, binds: false },
+    { platform: 'ios', outcome: 'interrupted', id: null, binds: false },
+    { platform: 'android', outcome: 'stopped', id: 'sess-new', binds: false },
+    { platform: 'ios', outcome: 'unknown', id: 'sess-new', binds: true },
+  ] as const)(
+    'handles a $platform start ending with $outcome',
+    async ({ platform, outcome, id, binds }) => {
+      await mockLifecycleStart(outcome);
+      const report = await ensureEasSessionAsync(projectRoot, {
+        platform,
+        expoGo: true,
+        devServerUrl: DEV_SERVER,
+        buildId: null,
+        keepSession: true,
+      });
+      expect(report).toMatchObject({
+        ok: false,
+        sessionId: id,
+        sessionUrl:
+          outcome === 'unknown' ? 'https://expo.dev/correct/simulator-sessions/sess-new' : null,
+        started: id !== null,
+      });
+      expect(report.cleanup).toBe(id ? outcome : undefined);
+      expect(report.reason).toContain(
+        ['missing-id', 'interrupted'].includes(outcome)
+          ? 'simulator:list'
+          : 'Simulator startup failed.'
+      );
+      expect(report.reason?.includes('may be billing')).toBe(binds);
+      expect(vi.mocked(acquireCloudBindingAsync).mock.calls.length > 0).toBe(binds);
+      if (id) expect(Log.progress).toHaveBeenCalledWith(expect.stringContaining(id));
+    }
+  );
+
   it(`ends its own session when a concurrent start in this worktree owns the dotenv`, async () => {
     const fs = await import('fs');
     const { acquireCloudBindingAsync } = await import('../../deviceBinding/cloud');
@@ -664,6 +733,26 @@ describe('the session half on its own', () => {
 // `finished` feeds `easOpenFinished` on the dev lock, which a detached `--wait-ready` re-run reads;
 // a foreground run waits for the open itself, so no e2e run hangs when `finished` never settles.
 describe(easRunLifecycle, () => {
+  it.each(['stopped', 'unknown'])(
+    'finishes a failed foreground start with cleanup %s',
+    async (cleanup) => {
+      await mockLifecycleStart(cleanup);
+      const eas = easRunLifecycle(projectRoot, {
+        platform: 'ios',
+        expoGo: true,
+        keepSession: false,
+      });
+      eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+      await eas.finishAsync();
+      const stops = vi
+        .mocked(spawnCaptureAsync)
+        .mock.calls.filter(
+          ([, args]) => args.includes('simulator:stop') && args.includes('sess-new')
+        );
+      expect(stops).toHaveLength(cleanup === 'stopped' ? 0 : 1);
+    }
+  );
+
   it.each([
     { name: 'an open that bound a session', open: true, failed: false },
     { name: 'an open that failed', open: true, failed: true },

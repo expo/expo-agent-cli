@@ -3547,30 +3547,38 @@ describe('the start-session phase, on --eas', () => {
     expect(stopEasSession).toHaveBeenCalledWith('sess-new');
   });
 
-  it('cleans up a created session even when readiness fails', async () => {
-    const stopEasSession = vi.fn(async (sessionId: string) => ({
-      ok: true,
-      target: sessionId,
-      reason: null,
-    }));
-    const run = await runSmokePhasesAsync(
-      cloudDeps({
-        ensureEasSession: async () => ({
-          ok: false,
-          sessionId: 'sess-billed',
-          started: true,
-          reason: 'readiness timed out',
+  it.each([undefined, 'unknown', 'stopped'] as const)(
+    'releases an allocated session after readiness failure when needed (cleanup: %s)',
+    async (cleanup) => {
+      const stopEasSession = vi.fn(async (sessionId: string) => ({
+        ok: true,
+        target: sessionId,
+        reason: null,
+      }));
+      const run = await runSmokePhasesAsync(
+        cloudDeps({
+          ensureEasSession: async () => ({
+            ok: false,
+            sessionId: 'sess-billed',
+            started: true,
+            cleanup,
+            reason: 'readiness timed out',
+          }),
+          stopEasSession,
         }),
-        stopEasSession,
-      }),
-      options({ bootstrap: true, cloud: 'required' })
-    );
-    expect(run.outcome).toBe('failed');
-    expect(stopEasSession).toHaveBeenCalledWith('sess-billed');
-    expect(run.environment.cleanup).toContainEqual(
-      expect.objectContaining({ resource: 'session', target: 'sess-billed', ok: true })
-    );
-  });
+        options({ bootstrap: true, cloud: 'required' })
+      );
+      expect(run.outcome).toBe('failed');
+      if (cleanup === 'stopped') {
+        expect(stopEasSession).not.toHaveBeenCalled();
+        return;
+      }
+      expect(stopEasSession).toHaveBeenCalledWith('sess-billed');
+      expect(run.environment.cleanup).toContainEqual(
+        expect.objectContaining({ resource: 'session', target: 'sess-billed', ok: true })
+      );
+    }
+  );
 
   it('does not claim a session stopped when cleanup fails', async () => {
     const run = await runSmokePhasesAsync(

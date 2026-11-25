@@ -1,3 +1,4 @@
+import { sessionToRelease } from '../../dev/easSessionLifecycle';
 import type { AppConnectionResult } from '../../runtime/waitReady';
 import { noScreenshot } from '../results';
 import { APP_PROBE_MS, BUILD_DEV_SERVER_TIMEOUT_MS, START_SESSION_TIMEOUT_MS } from '../timeouts';
@@ -33,11 +34,12 @@ async function startSessionStep(walk: PhaseWalk): Promise<Step<null>> {
     'start-session',
     async () => {
       const result = await deps.ensureEasSession(report.devServerUrl);
-      if (result.sessionId != null && result.started) {
+      const id = sessionToRelease(result);
+      if (id) {
         cleanups.push({
           resource: 'session',
-          target: result.sessionId,
-          release: () => deps.stopEasSession(result.sessionId!),
+          target: id,
+          release: () => deps.stopEasSession(id),
         });
       }
       return result.ok

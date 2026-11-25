@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { createInterface } from 'readline';
 
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
@@ -33,6 +34,8 @@ export interface SpawnCaptureBufferResult extends Omit<SpawnCaptureResult, 'stdo
 }
 
 export interface SpawnCaptureOptions {
+  env?: NodeJS.ProcessEnv;
+  onStderrLine?: (line: string) => void;
   cwd?: string;
   timeoutMs?: number;
 }
@@ -105,10 +108,11 @@ function spawnCaptureNowAsync(
 ): Promise<SpawnCaptureBufferResult> {
   return new Promise<SpawnCaptureBufferResult>((resolve, reject) => {
     // A `fingerprint` resolved inside a project is a batch shim on Windows, which needs `cmd.exe`.
-    const target = resolveSpawnTarget(command, args, process.env);
+    const target = resolveSpawnTarget(command, args, options.env ?? process.env);
     assertSubprocessDeadline();
     const child = spawn(target.command, target.args, {
       cwd: options.cwd,
+      env: options.env,
       // The output is data for the caller, not something the user should read directly.
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: target.shell,
@@ -147,6 +151,12 @@ function spawnCaptureNowAsync(
       child.stdout?.on('data', (chunk: Buffer | string) => {
         stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       });
+      if (options.onStderrLine && child.stderr) {
+        createInterface({ input: child.stderr, crlfDelay: Infinity }).on(
+          'line',
+          options.onStderrLine
+        );
+      }
       child.stderr?.on('data', (chunk) => {
         stderr += chunk.toString();
       });

@@ -4,6 +4,7 @@
 // Types only. `walk/*` walks the phases against `SmokeDeps`, `deps/` implements it, and the
 // formatter and the follow-ups read `SmokeRun`; none of them has to import the walk to name a result.
 
+import type { SessionCleanup } from '../dev/easSessionLifecycle';
 import type { ScreenshotResult } from '../device/screenshot';
 import type { AcquireAction, ReleasedDevice } from '../deviceBinding';
 import type { CloudPreference, DeviceBackend } from '../navigate/device';
@@ -84,10 +85,11 @@ export interface SmokeReleaseResult {
 
 /** What making sure there is an EAS Simulator session amounted to. */
 export interface SmokeSessionResult {
+  cleanup?: SessionCleanup;
   ok: boolean;
-  /** The session that is up, or null. */
+  /** The allocated or reused session id, including a failed start whose id EAS reported. */
   sessionId: string | null;
-  /** Whether this run started it, which is what registers the cleanup. */
+  /** Whether this run started the session. A confirmed stop completes its cleanup. */
   started: boolean;
   /** Why there is none. Null exactly when {@link ok} is true. */
   reason: string | null;
