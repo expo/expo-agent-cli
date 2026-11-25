@@ -2055,12 +2055,12 @@ describe('@expo/agent-cli status', () => {
       ['EAS_LOGIN_REQUIRED', 'EXPO_TOKEN'],
       ['EAS_PERMISSION_DENIED', 'grant access'],
       ['EAS_INPUT_REQUIRED', 'missing arguments'],
-    ])('chooses the fingerprint comparison recovery from %s', async (code, recovery) => {
+    ])('chooses the fingerprint comparison recovery from %s', async (errorCode, recovery) => {
       const projectRoot = await setupCompareAsync();
       const result = await runBuildAsync(projectRoot, ['--json'], {
         STUB_EAS_COMPARE_EXIT: '1',
         STUB_EAS_COMPARE_JSON: JSON.stringify({
-          error: { code, message: 'EAS project not configured.' },
+          error: { errorCode, message: 'EAS project not configured.' },
         }),
       });
 
@@ -2759,7 +2759,7 @@ describe('@expo/agent-cli status', () => {
       const report = await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST_EXIT: '1',
         STUB_EAS_BUILD_LIST_STDOUT: JSON.stringify({
-          error: { code: 'EAS_PERMISSION_DENIED', message: 'Not logged in' },
+          error: { errorCode: 'EAS_PERMISSION_DENIED', message: 'Not logged in' },
         }),
       });
       for (const platform of ['ios', 'android']) {

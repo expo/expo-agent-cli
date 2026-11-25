@@ -115,9 +115,9 @@ describe(describeLookupFailure, () => {
 
   it.each([undefined, 'EAS_FUTURE_CODE'])(
     'preserves the diagnostic in a multiline envelope with code %s',
-    (code) => {
+    (errorCode) => {
       const message = 'The requested artifact has expired.';
-      const stdout = JSON.stringify({ error: { code, message } }, null, 2);
+      const stdout = JSON.stringify({ error: { errorCode, message } }, null, 2);
       expect(
         describeLookupFailure(
           { exitCode: 1, stdout, stderr: 'Error: build:list command failed.' },
@@ -129,9 +129,9 @@ describe(describeLookupFailure, () => {
 
   it.each([undefined, 'EAS_PROJECT_NOT_CONFIGURED'])(
     'keeps the account from a pin that reported it in the message with code %s',
-    (code) => {
+    (errorCode) => {
       const message = 'EAS project not configured.\nAccounts you can create projects in: bob';
-      const stdout = JSON.stringify({ error: { message, code } }, null, 2);
+      const stdout = JSON.stringify({ error: { message, errorCode } }, null, 2);
       expect(describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION)).toContain(
         'init --account bob --non-interactive'
       );

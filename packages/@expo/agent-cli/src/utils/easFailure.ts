@@ -180,9 +180,9 @@ export type EasSaid =
   | { kind: 'nothing' };
 
 interface EasJsonError {
-  code?: unknown;
+  errorCode?: unknown;
   message?: unknown;
-  eligibleAccounts?: unknown;
+  accountsWithProjectCreationPermission?: unknown;
   accountName?: unknown;
 }
 
@@ -192,26 +192,30 @@ type EasJsonFailure =
 
 /** Read the build:list failure contract. Older EAS CLIs report this refusal as prose. */
 function readUnlinkedProjectReason(error: EasJsonError): string | null {
-  const { eligibleAccounts, accountName } = error;
+  const { accountsWithProjectCreationPermission, accountName } = error;
   if (
-    !Array.isArray(eligibleAccounts) ||
-    !eligibleAccounts.every((account): account is string => typeof account === 'string') ||
+    !Array.isArray(accountsWithProjectCreationPermission) ||
+    !accountsWithProjectCreationPermission.every(
+      (account): account is string => typeof account === 'string'
+    ) ||
     (accountName !== undefined && typeof accountName !== 'string')
   ) {
     return null;
   }
 
   if (
-    eligibleAccounts.length === 0 ||
-    (accountName !== undefined && !eligibleAccounts.includes(accountName))
+    accountsWithProjectCreationPermission.length === 0 ||
+    (accountName !== undefined && !accountsWithProjectCreationPermission.includes(accountName))
   ) {
     return unlinkedProjectSummary(null);
   }
-  if (accountName === undefined && eligibleAccounts.length > 1) {
-    const choices = eligibleAccounts.map((account) => JSON.stringify(account)).join(', ');
+  if (accountName === undefined && accountsWithProjectCreationPermission.length > 1) {
+    const choices = accountsWithProjectCreationPermission
+      .map((account) => JSON.stringify(account))
+      .join(', ');
     return `${unlinkedProjectSummary('<account-name>')}. Choose an eligible account for <account-name> from ${choices}.`;
   }
-  return unlinkedProjectSummary(accountName ?? eligibleAccounts[0]!);
+  return unlinkedProjectSummary(accountName ?? accountsWithProjectCreationPermission[0]!);
 }
 
 /** Read the entire stdout document before consulting diagnostics from older EAS versions. */
@@ -222,7 +226,7 @@ export function readEasJsonFailure(result: { stdout: string; stderr: string }): 
   } catch {
     return readEasFailure(result);
   }
-  switch (error?.code) {
+  switch (error?.errorCode) {
     case 'EAS_PROJECT_NOT_CONFIGURED': {
       const summary = readUnlinkedProjectReason(error);
       if (summary) {
@@ -252,7 +256,7 @@ export function readEasJsonFailure(result: { stdout: string; stderr: string }): 
   }
   if (typeof error?.message === 'string' && error.message.trim()) {
     const message = stripVTControlCharacters(error.message).trim();
-    if (error.code === undefined && EAS_CLOSING_ERROR.test(`Error: ${message}`)) {
+    if (error.errorCode === undefined && EAS_CLOSING_ERROR.test(`Error: ${message}`)) {
       // EAS exit(1) wraps a reason already printed to stderr.
       return readEasFailure({ stdout: message, stderr: result.stderr });
     }
@@ -260,8 +264,8 @@ export function readEasJsonFailure(result: { stdout: string; stderr: string }): 
     const cause = classifyEasFailure(message);
     if (
       cause &&
-      (error.code === undefined ||
-        (error.code === 'EAS_PROJECT_NOT_CONFIGURED' && cause.id === 'eas-project-unlinked'))
+      (error.errorCode === undefined ||
+        (error.errorCode === 'EAS_PROJECT_NOT_CONFIGURED' && cause.id === 'eas-project-unlinked'))
     ) {
       return { kind: 'cause', cause };
     }
