@@ -1,10 +1,9 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock
 // Which port the dev server actually listens on.
 //
-// The wrapper cannot know: `expo start` walks past a taken port, and `expo run:ios` starts a dev
-// server the wrapper passed no port to at all. What it can do is read Metro's `metro:instantiate`
-// event, which the Expo CLI sends to this process's `2g` event log, and only trust events the
-// current run sent.
+// The wrapper cannot know: `expo start` walks past a taken port. What it can do is read Metro's
+// `metro:instantiate` event, which the Expo CLI sends to this process's `2g` event log, and only
+// trust events the current run sent.
 
 import { getEventLoggerInfo } from '2g';
 import { tap } from '2g/api';

@@ -5,8 +5,8 @@
 // Behavior is controlled through environment variables set by the test:
 // - STUB_EXPO_EXIT_CODE: exit code to return (default 0), to test exit code forwarding
 // - STUB_EXPO_DELAY_MS: milliseconds to stay alive before exiting (default 0), for `start`
-// - STUB_EXPO_BUILD_DELAY_MS: with STUB_EXPO_LISTEN, how long `run:*` builds before it prints the
-//   install markers and serves (default 0)
+// - STUB_EXPO_BUILD_DELAY_MS: how long `run:*` builds before it prints the install markers: then
+//   `run:* --no-bundler` exits, and `run:*` with STUB_EXPO_LISTEN serves (default 0)
 // - STUB_EXPO_LOG: file the invocation is appended to (default `<cwd>/stub-expo-invocations.jsonl`)
 // - STUB_EXPO_DEV_SERVER_PORT: port to report as a `metro:instantiate` event, the way the real CLI
 //   does. Unset means no port is reported, which is what the dev-server lock has to fall back from.
@@ -68,12 +68,6 @@
 // - STUB_EXPO_LISTEN_GATE: a file path. With STUB_EXPO_LISTEN, `start` binds its port only once
 //   this file exists, the way Metro binds after its start-up work. The test decides the moment, so
 //   a test that holds the port meanwhile never races the bind.
-// - STUB_EXPO_DIE_AFTER_STATUS_MS: with STUB_EXPO_LISTEN, `start` exits 1 this many milliseconds
-//   after it has answered the **first** `GET /status`, printing the macOS Automation refusal the
-//   real CLI dies of. That ordering is F140's whole shape and the reason it is keyed on the request
-//   rather than on the clock: the readiness probe *is* that request, so the death is guaranteed to
-//   land after the claim rather than racing it [observed — 2026-08-28, `friction/run9`: `/status`
-//   answered at ~450ms and the process was gone at ~700ms].
 'use strict';
 
 const fs = require('node:fs');
@@ -180,11 +174,35 @@ if (
   process.exit(1);
 }
 
+// `expo run:* --no-bundler` builds, installs and launches the app, then exits: it starts no dev
+// server, so it does not stay alive for STUB_EXPO_DELAY_MS the way `start` does. A failed build
+// (STUB_EXPO_EXIT_CODE) installs nothing.
+const runsWithoutBundler =
+  (args[0] === 'run:ios' || args[0] === 'run:android') && args.includes('--no-bundler');
+if (runsWithoutBundler) {
+  setTimeout(
+    () => {
+      const device = args[0] === 'run:ios' ? 'iPhone 17 Pro' : 'tuft-pixel';
+      if (exitCode !== 0) return exit();
+      process.stdout.write(
+        [
+          args[0] === 'run:ios' ? '\u203a Build Succeeded' : 'BUILD SUCCESSFUL in 4m 11s',
+          `\u203a Installing on ${device}`,
+          `\u203a Opening on ${device} (com.example.stub)`,
+        ].join('\n') + '\n'
+      );
+      exit();
+    },
+    Number(process.env.STUB_EXPO_BUILD_DELAY_MS || 0)
+  );
+}
+
 const askedRunPort = args.includes('--port') ? args[args.indexOf('--port') + 1] : null;
 // With an explicit `--port` the real CLI asks nothing: it builds, then finds the port taken
 // (`ensurePortAvailabilityAsync`) and exits 1.
 if (
   (args[0] === 'run:ios' || args[0] === 'run:android') &&
+  !runsWithoutBundler &&
   process.env.STUB_EXPO_PORT_BUSY &&
   askedRunPort === process.env.STUB_EXPO_PORT_BUSY
 ) {
@@ -199,6 +217,7 @@ if (
 
 if (
   (args[0] === 'run:ios' || args[0] === 'run:android') &&
+  !runsWithoutBundler &&
   process.env.STUB_EXPO_PORT_BUSY &&
   askedRunPort == null
 ) {
@@ -219,9 +238,12 @@ if (
 // `expo run:*` builds, installs and serves in one subprocess. With STUB_EXPO_LISTEN it plays the
 // serving half too: the install markers first — they are what tells a reader of the child log that
 // the compiler finished and the step moved on to serving (`appReachedDevice`) — then the same dev
-// server the `start` path binds. This is the shape the F140 grace-window e2e needs: a run step
-// whose launch dies *after* the bundler has answered.
-if ((args[0] === 'run:ios' || args[0] === 'run:android') && process.env.STUB_EXPO_LISTEN) {
+// server the `start` path binds.
+if (
+  (args[0] === 'run:ios' || args[0] === 'run:android') &&
+  !runsWithoutBundler &&
+  process.env.STUB_EXPO_LISTEN
+) {
   setTimeout(serveAfterRunBuild, Number(process.env.STUB_EXPO_BUILD_DELAY_MS || 0));
 }
 
@@ -312,20 +334,10 @@ if (args[0] === 'start') {
   }
 }
 
-/** Whether the death timer has already been armed, so a second probe does not arm a second one. */
-let dying = false;
 /** Whether the stub tunnel has "come up" (STUB_EXPO_TUNNEL_HOST, after its delay). */
 let tunnelUp = false;
 
-/**
- * Answer `GET /status` the way a dev server whose bundler has finished does, and — when the test
- * asks for it — die shortly after the first one has been answered.
- *
- * The death is an uncaught failure rather than a clean exit, because that is what `expo start --ios`
- * does when macOS refuses it Automation permission: the rejection of an un-awaited
- * `activateWindowAsync` reaches `process.on('uncaughtException')` and takes the whole dev server
- * with it, long after the port was bound.
- */
+/** Answer `GET /status` the way a dev server whose bundler has finished does. */
 function listen(port) {
   let opensSeen = 0;
   let emptyAnswers = 0;
@@ -406,17 +418,6 @@ function listen(port) {
       'X-React-Native-Project-Root': encodeURI(cwd),
     });
     response.end('packager-status:running');
-    const dieAfterMs = Number(process.env.STUB_EXPO_DIE_AFTER_STATUS_MS || 0);
-    if (dieAfterMs > 0 && !dying) {
-      dying = true;
-      setTimeout(() => {
-        process.stderr.write(
-          'Error: osascript -e tell app "System Events" to count processes whose name is ' +
-            '"Simulator" or name is "DeviceHub" exited with non-zero code: 1\n'
-        );
-        process.exit(1);
-      }, dieAfterMs).unref();
-    }
   });
   server.listen(port, '127.0.0.1');
   // Unreferenced: `STUB_EXPO_DELAY_MS` decides how long this stub lives, exactly as it does without
@@ -443,7 +444,9 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-if (delayMs > 0) {
+if (runsWithoutBundler) {
+  // It exits after its build, above.
+} else if (delayMs > 0) {
   setTimeout(exit, delayMs);
 } else {
   exit();

@@ -65,10 +65,7 @@ Two doubles live once in `e2e/stubs/`, and fixture setup copies them into each f
   stub `expo` package declares, so no fixture commits one. It records every invocation as one JSON line in
   `stub-expo-invocations.jsonl` and starts no Metro. `STUB_EXPO_LISTEN` makes `start` bind the port it
   reports and answer `GET /status` the way a dev server whose bundler has finished does, which is what
-  lets `--wait-ready` be driven end to end; `STUB_EXPO_DIE_AFTER_STATUS_MS` then makes it die a fixed
-  time **after** that answer, printing the macOS Automation refusal the real CLI dies of. Keying the
-  death on the request rather than on a clock is what makes F140 — a dev server that answers and is
-  then gone — reproducible instead of a race. `expo config` answers with the
+  lets `--wait-ready` be driven end to end. `expo config` answers with the
   contents of the file `STUB_EXPO_CONFIG_JSON` names and exits, the way the real CLI prints one JSON
   object there and nothing else — with the stub's own `stub_expo_start` line still above it, so the
   "last JSON line wins" parse of `inspect:config-plugins` is tested against a stream that has two.

@@ -248,18 +248,23 @@ describe(devAsync, () => {
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
-      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios'], {
-        signal: expect.any(AbortSignal),
-      });
+      expect(vi.mocked(runExpoAsync).mock.calls).toEqual([
+        [projectRoot, ['prebuild', '--platform', 'ios'], { signal: expect.any(AbortSignal) }],
+        [projectRoot, ['run:ios', '--no-bundler'], { signal: expect.any(AbortSignal) }],
+      ]);
       expect(spawnExpoAsync).not.toHaveBeenCalled();
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
-        agentSkills: true,
-        output: 'inherit',
-        signal: expect.any(AbortSignal),
-        easPlatform: null,
-        lock: expect.any(RunLock),
-        phase: 'building',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--dev-client', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+          signal: expect.any(AbortSignal),
+          easPlatform: null,
+          lock: expect.any(RunLock),
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     // @ref llp/0035-one-device-per-worktree.rfc.md §Lease
@@ -268,7 +273,7 @@ describe(devAsync, () => {
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
-      expect(withLeaseExtendedAsync).toHaveBeenCalledTimes(1);
+      expect(withLeaseExtendedAsync).toHaveBeenCalledTimes(2);
       expect(withLeaseExtendedAsync).toHaveBeenCalledWith(projectRoot, expect.any(Function));
     });
   });
@@ -281,13 +286,19 @@ describe(devAsync, () => {
     // person can clear. The record is written **before** that handoff is thrown.
     it(`should record the build when the step failed at the launch after installing the app`, async () => {
       mockStaleDevClientState();
-      vi.mocked(runDevServerAsync).mockResolvedValue(
-        devServerRun({
-          exitCode: 1,
-          stdout: '› Build Succeeded\n› Installing on iPhone 17 Pro\n› Opening on iPhone 17 Pro',
-          stderr: 'Error: osascript -e tell app "System Events" exited with non-zero code: 1',
-        })
-      );
+      vi.mocked(isInteractive).mockReturnValue(false);
+      vi.mocked(spawnExpoAsync).mockImplementation(async (_root, args) => ({
+        cli: { command: 'expo', args: [] },
+        result:
+          args[0] === 'run:ios'
+            ? {
+                exitCode: 1,
+                stdout:
+                  '› Build Succeeded\n› Installing on iPhone 17 Pro\n› Opening on iPhone 17 Pro',
+                stderr: 'Error: osascript -e tell app "System Events" exited with non-zero code: 1',
+              }
+            : { exitCode: 0, stdout: '', stderr: '' },
+      }));
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
         exitCode: 7,

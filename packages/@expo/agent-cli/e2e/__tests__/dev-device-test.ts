@@ -107,8 +107,7 @@ describe('@expo/agent-cli dev, with devices on', () => {
       expect(plan.steps.find((step: { id: string }) => step.id === 'run').argv).toEqual([
         'expo',
         'run:android',
-        '--port',
-        '8091',
+        '--no-bundler',
         '--device',
         EMULATOR_SERIAL,
       ]);

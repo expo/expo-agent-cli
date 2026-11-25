@@ -17,7 +17,6 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync } from '../detachAsync';
-import { OPEN_PLATFORM_GRACE_MS } from '../detachHealth';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
@@ -53,7 +52,8 @@ vi.mock('../advertisedUrl', async (importOriginal) => ({
 
 const projectRoot = '/project';
 const logFile = detachedLogPath(projectRoot);
-const servingPlan = '  1. expo run:ios  ~minutes\n› Installing on iPhone\n';
+const servingPlan =
+  '  1. expo run:ios --no-bundler  ~minutes\n› Installing on iPhone\n  2. expo start --dev-client  ~seconds\n';
 
 function readiness(ready = true): BundlerReadyResult {
   return {
@@ -102,25 +102,6 @@ function run() {
     { print: false }
   );
 }
-
-it.each(['ios', 'android'] as const)(
-  'relays an app-open handoff during grace without claiming readiness on %s',
-  async (platform) => {
-    setTimeout(() => {
-      fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
-    }, 300);
-
-    const result = devDetachAsync(
-      projectRoot,
-      resolveDevOptions([`--${platform}`, '--detach', '--local', '--json'])
-    ).catch((error) => error);
-    await vi.runAllTimersAsync();
-
-    expect(await result).toMatchObject({ code: 'DEV_DETACH_NEEDS_HUMAN', exitCode: 7 });
-    expect(waitForBundlerReadyAsync).not.toHaveBeenCalled();
-    expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
-  }
-);
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro exits during the
 // wait and the run still binds its session: the detach reports no dev server, and names the stop.
@@ -208,13 +189,10 @@ it.each([false, true])('detects death during the device probe (reusing=%s)', asy
   expect(Log.log).not.toHaveBeenCalled();
 });
 
-/** Fail a status probe after the child exits, optionally before its handoff reaches the log. */
-function diesDuringProbe(check: 'final check' | 'grace', handoffDelay: number | null) {
+/** Fail the final status probe after the child exits, optionally before its handoff is logged. */
+function diesDuringProbe(handoffDelay: number | null) {
   const probe = vi.mocked(waitForBundlerReadyAsync);
   probe.mockResolvedValueOnce(readiness());
-  if (check === 'grace') {
-    probe.mockResolvedValueOnce(readiness());
-  }
   probe.mockImplementationOnce(async () => {
     setTimeout(() => {
       // The PID is gone even if the parent has not received its exit event yet.
@@ -226,53 +204,50 @@ function diesDuringProbe(check: 'final check' | 'grace', handoffDelay: number | 
         fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
       }, handoffDelay);
     }
-    // The production liveness probe may retry for two seconds, outlasting the grace window.
+    // The production liveness probe may retry for two seconds.
     await new Promise((resolve) => setTimeout(resolve, 2000));
     return readiness(false);
   });
 }
 
-describe.each(['final check', 'grace'] as const)(
-  'child exit during the %s status probe',
-  (check) => {
-    it('relays the handoff written while the status probe was pending', async () => {
-      diesDuringProbe(check, 500);
+describe('child exit during the final status probe', () => {
+  it('relays the handoff written while the status probe was pending', async () => {
+    diesDuringProbe(500);
 
-      const result = run().catch((error) => error);
-      await vi.runAllTimersAsync();
+    const result = run().catch((error) => error);
+    await vi.runAllTimersAsync();
 
-      expect(await result).toMatchObject({
-        code: 'DEV_DETACH_NEEDS_HUMAN',
-        exitCode: 7,
-        needsHuman: { scenario: 'macos-automation', detectedBy: 'detached-child-log' },
-      });
+    expect(await result).toMatchObject({
+      code: 'DEV_DETACH_NEEDS_HUMAN',
+      exitCode: 7,
+      needsHuman: { scenario: 'macos-automation', detectedBy: 'detached-child-log' },
     });
+  });
 
-    it('waits for the handoff when only the error line is readable after the probe', async () => {
-      diesDuringProbe(check, 2200);
+  it('waits for the handoff when only the error line is readable after the probe', async () => {
+    diesDuringProbe(2200);
 
-      const result = run().catch((error) => error);
-      await vi.runAllTimersAsync();
+    const result = run().catch((error) => error);
+    await vi.runAllTimersAsync();
 
-      expect(await result).toMatchObject({
-        code: 'DEV_DETACH_NEEDS_HUMAN',
-        exitCode: 7,
-        needsHuman: { scenario: 'macos-automation' },
-      });
+    expect(await result).toMatchObject({
+      code: 'DEV_DETACH_NEEDS_HUMAN',
+      exitCode: 7,
+      needsHuman: { scenario: 'macos-automation' },
     });
+  });
 
-    it('bounds the extra wait when the child exits without a handoff', async () => {
-      diesDuringProbe(check, null);
+  it('bounds the extra wait when the child exits without a handoff', async () => {
+    diesDuringProbe(null);
 
-      const result = run().catch((error) => error);
-      await vi.runAllTimersAsync();
+    const result = run().catch((error) => error);
+    await vi.runAllTimersAsync();
 
-      expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
-      // One verdict wait after the failed probe, including the first grace poll if needed.
-      expect(Date.now()).toBe(check === 'grace' ? 4100 : 4000);
-    });
-  }
-);
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+    // One verdict wait after the failed probe.
+    expect(Date.now()).toBe(4000);
+  });
+});
 
 describe('reusing a running server', () => {
   beforeEach(() => {
@@ -391,38 +366,6 @@ describe('reusing a running server', () => {
   });
 });
 
-it('keeps the same grace window for a child that stays healthy', async () => {
-  const result = run();
-  await vi.runAllTimersAsync();
-
-  await expect(result).resolves.toBe(0);
-  expect(Date.now()).toBe(OPEN_PLATFORM_GRACE_MS);
-});
-
-it.each([false, true])(
-  'keeps a grace failure after status recovers, unless a handoff arrives (handoff=%s)',
-  async (handoff) => {
-    vi.mocked(waitForBundlerReadyAsync)
-      .mockResolvedValueOnce(readiness())
-      .mockResolvedValueOnce(readiness())
-      .mockResolvedValueOnce(readiness(false));
-    if (handoff) {
-      setTimeout(() => {
-        fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
-      }, 300);
-    }
-
-    const result = run().catch((error) => error);
-    await vi.runAllTimersAsync();
-
-    expect(await result).toMatchObject({
-      code: handoff ? 'DEV_DETACH_NEEDS_HUMAN' : 'DEV_DETACH_NOT_ANSWERING',
-      exitCode: handoff ? 7 : 20,
-    });
-    expect(Date.now()).toBe(handoff ? 300 : OPEN_PLATFORM_GRACE_MS);
-  }
-);
-
 it('does not wait for a verdict when the child is alive but the bundler stopped answering', async () => {
   vi.mocked(waitForBundlerReadyAsync)
     .mockResolvedValueOnce(readiness())
@@ -497,24 +440,20 @@ describe('readiness belongs to this worktree', () => {
     expect(Date.now()).toBe(1000);
   });
 
-  it.each(['final check', 'grace'])(
-    'rejects a foreign server replacing ours during %s',
-    async (check) => {
-      const probe = vi.mocked(waitForBundlerReadyAsync);
-      probe.mockResolvedValueOnce(readiness());
-      if (check === 'grace') probe.mockResolvedValueOnce(readiness());
-      probe.mockResolvedValue(foreign);
+  it('rejects a foreign server replacing ours during the final check', async () => {
+    const probe = vi.mocked(waitForBundlerReadyAsync);
+    probe.mockResolvedValueOnce(readiness());
+    probe.mockResolvedValue(foreign);
 
-      const result = run().catch((error) => error);
-      await vi.runAllTimersAsync();
+    const result = run().catch((error) => error);
+    await vi.runAllTimersAsync();
 
-      expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_ANSWERING' });
-    }
-  );
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_ANSWERING' });
+  });
 });
 
-// A `run:*` build has not reached Metro yet, so the lock's port is not reported. The lock's own
-// `startedAt` (the step's spawn) bounds the wait, as the port watch is bounded.
+// Metro has not reported its port yet. The lock's own `startedAt` (the step's spawn) bounds the
+// wait, as the port watch is bounded.
 describe('a lock whose port Metro has not reported', () => {
   const pending = {
     ...lockInfo(),

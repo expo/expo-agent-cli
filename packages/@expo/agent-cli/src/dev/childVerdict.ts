@@ -13,8 +13,6 @@
 // parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
 // below. The parent's report goes silently wrong the moment the two drift.
 
-import { buildsBeforeServing } from './forwardedArgs';
-
 /** How many lines of the child's log are searched for its verdict. */
 export const VERDICT_LOG_LINES = 400;
 
@@ -145,49 +143,6 @@ export function isRelayedDeviceCode(code: string | null): code is string {
 }
 
 /**
- * One numbered row of the plan table `formatStartPlan` prints: `  2. expo run:android  ~minutes`.
- *
- * The command runs to the end of the run of two-or-more spaces that separates it from the time
- * class, which is how that table is laid out — the columns are padded, so a single space is inside
- * an argument and two are between columns.
- */
-const PLAN_STEP_ROW = /^\s*\d+\.\s+((?:expo|eas)(?:\s\S+)*?)(?:\s{2,}|\s*$)/;
-
-/**
- * Whether the detached child's dev-server step also opens the app, read from the plan table in
- * its log (`src/plan/format.ts`).
- *
- * @ref llp/0021-honest-reports.rfc.md §The rules — **F140.** The dev server and the app-opening
- * are one subprocess, and the opening is the half that can end it: a macOS Automation refusal
- * reaches the Expo CLI as an unhandled rejection and kills the process, measured 215ms to 263ms
- * after `/status` first answered [observed — 2026-08-28, `friction/run9/livecheck`]. So a run
- * whose step opens the app has risky work outstanding when the bundler answers.
- *
- * `run:ios` and `run:android` open it: launching the app is the last thing they do. An
- * `expo start` step never does: `dev` keeps the platform flags away from it and opens the app
- * itself, from its own process (llp/0026). The last step that serves is the dev-server step; a
- * `run:* --no-bundler` install serves nothing, so it counts only when no step serves.
- *
- * @param rawLines the child's log, ANSI stripped, oldest first.
- */
-export function childOpensPlatform(rawLines: readonly string[]): boolean {
-  let servingCommand: string | undefined;
-  let sawBuild = false;
-  for (const line of rawLines.flatMap((entry) => entry.split('\n'))) {
-    const row = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
-    if (!row) {
-      continue;
-    }
-    const command = row.split(/\s+/)[1];
-    sawBuild ||= buildsBeforeServing(command);
-    if ((command === 'start' || buildsBeforeServing(command)) && !row.includes('--no-bundler')) {
-      servingCommand = command;
-    }
-  }
-  return servingCommand != null ? buildsBeforeServing(servingCommand) : sawBuild;
-}
-
-/**
  * Line 1 of a detached child's log, printed by `devAsync` before anything else.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — it names the run that wrote
@@ -214,8 +169,8 @@ const PLAN_PORT_ROW = /^\s*Dev server:\s+port (\d+)(?:, because (\d+) is taken)?
 /**
  * The port the child's plan gave its dev server, and the busy port the plan moved it from.
  *
- * Pure over the lines, like {@link childOpensPlatform}, and read from the same table. The
- * first row is the plan's: the table is printed once, before any step runs.
+ * Pure over the lines. The first row is the plan's: the table is printed once, before any step
+ * runs.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.
  * @returns null when the log holds no plan, or a plan with no step that serves.

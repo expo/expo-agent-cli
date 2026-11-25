@@ -30,7 +30,6 @@ const EVENTS: [string, RunEvent, PortAfter][] = [
   ['published serving', { type: 'published', phase: 'serving', ...PUBLISHED_AT }, 'published'],
   ['foreign-port', { type: 'foreign-port' }, 'kept'],
   ['port-reported', { type: 'port-reported', port: 8082 }, 'reported'],
-  ['status-answered', { type: 'status-answered' }, 'kept'],
   ['eas-open-started', { type: 'eas-open-started' }, 'kept'],
   ['eas-open-returned', { type: 'eas-open-returned' }, 'kept'],
   ['server-exited', { type: 'server-exited' }, 'kept'],
@@ -53,17 +52,17 @@ const PORT_AFTER: Record<PortAfter, LockPort> = {
 // One row per state, one column per event in the order of EVENTS.
 // oxfmt-ignore
 const TABLE: [Cell, Next[]][] = [
-  [u('none'),     [b('none'),     s('none'),     u('none'),     u('none'),     u('none'),     u('running'), X,              u('none'),     R]],
-  [u('running'),  [b('running'),  s('running'),  u('running'),  u('running'),  u('running'),  X,            u('returned'),  u('running'),  R]],
-  [u('returned'), [b('returned'), s('returned'), u('returned'), u('returned'), u('returned'), X,            X,              u('returned'), R]],
-  [b('none'),     [b('none'),     s('none'),     u('none'),     b('none'),     s('none'),     b('running'), X,              b('none'),     R]],
-  [b('running'),  [b('running'),  s('running'),  u('running'),  b('running'),  s('running'),  X,            b('returned'),  f,             R]],
-  [b('returned'), [b('returned'), s('returned'), u('returned'), b('returned'), s('returned'), X,            X,              R,             R]],
-  [s('none'),     [b('none'),     s('none'),     u('none'),     s('none'),     s('none'),     s('running'), X,              s('none'),     R]],
-  [s('running'),  [b('running'),  s('running'),  u('running'),  s('running'),  s('running'),  X,            s('returned'),  f,             R]],
-  [s('returned'), [b('returned'), s('returned'), u('returned'), s('returned'), s('returned'), X,            X,              R,             R]],
-  [f,             [X,             X,             X,             f,             f,             X,            R,              X,             R]],
-  [R,             [X,             X,             R,             R,             R,             R,            R,              R,             R]],
+  [u('none'),     [b('none'),     s('none'),     u('none'),     u('none'),     u('running'), X,             u('none'),     R]],
+  [u('running'),  [b('running'),  s('running'),  u('running'),  u('running'),  X,            u('returned'), u('running'),  R]],
+  [u('returned'), [b('returned'), s('returned'), u('returned'), u('returned'), X,            X,             u('returned'), R]],
+  [b('none'),     [b('none'),     s('none'),     u('none'),     b('none'),     b('running'), X,             b('none'),     R]],
+  [b('running'),  [b('running'),  s('running'),  u('running'),  b('running'),  X,            b('returned'), f,             R]],
+  [b('returned'), [b('returned'), s('returned'), u('returned'), b('returned'), X,            X,             R,             R]],
+  [s('none'),     [b('none'),     s('none'),     u('none'),     s('none'),     s('running'), X,             s('none'),     R]],
+  [s('running'),  [b('running'),  s('running'),  u('running'),  s('running'),  X,            s('returned'), f,             R]],
+  [s('returned'), [b('returned'), s('returned'), u('returned'), s('returned'), X,            X,             R,             R]],
+  [f,             [X,             X,             X,             f,             X,            R,             X,             R]],
+  [R,             [X,             X,             R,             R,             R,            R,             R,             R]],
 ];
 
 const CASES = TABLE.flatMap(([from, row]) =>

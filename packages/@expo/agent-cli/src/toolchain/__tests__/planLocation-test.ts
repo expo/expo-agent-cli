@@ -67,10 +67,11 @@ describe('where each row of the decision table runs', () => {
     expect(runsOnOf(plan)).toEqual([
       ['prebuild', 'local'],
       ['run', 'local'],
+      ['start', null],
     ]);
-    expect(plan.steps.at(-1)!.reason).toContain('on this machine');
-    expect(plan.steps.at(-1)!.reason).toContain('Xcode on this machine');
-    expect(plan.steps.at(-1)!.timeClass).toBe('many-minutes');
+    const run = plan.steps.find((step) => step.id === 'run')!;
+    expect(run.reason).toContain('Xcode on this machine');
+    expect(run.timeClass).toBe('many-minutes');
     expect(plan.buildLocation).toMatchObject({
       runsOn: 'local',
       platform: 'ios',
@@ -88,7 +89,10 @@ describe('where each row of the decision table runs', () => {
     );
 
     expect(plan.rule).toBe('bare-stale');
-    expect(runsOnOf(plan)).toEqual([['run', 'local']]);
+    expect(runsOnOf(plan)).toEqual([
+      ['run', 'local'],
+      ['start', null],
+    ]);
     expect(plan.buildLocation).toMatchObject({
       platform: 'android',
       requirement: 'the Android SDK and a JDK on this machine',
@@ -109,6 +113,7 @@ describe('where each row of the decision table runs', () => {
       ['install-dev-client', null],
       ['prebuild', 'local'],
       ['run', 'local'],
+      ['start', null],
     ]);
   });
 });

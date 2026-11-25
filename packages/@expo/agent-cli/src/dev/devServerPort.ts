@@ -45,9 +45,7 @@ export async function planDevServerPortAsync(
   claim: UntrackedPortClaim
 ): Promise<StartPlan> {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
-  // the port is picked here, before the plan is printed, and set on every step that
-  // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
-  // holds the port, and exits 0 [observed — live suite, 2026-10-05].
+  // the port is picked here, before the plan is printed, and set on the step that serves.
   const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
   let plan: StartPlan = forwardedPlan;
   if (lock) {

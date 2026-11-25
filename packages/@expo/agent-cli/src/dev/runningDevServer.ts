@@ -20,7 +20,7 @@ export type RunningDevServer = { lock: DevServerLockInfo; phase: RunningDevServe
  *
  * `starting` covers a Metro that is not up, and another project's Metro on the lock's port while
  * this project's busy-port retry moves off it: in each, this project's server is on its way and
- * there is nothing to open against yet. An `expo run:*` build is `building` on the lock.
+ * there is nothing to open against yet. A build before the dev server is `building` on the lock.
  */
 export async function runningDevServerAsync(
   projectRoot: string,

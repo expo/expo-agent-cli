@@ -37,8 +37,6 @@ export type RunEvent =
   | { type: 'foreign-port' }
   /** Metro reported the port it listens on. */
   | { type: 'port-reported'; port: number }
-  /** `/status` answers for this project while the step runs. */
-  | { type: 'status-answered' }
   | { type: 'eas-open-started' }
   | { type: 'eas-open-returned' }
   /** The dev-server step's child exited, and its port watch ended. */
@@ -64,8 +62,6 @@ export function nextRunState(state: RunState, event: RunEvent): RunState | null 
       return finishing ? null : { phase: 'unlocked', easOpen };
     case 'port-reported':
       return isHeld(state) ? { ...state, port: event.port, source: 'reported' } : state;
-    case 'status-answered':
-      return state.phase === 'building' ? { ...state, phase: 'serving' } : state;
     case 'eas-open-started':
       return easOpen !== 'none' || finishing ? null : { ...state, easOpen: 'running' };
     case 'eas-open-returned':

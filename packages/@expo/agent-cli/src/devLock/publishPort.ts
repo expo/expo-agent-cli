@@ -19,8 +19,6 @@ export type PublishDevServerPortOptions = ResolveDevServerPortOptions & {
   lock: RunLock;
   /** {@link DevServerLockInfo.easPlatform}; null when omitted. */
   easPlatform?: DevServerLockInfo['easPlatform'];
-  /** What the lock answers at the spawn: `building` for a step that compiles before it serves. */
-  phase: 'building' | 'serving';
   /** The pid listening on a port, for the run record (`./runRecord`); no record without it. */
   findListenerPid?: (port: number) => Promise<number | null>;
 };
@@ -64,7 +62,7 @@ export async function publishDevServerPortAsync(
     }
     await options.lock.publishAsync({
       type: 'published',
-      phase: options.phase,
+      phase: 'serving',
       port: resolved.port,
       source: resolved.source,
       since: options.since,
@@ -83,7 +81,7 @@ export async function publishDevServerPortAsync(
 
   await publishAsync({ port: named, source: 'arg' });
   // The lock already answers, so nothing waits on this watch: it follows the dev server for as long
-  // as it runs, and Metro's report after a long `expo run:*` build still counts.
+  // as it runs, and a later report from Metro still counts.
   const watched = await resolveDevServerPortAsync(projectRoot, args, {
     ...options,
     onResolved: undefined,

@@ -78,7 +78,6 @@ describe(publishDevServerPortAsync, () => {
 
     const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8301'], {
       lock: runLock,
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
@@ -115,7 +114,6 @@ describe(publishDevServerPortAsync, () => {
 
     const lock = publishDevServerPortAsync(projectRoot, ['run:ios', '--port', '8303'], {
       lock: runLockFor(projectRoot),
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
@@ -142,7 +140,6 @@ describe(publishDevServerPortAsync, () => {
 
     const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8308'], {
       lock: runLock,
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => true,
       intervalMs: 10,
@@ -180,7 +177,6 @@ describe(publishDevServerPortAsync, () => {
 
     const lock = publishDevServerPortAsync(projectRoot, ['start'], {
       lock: runLockFor(projectRoot),
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => true,
       intervalMs: 10,
@@ -207,7 +203,6 @@ describe(publishDevServerPortAsync, () => {
     const projectRoot = makeTempProject();
     const published = publishDevServerPortAsync(projectRoot, ['start'], {
       lock: runLockFor(projectRoot),
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => true,
       intervalMs: 10,
@@ -235,7 +230,6 @@ describe(publishDevServerPortAsync, () => {
 
     const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8304'], {
       lock: runLockFor(projectRoot),
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       intervalMs: 10,
@@ -286,7 +280,6 @@ describe(publishDevServerPortAsync, () => {
 
     await publishDevServerPortAsync(projectRoot, ['start', '--port', '8311'], {
       lock: runLock,
-      phase: 'serving',
       since,
       isRunning: () => running,
       stopped,
@@ -308,7 +301,6 @@ describe(publishDevServerPortAsync, () => {
 
     const lock = publishDevServerPortAsync(projectRoot, ['start', '--port', '8306'], {
       lock: runLockFor(projectRoot),
-      phase: 'serving',
       since: Date.now(),
       isRunning: () => running,
       stopped,

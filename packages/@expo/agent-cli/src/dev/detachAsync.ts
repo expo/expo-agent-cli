@@ -8,17 +8,14 @@ import {
   detachFailureError,
   isOwnBundlerAnsweringAsync,
   lostDevServerError,
-  needsOpenPlatformGrace,
   notReadyError,
   notStartedError,
-  OPEN_PLATFORM_GRACE_MS,
   readChildVerdictSync,
   relayedDeviceError,
   relayedSpawnRefusal,
   resolveDetachFailure,
   waitFailureAsync,
   waitForChildVerdictAsync,
-  watchOpenPlatformGraceAsync,
 } from './detachHealth';
 import { waitForDetachedStartupAsync } from './detachLockWait';
 import { detachEas, reportDetached, WHOLE_LOG, type DetachEas } from './detachReport';
@@ -39,7 +36,7 @@ import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { detachedEventLogEnv } from '../utils/eventLogEnv';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
-import { childOpensPlatform, parseDetachedChildVerdict, VERDICT_LOG_LINES } from './childVerdict';
+import { parseDetachedChildVerdict, VERDICT_LOG_LINES } from './childVerdict';
 import {
   childStartsSessionSync,
   knownSessionIdSync,
@@ -638,7 +635,7 @@ async function checkSpawnedHealthAsync(
   childIsGone: () => boolean,
   ready: boolean | null
 ): Promise<DetachedLogRead | null> {
-  const { projectRoot, options, startedAt } = context;
+  const { projectRoot, options } = context;
   const { logFile } = child;
   // @ref llp/0021-honest-reports.rfc.md §The rules
   // The probe can outlast the child. Read its state and log only after that await, so a handoff
@@ -647,7 +644,6 @@ async function checkSpawnedHealthAsync(
     ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // One read of the whole log, for the phase, the verdict and the report's port move.
   const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
-  const opensPlatform = log != null && childOpensPlatform(log.lines);
   let verdict = log == null ? null : parseDetachedChildVerdict(log.lines.slice(-VERDICT_LOG_LINES));
   let failure = resolveDetachFailure({
     exited: childIsGone(),
@@ -655,25 +651,9 @@ async function checkSpawnedHealthAsync(
     statusAnswering,
   });
 
-  if (failure == null && needsOpenPlatformGrace({ ready, opensPlatform })) {
-    const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
-      hasExited: childIsGone,
-      budgetMs: Math.min(
-        OPEN_PLATFORM_GRACE_MS,
-        // Bounded by the budget the caller gave the whole run, never beyond it: a `--wait-ready`
-        // that has already spent its timeout must not spend a second one here.
-        Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt))
-      ),
-      // Only a run that waited for the bundler may be failed on the bundler.
-      watchStatus: ready === true,
-    });
-    failure = grace.failure;
-    verdict = grace.verdict ?? verdict;
-  }
-
   if (failure) {
-    // Both the final probe and the grace window can observe an exit before the handoff is
-    // readable. Give either path the same bounded wait, once, and prefer the child's own verdict.
+    // The final probe can observe an exit before the handoff is readable. Wait for it once, with
+    // a bound, and prefer the child's own verdict.
     if (verdict?.scenario == null && childIsGone()) {
       verdict = await waitForChildVerdictAsync(projectRoot);
       failure = verdict?.scenario != null ? 'needs-human' : 'child-exited';

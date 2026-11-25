@@ -543,7 +543,8 @@ describe(buildNextActionStatus, () => {
     expect(next.rule).toBe('dev-client-stale');
     expect(next.steps.map((step) => step.argv.join(' '))).toEqual([
       'expo prebuild --platform android',
-      'expo run:android',
+      'expo run:android --no-bundler',
+      'expo start --dev-client',
     ]);
   });
 

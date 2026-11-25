@@ -5,7 +5,6 @@
 // `expo` invocations, the stop on the first failing step, and the build record written after a
 // successful native build.
 import fs from 'node:fs';
-import http from 'node:http';
 import path from 'node:path';
 
 import {
@@ -123,7 +122,8 @@ describe('@expo/agent-cli dev', () => {
     // Not merely un-asked: the plan it printed is the plan it ran.
     expect(invocationArgs(projectRoot)).toEqual([
       ['prebuild', '--platform', 'ios'],
-      ['run:ios', ...PORT_ARGS],
+      ['run:ios', '--no-bundler'],
+      ['start', '--dev-client', ...PORT_ARGS],
     ]);
   });
 
@@ -135,7 +135,8 @@ describe('@expo/agent-cli dev', () => {
       expect(result.exitCode).toBe(0);
       expect(invocationArgs(projectRoot)).toEqual([
         ['prebuild', '--platform', 'ios'],
-        ['run:ios', ...PORT_ARGS],
+        ['run:ios', '--no-bundler'],
+        ['start', '--dev-client', ...PORT_ARGS],
       ]);
     });
 
@@ -153,28 +154,25 @@ describe('@expo/agent-cli dev', () => {
         env: { CI: undefined },
       });
 
-      const [prebuild, run] = readStubExpoInvocations(projectRoot);
+      const [prebuild, run, start] = readStubExpoInvocations(projectRoot);
       expect(prebuild!.args).toEqual(['prebuild', '--platform', 'ios']);
       expect(prebuild!.ci).toBe('1');
-      expect(run!.args).toEqual(['run:ios', ...PORT_ARGS]);
+      expect(run!.args).toEqual(['run:ios', '--no-bundler']);
+      expect(run!.ci).toBe('1');
+      expect(start!.args).toEqual(['start', '--dev-client', ...PORT_ARGS]);
       // Nothing set, rather than `CI=0`: a machine whose own environment says CI keeps saying it.
-      expect(run!.ci).toBeNull();
-      // Both steps are non-interactive whatever `CI` says, because neither owns a terminal.
-      expect(prebuild!.isTTY).toBe(false);
-      expect(run!.isTTY).toBe(false);
+      expect(start!.ci).toBeNull();
+      // Every step is non-interactive whatever `CI` says, because none owns a terminal.
+      expect([prebuild, run, start].map((step) => step!.isTTY)).toEqual([false, false, false]);
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `expo run:*` builds before
-    // it serves, so its lock says `building` until Metro answers /status for this project. Another
-    // project's dev server that answers on the port during the build and then leaves does not keep
-    // the lock `building` after this project's Metro serves there.
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the lock says `building`
+    // while `run:* --no-bundler` compiles, and `serving` from the spawn of `expo start`.
     it.each(['ios', 'android'] as const)(
-      'says building on the lock while run:%s compiles, and serving once Metro answers',
+      'says building on the lock while run:%s compiles, and serving when expo start runs',
       async (platform) => {
-        // Bare native directories, so the plan is the one `run:*` step and nothing waits before it.
         const projectRoot = await setupAsync('bare-app');
-        // Its own port: other files run beside this one, and a dev server of theirs that stays on
-        // the port would keep this Metro from serving at all.
+        // Its own port: other files run beside this one.
         const port = await freePortAsync();
         const child = spawnAgentCli(
           projectRoot,
@@ -182,16 +180,12 @@ describe('@expo/agent-cli dev', () => {
           {
             env: {
               STUB_EXPO_LISTEN: '1',
-              // Long enough that the foreign server below has left before the stub binds the port.
-              STUB_EXPO_BUILD_DELAY_MS: '6000',
+              // Long enough that the read below lands inside the build under load.
+              STUB_EXPO_BUILD_DELAY_MS: '8000',
               STUB_EXPO_DELAY_MS: '30000',
             },
           }
         );
-        const foreign = http.createServer((_request, response) => {
-          response.writeHead(200, { 'x-react-native-project-root': '/another/project' });
-          response.end('packager-status:running');
-        });
         try {
           expect(
             await waitForAsync(
@@ -199,24 +193,26 @@ describe('@expo/agent-cli dev', () => {
               30_000
             )
           ).toBe(true);
-          // The lock first: the run checks the named port at the spawn and publishes nothing on a
-          // port another project already answers on, so the foreign server binds after it.
-          const building = { pid: child.pid, port, phase: 'building' };
-          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject(building);
-          await new Promise<void>((resolve) => foreign.listen(port, '127.0.0.1', resolve));
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          expect(await readDevLockAsync(projectRoot)).toMatchObject(building);
-          await new Promise((resolve) => foreign.close(resolve));
+          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
+            pid: child.pid,
+            port,
+            phase: 'building',
+          });
 
-          const deadline = Date.now() + 20_000;
-          let lock = await readDevLockAsync(projectRoot);
-          while (lock?.phase !== 'serving' && Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            lock = await readDevLockAsync(projectRoot);
-          }
-          expect(lock).toMatchObject({ pid: child.pid, port, phase: 'serving' });
+          expect(
+            await waitForAsync(
+              async () => (await readDevLockAsync(projectRoot))?.phase === 'serving',
+              20_000,
+              250
+            )
+          ).toBe(true);
+          expect(
+            await waitForAsync(
+              () => invocationArgs(projectRoot).some((args) => args[0] === 'start'),
+              10_000
+            )
+          ).toBe(true);
         } finally {
-          foreign.close();
           await killAsync(child);
         }
       }
@@ -253,49 +249,6 @@ describe('@expo/agent-cli dev', () => {
       }
     );
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — `serving` comes from
-    // /status alone, so a port report the run cannot read does not hold the lock at `building`.
-    it.each(['ios', 'android'] as const)(
-      'says serving once Metro answers after run:%s, with no port report',
-      async (platform) => {
-        const projectRoot = await setupAsync('bare-app');
-        // Not 8081: the stub Metro holds its port for the whole test, and other files run beside it.
-        const port = String(await freePortAsync());
-        const child = spawnAgentCli(
-          projectRoot,
-          ['dev', `--${platform}`, '--local', '--port', port],
-          {
-            env: {
-              STUB_EXPO_LISTEN: '1',
-              STUB_EXPO_NO_PORT_REPORT: '1',
-              STUB_EXPO_BUILD_DELAY_MS: '2000',
-              STUB_EXPO_DELAY_MS: '30000',
-            },
-          }
-        );
-        try {
-          expect(await waitForDevLockAsync(projectRoot, 10_000)).toMatchObject({
-            phase: 'building',
-          });
-          // Well inside the 20 s port watch, which the poll no longer waits for.
-          const deadline = Date.now() + 10_000;
-          let lock = await readDevLockAsync(projectRoot);
-          while (lock?.phase !== 'serving' && Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            lock = await readDevLockAsync(projectRoot);
-          }
-          expect(lock).toMatchObject({
-            pid: child.pid,
-            port: Number(port),
-            phase: 'serving',
-            portReported: false,
-          });
-        } finally {
-          await killAsync(child);
-        }
-      }
-    );
-
     it('emits the plan before the first step runs', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
@@ -323,8 +276,8 @@ describe('@expo/agent-cli dev', () => {
     // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
     // F120. The development build's connect URL was built out of a `--port` the plan then dropped
     // [observed — wave 29, live, `wave29-devclient/evidence/05-dev-build-ios.log`]. The URL is the
-    // follow-up an agent acts on, so it names the port the step serves on: the port the plan
-    // named, because `expo run:*` takes `--port` too (llp/0004 §A busy port).
+    // follow-up an agent acts on, so it names the port the dev-server step serves on: the port the
+    // plan named (llp/0004 §A busy port).
     it('names the port the plan will really serve on', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       const result = await executeAgentCliAsync(projectRoot, [
@@ -337,7 +290,8 @@ describe('@expo/agent-cli dev', () => {
 
       expect(result.stderr).not.toContain('were not passed on');
       expect(readStubExpoInvocations(projectRoot).at(-1)!.args).toEqual([
-        'run:ios',
+        'start',
+        '--dev-client',
         '--port',
         '8901',
       ]);
@@ -346,17 +300,25 @@ describe('@expo/agent-cli dev', () => {
       expect(connectLine).toContain('8901');
     });
 
-    it('says which options a plan that ends in a build does not pass on', async () => {
+    it('passes the expo start options to the dev server of a plan that builds', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       const result = await executeAgentCliAsync(projectRoot, [
         'dev',
         '--ios',
         '--local',
         '--plan',
+        '--json',
         '--tunnel',
       ]);
 
-      expect(result.stderr).toContain('so these options were not passed on: --tunnel.');
+      expect(result.stderr).not.toContain('were not passed on');
+      expect(JSON.parse(result.stdout).steps.at(-1).argv).toEqual([
+        'expo',
+        'start',
+        '--dev-client',
+        '--tunnel',
+        ...PORT_ARGS,
+      ]);
     });
 
     it('records no build when the fingerprint is unavailable', async () => {
@@ -379,7 +341,8 @@ describe('@expo/agent-cli dev', () => {
       expect(result.exitCode).toBe(0);
       expect(invocationArgs(projectRoot)).toEqual([
         ['prebuild', '--platform', 'ios'],
-        ['run:ios', ...PORT_ARGS],
+        ['run:ios', '--no-bundler'],
+        ['start', '--dev-client', ...PORT_ARGS],
       ]);
       // Only the platform that was built is updated, and it is recorded in the v2 shape: the
       // whole fingerprint, so a later `@expo/agent-cli impact` can diff against it and say *what* changed
@@ -412,7 +375,7 @@ describe('@expo/agent-cli dev', () => {
       expect(built.exitCode).toBe(1);
       expect(invocationArgs(projectRoot)).toEqual([
         ['prebuild', '--platform', 'ios'],
-        ['run:ios', ...PORT_ARGS],
+        ['run:ios', '--no-bundler'],
       ]);
       expect(readLastBuildFile(projectRoot)).toMatchObject({
         ios: { hash: CHANGED_HASH },
@@ -433,7 +396,7 @@ describe('@expo/agent-cli dev', () => {
     });
 
     // A build that compiled and then failed before the install is not a build on the device:
-    // `Build Succeeded` alone records nothing. A checked-in `ios/` makes `run:ios` the only step.
+    // `Build Succeeded` alone records nothing. A checked-in `ios/` makes `run:ios` the first step.
     it('records no build for a step that failed before it installed anything', async () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await fs.promises.mkdir(path.join(projectRoot, 'ios'), { recursive: true });
@@ -449,7 +412,7 @@ describe('@expo/agent-cli dev', () => {
       });
 
       expect(result.exitCode).toBe(1);
-      expect(invocationArgs(projectRoot)).toEqual([['run:ios', ...PORT_ARGS]]);
+      expect(invocationArgs(projectRoot)).toEqual([['run:ios', '--no-bundler']]);
       expect(readLastBuildFile(projectRoot)).toEqual({
         ios: RECORDED_HASH,
         android: RECORDED_HASH,
@@ -585,7 +548,8 @@ describe('@expo/agent-cli dev', () => {
 
       expect(await planStepsAsync(projectRoot)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios', ...PORT_ARGS],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
       ]);
     });
 
@@ -616,7 +580,10 @@ describe('@expo/agent-cli dev', () => {
 
       const plan = await planAsync(projectRoot);
       expect(plan.rule).toBe('dev-client-rebuild');
-      expect(plan.steps).toEqual([['expo', 'run:ios', ...PORT_ARGS]]);
+      expect(plan.steps).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
+      ]);
     });
 
     // @ref ../../src/impact/classify §sourceNeedsPrebuild. The run this split was asked for
@@ -638,7 +605,10 @@ describe('@expo/agent-cli dev', () => {
 
       const plan = await planAsync(projectRoot);
       expect(plan.rule).toBe('dev-client-rebuild');
-      expect(plan.steps).toEqual([['expo', 'run:ios', ...PORT_ARGS]]);
+      expect(plan.steps).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
+      ]);
     });
 
     it('builds without prebuilding after a native module was removed', async () => {
@@ -647,7 +617,10 @@ describe('@expo/agent-cli dev', () => {
 
       const plan = await planAsync(projectRoot);
       expect(plan.rule).toBe('dev-client-rebuild');
-      expect(plan.steps).toEqual([['expo', 'run:ios', ...PORT_ARGS]]);
+      expect(plan.steps).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
+      ]);
     });
 
     // The other side of the same split. An SDK upgrade moves the versions of the modules that are
@@ -663,7 +636,8 @@ describe('@expo/agent-cli dev', () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.steps).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios', ...PORT_ARGS],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
       ]);
     });
 
@@ -681,7 +655,8 @@ describe('@expo/agent-cli dev', () => {
       const plan = await planAsync(projectRoot);
       expect(plan.steps).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios', ...PORT_ARGS],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
       ]);
     });
 
@@ -702,7 +677,8 @@ describe('@expo/agent-cli dev', () => {
       const plan = await planAsync(projectRoot);
       expect(plan.steps).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios', ...PORT_ARGS],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
       ]);
     });
 
@@ -719,7 +695,10 @@ describe('@expo/agent-cli dev', () => {
       config.expo.ios = { ...config.expo.ios, bundleIdentifier: 'com.example.changed' };
       await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
 
-      expect(await planStepsAsync(projectRoot)).toEqual([['expo', 'run:ios', ...PORT_ARGS]]);
+      expect(await planStepsAsync(projectRoot)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
+      ]);
     });
   });
 
@@ -1357,49 +1336,6 @@ describe('@expo/agent-cli dev', () => {
       ]);
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — F125.
-    //
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the install step
-    // serves nothing (`--no-bundler`), so the run's lock says `building` until the step that serves.
-    it('says building on the lock while the install runs, and serving when it serves', async () => {
-      const { projectRoot, env } = await setupInstallAsync();
-      // Long enough that the read below lands inside the install by a wide margin, and paid only
-      // once: the run is killed as soon as the dev server it is waiting for has published.
-      const child = spawnAgentCli(projectRoot, ['dev', '--android', '--local'], {
-        env: { ...env, STUB_EXPO_DELAY_MS: '5000', STUB_EXPO_DEV_SERVER_PORT: '8097' },
-      });
-
-      try {
-        // The install has started — the step records itself before it sleeps — and it is still
-        // running, so this is the window the finding is about.
-        expect(
-          await waitForAsync(
-            () => invocationArgs(projectRoot).some((args) => args[0] === 'run:android'),
-            30_000
-          )
-        ).toBe(true);
-        expect(await readDevLockAsync(projectRoot)).toMatchObject({
-          pid: child.pid,
-          phase: 'building',
-        });
-
-        const deadline = Date.now() + 30_000;
-        let lock = await readDevLockAsync(projectRoot);
-        while (lock?.phase !== 'serving' && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          lock = await readDevLockAsync(projectRoot);
-        }
-        expect(lock).toMatchObject({
-          phase: 'serving',
-          url: 'http://127.0.0.1:8097',
-          port: 8097,
-          pid: child.pid,
-        });
-      } finally {
-        await killAsync(child);
-      }
-    });
-
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the run's lock says
     // `building` through the install and `serving` once the dev-server step answers.
     it('reports a detached install plan as serving once the app is on the device', async () => {
@@ -1486,7 +1422,8 @@ describe('@expo/agent-cli dev', () => {
       for (const [index, root] of [first!, second!].entries()) {
         expect(invocationArgs(root)).toEqual([
           ['prebuild', '--platform', 'ios'],
-          ['run:ios', ...PORT_ARGS, '--device', udids[index]],
+          ['run:ios', '--no-bundler', '--device', udids[index]],
+          ['start', '--dev-client', ...PORT_ARGS],
         ]);
       }
       const booted = readXcrun()
@@ -1571,8 +1508,12 @@ describe('@expo/agent-cli dev', () => {
       const ports = [first!, second!].map((root) => bindings[fs.realpathSync.native(root)]!.port);
       expect(ports).toEqual(expect.arrayContaining([5554, 5556]));
       for (const [index, root] of [first!, second!].entries()) {
-        const pinned = ['run:android', ...PORT_ARGS, '--device', `emulator-${ports[index]}`];
-        expect(invocationArgs(root)).toEqual([['prebuild', '--platform', 'android'], pinned]);
+        const pinned = ['run:android', '--no-bundler', '--device', `emulator-${ports[index]}`];
+        expect(invocationArgs(root)).toEqual([
+          ['prebuild', '--platform', 'android'],
+          pinned,
+          ['start', '--dev-client', ...PORT_ARGS],
+        ]);
         // The plan the run announced is the pinned one, not the one from before the bind.
         const [announced, ...more] = startPlanEvents(eventsOf(root));
         expect(more).toEqual([]);
@@ -1594,7 +1535,7 @@ describe('@expo/agent-cli dev', () => {
         const run = JSON.parse(bound.stdout).steps.find(
           (step: { id: string }) => step.id === 'run'
         );
-        expect(run.argv).toEqual(['expo', 'run:android', ...PORT_ARGS, '--device', serial]);
+        expect(run.argv).toEqual(['expo', 'run:android', '--no-bundler', '--device', serial]);
       }
       expect(Object.keys(readBindings(home))).toHaveLength(2);
     });

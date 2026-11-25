@@ -621,14 +621,13 @@ export function androidDevBuildGate(
   // The second half, and it is what makes the suite cheap rather than merely possible: `@expo/agent-cli dev`
   // plans a **build** for a platform with no recorded fingerprint, so a project whose app is
   // installed and whose record is missing would send `beforeAll` into fifteen minutes of Gradle.
-  // The record is written when the `expo run:android` step exits — which is when its dev server is
-  // stopped, not when the compiler finishes [observed — wave 29, 2026-08-28] — so "installed" and
-  // "recorded" really are two facts and this gate needs both.
+  // An app installed some other way (Android Studio, an older `dev`) has no record, so "installed"
+  // and "recorded" really are two facts and this gate needs both.
   const record = path.join(project.root, '.expo', 'agent-cli-last-build.json');
   try {
     if (JSON.parse(fs.readFileSync(record, 'utf8'))?.android == null) {
       return missing(
-        `${record} records no android build, so "@expo/agent-cli dev" would plan one rather than serve the app that is installed — run "npx expo run:android" through "npx @expo/agent-cli dev --android", and stop it with "npx @expo/agent-cli dev:stop", which is what writes the record`
+        `${record} records no android build, so "@expo/agent-cli dev" would plan one rather than serve the app that is installed — run "npx @expo/agent-cli dev --android" once, which builds and records it`
       );
     }
   } catch {

@@ -78,26 +78,13 @@ export function withForwardedExpoArgs(
 }
 
 /**
- * Whether this step starts the dev server, and so runs through the `@expo/agent-cli start` wrapper:
- * `expo start`, or an `expo run:*` that serves.
+ * Whether this step starts the dev server, and so runs through the `@expo/agent-cli start` wrapper.
  *
- * `eas build` finishes with an artifact and starts nothing. The install step of an `*-install`
- * plan passes `--no-bundler` (llp/0004 §A current build is not an installed app): running it
- * through the dev-server runner would publish a lock naming a port nothing will listen on, for as
- * long as the install takes, and every reader of that lock (`status`, `smoke`, `dev:stop`, a
- * `--detach` parent waiting on another port) would be told about a dev server that does not exist.
+ * Only `expo start` serves. A build or install step runs `expo run:* --no-bundler` (llp/0004
+ * §Decision table), and `eas build` finishes with an artifact and starts nothing.
  */
 export function isDevServerStep(step: PlanStep): boolean {
-  if (step.argv[0] !== 'expo' || step.argv.includes('--no-bundler')) {
-    return false;
-  }
-  const command = step.argv[1];
-  return command === 'start' || buildsBeforeServing(command);
-}
-
-/** Whether an `expo` command compiles the app before it serves: `run:ios` and `run:android`. */
-export function buildsBeforeServing(command: string | undefined): boolean {
-  return command === 'run:ios' || command === 'run:android';
+  return step.argv[0] === 'expo' && step.argv[1] === 'start';
 }
 
 /**
@@ -166,10 +153,8 @@ function withoutDeviceArgs(argv: readonly string[]): string[] {
  * The same plan, with `--port` on every step that serves, and on no other step.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
- * An `expo run:*` that serves writes the port to `RCT_METRO_PORT` and
- * `-PreactNativeDevServerPort`, so the binary and its deep link name the port the dev server takes.
- * An install step with `--no-bundler` gets none: the Expo CLI refuses `--port` with `--no-bundler`,
- * and the open deep-links the app to the dev server anyway.
+ * A `run:* --no-bundler` step gets none: the Expo CLI refuses `--port` with `--no-bundler`, and
+ * `dev` opens the app on the dev server itself.
  */
 export function withDevServerPort(plan: StartPlan, port: number): StartPlan {
   return {

@@ -35,15 +35,6 @@ export interface PortCollision {
  *   printed just above the question, which survives even when the question does not.
  * - `Port 8180 is unavailable and 'npx expo' is running in non-interactive mode` — the newer
  *   branch, which throws instead of asking when the port was explicit.
- * - `› Skipping dev server` is not read on its own. When another process holds the port, `expo run:*`
- *   prints a `Port 8081 is …` line above it, which the pattern above reads, then builds, installs,
- *   deep-links the app to that process, and exits 0 [observed — live suite, 2026-10-05]. That exit
- *   0 is why the check runs on any exit code. A skip with no `Port N is` line before it is the
- *   Expo CLI reusing this project's own dev server (`choosePortAsync` with `reuseExistingPort`),
- *   not a collision.
- * - `Port "8081" became busy running another process while the app was compiling` — what
- *   `expo run:*` throws, exit 1, when its explicit port was taken during the build
- *   (`utils/port.ts` `ensurePortAvailabilityAsync`).
  *
  * And one from Metro: `Error: listen EADDRINUSE: address already in use :::8082`, when the port
  * this CLI picked was free at the bind test and taken before Metro bound it. `expo start` then
@@ -53,12 +44,11 @@ const COLLISION_PATTERNS: RegExp[] = [
   /Use port (?<offered>\d+) instead\?/i,
   /Port\s+(?<requested>\d+)\s+is\s+(?:running\b|being used\b)/i,
   /Port\s+(?<requested>\d+)\s+is unavailable and/i,
-  /Port "?(?<requested>\d+)"? became busy/,
   /listen EADDRINUSE: address already in use \S*?:(?<requested>\d+)\b/,
 ];
 
 /**
- * Whether a failed `expo` step stopped because its port was taken, and which ports it named.
+ * Whether an `expo start` step stopped because its port was taken, and which ports it named.
  *
  * Pure over the captured text, so every spelling above is testable without a busy port.
  *
@@ -82,7 +72,7 @@ export function detectPortCollision(output: string): PortCollision | null {
   return matched ? { requestedPort, offeredPort } : null;
 }
 
-/** Where `expo start` and `expo run:*` listen when nothing names a port: Expo's own default. */
+/** Where `expo start` listens when nothing names a port: Expo's own default. */
 export function defaultMetroPort(): number {
   return toPort(process.env.RCT_METRO_PORT) ?? 8081;
 }
@@ -120,9 +110,7 @@ export function formatPortMove({
  * The port a plan's dev server is given, decided before any step runs.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
- * `expo run:*` answers an unanswerable port question by skipping its dev server and
- * exiting 0, after it baked the busy port into the app [observed — live suite, 2026-10-05]. With a
- * free port picked here and passed as `--port`, the question is never asked.
+ * With a free port picked here and passed as `--port`, `expo start` never asks which port to use.
  */
 export interface PlannedPort {
   port: number;

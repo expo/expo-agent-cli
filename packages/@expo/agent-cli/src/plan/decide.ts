@@ -119,11 +119,14 @@ export function decideStartPlan(
             `The ${platform} device has not got this development build, so it is installed before the dev server starts.`,
           ]
         : [];
+  // No local step builds and serves: `run:* --no-bundler` exits after the install, so the build is
+  // recorded before the dev server starts (llp/0004 §Decision table).
+  const serveBuild = startDevClientStep('It serves the build the step above installed.', options);
   /** The steps that make and install the app, per the backend that was chosen. */
   const buildSteps = (reason: string, prebuild: boolean): PlanStep[] =>
     backend?.runsOn === 'eas'
       ? easRouteSteps(platform, reason, options)
-      : [...(prebuild ? [prebuildStep(platform)] : []), runStep(platform, reason)];
+      : [...(prebuild ? [prebuildStep(platform)] : []), runStep(platform, reason), serveBuild];
   const location = () =>
     backend?.runsOn === 'eas'
       ? easBuildLocation(platform, backend)
@@ -393,9 +396,8 @@ function prebuildStep(platform: NativePlatform): PlanStep {
  * `expo run:<platform> --no-bundler`, which is the same command `smoke` installs a development
  * build with (`src/device/installDevBuild.ts`) — the Expo CLI already owns "compile what is
  * missing, reusing the toolchain's cache, then install and launch", and llp/0001 constraint 4 says
- * to invoke that rather than reimplement it. `--no-bundler` is what separates this from
- * {@link runStep}: the dev server is the step after this one, and a second Metro would be a second
- * answer to which bundle the app is running.
+ * to invoke that rather than reimplement it. `--no-bundler`: the dev server is the step after this
+ * one, and a second Metro would be a second answer to which bundle the app is running.
  *
  * **`a-minute`, and the reason says why it might not be.** This step is only ever planned when the
  * fingerprint matches the recorded build, so the compiler has nothing to do and Xcode or Gradle
@@ -419,9 +421,9 @@ function installStep(platform: NativePlatform): PlanStep {
 function runStep(platform: NativePlatform, reason: string): PlanStep {
   return step(
     'run',
-    ['expo', `run:${platform}`],
+    ['expo', `run:${platform}`, '--no-bundler'],
     'many-minutes',
-    `Builds the ${platform} app ${LOCAL_WHERE} (a local build, which needs ${localRequirement(platform)}), installs it, and starts the dev server. ${reason}`,
+    `Builds the ${platform} app ${LOCAL_WHERE} (a local build, which needs ${localRequirement(platform)}) and installs it. --no-bundler because the next step is the dev server. ${reason}`,
     'local'
   );
 }
@@ -429,13 +431,11 @@ function runStep(platform: NativePlatform, reason: string): PlanStep {
 /**
  * The steps that replace `prebuild` + `run:*` when the build runs on EAS.
  *
- * Three differences from the local route, all of them worth the reader's attention:
+ * Two differences from the local route, both of them worth the reader's attention:
  *
  * - **No prebuild.** EAS Build generates the native project itself for a CNG app, so a prebuild
  *   here would only be work done twice — and it is the step that needs a toolchain this route was
  *   chosen to avoid.
- * - **The dev server is its own step.** `expo run:*` builds, installs and starts; `eas build`
- *   builds and stops, so `expo start --dev-client` has to follow it.
  * - **Installing the artifact is guidance, not a step** [decided — llp/0015 §The plan approved is the plan run]. Whether the finished build can be installed *here* depends on there being a
  *   simulator or a device attached to this machine, which is exactly what the host that sent this
  *   build to the cloud may not have. A step that cannot be run on the host it was planned for is
@@ -481,8 +481,8 @@ function easRouteSteps(
       ['expo', 'start', '--dev-client'],
       'seconds',
       onEas
-        ? `Starts the dev server through a tunnel, for the build above. Once it is up, the EAS Simulator session is started with that build, and the app is opened on it. Unlike a local build, "eas build" starts no dev server.`
-        : `Starts the dev server for the build above. Unlike a local build, "eas build" does not start one — and it serves nothing until the artifact is installed.`
+        ? `Starts the dev server through a tunnel, for the build above. Once it is up, the EAS Simulator session is started with that build, and the app is opened on it.`
+        : `Starts the dev server for the build above. It serves nothing until the artifact is installed.`
     ),
   ];
 }
@@ -608,8 +608,7 @@ function describeTargetPlatform(
   options: DecideStartPlanOptions,
   actsOnPlatform: boolean
 ): string {
-  const { requestedPlatform } = options;
-  if (requestedPlatform === platform) {
+  if (options.requestedPlatform === platform) {
     return actsOnPlatform
       ? `Target platform: ${platform}, named on the command line.`
       : `Target platform: ${platform}, named on the command line. --no-open leaves the app unopened — run "${navigateCommand(options)}" once the dev server is up.`;
