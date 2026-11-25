@@ -8,7 +8,7 @@ import { diffFingerprintsAsync, generateFingerprintAsync } from '../project/fing
 import type { FingerprintDiffItem, FingerprintSource } from '../project/fingerprint';
 import { easCliArgs, easCliLabel, type EasCli } from '../utils/easCli';
 import { spawnSubprocessAsync } from '../utils/subprocess';
-import { readEasFailure, readEasJsonError } from '../utils/easFailure';
+import { readEasJsonFailure } from '../utils/easFailure';
 import { looksLikeWrapperCrash, runnerCrashDetail, runnerNoiseReason } from '../utils/wrapperCrash';
 import type { ComparisonSide } from './types';
 import { easCommandPrefix } from '../utils/easCli';
@@ -214,9 +214,7 @@ export async function compareWithEasBuildAsync(
     const wrapperCrash = !result.spawnError && looksLikeWrapperCrash({ tool: 'eas', ...result });
     // F93: a spawn that printed only the runner's install progress never reached the CLI, so
     // "check the id, check your sign-in" is advice about a problem this run does not have.
-    const said = result.spawnError
-      ? null
-      : readEasFailure(result, readEasJsonError(result.stdout)?.code);
+    const said = result.spawnError ? null : readEasJsonFailure(result);
     const quoted =
       said?.kind === 'cause' ? said.cause.summary : said?.kind === 'line' ? said.line : null;
     return {
