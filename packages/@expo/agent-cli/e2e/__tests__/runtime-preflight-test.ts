@@ -12,6 +12,7 @@
 // spent up to twenty seconds of the gate's budget before saying what it knew in a millisecond.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { digestOf } from '../../src/devLock/address';
@@ -21,6 +22,7 @@ import { appRuntime, expoGoRuntimeTarget } from '../runtimeTargetFixtures';
 import {
   executeAgentCliAsync,
   expoHomeOf,
+  holdLockForAsync,
   installStubBinAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
@@ -345,6 +347,83 @@ describe('a dev server whose app ran no bundle', () => {
 
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout).error).toBeUndefined();
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+  // `app`, `foreign` and `parent` are the fixture, a sibling worktree and the directory that holds
+  // both. `header` is the root the dev server names; `lock` finds the server through this project's
+  // lock instead of `--dev-server-url`.
+  type Root = 'app' | 'foreign' | 'parent';
+  type Case = {
+    global?: Root;
+    env?: Root;
+    header?: Root | null;
+    cwd?: Root | 'outside';
+    lock?: boolean;
+  };
+  const eval_ = (c: Case, exitCode: 0 | 20) =>
+    [evaluate![0], 'ios', c, exitCode, evaluate![1]] as const;
+  it.each([
+    ...NEEDS_AN_APP.map(([name, argv]) => [name, 'ios', { env: 'foreign' }, 20, argv] as const),
+    ...[evaluate!, tree!].map(
+      ([name, argv]) => [name, 'android', { env: 'foreign' }, 20, argv] as const
+    ),
+    eval_({ global: 'foreign', env: 'app' }, 20),
+    eval_({ global: 'app', env: 'foreign' }, 0),
+    eval_({ env: 'app' }, 0),
+    eval_({}, 0),
+    eval_({ env: 'app', cwd: 'outside' }, 0),
+    eval_({ env: 'app', cwd: 'parent' }, 0),
+    eval_({ env: 'app', header: 'parent' }, 0),
+    eval_({ env: 'foreign', header: null }, 0),
+    eval_({ env: 'foreign', header: null, lock: true }, 20),
+    eval_({ env: 'app', header: null, lock: true }, 0),
+  ])('%s --%s with %j exits %i', async (_name, platform: Platform, c: Case, exitCode, argv) => {
+    const parent = path.dirname(projectRoot);
+    const rootOf = (root: Root) =>
+      ({ app: projectRoot, foreign: path.join(parent, 'other-worktree'), parent })[root];
+    const header = c.header === undefined ? 'app' : c.header;
+    const cwd =
+      c.cwd === 'outside'
+        ? await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-outside-'))
+        : rootOf(c.cwd ?? 'app');
+    const runtime = appRuntime({
+      __r() {},
+      ...(c.global && { __EXPO_PROJECT_ROOT__: rootOf(c.global) }),
+      ...(c.env && { process: { env: { EXPO_PUBLIC_PROJECT_ROOT: rootOf(c.env) } } }),
+    });
+    const stub = await startStubDevServerAsync({
+      targets: [expoGoRuntimeTarget(platform)],
+      inspectorEvaluate: runtime.evaluate,
+      projectRoot: header == null ? null : rootOf(header),
+    });
+    const release = c.lock ? await holdLockForAsync(projectRoot, stub) : null;
+    let result;
+    try {
+      result = await executeAgentCliAsync(
+        cwd,
+        [...argv, `--${platform}`, ...(c.lock ? [] : ['--dev-server-url', stub.url]), '--json'],
+        { reject: false, env: stubExpoEnv(projectRoot) }
+      );
+    } finally {
+      release?.();
+      await stub.close();
+    }
+
+    expect(result.exitCode, result.all).toBe(exitCode);
+    if (exitCode === 0) return;
+    const { error } = JSON.parse(result.stdout);
+    expect(error.code).toBe('FOREIGN_BUNDLE');
+    expect(error.message).toContain(canonicalizeExistingPath(rootOf('foreign')));
+    expect(error.message).toContain(canonicalizeExistingPath(projectRoot));
+    expect(error.suggestedCommand).toMatch(
+      new RegExp(`^npx @expo/agent-cli navigate exp://127\\.0\\.0\\.1:\\d+ --${platform}$`)
+    );
+    expect(error.data).toMatchObject({
+      devServerReachable: true,
+      debuggerTargets: 1,
+      platform,
+    });
   });
 
   // `runtime:stop` reads which app runs, not what its runtime answers.
