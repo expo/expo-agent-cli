@@ -94,12 +94,22 @@ function createProjectGuidance(account: string): { command: string; note: string
 }
 
 /** A build lookup that knows which account can create the project, or only how to link an existing one. */
-export function unlinkedProjectSummary(account: string | null): string {
+function unlinkedProjectSummary(account: string | null): string {
   if (account === null) {
     return `this project is not linked to an EAS project — to link an existing project, run "${easCommandPrefix()} init --id <project-id> --non-interactive"`;
   }
   const { command, note } = createProjectGuidance(account);
   return `this project is not linked to an EAS project — link it once with "${command}" (or --id <project-id> for one that exists)${note}`;
+}
+
+function loginRequired(): EasFailureCause {
+  return {
+    id: 'eas-login',
+    summary: `this machine is not signed in to an Expo account — "${PROGRAM_PREFIX} login", or EXPO_TOKEN for a machine with nobody at it`,
+    why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
+    how: `sign in with "${PROGRAM_PREFIX} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
+    command: `${PROGRAM_PREFIX} login`,
+  };
 }
 
 const SIGNATURES: readonly EasFailureSignature[] = [
@@ -136,13 +146,7 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     // explicit signed-out wording or the login/token authentication instruction establishes this.
     pattern:
       /\bnot logged in\b|\bmust be logged in\b|\blog in with ["']?eas login\b[\s\S]{0,400}\bEXPO_TOKEN\b/i,
-    cause: () => ({
-      id: 'eas-login',
-      summary: `this machine is not signed in to an Expo account — "${PROGRAM_PREFIX} login", or EXPO_TOKEN for a machine with nobody at it`,
-      why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
-      how: `sign in with "${PROGRAM_PREFIX} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
-      command: `${PROGRAM_PREFIX} login`,
-    }),
+    cause: loginRequired,
   },
 ];
 
@@ -174,6 +178,92 @@ export type EasSaid =
   | { kind: 'line'; line: string }
   | { kind: 'runner-only'; runnerLine: string }
   | { kind: 'nothing' };
+
+interface EasJsonError {
+  errorCode?: unknown;
+  message?: unknown;
+  accountsWithProjectCreationPermission?: unknown;
+  accountName?: unknown;
+}
+
+type EasJsonFailure =
+  | Exclude<EasSaid, { kind: 'cause' }>
+  | { kind: 'cause'; cause: Pick<EasFailureCause, 'summary' | 'how'> };
+
+/** Read the build:list failure contract. Older EAS CLIs report this refusal as prose. */
+function readUnlinkedProjectReason(error: EasJsonError): string | null {
+  const { accountsWithProjectCreationPermission, accountName } = error;
+  if (
+    !Array.isArray(accountsWithProjectCreationPermission) ||
+    !accountsWithProjectCreationPermission.every(
+      (account): account is string => typeof account === 'string'
+    ) ||
+    (accountName !== undefined && typeof accountName !== 'string')
+  ) {
+    return null;
+  }
+
+  if (
+    accountsWithProjectCreationPermission.length === 0 ||
+    (accountName !== undefined && !accountsWithProjectCreationPermission.includes(accountName))
+  ) {
+    return unlinkedProjectSummary(null);
+  }
+  if (accountName === undefined && accountsWithProjectCreationPermission.length > 1) {
+    const choices = accountsWithProjectCreationPermission
+      .map((account) => JSON.stringify(account))
+      .join(', ');
+    return `${unlinkedProjectSummary('<account-name>')}. Choose an eligible account for <account-name> from ${choices}.`;
+  }
+  return unlinkedProjectSummary(accountName ?? accountsWithProjectCreationPermission[0]!);
+}
+
+/** Read the entire stdout document before consulting diagnostics from older EAS versions. */
+export function readEasJsonFailure(result: { stdout: string; stderr: string }): EasJsonFailure {
+  let error: EasJsonError | undefined;
+  try {
+    error = JSON.parse(result.stdout)?.error;
+  } catch {
+    return readEasFailure(result);
+  }
+  switch (error?.errorCode) {
+    case 'EAS_PROJECT_NOT_CONFIGURED': {
+      const summary = readUnlinkedProjectReason(error);
+      if (summary) {
+        return { kind: 'cause', cause: { summary, how: summary } };
+      }
+      break;
+    }
+    case 'EAS_LOGIN_REQUIRED':
+      return { kind: 'cause', cause: loginRequired() };
+    case 'EAS_PERMISSION_DENIED':
+      return {
+        kind: 'cause',
+        cause: {
+          how: 'use an account or token with permission for this project, or ask the project owner to grant access.',
+          summary: 'EAS denied access — use an account or token with permission for this project',
+        },
+      };
+  }
+  if (typeof error?.message === 'string' && error.message.trim()) {
+    const message = stripVTControlCharacters(error.message).trim();
+    if (error.errorCode === undefined && EAS_CLOSING_ERROR.test(`Error: ${message}`)) {
+      // EAS exit(1) wraps a reason already printed to stderr.
+      return readEasFailure({ stdout: message, stderr: result.stderr });
+    }
+    // Older versions put the eligible account names only in the message.
+    const cause = classifyEasFailure(message);
+    if (
+      cause &&
+      (error.errorCode === undefined ||
+        (error.errorCode === 'EAS_PROJECT_NOT_CONFIGURED' && cause.id === 'eas-project-unlinked'))
+    ) {
+      return { kind: 'cause', cause };
+    }
+    return { kind: 'line', line: message };
+  }
+  return readEasFailure(result);
+}
 
 export function readEasFailure(result: { stdout: string; stderr: string }): EasSaid {
   // FORCE_COLOR in the caller's environment reaches eas-cli, and chalk then colors every line.

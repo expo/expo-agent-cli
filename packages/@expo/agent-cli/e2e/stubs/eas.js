@@ -50,7 +50,7 @@
 // `fingerprint:compare --build-id <id>`
 // - STUB_EAS_COMPARE_JSON: the `{ fingerprint1, fingerprint2 }` payload to print (default: two
 //   equal, empty fingerprints)
-// - STUB_EAS_COMPARE_EXIT: a refusal, with one `Error:` line on stderr
+// - STUB_EAS_COMPARE_EXIT: a refusal, with optional STUB_EAS_COMPARE_JSON on stdout
 //
 // `build:view <id>`: an iOS build
 // - STUB_EAS_BUILD_VIEW_EXIT: a refusal, with one `Error:` line on stderr
@@ -295,6 +295,9 @@ if (command === 'build:list') {
 if (command === 'fingerprint:compare') {
   const exitCode = Number(process.env.STUB_EAS_COMPARE_EXIT || 0);
   if (exitCode !== 0) {
+    if (process.env.STUB_EAS_COMPARE_JSON) {
+      process.stdout.write(process.env.STUB_EAS_COMPARE_JSON + '\n');
+    }
     exitWith(process.stderr, '    Error: fingerprint:compare command failed.', exitCode);
   }
   // `fingerprint1` is the build's, `fingerprint2` the working directory's; there is no diff.
