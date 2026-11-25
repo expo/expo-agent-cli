@@ -20,6 +20,7 @@
 //
 // Never throws: `dev`'s server outlives a failed open, the same as for a local device.
 
+import { sessionToRelease } from './easSessionLifecycle';
 import { claimable, readCloudBindings } from '../deviceBinding/cloud';
 import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
 
@@ -44,6 +45,7 @@ import { event } from './events';
 import {
   EAS_TUNNEL_WAIT_MS,
   ensureEasSessionAsync,
+  type EnsureEasSessionReport,
   otherPlatformSession,
   resolveEasOpenUrlAsync,
   waitForTunnelHostAsync,
@@ -65,7 +67,8 @@ export type OpenAppOnEasOptions = EnsureEasSessionOptions & {
 /** What one open on EAS amounted to. */
 export interface OpenAppOnEasReport {
   opened: boolean;
-  /** The session the app was opened on, or null when none was reached. */
+  cleanup?: EnsureEasSessionReport['cleanup'];
+  /** The allocated or reused session id, including a failed start whose id EAS reported. */
   sessionId: string | null;
   /** Whether this run started the session, rather than finding one up. */
   started: boolean;
@@ -170,6 +173,7 @@ export async function openAppOnEasAsync(
   const session = await ensureEasSessionAsync(projectRoot, options);
   const base = {
     sessionId: session.sessionId,
+    ...(session.cleanup && { cleanup: session.cleanup }),
     started: session.started,
     tunnelHost: session.tunnelHost,
     sessionUrl: session.sessionUrl,
@@ -334,14 +338,14 @@ export function easRunLifecycle(
       if (!task) return;
       Log.progress('Finishing EAS session work before exiting.');
       const session = await task;
-      if (keepSession || !session?.started || !session.sessionId) return;
-      const release = await releaseStartedSessionAsync(projectRoot, session.sessionId, 'dev');
+      const id = session && sessionToRelease(session);
+      if (keepSession || !id) return;
+      const release = await releaseStartedSessionAsync(projectRoot, id, 'dev');
       if (release.outcome === 'stopped')
-        Log.progress(`Stopped EAS Simulator session ${session.sessionId}, created by this run.`);
+        Log.progress(`Stopped EAS Simulator session ${id}, created by this run.`);
       else if (release.outcome === 'kept')
-        Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
-      else
-        Log.warn(`Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`);
+        Log.progress(`Kept EAS Simulator session ${id}: ${release.reason}.`);
+      else Log.warn(`Could not stop EAS Simulator session ${id}: ${release.reason}.`);
     },
   };
 }

@@ -30,7 +30,7 @@ import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { easCliArgs, easCliLabel, resolveEasCli } from '../utils/easCli';
-import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { captureSessionStartAsync, type SessionCleanup } from './easSessionLifecycle';
 import { ensureGitExcludedAsync } from '../utils/gitExclude';
 import { easFailureReason } from '../utils/easFailure';
 import type { CommandError } from '../utils/errors';
@@ -88,10 +88,12 @@ export interface EnsureEasSessionOptions {
 export interface EnsureEasSessionReport {
   /** A session on this platform is up, with the app on it (started) or at least drivable (reused). */
   ok: boolean;
-  /** The session, or null when none was reached. */
+  /** The allocated or reused session id, including a failed start whose id EAS reported. */
   sessionId: string | null;
   /** Whether this run started the session, rather than finding one up. */
   started: boolean;
+  /** Outcome of the cleanup attempted by eas simulator during start. */
+  cleanup?: SessionCleanup;
   /** The tunnel host the session was pointed at, when one was found. */
   tunnelHost: string | null;
   /** The URL that loads the app against this dev server, once the tunnel was known. */
@@ -138,46 +140,6 @@ export function buildSessionStartArgs({
 }
 
 /**
- * The session id out of what `eas simulator` printed.
- *
- * `Simulator session created (id: <id>)` is printed as soon as the session exists — before the
- * wait for readiness, so a start that then fails still names the session it billed
- * [observed — eas-cli 23.2 `simulator/index.ts`; expo-ci, 2026-09-06]. The `--json` form is read
- * too, for a caller that passed it.
- */
-export function readSessionId(output: string): string | null {
-  // `(id: <id>)` with `--json`, and `(id: <id>, saved to .env.eas-simulator)` without it — the
-  // form this CLI runs, which the first regex here did not read [observed — live, expo-ci,
-  // 2026-09-08: "Opened the app on EAS Simulator session (id unknown)" beside the session's URL].
-  const created = /Simulator session created\s*\(id:\s*([^\s,)]+)/.exec(output);
-  if (created) {
-    return created[1]!;
-  }
-  // The session page names it too, and is printed on the same line.
-  const fromUrl = /simulator-sessions\/([^\s/)]+)/.exec(output);
-  if (fromUrl) {
-    return fromUrl[1]!;
-  }
-  const start = output.indexOf('{');
-  if (start >= 0) {
-    try {
-      const parsed = JSON.parse(output.slice(start)) as { id?: unknown };
-      if (typeof parsed.id === 'string' && parsed.id) {
-        return parsed.id;
-      }
-    } catch {
-      // Not JSON, or not the JSON of a session — the line above is the answer then.
-    }
-  }
-  return null;
-}
-
-/** The session's page on expo.dev out of what `eas simulator` printed, or null. */
-export function readSessionUrl(output: string): string | null {
-  return /https:\/\/expo\.dev\/\S*simulator-sessions\/[^\s)]+/.exec(output)?.[0] ?? null;
-}
-
-/**
  * Make sure this project has an EAS Simulator session on `platform` with the app on it.
  *
  * Reuses the session in progress on that platform when there is one, and otherwise starts one with
@@ -189,6 +151,10 @@ export async function ensureEasSessionAsync(
 ): Promise<EnsureEasSessionReport> {
   const startedAt = new Date();
   const session = await ensureSessionAsync(projectRoot, options);
+  if (session.cleanup === 'stopped') {
+    const gitExclude = await excludeCloudSessionEnvFromGitAsync(projectRoot);
+    return { ...session, ...(gitExclude && { gitExclude }) };
+  }
   if (
     session.sessionId &&
     session.started &&
@@ -483,34 +449,46 @@ async function ensureSessionAsync(
         : 'This run will stop the session afterwards.'
     }`
   );
-  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
+  const result = await captureSessionStartAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
     timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
   });
-  const output = `${result.stdout}\n${result.stderr}`;
-  const sessionId = readSessionId(output);
-  const sessionUrl = readSessionUrl(output);
+  const { sessionId, sessionUrl, cleanup } = result;
   if (result.spawnError) {
     return failed(`"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`, {
       tunnelHost,
       openUrl,
     });
   }
-  if (result.exitCode !== 0) {
+  // A package runner can encode a signal in its exit status (e.g. 130 for SIGINT).
+  if (
+    result.missingAllocation &&
+    (result.exitCode == null || result.exitCode === 0 || result.exitCode >= 128)
+  ) {
     return failed(
-      `${easFailureReason(result, `${easCliLabel(easCli)} ${args.join(' ')}`)}${
-        sessionId
-          ? ` — the session ${sessionId} was created before it failed and may be billing; "${cloudStopCommand(sessionId)}" ends it`
-          : ''
-      }`,
-      {
-        tunnelHost,
-        openUrl,
-        sessionId,
-        sessionUrl,
-        started: sessionId != null,
-      }
+      `EAS ended the simulator start without an allocation id. Check "${easCommandPrefix()} simulator:list" for a session that may still be running.`,
+      { tunnelHost, openUrl }
     );
+  }
+  if (result.exitCode !== 0 || cleanup) {
+    const details =
+      cleanup === 'stopped'
+        ? ` — EAS stopped session ${sessionId}`
+        : sessionId
+          ? ` — the session ${sessionId} was created before it failed and may be billing; "${cloudStopCommand(sessionId)}" ends it`
+          : '';
+    const reason =
+      result.exitCode === 0
+        ? 'EAS simulator start was interrupted'
+        : easFailureReason(result, `${easCliLabel(easCli)} ${args.join(' ')}`);
+    return failed(reason + details, {
+      tunnelHost,
+      openUrl,
+      sessionId,
+      sessionUrl,
+      started: sessionId != null,
+      ...(cleanup && { cleanup }),
+    });
   }
   return {
     ok: true,

@@ -264,6 +264,7 @@ An EAS session belongs to the worktree that started it. The registry records whi
 
 ### Session start
 
+- A start reports the allocated session id while EAS waits for readiness. A later failure keeps the id. If EAS confirms it stopped the session, the run skips binding and releasing it. If cleanup is uncertain, the run retains the id for recovery. Older eas-cli versions report the id through their creation message.
 - The start passes `--max-idle-time-minutes 30`. A start that an agent's tool timeout kills before it returns an id leaves a session with no binding; the idle timeout limits its cost.
 - `.env.eas-simulator` holds the session's auth token. After every bind, and after a start that ends unbound because Metro stopped, the run asks `git check-ignore --no-index`. When git does not ignore the file, the run appends `.env.eas-simulator` to `info/exclude` (never `.gitignore`), once, and says so. When a rule that wins over `info/exclude` still un-ignores it, the run warns and names that rule. When git tracks the file, the run warns and names `git rm --cached`; it never runs it. Outside a git repo it does nothing.
 

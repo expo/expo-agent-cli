@@ -340,12 +340,16 @@ function choiceOf(device: BoundDevice): string | null {
 
 /** The phase result of a session start; a refusal gives its What and How, not only its first line. */
 export function smokeSessionResult(
-  result: Pick<EnsureEasSessionReport, 'ok' | 'sessionId' | 'started' | 'reason' | 'refusal'>
+  result: Pick<
+    EnsureEasSessionReport,
+    'ok' | 'sessionId' | 'started' | 'reason' | 'refusal' | 'cleanup'
+  >
 ): SmokeSessionResult {
   return {
     ok: result.ok,
     sessionId: result.sessionId,
     started: result.started,
+    ...(result.cleanup && { cleanup: result.cleanup }),
     reason: result.refusal ? whatAndHow(result.refusal.message) : result.reason,
   };
 }
