@@ -242,7 +242,7 @@ async function saveWithNpmAsync(
   options: BackendOptions
 ): Promise<BackendResult> {
   const root = target.packageManager.root;
-  if (!(await hasNpmPatchAsync(root)) || usesPatchPackage(root)) {
+  if (usesPatchPackage(root) || !(await hasNpmPatchAsync(root))) {
     return saveWithPatchPackageFormatAsync(target, options, NO_PATCH_COMMAND_REASON);
   }
   try {

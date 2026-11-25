@@ -22,7 +22,7 @@ import {
   type NativePlatform,
 } from './buildFromSource';
 import { resolveInstalledPackage } from './installed';
-import { editPackageJson, type PackageJsonEdit } from './packageJson';
+import { editPackageJsonAsync, type PackageJsonEdit } from './packageJson';
 import { detectPackageManager, type PackageManagerName } from './packageManager';
 import { updateLockfileAsync } from './patchPackage';
 import { findLinkedFiles } from './tree';
@@ -156,9 +156,7 @@ export async function patchAsync(
   if (plan.changes.length) {
     addEdits(projectPackageJson, [plan.edit]);
   }
-  for (const [file, fileEdits] of edits) {
-    editPackageJson(file, fileEdits);
-  }
+  await Promise.all([...edits].map(([file, fileEdits]) => editPackageJsonAsync(file, fileEdits)));
   if (result.setup?.updatesLockfile) {
     await updateLockfileAsync(result.setup, result.patchFile);
   }
