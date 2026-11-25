@@ -28,7 +28,7 @@ import {
   holdLockForAsync,
   readEvents,
 } from '../utils';
-import { startStubDevServerAsync, type StubDevServer } from '../stubDevServer';
+import { startStubDevServerAsync, STUB_MANIFEST_ERROR, type StubDevServer } from '../stubDevServer';
 import { appStartedMarkerPath } from './installedAppStubs';
 import {
   SIMULATOR_UDID,
@@ -548,6 +548,35 @@ describe('@expo/agent-cli smoke', () => {
           error: { type: 'TransformError', filename: 'src/app/index.tsx' },
         });
         expect(report.phases.find((phase: any) => phase.id === 'app').status).toBe('skipped');
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
+
+    it('exits 20 for a manifest the dev server cannot build, and leads with install', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      await installStubXcrunAsync(projectRoot);
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        bundle: 'manifest-error',
+      });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(projectRoot, ['smoke', '--ios', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+
+        expect(result.exitCode).toBe(20);
+        const report = JSON.parse(result.stdout);
+        expect(report.bundle).toMatchObject({
+          ok: false,
+          error: { type: 'PluginError', message: STUB_MANIFEST_ERROR },
+        });
+        expect(report.followups[0].command).toBe('npx @expo/agent-cli install');
       } finally {
         release();
         await stub.close();

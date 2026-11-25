@@ -115,6 +115,8 @@ The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `r
 
 An unknown result is not a broken bundle: `bundle.checked` is exactly `bundle.ok != null`.
 
+A failed native manifest whose body is `@expo/cli`'s `{error}` object is a broken bundle too. An app cannot load a project whose manifest fails, for example a config plugin whose package does not resolve. `bundle.error.type` is the body's `code` when it has one, else the class name before the `:` of `error`. Any other failed manifest stays unknown, because a server that is not Expo has not shown the project to be broken. A `PLUGIN_NOT_FOUND` or `PluginError` type makes `install` the first next step of `smoke`. Tests: e2e `smoke-test.ts` "exits 20 for a manifest the dev server cannot build"; `runtime/__tests__/bundleCheck-test.ts`; `followups/__tests__/smoke-test.ts`.
+
 The check sends its HEAD request to the dev server it was given ([[0005-runtime-loop-tools]] §Where a device reaches the dev server), with the path and query that the manifest or web page names, never their host. `bundle.url` is that URL. The reason: a HEAD, or a GET cancelled after its headers, through the Expo tunnel closes every websocket on that tunnel, the app's debugger socket too.
 
 ## Needs-human protocol
@@ -284,6 +286,7 @@ Gaps found while building the tool layer, recorded and not yet filed ([[0001-age
 | `@expo/cli`         | `expo cache:clear`                                                                                                           |                                                                            |
 | `@expo/cli`         | Do not print the deep-link scheme as the dev server URL                                                                      | keep the host; a non-HTTP scheme becomes `https` for a tunnel, else `http` |
 | `@expo/cli`         | `devserver:url` in a released SDK                                                                                            | parse `Waiting on <url>`                                                   |
+| `@expo/cli`         | Manifest error body `{error, name, code}` with a JSON content type                                                           | read the class name before `:`                                             |
 | `@expo/fingerprint` | `fingerprint:diff` from stdin or two revisions                                                                               | temporary files                                                            |
 | `create-expo`       | `--no-git`                                                                                                                   | remove only the repository it made                                         |
 | `expo-doctor`       | `--json`                                                                                                                     | parse the prose report                                                     |

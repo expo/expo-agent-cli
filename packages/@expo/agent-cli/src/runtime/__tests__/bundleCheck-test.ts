@@ -190,6 +190,31 @@ describe(checkEntryBundleAsync, () => {
     expect(result.error!.message).toContain('Proxy error');
   });
 
+  // The class name before `:` is the fallback; e2e `smoke-test.ts` covers it.
+  it(`should type a failed manifest by the code its error body carries`, async () => {
+    mockFetch({
+      'http://127.0.0.1:8123/': {
+        status: 500,
+        json: {
+          error: 'PluginError: Failed to resolve plugin for module "expo-camera"',
+          name: 'PluginError',
+          code: 'PLUGIN_NOT_FOUND',
+        },
+      },
+    });
+
+    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
+
+    expect(result).toMatchObject({
+      outcome: 'broken',
+      url: null,
+      error: {
+        type: 'PLUGIN_NOT_FOUND',
+        message: 'PluginError: Failed to resolve plugin for module "expo-camera"',
+      },
+    });
+  });
+
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief
   // The web dev server has no manifest: `GET /` is the page a browser loads, and the entry bundle
   // is the `<script src>` appended to it. Asking that page for JSON is what left `--platform web`

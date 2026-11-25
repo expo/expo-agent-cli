@@ -7,8 +7,15 @@
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
 import { PROGRAM_PREFIX } from '../programName';
+import type { BundleCheckOutcome } from '../runtime/bundleCheck';
 import type { SmokeAppMismatchKind } from '../smoke/contract';
 import { capFollowUps, type FollowUp } from './types';
+
+/**
+ * The manifest error types of a config plugin that does not resolve: `@expo/cli`'s `PluginError`
+ * code, and the class name that a body without a code carries (llp/0010 §Upstream asks).
+ */
+const MISSING_PLUGIN_TYPES = new Set(['PLUGIN_NOT_FOUND', 'PluginError']);
 
 export interface SmokeFollowUpInput {
   outcome: 'passed' | 'failed' | 'inconclusive';
@@ -18,10 +25,12 @@ export interface SmokeFollowUpInput {
   bootstrap: boolean;
   /** Whether the dev server proved it serves another project. */
   foreignDevServer: boolean;
-  /** Whether the entry bundle was reported broken. */
-  bundleBroken: boolean;
+  /** How the entry-bundle check ended, or null when the run never reached it. */
+  bundleOutcome: BundleCheckOutcome | null;
   /** The file the bundler stopped on, when it named one. */
   bundleFile: string | null;
+  /** The error type the dev server reported for a broken bundle or manifest. */
+  bundleErrorType: string | null;
   /** Debugger targets attached, or null when the run never read them. */
   appsConnected: number | null;
   /** Whether the runtime answered an evaluation; null when it was never asked. */
@@ -246,17 +255,22 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
 
   // A bundle that does not compile is the whole answer: nothing that reads the app can mean
   // anything until the file the bundler named parses.
-  if (input.bundleBroken) {
+  if (input.bundleOutcome === 'broken') {
+    const fix = MISSING_PLUGIN_TYPES.has(input.bundleErrorType ?? '')
+      ? {
+          id: 'install',
+          why: 'The dev server could not read the app config: a plugin it names does not resolve from node_modules. This installs what package.json declares; when package.json does not list the plugin, pass its package name.',
+        }
+      : {
+          id: 'typecheck',
+          why: `The entry bundle does not compile${input.bundleFile ? ` (${input.bundleFile})` : ''}, and the compiler reports every error in the project rather than only the one the bundler stopped on.`,
+        };
     return capFollowUps([
-      {
-        id: 'typecheck',
-        command: `${PROGRAM_PREFIX} typecheck`,
-        why: `The entry bundle does not compile${input.bundleFile ? ` (${input.bundleFile})` : ''}, and the compiler reports every error in the project rather than only the one the bundler stopped on.`,
-      },
+      { ...fix, command: `${PROGRAM_PREFIX} ${fix.id}` },
       {
         id: 'smoke-again',
         command: `${PROGRAM_PREFIX} smoke${same}`,
-        why: 'The dev server rebuilds on save, so this is the gate to run again once the file parses.',
+        why: 'The dev server reads the project again on the next request, so this is the gate to run again after the fix.',
       },
     ]);
   }
@@ -397,7 +411,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     {
       id: 'typecheck',
       command: `${PROGRAM_PREFIX} typecheck`,
-      why: 'Nothing threw and the bundle compiled, which is not the same as the types being right — a value that is undefined renders rather than throwing.',
+      why: `Nothing threw${input.bundleOutcome === 'ok' ? ' and the bundle compiled' : ''}, which is not the same as the types being right — a value that is undefined renders rather than throwing.`,
     },
   ];
   if (input.screenshotPath) {

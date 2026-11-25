@@ -14,8 +14,9 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     devServerFound: true,
     bootstrap: true,
     foreignDevServer: false,
-    bundleBroken: false,
+    bundleOutcome: 'ok',
     bundleFile: null,
+    bundleErrorType: null,
     appsConnected: 1,
     runtimeSupported: true,
     failing: 0,
@@ -48,7 +49,7 @@ describe(buildSmokeFollowUps, () => {
     for (const overrides of [
       {},
       { devServerFound: false },
-      { bundleBroken: true },
+      { bundleOutcome: 'broken' as const },
       { appsConnected: 0 },
       { runtimeSupported: false },
       { failing: 2, outcome: 'failed' as const },
@@ -93,11 +94,20 @@ describe(buildSmokeFollowUps, () => {
   // bundler does — the bundler stops at the first file that will not transform.
   it(`answers a broken bundle with the compiler, and names the file`, () => {
     const followups = buildSmokeFollowUps(
-      input({ bundleBroken: true, outcome: 'failed', bundleFile: 'src/app/notes.tsx' })
+      input({ bundleOutcome: 'broken', outcome: 'failed', bundleFile: 'src/app/notes.tsx' })
     );
 
     expect(followups[0]!.command).toBe('npx @expo/agent-cli typecheck');
     expect(followups[0]!.why).toContain('src/app/notes.tsx');
+  });
+
+  it.each([
+    ['PLUGIN_NOT_FOUND', 'npx @expo/agent-cli install'],
+    ['INVALID_PLUGIN_IMPORT', 'npx @expo/agent-cli typecheck'],
+  ])(`answers a broken manifest of type %s with %s`, (bundleErrorType, first) => {
+    expect(commands({ bundleOutcome: 'broken', outcome: 'failed', bundleErrorType })[0]).toBe(
+      first
+    );
   });
 
   it(`answers no connected app with the command that opens one`, () => {
@@ -272,6 +282,13 @@ describe(buildSmokeFollowUps, () => {
     expect(commands()[0]).toBe('npx @expo/agent-cli typecheck');
   });
 
+  it(`claims a compiled bundle only when the bundle check passed`, () => {
+    const why = (bundleOutcome: 'ok' | 'unknown') =>
+      buildSmokeFollowUps(input({ bundleOutcome }))[0]!.why;
+    expect(why('ok')).toContain('the bundle compiled');
+    expect(why('unknown')).not.toContain('the bundle compiled');
+  });
+
   it(`points at the picture it took, when it took one`, () => {
     expect(commands()).toContain('open /project/.expo/agent-cli/smoke.png');
     expect(commands({ screenshotTaken: false, screenshotPath: null }).join(' ')).not.toContain(
@@ -283,7 +300,7 @@ describe(buildSmokeFollowUps, () => {
     expect(commands({ devServerFound: false, bootstrap: false, route: '/notes' })).toContain(
       'npx @expo/agent-cli smoke --ios --route /notes'
     );
-    expect(commands({ bundleBroken: true, outcome: 'failed', route: '/notes' })).toContain(
+    expect(commands({ bundleOutcome: 'broken', outcome: 'failed', route: '/notes' })).toContain(
       'npx @expo/agent-cli smoke --ios --route /notes'
     );
   });

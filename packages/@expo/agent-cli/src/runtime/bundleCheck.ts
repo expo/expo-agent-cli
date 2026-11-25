@@ -282,9 +282,9 @@ interface EntryBundleUrl {
   /**
    * The build failure the *document* reported, when reading it was already the answer.
    *
-   * Only web can reach this. Its dev server renders the page on the server, so a project that does
-   * not compile never produces a page with a script tag in it — it produces an error page carrying
-   * the whole failure, and there is no bundle URL left to fetch.
+   * Web reaches this through its error page: the web dev server renders the page on the server, so
+   * a project that does not compile produces an error page carrying the whole failure. Native
+   * reaches it through a failed manifest, which a config the dev server cannot read produces.
    */
   error?: BundleCheckError;
 }
@@ -483,6 +483,10 @@ async function readManifestBundleUrlAsync(
   });
 
   if (!response.ok) {
+    const failure = readManifestFailure(await response.text().catch(() => ''));
+    if (failure) {
+      return { url: null, error: failure };
+    }
     return {
       url: null,
       reason: `${manifestUrl} answered ${response.status} ${response.statusText} for the ${platform} manifest, so the entry bundle URL is unknown`,
@@ -521,6 +525,36 @@ async function readManifestBundleUrlAsync(
       reason: `the ${platform} manifest names an unusable launchAsset.url: ${launchAsset.url}`,
     };
   }
+}
+
+/**
+ * The error a failed manifest carries, or null when the body is not `ExpoMiddleware`'s.
+ *
+ * @ref llp/0010-agent-conventions.rfc.md §Upstream asks. `@expo/cli` 58.1.21 answers 500 with
+ * `{"error": "<Name>: <message>"}` and no content type [observed — a config plugin whose package is
+ * missing], so the class name is read before the `:`. A `code`, such as `PLUGIN_NOT_FOUND`, wins
+ * when the body carries one.
+ */
+function readManifestFailure(text: string): BundleCheckError | null {
+  let payload: { error?: unknown; code?: unknown } | null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const error = readString(payload?.error);
+  if (!error) {
+    return null;
+  }
+  const message = stripVTControlCharacters(error).split('\n')[0]!.trim();
+  return {
+    type: readString(payload?.code) ?? message.match(/^(\w+):/)?.[1] ?? null,
+    filename: null,
+    lineNumber: null,
+    column: null,
+    message,
+    snippet: null,
+  };
 }
 
 /** Reshape Metro's failed-build body, or describe the answer when it is not one. */
