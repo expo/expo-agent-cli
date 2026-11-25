@@ -7,6 +7,7 @@ import { vol } from 'memfs';
 import os from 'os';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
+import { stopAppOnDeviceAsync } from '../../runtime/appProcess';
 import { bindingFor, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
@@ -71,6 +72,13 @@ vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
 vi.mock('../../deviceBinding/preview', () => ({ previewExplicitDeviceAsync: vi.fn() }));
+vi.mock('../../runtime/appProcess', () => ({
+  stopAppOnDeviceAsync: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock('../../runtime/appId', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../runtime/appId')>()),
+  readConfiguredAppId: vi.fn(() => 'com.example.app'),
+}));
 vi.mock('../../devLock/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../devLock/client')>()),
   readDevServerLockAsync: vi.fn(async () => null),
@@ -112,6 +120,10 @@ vi.mock('../../device/localDevice', () => ({
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   devicesDisabled: vi.fn(() => true),
+  // Android tools are this machine's; the cases that bind an emulator say they resolve.
+  hostBindsPlatform: vi.fn((platform: string) =>
+    platform === 'ios' ? process.platform === 'darwin' : true
+  ),
   acquireDeviceAsync: vi.fn(),
   inspectBindingAsync: vi.fn(),
 }));
@@ -667,6 +679,43 @@ describe(devAsync, () => {
     afterEach(() => {
       vi.mocked(devicesDisabled).mockReturnValue(true);
     });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Risks — Risk 9. The build step launches
+    // the app against port 8081; it is stopped before the dev server step, so the open starts it cold.
+    it.each([
+      ['ios', device, 'SIM-1'],
+      [
+        'android',
+        {
+          backend: 'local-android' as const,
+          platform: 'android' as const,
+          serial: 'emulator-5554',
+          origin: { kind: 'explicit' as const },
+        },
+        'emulator-5554',
+      ],
+    ] as const)(
+      `stops the app the %s build step launched, before the dev server starts`,
+      async (platform, bound, deviceId) => {
+        mockStaleDevClientState();
+        vi.mocked(acquireDeviceAsync).mockResolvedValue({
+          device: bound,
+          justBooted: false,
+          action: 'created',
+        });
+
+        await devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--local']));
+
+        expect(stopAppOnDeviceAsync).toHaveBeenCalledWith({
+          platform,
+          deviceId,
+          appId: 'com.example.app',
+        });
+        expect(vi.mocked(stopAppOnDeviceAsync).mock.invocationCallOrder[0]).toBeLessThan(
+          vi.mocked(runDevServerAsync).mock.invocationCallOrder[0]!
+        );
+      }
+    );
 
     // non-darwin-host-binds-nothing
     it.each(['linux', 'win32'] as const)(

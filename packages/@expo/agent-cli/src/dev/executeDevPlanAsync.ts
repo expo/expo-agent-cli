@@ -1,6 +1,6 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
 import { outputTail } from '../deploy/parseOutput';
-import { type AcquireResult } from '../deviceBinding';
+import { deviceIdOf, type AcquireResult } from '../deviceBinding';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import type { RunLock } from '../devLock';
 import { Log } from '../log';
@@ -19,6 +19,8 @@ import { dropEasNoneEntry } from '../status/easBuilds';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { easCommandPrefix } from '../utils/easCli';
 import { classifyEasFailure } from '../utils/easFailure';
+import { readConfiguredAppId } from '../runtime/appId';
+import { stopAppOnDeviceAsync } from '../runtime/appProcess';
 import { ensureSimulatorProfileSync } from '../utils/easJson';
 import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
@@ -53,7 +55,7 @@ type PlanOutcome =
   | { status: 'completed'; serving: ServingStep | null }
   | { status: 'failed'; failure: StepFailure };
 
-type RunScope = { lock: RunLock; steps: RunSteps };
+type RunScope = { lock: RunLock; steps: RunSteps; acquired: AcquireResult | null };
 
 interface StepFailure {
   step: PlanStep;
@@ -88,7 +90,7 @@ export async function executeDevPlanAsync(
   const output = stepOutputFor(options);
   const server = new DevServerStepRunner(projectRoot, plan, options, acquired, output);
   const outcome = await withRunAsync(projectRoot, plan, server.easPlatform, (lock, steps) =>
-    runPlanStepsAsync(projectRoot, plan, state, options, output, server, { lock, steps })
+    runPlanStepsAsync(projectRoot, plan, state, options, output, server, { lock, steps, acquired })
   );
   if (outcome.status === 'failed') {
     const { failure } = outcome;
@@ -151,6 +153,7 @@ async function runPlanStepsAsync(
     );
     if (failure) return { status: 'failed', failure };
     recordBuildOf(projectRoot, step, state);
+    await stopLaunchedAppAsync(projectRoot, step, scope.acquired);
     if (step.id === 'eas-build') {
       dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
       if (options.deviceBackend === 'eas') {
@@ -451,6 +454,30 @@ function recordBuildOf(projectRoot: string, step: PlanStep, state: ProjectState)
       sources: state.fingerprint.sources ?? null,
     });
   }
+}
+
+/**
+ * Stop the app that `expo run:* --no-bundler` launched, so the dev server's open starts it cold.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Risks — Risk 9. The Expo CLI launches it
+ * against port 8081, whatever serves there. A foreign bundle that loaded there kept the app from
+ * attaching to this run's dev server on Android.
+ */
+async function stopLaunchedAppAsync(
+  projectRoot: string,
+  step: PlanStep,
+  acquired: AcquireResult | null
+): Promise<void> {
+  const platform = resolveBuildPlatform(step);
+  if (platform == null || acquired == null || acquired.device.backend === 'cloud') return;
+  const appId = readConfiguredAppId(projectRoot, platform);
+  if (appId == null) return;
+  const stopped = await stopAppOnDeviceAsync({
+    platform,
+    deviceId: deviceIdOf(acquired.device),
+    appId,
+  });
+  devEvent('launched_app_stopped', { platform, appId, ok: stopped.ok });
 }
 
 /**
