@@ -45,6 +45,8 @@ const SPAWN_HELPERS = new Set([
   'spawnSubprocessAsync',
   'spawnCaptureAsync',
   'spawnFingerprintAsync',
+  // `patch`'s runner for the package managers and git (`src/patch/tools.ts`).
+  'runToolAsync',
   // The injected seam, and the reason this list grew [found while adding the Android install,
   // 2026-09-04]. Two modules do not call `spawnCaptureAsync` by that name: `installExpoGo.ts` takes
   // it as a parameter so the tests can record the argv, and `bootDevice.ts` uses Node's own `spawn`

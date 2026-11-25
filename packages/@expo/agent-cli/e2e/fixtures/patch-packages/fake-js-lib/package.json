@@ -1,0 +1,6 @@
+{
+  "name": "fake-js-lib",
+  "version": "2.1.0",
+  "repository": "https://github.com/example/fake-js-lib.git",
+  "main": "index.js"
+}

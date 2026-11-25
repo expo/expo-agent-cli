@@ -7,3 +7,6 @@
 # here, above the fixture that needs it. Every fixture that has no committed `.expo` content
 # ignores the directory again in its own `.gitignore`.
 !.expo/
+
+# patch-test: a published package ships compiled output in build/, and --upstream maps it to src/.
+!patch-packages/*/build/

@@ -148,6 +148,12 @@ export const topLevelCommands: { [command: string]: TopLevelCommand } = {
     load: () => import('./new').then((i) => i.agentCliNew),
     help: () => import('./new').then((i) => i.newHelp),
   },
+  // @ref llp/0037-patch-command.rfc.md — one command: the agent edits node_modules, this saves it.
+  patch: {
+    summary: 'Save node_modules edits as a patch',
+    load: () => import('./patch').then((i) => i.agentCliPatch),
+    help: () => import('./patch').then((i) => i.patchHelp),
+  },
   // A capability only this CLI has, so it gets a verb of its own (llp/0006 naming rule).
   smoke: {
     summary: 'Prove the app boots, on a device',
