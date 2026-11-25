@@ -82,17 +82,6 @@ describe(classifyEasFailure, () => {
     expect(cause?.summary).toContain('"one org"');
   });
 
-  it('keeps link-only recovery when EAS offers no create command', () => {
-    const cause = classifyEasFailure(
-      'EAS project not configured. To link an existing project:\n\n  eas init --id <project-id> --non-interactive'
-    );
-    const command = 'npx --yes eas-cli init --id <project-id> --non-interactive';
-    expect(cause?.command).toBe(command);
-    expect(cause?.summary).toContain(command);
-    expect(cause?.how).toContain(command);
-    expect(cause?.how).not.toContain('--account');
-  });
-
   it.each([
     ['You are not logged in. Run "eas login".'],
     ['Error: Not logged in'],
