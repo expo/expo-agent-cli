@@ -52,6 +52,8 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['__tests__/**/*-test.ts'],
+    // Refuse a missing or stale `build/`: the tests run the bundle, not `src/`.
+    globalSetup: ['./buildGuard.ts'],
     // The fixtures ship committed `node_modules` directories as test data. Vitest must never treat
     // them as modules of this project.
     exclude: ['**/node_modules/**', 'fixtures/**'],
