@@ -1,4 +1,3 @@
-import { manifestErrorOf } from '../../runtime/bundleCheck';
 import { bundleErrorSentence, noScreenshot } from '../results';
 import { FIRST_BUNDLE_TIMEOUT_MS } from '../timeouts';
 import type { PhaseWalk, RecordOptions, Step } from './walk';
@@ -108,9 +107,10 @@ export async function bundleStep(walk: PhaseWalk): Promise<Step<null>> {
   if (bundle.outcome === 'broken') {
     // Nothing after this is worth doing: the app cannot be running code that does not compile, and
     // an error window against the red screen would report the bundler's own error as the app's.
-    const reason = manifestErrorOf(bundle)
-      ? 'the native manifest failed'
-      : 'the entry bundle does not compile';
+    const reason =
+      bundle.error?.source === 'manifest'
+        ? 'the native manifest failed'
+        : 'the entry bundle does not compile';
     walk.skipRest('app', `${reason}, so there is no working app to read`);
     return {
       stop: walk.done('failed', {

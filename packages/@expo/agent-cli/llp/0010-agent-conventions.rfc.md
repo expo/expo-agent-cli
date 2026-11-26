@@ -115,7 +115,7 @@ The entry-bundle check runs inside `smoke`, `runtime:reload`, `runtime:tree`, `r
 
 An unknown result is not a broken bundle: `bundle.checked` is exactly `bundle.ok != null`.
 
-A native manifest that answers HTTP 500 with a diagnostic code or an error class prefix (such as `PluginError:`) and a message is a failed bundle check. The code takes precedence over the class name in `bundle.error.type`. An unrecognized response stays unknown. A deadline reached while reading the diagnostic is a timeout. Smoke reports the manifest diagnostic and asks the user to retry after fixing it. For unresolved plugins, check that the package is installed or that the referenced local file exists.
+A native manifest that answers HTTP 500 with a recognized Expo config or plugin diagnostic and a nonempty message is a failed bundle check. The code takes precedence over the class name in `bundle.error.type`. An unrecognized response stays unknown. A deadline reached while reading the diagnostic is a timeout. Smoke reports the manifest diagnostic and asks the user to retry after fixing it. For unresolved plugins, check that the package is installed or that the referenced local file exists.
 
 The check sends its HEAD request to the dev server it was given ([[0005-runtime-loop-tools]] §Where a device reaches the dev server), with the path and query that the manifest or web page names, never their host. `bundle.url` is that URL. The reason: a HEAD, or a GET cancelled after its headers, through the Expo tunnel closes every websocket on that tunnel, the app's debugger socket too.
 

@@ -14,6 +14,7 @@
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import type { BundleCheckJson } from '../bundleCheck';
+import { describeManifestFailure } from '../manifestFailure';
 import { wrapUntrustedAppOutput } from '../untrusted';
 import type {
   RuntimeTapJson,
@@ -494,6 +495,12 @@ export function explainBundleRefusal(
   }
 
   const error = bundle.error;
+  if (error?.source === 'manifest') {
+    return {
+      message: `The native manifest failed, so ${what}.\n${describeManifestFailure(error)}\nThen run "${rerun}" again.`,
+      suggestedCommand: rerun,
+    };
+  }
   const where = [error?.filename, error?.lineNumber, error?.column]
     .filter((part) => part != null)
     .join(':');

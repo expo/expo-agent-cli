@@ -1,24 +1,22 @@
 import { PROGRAM_PREFIX } from '../programName';
-import { isMissingPluginError } from '../runtime/bundleCheck';
-import type { SmokeFollowUpInput } from './smoke';
+import type { BundleCheckError } from '../runtime/bundleCheck';
+import { describeManifestFailure } from '../runtime/manifestFailure';
 import type { FollowUp } from './types';
 
 export function brokenBundleFollowUps(
-  { manifestError, bundleFile }: Pick<SmokeFollowUpInput, 'manifestError' | 'bundleFile'>,
+  error: BundleCheckError | null,
   retryCommand: string
 ): FollowUp[] {
-  if (manifestError) {
-    const advice = isMissingPluginError(manifestError)
-      ? 'Check the plugin entry in the app config. For a package, make sure it is installed. For a local file, check that its path exists.'
-      : 'Fix the error reported by the dev server while generating the manifest.';
+  if (error?.source === 'manifest') {
     return [
       {
         id: 'smoke-again',
         command: retryCommand,
-        why: `${manifestError.message} — ${advice} Then run smoke again.`,
+        why: `${describeManifestFailure(error)} Then run smoke again.`,
       },
     ];
   }
+  const bundleFile = error?.filename;
   return [
     {
       id: 'typecheck',

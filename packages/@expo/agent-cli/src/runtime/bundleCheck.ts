@@ -37,6 +37,7 @@ import { stripVTControlCharacters } from 'util';
 
 import type { TargetSelection, DeviceInventory } from './targetSelection';
 import type { CdpTarget } from './cdpClient';
+import { readManifestFailureAsync } from './manifestFailure';
 import { normalizeDevServerUrl } from './devServer';
 
 /** Platforms the bundle can be built for. The same set `expo-platform` accepts. */
@@ -105,6 +106,8 @@ export async function resolveBundleCheckPlatformsAsync(
 
 /** What the bundler reported, reshaped into the fields worth acting on. */
 export interface BundleCheckError {
+  /** Present when manifest generation failed before the entry bundle could be requested. */
+  source?: 'manifest';
   /**
    * Metro's own class for the failure, e.g. `TransformError` or `UnableToResolveError`.
    *
@@ -483,7 +486,7 @@ async function readManifestBundleUrlAsync(
   });
 
   if (!response.ok) {
-    const failure = response.status === 500 ? readManifestFailure(await response.text()) : null;
+    const failure = response.status === 500 ? await readManifestFailureAsync(response) : null;
     if (failure) {
       return { url: null, error: failure };
     }
@@ -525,62 +528,6 @@ async function readManifestBundleUrlAsync(
       reason: `the ${platform} manifest names an unusable launchAsset.url: ${launchAsset.url}`,
     };
   }
-}
-
-/**
- * The error a failed manifest carries, or null when the body is not `ExpoMiddleware`'s.
- *
- * @ref llp/0010-agent-conventions.rfc.md §Upstream asks. `@expo/cli` 58.1.21 answers only 500 with
- * `{"error": "<Name>: <message>"}` and no content type [observed — a config plugin whose package is
- * missing; `ExpoMiddleware.getHandler`], so the class name is read before the `:`. A `code`, such
- * as `PLUGIN_NOT_FOUND`, wins when the body carries one.
- */
-function readManifestFailure(text: string): BundleCheckError | null {
-  let payload: { error?: unknown; code?: unknown } | null;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  const error = readString(payload?.error);
-  if (!error) {
-    return null;
-  }
-  const message = stripVTControlCharacters(error).split('\n')[0]!.trim();
-  const type = readString(payload?.code)?.trim() || message.match(/^((?:[A-Z]\w*)?Error):/)?.[1];
-  if (!message || !type) {
-    return null;
-  }
-  return {
-    type,
-    filename: null,
-    lineNumber: null,
-    column: null,
-    message,
-    snippet: null,
-  };
-}
-
-/** Native document failures are reported before the manifest can supply a bundle URL. */
-export function manifestErrorOf(bundle: BundleCheckResult | null): BundleCheckError | null {
-  return bundle?.outcome === 'broken' && bundle.platform !== 'web' && bundle.url === null
-    ? bundle.error
-    : null;
-}
-
-/**
- * Whether a manifest error says that a config plugin's package does not resolve.
- *
- * `PluginError` also covers a plugin of the wrong shape and a local plugin that does not parse, so
- * without a `code` only the wording of `@expo/config-plugins`' `PLUGIN_NOT_FOUND` counts
- * [observed — `plugin-resolver.ts` `resolvePluginForModule`].
- */
-export function isMissingPluginError(error: BundleCheckError | null): boolean {
-  return (
-    error?.type === 'PLUGIN_NOT_FOUND' ||
-    (error?.type === 'PluginError' &&
-      error.message.startsWith('PluginError: Failed to resolve plugin for module'))
-  );
 }
 
 /** Reshape Metro's failed-build body, or describe the answer when it is not one. */

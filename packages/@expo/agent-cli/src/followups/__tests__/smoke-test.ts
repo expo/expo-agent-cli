@@ -14,9 +14,7 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     devServerFound: true,
     bootstrap: true,
     foreignDevServer: false,
-    bundleOutcome: 'ok',
-    bundleFile: null,
-    manifestError: null,
+    bundle: { outcome: 'ok', error: null },
     appsConnected: 1,
     runtimeSupported: true,
     failing: 0,
@@ -49,7 +47,7 @@ describe(buildSmokeFollowUps, () => {
     for (const overrides of [
       {},
       { devServerFound: false },
-      { bundleOutcome: 'broken' as const },
+      { bundle: { outcome: 'broken' as const, error: null } },
       { appsConnected: 0 },
       { runtimeSupported: false },
       { failing: 2, outcome: 'failed' as const },
@@ -94,7 +92,20 @@ describe(buildSmokeFollowUps, () => {
   // bundler does — the bundler stops at the first file that will not transform.
   it(`answers a broken bundle with the compiler, and names the file`, () => {
     const followups = buildSmokeFollowUps(
-      input({ bundleOutcome: 'broken', outcome: 'failed', bundleFile: 'src/app/notes.tsx' })
+      input({
+        bundle: {
+          outcome: 'broken',
+          error: {
+            filename: 'src/app/notes.tsx',
+            message: 'syntax error',
+            type: null,
+            lineNumber: null,
+            column: null,
+            snippet: null,
+          },
+        },
+        outcome: 'failed',
+      })
     );
 
     expect(followups[0]!.command).toBe('npx @expo/agent-cli typecheck');
@@ -277,14 +288,17 @@ describe(buildSmokeFollowUps, () => {
     const message = 'PluginError: Plugin "./local.js" must export a function';
     const followups = buildSmokeFollowUps(
       input({
-        bundleOutcome: 'broken',
-        manifestError: {
-          type: 'PluginError',
-          message,
-          filename: null,
-          lineNumber: null,
-          column: null,
-          snippet: null,
+        bundle: {
+          outcome: 'broken',
+          error: {
+            source: 'manifest',
+            type: 'PluginError',
+            message,
+            filename: null,
+            lineNumber: null,
+            column: null,
+            snippet: null,
+          },
         },
       })
     );
@@ -295,7 +309,7 @@ describe(buildSmokeFollowUps, () => {
 
   it(`claims a compiled bundle only when the bundle check passed`, () => {
     const why = (bundleOutcome: 'ok' | 'unknown') =>
-      buildSmokeFollowUps(input({ bundleOutcome }))[0]!.why;
+      buildSmokeFollowUps(input({ bundle: { outcome: bundleOutcome, error: null } }))[0]!.why;
     expect(why('ok')).toContain('the bundle compiled');
     expect(why('unknown')).not.toContain('the bundle compiled');
   });
@@ -311,9 +325,9 @@ describe(buildSmokeFollowUps, () => {
     expect(commands({ devServerFound: false, bootstrap: false, route: '/notes' })).toContain(
       'npx @expo/agent-cli smoke --ios --route /notes'
     );
-    expect(commands({ bundleOutcome: 'broken', outcome: 'failed', route: '/notes' })).toContain(
-      'npx @expo/agent-cli smoke --ios --route /notes'
-    );
+    expect(
+      commands({ bundle: { outcome: 'broken', error: null }, outcome: 'failed', route: '/notes' })
+    ).toContain('npx @expo/agent-cli smoke --ios --route /notes');
   });
 });
 

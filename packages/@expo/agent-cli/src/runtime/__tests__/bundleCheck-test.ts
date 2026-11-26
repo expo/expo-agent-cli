@@ -3,7 +3,9 @@
 // are recorded from a live SDK 57 dev server on 2026-08-23 — including the ANSI codes Metro's
 // worker farm always emits, which is why stripping them is asserted rather than assumed.
 
-import { checkEntryBundleAsync, isMissingPluginError } from '../bundleCheck';
+import { checkEntryBundleAsync } from '../bundleCheck';
+
+import { isMissingPluginError } from '../manifestFailure';
 
 const devServerUrl = 'http://127.0.0.1:8123';
 
@@ -54,20 +56,14 @@ function mockFetch(answers: { [key: string]: Answer }) {
     }
     const status = answer.status ?? 200;
     const body = answer.text ?? JSON.stringify(answer.json ?? {});
-    return {
-      ok: status >= 200 && status < 300,
+    return new Response(status === 304 ? null : body, {
       status,
       statusText: status === 500 ? 'Internal Server Error' : 'OK',
       headers: {
-        get: (name: string) =>
-          name.toLowerCase() === 'content-type'
-            ? (answer.contentType ??
-              (answer.text ? 'text/html; charset=utf-8' : 'application/json'))
-            : null,
+        'content-type':
+          answer.contentType ?? (answer.text ? 'text/html; charset=utf-8' : 'application/json'),
       },
-      text: async () => body,
-      json: async () => JSON.parse(body),
-    };
+    });
   }) as unknown as typeof fetch;
   return calls;
 }
@@ -212,6 +208,36 @@ describe(checkEntryBundleAsync, () => {
         type: 'PLUGIN_NOT_FOUND',
         message: 'PluginError: Failed to resolve plugin for module "expo-camera"',
       },
+    });
+  });
+
+  it.each([
+    { error: 'Upstream unavailable', code: 'ECONNRESET' },
+    { error: 'Error: upstream unavailable' },
+    { error: 'PluginError:' },
+    { error: 'PluginError: ' + 'x'.repeat(65536) },
+  ])('leaves an unrecognized or oversized diagnostic unknown', async (json) => {
+    mockFetch({ [devServerUrl + '/']: { status: 500, json } });
+    expect(
+      (await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })).outcome
+    ).toBe('unknown');
+  });
+
+  it('preserves the cause of a dynamic config failure', async () => {
+    mockFetch({
+      [devServerUrl + '/']: {
+        status: 500,
+        json: {
+          error: 'Error: Error reading Expo config at /project/app.config.js:\n\nMissing APP_ENV',
+        },
+      },
+    });
+    expect(
+      (await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })).error
+    ).toMatchObject({
+      source: 'manifest',
+      type: 'Error',
+      snippet: 'Missing APP_ENV',
     });
   });
 

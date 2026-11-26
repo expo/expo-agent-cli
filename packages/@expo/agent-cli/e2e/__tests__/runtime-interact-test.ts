@@ -601,6 +601,8 @@ describe('the entry bundle gate', () => {
         reason: 'bundle-broken',
         bundle: { ok: false, error: { type: 'PluginError' } },
       });
+      expect(result.stderr).toContain('The native manifest failed');
+      expect(result.stderr).toContain('Check the plugin entry');
     } finally {
       await devServer.close();
     }

@@ -7,7 +7,7 @@
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
 import { PROGRAM_PREFIX } from '../programName';
-import type { BundleCheckError, BundleCheckOutcome } from '../runtime/bundleCheck';
+import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { SmokeAppMismatchKind } from '../smoke/contract';
 import { brokenBundleFollowUps } from './smokeBundle';
 import { capFollowUps, type FollowUp } from './types';
@@ -21,11 +21,7 @@ export interface SmokeFollowUpInput {
   /** Whether the dev server proved it serves another project. */
   foreignDevServer: boolean;
   /** How the entry-bundle check ended, or null when the run never reached it. */
-  bundleOutcome: BundleCheckOutcome | null;
-  /** The file the bundler stopped on, when it named one. */
-  bundleFile: string | null;
-  /** Diagnostic returned while generating the native manifest. */
-  manifestError: BundleCheckError | null;
+  bundle: Pick<BundleCheckResult, 'outcome' | 'error'> | null;
   /** Debugger targets attached, or null when the run never read them. */
   appsConnected: number | null;
   /** Whether the runtime answered an evaluation; null when it was never asked. */
@@ -248,8 +244,8 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     ]);
   }
 
-  if (input.bundleOutcome === 'broken') {
-    return brokenBundleFollowUps(input, `${PROGRAM_PREFIX} smoke${same}`);
+  if (input.bundle?.outcome === 'broken') {
+    return brokenBundleFollowUps(input.bundle.error, `${PROGRAM_PREFIX} smoke${same}`);
   }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
@@ -388,7 +384,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     {
       id: 'typecheck',
       command: `${PROGRAM_PREFIX} typecheck`,
-      why: `Nothing threw${input.bundleOutcome === 'ok' ? ' and the bundle compiled' : ''}, which is not the same as the types being right — a value that is undefined renders rather than throwing.`,
+      why: `Nothing threw${input.bundle?.outcome === 'ok' ? ' and the bundle compiled' : ''}, which is not the same as the types being right — a value that is undefined renders rather than throwing.`,
     },
   ];
   if (input.screenshotPath) {
