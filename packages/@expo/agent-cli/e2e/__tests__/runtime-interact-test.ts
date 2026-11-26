@@ -603,6 +603,15 @@ describe('the entry bundle gate', () => {
       });
       expect(result.stderr).toContain('The native manifest failed');
       expect(result.stderr).toContain('Check the plugin entry');
+      expect(result.stderr).toContain('repeat your original command');
+      expect(result.stderr).not.toContain('Try:');
+      const human = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:tree', '--dev-server-url', devServer.url],
+        { reject: false, env: stubExpoEnv(projectRoot) }
+      );
+      expect(human.stdout).toContain('Native manifest failed');
+      expect(human.stdout).not.toContain('does not compile');
     } finally {
       await devServer.close();
     }

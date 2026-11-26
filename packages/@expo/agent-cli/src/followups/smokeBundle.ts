@@ -1,6 +1,6 @@
 import { PROGRAM_PREFIX } from '../programName';
 import type { BundleCheckError } from '../runtime/bundleCheck';
-import { describeManifestFailure } from '../runtime/manifestFailure';
+import { manifestRepairAdvice } from '../runtime/manifestFailure';
 import type { FollowUp } from './types';
 
 export function brokenBundleFollowUps(
@@ -12,7 +12,7 @@ export function brokenBundleFollowUps(
       {
         id: 'smoke-again',
         command: retryCommand,
-        why: `${describeManifestFailure(error)} Then run smoke again.`,
+        why: `${manifestRepairAdvice(error)} Then run smoke again.`,
       },
     ];
   }

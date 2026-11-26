@@ -241,6 +241,19 @@ describe(checkEntryBundleAsync, () => {
     });
   });
 
+  it.each([
+    [
+      { error: 'CommandError: Unable to determine runtime version for platform ios' },
+      'CommandError',
+    ],
+    [{ error: 'Could not export manifest assets', code: 'MANIFEST_ASSET' }, 'MANIFEST_ASSET'],
+  ] as const)('recognizes Expo manifest middleware errors', async (json, type) => {
+    mockFetch({ [devServerUrl + '/']: { status: 500, json } });
+    expect(
+      (await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })).error
+    ).toMatchObject({ source: 'manifest', type });
+  });
+
   // A proxy can return the same JSON shape, including on HTTP 500.
   it.each([404, 500, 502])(`should answer unknown for a %s with an error body`, async (status) => {
     mockFetch({ 'http://127.0.0.1:8123/': { status, json: { error: 'Bad Gateway' } } });

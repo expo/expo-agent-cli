@@ -14,6 +14,8 @@ const MANIFEST_CODES = new Set([
   'NO_APP_JSON',
   'NO_EXPO',
   'ENTRY_NOT_FOUND',
+  'MANIFEST_MIDDLEWARE',
+  'MANIFEST_ASSET',
 ]);
 
 export async function readManifestFailureAsync(
@@ -61,7 +63,7 @@ function parseManifestFailure(text: string): BundleCheckError | null {
 
   const code = 'code' in payload && typeof payload.code === 'string' ? payload.code.trim() : '';
   const expoClass =
-    /^(?:PluginError|ConfigError|JsonFileError):/.test(diagnostic) ||
+    /^(?:PluginError|ConfigError|JsonFileError|CommandError):/.test(diagnostic) ||
     /^[A-Z]\w*: Error reading Expo config at /.test(diagnostic);
   if (!MANIFEST_CODES.has(code) && !expoClass) return null;
 
@@ -77,11 +79,14 @@ function parseManifestFailure(text: string): BundleCheckError | null {
   };
 }
 
-export function describeManifestFailure(error: BundleCheckError): string {
-  const advice = isMissingPluginError(error)
+export function manifestRepairAdvice(error: BundleCheckError): string {
+  return isMissingPluginError(error)
     ? 'Check the plugin entry in the app config. For a package, make sure it is installed. For a local file, check that its path exists.'
     : 'Fix the error reported by the dev server while generating the manifest.';
-  return [error.message, error.snippet, advice].filter(Boolean).join('\n');
+}
+
+export function describeManifestFailure(error: BundleCheckError): string {
+  return [error.message, error.snippet, manifestRepairAdvice(error)].filter(Boolean).join('\n');
 }
 
 /**

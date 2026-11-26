@@ -477,7 +477,7 @@ function capitalize(text: string): string {
 export function explainBundleRefusal(
   bundle: BundleCheckJson,
   { what, rerun }: { what: string; rerun: string }
-): InteractFailure {
+): { message: string; suggestedCommand: string | null } {
   if (bundle.ok !== false) {
     // The interact commands read a native app, so the bundle's platform is `ios` or `android` on
     // every path that reaches here. When it somehow is not, name both flags in the prose and let
@@ -497,8 +497,8 @@ export function explainBundleRefusal(
   const error = bundle.error;
   if (error?.source === 'manifest') {
     return {
-      message: `The native manifest failed, so ${what}.\n${describeManifestFailure(error)}\nThen run "${rerun}" again.`,
-      suggestedCommand: rerun,
+      message: `The native manifest failed, so ${what}.\n${describeManifestFailure(error)}\nThen repeat your original command.`,
+      suggestedCommand: null,
     };
   }
   const where = [error?.filename, error?.lineNumber, error?.column]

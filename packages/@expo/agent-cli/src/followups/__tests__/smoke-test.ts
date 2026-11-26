@@ -303,7 +303,6 @@ describe(buildSmokeFollowUps, () => {
       })
     );
     expect(followups.map(({ id }) => id)).toEqual(['smoke-again']);
-    expect(followups[0]!.why).toContain(message);
     expect(followups[0]!.why).toContain('generating the manifest');
   });
 
