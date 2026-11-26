@@ -239,15 +239,19 @@ describe(classifyFingerprintDiff, () => {
     hash: null,
   };
 
-  it.each<FingerprintDiffItem>([
-    { op: 'added', addedSource: cngIosDir },
-    { op: 'removed', removedSource: cngIosDir },
-  ])(`should ignore a source with no hash, which the fingerprint hash leaves out ($op)`, (item) => {
-    expect(classifyFingerprintDiff([item])).toEqual({
-      class: 'js-only',
-      changedSources: [],
-      reasons: [],
-    });
+  // A source with no hash is left out of the fingerprint hash, so its appearing or going is no
+  // change. A `changed` one has a hash on one side: a committed `ios/` that became gitignored
+  // moved it, though the side the classifier reads has none.
+  it.each<{ op: string; item: FingerprintDiffItem; expected: string }>([
+    { op: 'added', item: { op: 'added', addedSource: cngIosDir }, expected: 'js-only' },
+    { op: 'removed', item: { op: 'removed', removedSource: cngIosDir }, expected: 'js-only' },
+    {
+      op: 'changed',
+      item: { op: 'changed', beforeSource: { ...cngIosDir, hash: 'abc' }, afterSource: cngIosDir },
+      expected: 'needs-native-build',
+    },
+  ])(`should classify an ios/ with a null hash that was $op as $expected`, ({ item, expected }) => {
+    expect(classifyFingerprintDiff([item]).class).toBe(expected);
   });
 
   it(`should say a build-config change needs no prebuild`, () => {

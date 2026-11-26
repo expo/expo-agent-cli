@@ -378,6 +378,17 @@ export function diffItemSource(item: FingerprintDiffItem): FingerprintSource {
   }
 }
 
+/**
+ * Whether a diff item can have moved the fingerprint hash.
+ *
+ * `@expo/fingerprint` leaves a source with a null hash out of the fingerprint hash. In a CNG project
+ * that is the gitignored `ios/` or `android/` (`bareNativeDir`), which appears after a prebuild and
+ * disappears after a clean, while the hash stays the same. A `changed` item has a hash on one side.
+ */
+export function diffItemMovesHash(item: FingerprintDiffItem): boolean {
+  return item.op === 'changed' || diffItemSource(item).hash !== null;
+}
+
 function runFingerprintAsync(
   command: string,
   projectRoot: string,
