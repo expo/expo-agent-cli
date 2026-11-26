@@ -246,6 +246,14 @@ describe(checkEntryBundleAsync, () => {
       { error: 'CommandError: Unable to determine runtime version for platform ios' },
       'CommandError',
     ],
+    [
+      {
+        error:
+          'TypeError [ERR_INVALID_ARG_TYPE]: Error reading Expo config at /app.config.js:\n\nInvalid path',
+      },
+      'TypeError',
+    ],
+    [{ error: 'EmptyJsonFileError: Cannot parse an empty JSON string' }, 'EmptyJsonFileError'],
     [{ error: 'Could not export manifest assets', code: 'MANIFEST_ASSET' }, 'MANIFEST_ASSET'],
   ] as const)('recognizes Expo manifest middleware errors', async (json, type) => {
     mockFetch({ [devServerUrl + '/']: { status: 500, json } });

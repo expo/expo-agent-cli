@@ -46,7 +46,8 @@ export function cleanupLeft(environment: SmokeEnvironmentJson): {
  */
 export async function smokeAsync(
   projectRoot: string,
-  options: SmokeOptions
+  options: SmokeOptions,
+  argv: string[]
 ): Promise<OutcomeExitCode> {
   if (options.cloud === 'required') {
     await assertEasProjectConfiguredAsync(projectRoot);
@@ -76,7 +77,7 @@ export async function smokeAsync(
     phases: run.phases.map((phase) => ({ id: phase.id, status: phase.status, ms: phase.ms })),
   });
 
-  const followups = followUpsEnabled(options.followups) ? buildFollowUps(run, options) : [];
+  const followups = followUpsEnabled(options.followups) ? buildFollowUps(run, options, argv) : [];
 
   if (options.json) {
     Log.log(JSON.stringify(smokeResultToJson(run, options, followups), null, 2));
@@ -92,13 +93,14 @@ export async function smokeAsync(
 }
 
 /** The follow-ups of one run, from the facts it established. */
-function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
+function buildFollowUps(run: SmokeRun, options: SmokeOptions, argv: string[]) {
   return buildSmokeFollowUps({
     outcome: run.outcome,
     devServerFound: run.discovery?.reachable ?? false,
     bootstrap: options.bootstrap,
     foreignDevServer: run.projectRootMatched === false,
     bundle: run.bundle,
+    argv,
     appsConnected: run.appsConnected,
     runtimeSupported: run.runtimeSupported,
     failing: run.errors.filter(isFailingRecord).length,

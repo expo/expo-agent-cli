@@ -132,6 +132,31 @@ describe(runSmokePhasesAsync, () => {
       expect(waitForAppConnection).not.toHaveBeenCalled();
     });
 
+    it('includes the underlying config error in the failed phase without follow-ups', async () => {
+      const run = await runSmokePhasesAsync(
+        deps({
+          checkEntryBundle: async () =>
+            bundle({
+              outcome: 'broken',
+              url: null,
+              error: {
+                source: 'manifest',
+                type: 'Error',
+                message: 'Error: Error reading Expo config at /project/app.config.js:',
+                snippet: 'Missing APP_ENV',
+                filename: null,
+                lineNumber: null,
+                column: null,
+              },
+            }),
+        }),
+        options({ followups: false })
+      );
+      expect(run.phases.find((phase) => phase.id === 'bundle')?.reason).toContain(
+        'Missing APP_ENV'
+      );
+    });
+
     // Fail-open, unchanged from `dev:wait`: a dev server that answered nothing this CLI
     // understands has not shown the project to be broken. It does not *pass* either, because
     // nothing was proved.

@@ -16,6 +16,7 @@ const MANIFEST_CODES = new Set([
   'ENTRY_NOT_FOUND',
   'MANIFEST_MIDDLEWARE',
   'MANIFEST_ASSET',
+  'EJSONEMPTY',
 ]);
 
 export async function readManifestFailureAsync(
@@ -58,13 +59,17 @@ function parseManifestFailure(text: string): BundleCheckError | null {
     return null;
   }
   const diagnostic = stripVTControlCharacters(payload.error).trim();
-  const prefix = /^([A-Z]\w*Error|Error):/.exec(diagnostic);
-  if (!diagnostic.slice(prefix?.[0].length ?? 0).trim()) return null;
+  const prefix = /^([A-Z]\w*Error|Error)(?: \[[A-Z0-9_]+\])?:/.exec(diagnostic);
+  const detail = diagnostic.slice(prefix?.[0].length ?? 0).trim();
+  if (!detail) return null;
 
   const code = 'code' in payload && typeof payload.code === 'string' ? payload.code.trim() : '';
   const expoClass =
-    /^(?:PluginError|ConfigError|JsonFileError|CommandError):/.test(diagnostic) ||
-    /^[A-Z]\w*: Error reading Expo config at /.test(diagnostic);
+    prefix &&
+    (['PluginError', 'ConfigError', 'JsonFileError', 'EmptyJsonFileError', 'CommandError'].includes(
+      prefix[1]!
+    ) ||
+      detail.startsWith('Error reading Expo config at '));
   if (!MANIFEST_CODES.has(code) && !expoClass) return null;
 
   const [message, ...lines] = diagnostic.split('\n');

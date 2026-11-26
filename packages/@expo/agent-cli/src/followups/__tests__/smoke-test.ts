@@ -10,6 +10,7 @@ import { MAX_FOLLOWUPS } from '../types';
 
 function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput {
   return {
+    argv: ['--ios'],
     outcome: 'passed',
     devServerFound: true,
     bootstrap: true,
@@ -325,7 +326,12 @@ describe(buildSmokeFollowUps, () => {
       'npx @expo/agent-cli smoke --ios --route /notes'
     );
     expect(
-      commands({ bundle: { outcome: 'broken', error: null }, outcome: 'failed', route: '/notes' })
+      commands({
+        bundle: { outcome: 'broken', error: null },
+        outcome: 'failed',
+        route: '/notes',
+        argv: ['--ios', '--route', '/notes'],
+      })
     ).toContain('npx @expo/agent-cli smoke --ios --route /notes');
   });
 });

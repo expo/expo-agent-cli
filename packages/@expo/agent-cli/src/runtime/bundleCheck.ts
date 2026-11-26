@@ -109,6 +109,7 @@ export interface BundleCheckError {
   /** Present when manifest generation failed before the entry bundle could be requested. */
   source?: 'manifest';
   /**
+   * For a manifest failure, the Expo diagnostic code or the error class. Otherwise,
    * Metro's own class for the failure, e.g. `TransformError` or `UnableToResolveError`.
    *
    * Native gets it from the bundler's own payload. Web has no such payload — see
@@ -127,9 +128,9 @@ export interface BundleCheckError {
   filename: string | null;
   lineNumber: number | null;
   column: number | null;
-  /** The error itself: the first line of Metro's message, without the frame or its ANSI codes. */
+  /** The first line of the diagnostic, with ANSI codes removed. */
   message: string;
-  /** The code frame Metro printed, ANSI stripped. Null when it printed none. */
+  /** The remaining manifest diagnostic or the Metro code frame, ANSI stripped. Null when absent. */
   snippet: string | null;
 }
 
@@ -143,7 +144,7 @@ export interface BundleCheckError {
 export type BundleCheckOutcome =
   /** The entry bundle compiled. */
   | 'ok'
-  /** The bundler answered with an error: the project's own code does not compile. */
+  /** Manifest generation or the entry bundle build failed. */
   | 'broken'
   /** The budget expired before the bundler answered. */
   | 'timeout'

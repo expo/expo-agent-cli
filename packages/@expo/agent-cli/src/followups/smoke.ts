@@ -6,6 +6,7 @@
 // stay exactly as they are however many times the gate runs, and the shipped follow-ups of the
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
+import { quoteArgument } from '../utils/consent';
 import { PROGRAM_PREFIX } from '../programName';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { SmokeAppMismatchKind } from '../smoke/contract';
@@ -13,6 +14,8 @@ import { brokenBundleFollowUps } from './smokeBundle';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface SmokeFollowUpInput {
+  /** Original smoke arguments for a repeat of the same gate after a repair. */
+  argv: readonly string[];
   outcome: 'passed' | 'failed' | 'inconclusive';
   /** Whether a dev server answered at all. */
   devServerFound: boolean;
@@ -245,7 +248,8 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   }
 
   if (input.bundle?.outcome === 'broken') {
-    return brokenBundleFollowUps(input.bundle.error, `${PROGRAM_PREFIX} smoke${same}`);
+    const retry = [PROGRAM_PREFIX, 'smoke', ...input.argv.map(quoteArgument)].join(' ');
+    return brokenBundleFollowUps(input.bundle.error, retry);
   }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke

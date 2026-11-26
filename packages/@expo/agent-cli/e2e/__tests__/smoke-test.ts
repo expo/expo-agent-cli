@@ -569,7 +569,7 @@ describe('@expo/agent-cli smoke', () => {
         try {
           const result = await executeAgentCliAsync(
             projectRoot,
-            ['smoke', `--${platform}`, '--json'],
+            ['smoke', `--${platform}`, '--no-start', '--no-reload', '--json'],
             {
               env: stubExpoEnv(projectRoot),
               reject: false,
@@ -584,6 +584,9 @@ describe('@expo/agent-cli smoke', () => {
             error: { type: 'PluginError', message: STUB_MANIFEST_ERROR },
           });
           expect(report.followups.map((item: { id: string }) => item.id)).toEqual(['smoke-again']);
+          expect(report.followups[0].command).toBe(
+            `npx @expo/agent-cli smoke --${platform} --no-start --no-reload --json`
+          );
           expect(report.followups[0].why).toContain('make sure it is installed');
           expect(report.followups[0].why).toContain('check that its path exists');
         } finally {
