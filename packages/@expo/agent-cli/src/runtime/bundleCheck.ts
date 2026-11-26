@@ -483,8 +483,7 @@ async function readManifestBundleUrlAsync(
   });
 
   if (!response.ok) {
-    const failure =
-      response.status === 500 ? readManifestFailure(await response.text().catch(() => '')) : null;
+    const failure = response.status === 500 ? readManifestFailure(await response.text()) : null;
     if (failure) {
       return { url: null, error: failure };
     }
@@ -548,14 +547,25 @@ function readManifestFailure(text: string): BundleCheckError | null {
     return null;
   }
   const message = stripVTControlCharacters(error).split('\n')[0]!.trim();
+  const type = readString(payload?.code)?.trim() || message.match(/^((?:[A-Z]\w*)?Error):/)?.[1];
+  if (!message || !type) {
+    return null;
+  }
   return {
-    type: readString(payload?.code) ?? message.match(/^(\w+):/)?.[1] ?? null,
+    type,
     filename: null,
     lineNumber: null,
     column: null,
     message,
     snippet: null,
   };
+}
+
+/** Native document failures are reported before the manifest can supply a bundle URL. */
+export function manifestErrorOf(bundle: BundleCheckResult | null): BundleCheckError | null {
+  return bundle?.outcome === 'broken' && bundle.platform !== 'web' && bundle.url === null
+    ? bundle.error
+    : null;
 }
 
 /**

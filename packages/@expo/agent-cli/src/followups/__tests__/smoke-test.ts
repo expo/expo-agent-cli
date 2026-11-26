@@ -16,7 +16,7 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     foreignDevServer: false,
     bundleOutcome: 'ok',
     bundleFile: null,
-    missingPlugin: false,
+    manifestError: null,
     appsConnected: 1,
     runtimeSupported: true,
     failing: 0,
@@ -271,6 +271,26 @@ describe(buildSmokeFollowUps, () => {
   // undefined renders a screen with `padding: undefined` and every runtime gate green.
   it(`answers a pass with the gate this one is structurally blind to`, () => {
     expect(commands()[0]).toBe('npx @expo/agent-cli typecheck');
+  });
+
+  it('reports an invalid plugin export before asking to retry smoke', () => {
+    const message = 'PluginError: Plugin "./local.js" must export a function';
+    const followups = buildSmokeFollowUps(
+      input({
+        bundleOutcome: 'broken',
+        manifestError: {
+          type: 'PluginError',
+          message,
+          filename: null,
+          lineNumber: null,
+          column: null,
+          snippet: null,
+        },
+      })
+    );
+    expect(followups.map(({ id }) => id)).toEqual(['smoke-again']);
+    expect(followups[0]!.why).toContain(message);
+    expect(followups[0]!.why).toContain('generating the manifest');
   });
 
   it(`claims a compiled bundle only when the bundle check passed`, () => {

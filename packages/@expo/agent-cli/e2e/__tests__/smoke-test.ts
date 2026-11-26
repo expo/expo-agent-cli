@@ -555,7 +555,7 @@ describe('@expo/agent-cli smoke', () => {
     });
 
     it.each(['ios', 'android'])(
-      'exits 20 for a manifest the dev server cannot build on %s, and leads with install',
+      'exits 20 for a manifest the dev server cannot build on %s, and explains package and local plugin references',
       async (platform) => {
         const projectRoot = await setupFixtureAsync('go-app');
         await installStubXcrunAsync(projectRoot);
@@ -583,7 +583,9 @@ describe('@expo/agent-cli smoke', () => {
             ok: false,
             error: { type: 'PluginError', message: STUB_MANIFEST_ERROR },
           });
-          expect(report.followups[0].command).toBe('npx @expo/agent-cli install');
+          expect(report.followups.map((item: { id: string }) => item.id)).toEqual(['smoke-again']);
+          expect(report.followups[0].why).toContain('make sure it is installed');
+          expect(report.followups[0].why).toContain('check that its path exists');
         } finally {
           release();
           await stub.close();

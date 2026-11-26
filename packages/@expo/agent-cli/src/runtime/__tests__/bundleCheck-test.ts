@@ -215,8 +215,8 @@ describe(checkEntryBundleAsync, () => {
     });
   });
 
-  // Only `@expo/cli`'s 500 carries its error body; a proxy's or middleware's `{error}` is not one.
-  it.each([404, 502])(`should answer unknown for a %s with an error body`, async (status) => {
+  // A proxy can return the same JSON shape, including on HTTP 500.
+  it.each([404, 500, 502])(`should answer unknown for a %s with an error body`, async (status) => {
     mockFetch({ 'http://127.0.0.1:8123/': { status, json: { error: 'Bad Gateway' } } });
 
     const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
@@ -549,6 +549,20 @@ describe(checkEntryBundleAsync, () => {
       expect(result.outcome).toBe('unknown');
       expect(result.reason).toContain('ECONNREFUSED');
     });
+  });
+
+  it('times out when the manifest sends 500 headers but never finishes the body', async () => {
+    globalThis.fetch = async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason));
+          },
+        }),
+        { status: 500 }
+      );
+    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 50 });
+    expect(result.outcome).toBe('timeout');
   });
 
   // A first build of a cold dev server compiles the whole app, so the budget has to be able to

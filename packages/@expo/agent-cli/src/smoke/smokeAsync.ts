@@ -11,7 +11,7 @@ import { event } from '../events';
 import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
-import { isMissingPluginError } from '../runtime/bundleCheck';
+import { manifestErrorOf } from '../runtime/bundleCheck';
 import { describeSkippedApps } from '../runtime/targetSelection';
 import { createAppDeps, waitForStableTargets } from './deps/app';
 import { createDeviceDeps } from './deps/device';
@@ -101,7 +101,7 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     foreignDevServer: run.projectRootMatched === false,
     bundleOutcome: run.bundle?.outcome ?? null,
     bundleFile: run.bundle?.error?.filename ?? null,
-    missingPlugin: isMissingPluginError(run.bundle?.error ?? null),
+    manifestError: manifestErrorOf(run.bundle),
     appsConnected: run.appsConnected,
     runtimeSupported: run.runtimeSupported,
     failing: run.errors.filter(isFailingRecord).length,
