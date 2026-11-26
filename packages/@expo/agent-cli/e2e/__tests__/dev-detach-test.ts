@@ -245,26 +245,20 @@ describe('@expo/agent-cli dev --detach', () => {
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  // `bare-app`, whose plan is the single step `expo run:ios` (`plan-test.ts`), and a stub that
-  // stays alive without ever serving, which is what a compiler looks like from here. The run's lock
-  // says `building`, so the detach reports the run at once, with the port the dev server will take.
+  // `bare-app` plans `expo run:ios --no-bundler`, then `expo start` (`plan-test.ts`). The stub build
+  // holds on a gate, which is what a compiler looks like from here. The run's lock says `building`,
+  // so the detach reports the run at once, with the port the dev server will take.
   it('says the plan is building rather than that a dev server started', async () => {
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
     const port = await freePortAsync();
+    const gate = path.join(projectRoot, 'build-gate');
 
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--detach', '--ios', '--local', '--json', '--port', String(port)],
-        {
-          env: {
-            ...stubExpoEnv(projectRoot),
-            // Longer than the port watch, so the step is still running when the lock is published:
-            // a build holds the lock for minutes after it appears.
-            STUB_EXPO_DELAY_MS: '45000',
-          },
-        }
+        { env: { ...stubExpoEnv(projectRoot), STUB_EXPO_BUILD_GATE: gate } }
       );
 
       expect(result.exitCode).toBe(0);
@@ -275,6 +269,7 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(report.ready).toBeNull();
       expect(report.url).toBe(`http://127.0.0.1:${port}`);
     } finally {
+      await fs.promises.writeFile(gate, '');
       await cleanUpDetachedAsync(projectRoot);
     }
   });

@@ -7,6 +7,8 @@
 // - STUB_EXPO_DELAY_MS: milliseconds to stay alive before exiting (default 0), for `start`
 // - STUB_EXPO_BUILD_DELAY_MS: how long `run:*` builds before it prints the install markers: then
 //   `run:* --no-bundler` exits, and `run:*` with STUB_EXPO_LISTEN serves (default 0)
+// - STUB_EXPO_BUILD_GATE: a file path. `run:* --no-bundler` finishes its build only once this file
+//   exists, so a test reads the run while it builds, then lets it go on.
 // - STUB_EXPO_LOG: file the invocation is appended to (default `<cwd>/stub-expo-invocations.jsonl`)
 // - STUB_EXPO_DEV_SERVER_PORT: port to report as a `metro:instantiate` event, the way the real CLI
 //   does. Unset means no port is reported, which is what the dev-server lock has to fall back from.
@@ -180,21 +182,33 @@ if (
 const runsWithoutBundler =
   (args[0] === 'run:ios' || args[0] === 'run:android') && args.includes('--no-bundler');
 if (runsWithoutBundler) {
-  setTimeout(
-    () => {
-      const device = args[0] === 'run:ios' ? 'iPhone 17 Pro' : 'tuft-pixel';
-      if (exitCode !== 0) return exit();
-      process.stdout.write(
-        [
-          args[0] === 'run:ios' ? '\u203a Build Succeeded' : 'BUILD SUCCESSFUL in 4m 11s',
-          `\u203a Installing on ${device}`,
-          `\u203a Opening on ${device} (com.example.stub)`,
-        ].join('\n') + '\n'
-      );
-      exit();
-    },
-    Number(process.env.STUB_EXPO_BUILD_DELAY_MS || 0)
-  );
+  const finishBuild = () =>
+    setTimeout(
+      () => {
+        const device = args[0] === 'run:ios' ? 'iPhone 17 Pro' : 'tuft-pixel';
+        if (exitCode !== 0) return exit();
+        process.stdout.write(
+          [
+            args[0] === 'run:ios' ? '\u203a Build Succeeded' : 'BUILD SUCCESSFUL in 4m 11s',
+            `\u203a Installing on ${device}`,
+            `\u203a Opening on ${device} (com.example.stub)`,
+          ].join('\n') + '\n'
+        );
+        exit();
+      },
+      Number(process.env.STUB_EXPO_BUILD_DELAY_MS || 0)
+    );
+  const gate = process.env.STUB_EXPO_BUILD_GATE;
+  if (gate) {
+    const poll = setInterval(() => {
+      if (fs.existsSync(gate)) {
+        clearInterval(poll);
+        finishBuild();
+      }
+    }, 50);
+  } else {
+    finishBuild();
+  }
 }
 
 const askedRunPort = args.includes('--port') ? args[args.indexOf('--port') + 1] : null;
