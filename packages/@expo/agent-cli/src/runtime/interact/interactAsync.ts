@@ -355,7 +355,7 @@ function unreadTreeReport(
     reason: refusal,
     ok: false,
     followups: [],
-    untrusted: UNTRUSTED_TREE_FIELDS,
+    untrusted: [...UNTRUSTED_TREE_FIELDS, 'bundle.error'],
   };
 }
 
@@ -549,7 +549,7 @@ function unreadCallFields(
     reason: refusal,
     ok: false,
     followups: [] as FollowUp[],
-    untrusted: UNTRUSTED_CALL_FIELDS,
+    untrusted: [...UNTRUSTED_CALL_FIELDS, 'bundle.error'],
   };
 }
 

@@ -68,6 +68,7 @@ export const runtimeReloadHelp: CommandHelp = {
       'deviceId',
       'attempts',
       'waitedMs',
+      'untrusted',
       'followups',
     ],
   },

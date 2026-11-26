@@ -222,6 +222,7 @@ export interface ReloadResultJson {
   attempts: ReloadAttempt[];
   /** How long the whole reload took, in milliseconds. */
   waitedMs: number;
+  untrusted: string[];
   followups: FollowUp[];
 }
 
@@ -821,6 +822,7 @@ function buildReport({
     deviceId: device?.deviceId ?? null,
     attempts,
     waitedMs: Date.now() - startedAt,
+    untrusted: ['bundle.error', 'bundlesAfterReload.line'],
     followups,
   };
 }

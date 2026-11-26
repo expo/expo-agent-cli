@@ -72,7 +72,10 @@ export function smokeResultToJson(
     screenshot: run.screenshot,
     durationMs: run.durationMs,
     // @ref llp/0008-guardrails.rfc.md — every string in here came out of the app.
-    untrusted: ['errors.records'],
+    untrusted:
+      run.bundle?.error?.source === 'manifest'
+        ? ['errors.records', 'bundle.error', 'phases']
+        : ['errors.records'],
     followups,
   };
 }
@@ -90,7 +93,7 @@ export function formatSmokeResult(run: SmokeRun, options: SmokeOptions): string 
       'dev server',
       `${run.devServerUrl}${SEPARATOR}${chalk.dim(`via ${run.discovery?.source ?? 'default'}${run.started ? ', started by this run' : ''}`)}`
     ),
-    ...run.phases.map((phase) => row('', phaseLine(phase))),
+    ...run.phases.map((phase) => row('', phaseLine(phase, displayPhaseReason(phase, run)))),
   ];
 
   if (run.screenshot.ok) {
@@ -225,8 +228,14 @@ function outcomeValue(run: SmokeRun): string {
   }
 }
 
+export function displayPhaseReason(phase: SmokePhase, run: SmokeRun): string | null {
+  return phase.id === 'bundle' && run.bundle?.error?.source === 'manifest' && phase.reason
+    ? '\n' + wrapUntrustedAppOutput(phase.reason)
+    : phase.reason;
+}
+
 /** One phase, as `status  id · reason`. */
-function phaseLine(phase: SmokePhase): string {
+function phaseLine(phase: SmokePhase, reason: string | null): string {
   const mark =
     phase.status === 'ok'
       ? chalk.green('ok')
@@ -236,7 +245,7 @@ function phaseLine(phase: SmokePhase): string {
           ? chalk.yellow('unknown')
           : chalk.dim('skipped');
   const timing = phase.ms > 0 ? chalk.dim(` ${formatDuration(phase.ms)}`) : '';
-  return `${mark.padEnd(18)}${phase.id}${timing}${phase.reason ? chalk.dim(`${SEPARATOR}${phase.reason}`) : ''}`;
+  return `${mark.padEnd(18)}${phase.id}${timing}${reason ? chalk.dim(`${SEPARATOR}${reason}`) : ''}`;
 }
 
 /** Milliseconds, in the unit a reader thinks in: `840ms`, `4.2s`. */

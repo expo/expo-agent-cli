@@ -609,7 +609,10 @@ describe(checkEntryBundleAsync, () => {
         { status: 500 }
       );
     const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 50 });
-    expect(result.outcome).toBe('timeout');
+    expect(result).toMatchObject({
+      outcome: 'timeout',
+      reason: 'timed out after 50ms while reading the native manifest',
+    });
   });
 
   // A first build of a cold dev server compiles the whole app, so the budget has to be able to

@@ -17,7 +17,7 @@ import { createDeviceDeps } from './deps/device';
 import { createDevServerDeps } from './deps/devServer';
 import { createSmokeDepsContext } from './deps/shared';
 import { startPortArgs } from './deps/startArgs';
-import { formatSmokeResult, smokeResultToJson } from './format';
+import { displayPhaseReason, formatSmokeResult, smokeResultToJson } from './format';
 import type { CloudRouteCell, SmokeDeps, SmokeRun } from './contract';
 import { runSmokePhasesAsync, smokeExitCode } from './phases';
 import { buildSmokeProgress } from './progress';
@@ -138,7 +138,9 @@ function explainOutcome(run: SmokeRun): string {
     run.outcome === 'failed'
       ? `The smoke gate failed at "${culprit?.id ?? 'an unknown phase'}".`
       : `The smoke gate could not decide, at "${culprit?.id ?? 'an unknown phase'}".`;
-  const why = culprit?.reason ?? 'no phase reported a reason, which is a bug in this command.';
+  const why =
+    (culprit && displayPhaseReason(culprit, run)) ??
+    'no phase reported a reason, which is a bug in this command.';
   const how =
     run.outcome === 'failed'
       ? `Read the phase list above: every phase before the one that failed did answer, so the failure is about what that phase asked and nothing later. The "Suggested next:" line is the command that acts on it.`

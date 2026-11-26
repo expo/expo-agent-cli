@@ -286,9 +286,9 @@ export function explainReloadFailure(
   ) {
     return [
       chalk.red(
-        `The bundler was still building this project's entry bundle after ${options.timeoutMs}ms, so the app was not reloaded.`
+        `The entry bundle check could not confirm the current build, so the app was not reloaded.`
       ),
-      `Why: ${report.bundle.reason}. Until that build finishes it is not known whether a reload would fetch working code, and nothing was attempted rather than reload onto an answer nobody has.`,
+      `Why: ${report.bundle.reason}. It is unknown whether a reload would fetch working code.`,
       `How: run this command again with a longer --timeout — a first build of a large app takes tens of seconds — or run "${smokeBase}" first and reload once it is green.`,
     ].join('\n');
   }

@@ -1,4 +1,5 @@
 import { stripVTControlCharacters } from 'util';
+import { wrapUntrustedAppOutput } from './untrusted';
 import type { BundleCheckError } from './bundleCheck';
 
 // Codes specific to Expo config and config-plugin resolution. A proxy can also send {error, code}.
@@ -91,7 +92,8 @@ export function manifestRepairAdvice(error: BundleCheckError): string {
 }
 
 export function describeManifestFailure(error: BundleCheckError): string {
-  return [error.message, error.snippet, manifestRepairAdvice(error)].filter(Boolean).join('\n');
+  const diagnostic = [error.message, error.snippet].filter(Boolean).join('\n');
+  return `${wrapUntrustedAppOutput(diagnostic)}\n${manifestRepairAdvice(error)}`;
 }
 
 /**

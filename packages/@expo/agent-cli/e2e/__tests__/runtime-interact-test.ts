@@ -601,6 +601,10 @@ describe('the entry bundle gate', () => {
         reason: 'bundle-broken',
         bundle: { ok: false, error: { type: 'PluginError' } },
       });
+      expect(JSON.parse(result.stdout).untrusted).toContain('bundle.error');
+      expect(result.stderr).toMatch(
+        /BEGIN UNTRUSTED APP OUTPUT ---\nPluginError:[\s\S]+END UNTRUSTED APP OUTPUT ---\nCheck the plugin entry/
+      );
       expect(result.stderr).toContain('The native manifest failed');
       expect(result.stderr).toContain('Check the plugin entry');
       expect(result.stderr).toContain('repeat your original command');

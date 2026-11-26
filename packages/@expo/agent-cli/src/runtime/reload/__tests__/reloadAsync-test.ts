@@ -728,6 +728,7 @@ describe(explainReloadFailure, () => {
         },
       ],
       waitedMs: 12_000,
+      untrusted: [],
       followups: [],
     };
   }

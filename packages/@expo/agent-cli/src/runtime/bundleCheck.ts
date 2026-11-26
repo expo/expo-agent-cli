@@ -194,6 +194,7 @@ export async function checkEntryBundleAsync(
   const origin = normalizeDevServerUrl(devServerUrl);
 
   const controller = new AbortController();
+  let timeoutStage = platform === 'web' ? 'reading the entry page' : 'reading the native manifest';
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -223,6 +224,7 @@ export async function checkEntryBundleAsync(
     if (entry.url == null) {
       return finish({ outcome: 'unknown', url: null, error: null, reason: entry.reason });
     }
+    timeoutStage = 'checking the entry bundle';
     const url = toDevServerUrl(entry.url, origin);
 
     // HEAD, so a bundle that compiles costs a status line instead of megabytes of JavaScript.
@@ -249,7 +251,7 @@ export async function checkEntryBundleAsync(
         outcome: 'timeout',
         url: null,
         error: null,
-        reason: `the bundler did not finish building the entry bundle within ${timeoutMs}ms`,
+        reason: `timed out after ${timeoutMs}ms while ${timeoutStage}`,
       });
     }
     return finish({
