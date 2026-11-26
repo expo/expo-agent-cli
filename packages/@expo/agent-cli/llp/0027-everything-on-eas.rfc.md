@@ -124,7 +124,7 @@ The needs-human scenario `eas-project-unlinked` (`EAS_PROJECT_NOT_LINKED`) comes
 | §The open is a session                                   | `src/dev/__tests__/openAppEas-test.ts`                                                             |
 | §Check the EAS project before starting the environment   | `e2e/__tests__/eas-preflight-test.ts`                                                              |
 | `dev --eas` end to end: build, reuse, open, Expo Go      | `e2e/__tests__/dev-eas-test.ts`, `dev-eas-foreground-test.ts`                                      |
-| §smoke                                                   | `src/smoke/__tests__/phases-test.ts`, `e2e/__tests__/smoke-test.ts`                                |
+| §smoke                                                   | `src/smoke/__tests__/phasesAttach-test.ts`, `e2e/__tests__/smoke-test.ts`                          |
 | §Attach the controller after a smoke session starts      | `src/device/__tests__/screenshot-test.ts`                                                          |
 | §dev:stop                                                | `src/dev/__tests__/stopAsync-test.ts`, `e2e/__tests__/cloud-simulator-test.ts`                     |
 | §What EAS said                                           | `src/utils/__tests__/easFailure-test.ts`, `src/needsHuman/__tests__/easProject-test.ts`            |

@@ -3,7 +3,7 @@
 //
 // What this tier owns, and what it does not.
 //
-// The **outcome table** is the unit tests' (`src/smoke/__tests__/phases-test.ts`), because it is a
+// The **outcome table** is the unit tests' (`src/smoke/__tests__/phases*-test.ts`), because it is a
 // pure function of eight answers and pinning it needs no processes. What only a run through the
 // published bin can show is the process boundary itself: that the exit codes leave the process,
 // that `--json` is one parseable object, that a bogus route reaches the device tool **zero** times,
