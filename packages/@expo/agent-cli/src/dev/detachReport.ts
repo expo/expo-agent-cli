@@ -45,8 +45,8 @@ export interface DevDetachResultJson {
   /** Reused an existing run, including a build. Device or session work may still run. */
   alreadyRunning: boolean;
   /**
-   * What the run's lock says: `building` while a step before the dev server still runs, and
-   * `serving` after. While it builds, {@link url} is where the dev server
+   * What the run's lock says: `building` while a step before the dev server, or an `expo run:*`
+   * step, still compiles, and `serving` after. While it builds, {@link url} is where the dev server
    * will listen, not one that answers.
    *
    * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization

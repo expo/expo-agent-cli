@@ -16,7 +16,7 @@ import { isInteractive } from '../utils/interactive';
 import type { SubprocessOutput } from '../utils/subprocess';
 import { portDemandedError, warnPortMove } from './devServerPort';
 import { event as devEvent } from './events';
-import { withPortArg } from './forwardedArgs';
+import { buildsBeforeServing, withPortArg } from './forwardedArgs';
 import { recordLastDevRequest } from './lastRequest';
 import { easRunLifecycle } from './openAppEas';
 import {
@@ -65,6 +65,7 @@ export class DevServerStepRunner {
       this.runAttemptAsync(step, stepArgs, easBuildId, scope);
     const first = await runAttempt(args);
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol
+    // `expo run:*` can exit 0 after skipping its dev server.
     const collision = portCollisionIn(this.projectRoot, first);
     if (!collision) {
       return { args: first.args, result: first.result };
@@ -103,7 +104,9 @@ export class DevServerStepRunner {
     easBuildId: string | null,
     { lock, steps }: RunScope
   ): Promise<DevServerAttempt> {
-    const { projectRoot, plan, options, acquired, output, openPlatform } = this;
+    const { projectRoot, plan, options, acquired, output } = this;
+    // `expo run:*` installs and launches the app itself.
+    const openPlatform = step.argv[1] === 'start' ? this.openPlatform : null;
     const spawnedAt = Date.now();
     // Session cleanup stays inside the active step so interruption waits for it.
     const result = await steps.stepAsync(async (signal) => {
@@ -124,6 +127,7 @@ export class DevServerStepRunner {
         output,
         signal,
         lock,
+        phase: buildsBeforeServing(step.argv[1]) ? 'building' : 'serving',
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
         onDevServer: openPlatform
@@ -159,10 +163,12 @@ export class DevServerStepRunner {
  * The collision a dev-server step's output reports, or null.
  *
  * A dev server that reported or logged where it listens bound its port, so nothing in its output
- * is a bind collision. `start.log` is what `@expo/cli` 57 and older write instead of the report.
+ * is a bind collision. The port watch follows the step for as long as it runs, so a report after a
+ * `run:*` build counts; `start.log` is what `@expo/cli` 57 and older write instead.
  *
- * A collision that names another port is not this step's. A collision that names no port
- * (`Use port N instead?` alone) still counts.
+ * A collision that names another port is not this step's: a `run:*` step's output carries Gradle
+ * and Xcode output too, and an `EADDRINUSE` there is some other listener. A collision that names no
+ * port (`Use port N instead?` alone) still counts.
  *
  * @param attempt The arguments, output, and start time of the same spawn.
  */

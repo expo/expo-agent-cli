@@ -32,8 +32,10 @@ type RunFollowUpOptions = Pick<DevOptions, 'followups' | 'deviceBackend'>;
  * [observed — friction run, 2026-08-23].
  *
  * The dev-server options a follow-up may quote are the **plan's last step**, never the caller's own
- * arguments: reading the raw arguments once made it print a development-build URL naming a port
- * the step did not serve on [F120, observed — wave 29 live, 2026-08-27]. The plan is the argv that will run (llp/0015 §The
+ * arguments. They are the same list for a plan that ends in `expo start`, and they differ for every
+ * plan that does not: `--tunnel` cannot be forwarded to `expo run:ios`, and reading the raw
+ * arguments once made it print a development-build URL naming a port the step did not serve on
+ * [F120, observed — wave 29 live, 2026-08-27]. The plan is the argv that will run (llp/0015 §The
  * plan approved is the plan run), so it is the one thing a follow-up may read.
  */
 export function runFollowUpRequest(

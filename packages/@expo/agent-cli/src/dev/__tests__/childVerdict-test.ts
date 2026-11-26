@@ -13,6 +13,7 @@ import {
 } from '../../utils/errors';
 import {
   detachedPidLine,
+  childOpensPlatform,
   parseDetachedChildPid,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
@@ -147,6 +148,60 @@ describe(parseDetachedChildVerdict, () => {
   });
 });
 
+// The plan table is a format of this CLI's own (`src/plan/format.ts`), so it round-trips the same
+// way the verdict does: the log is built by `formatStartPlan` and read back here.
+describe(childOpensPlatform, () => {
+  /** The child's log, as `formatStartPlan` writes it, for a plan of the given steps. */
+  function planLog(steps: { argv: string[]; reason: string }[], ...after: string[]): string[] {
+    const plan: StartPlan = {
+      rule: 'bare-stale',
+      target: 'bare',
+      reasons: ['Expo SDK 57.0.17.'],
+      buildLocation: null,
+      steps: steps.map((step, index) => ({
+        id: `step-${index}`,
+        argv: step.argv,
+        reason: step.reason,
+        timeClass: 'minutes',
+        runsOn: null,
+      })),
+    };
+    return [...formatStartPlan(plan).split('\n'), ...after];
+  }
+
+  const RUN_ANDROID = { argv: ['expo', 'run:android'], reason: 'Builds and installs the app.' };
+  const PREBUILD = { argv: ['expo', 'prebuild', '--platform', 'android'], reason: 'Generates it.' };
+  const START = { argv: ['expo', 'start', '--dev-client'], reason: 'Starts the dev server.' };
+  const START_IOS = {
+    argv: ['expo', 'start', '--go', '--ios', '--port', '9201'],
+    reason: 'Serves the project and opens it on a booted iOS simulator.',
+  };
+
+  // @ref llp/0021-honest-reports.rfc.md §The rules — F140. The step that opens the app is the step
+  // that can kill the dev server after it has answered `/status`. An `expo start` step opens nothing
+  // any more: `dev` performs the open itself, from its own process (llp/0026).
+  it.each([
+    ['a plan that serves from its build step', planLog([PREBUILD, RUN_ANDROID]), true],
+    [
+      'an install before a start step',
+      planLog([{ ...RUN_ANDROID, argv: [...RUN_ANDROID.argv, '--no-bundler'] }, START]),
+      false,
+    ],
+    ['a plan whose only step is the dev server', planLog([START]), false],
+    ['a start step with a platform flag', planLog([START_IOS]), false],
+    ['a run:ios step', planLog([{ argv: ['expo', 'run:ios'], reason: 'Builds it.' }]), true],
+    [
+      'a start step with the short platform flag',
+      planLog([{ argv: ['expo', 'start', '--go', '-i'], reason: 'Serves it.' }]),
+      false,
+    ],
+    ['a plan that only prebuilds', planLog([PREBUILD]), false],
+    ['a log with no plan in it', ['Starting project at /project'], false],
+  ] as const)(`reads %s`, (_name, lines, opens) => {
+    expect(childOpensPlatform(lines)).toBe(opens);
+  });
+});
+
 describe('parseDetachedChildPid', () => {
   it(`reads the pid the child printed on line 1`, () => {
     expect(parseDetachedChildPid([detachedPidLine(4242), 'Smart start plan'])).toBe(4242);
@@ -159,6 +214,8 @@ describe('parseDetachedChildPid', () => {
   });
 });
 
+// @ref llp/0021-honest-reports.rfc.md §The rules — F140. Which dev-server
+// steps carry work that can end the process *after* the bundler has answered.
 // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
 // the `--detach` parent computes the move from this row and the lock.
 describe(parseDetachedChildPort, () => {

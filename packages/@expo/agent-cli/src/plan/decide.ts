@@ -11,12 +11,12 @@ import {
   EAS_REQUIREMENT,
   EAS_SIMULATOR_PROFILE,
   EAS_WHERE,
-  LOCAL_WHERE,
 } from '../toolchain/runsOn';
 import type { RunsOn } from '../toolchain/runsOn';
 import type { BuildBackendChoice } from '../toolchain/selectBackend';
 import { classifyAgainstRecordedBuild } from '../impact/fromRecord';
 import type { LastBuildRecord } from './lastBuild';
+import { localBuildSteps } from './localBuild';
 import { planWithoutApp } from './noApp';
 import type { DecideStartPlanOptions, NativePlatform, StartPlanRule } from './types';
 import { easCommandPrefix } from '../utils/easCli';
@@ -119,14 +119,12 @@ export function decideStartPlan(
             `The ${platform} device has not got this development build, so it is installed before the dev server starts.`,
           ]
         : [];
-  // No local step builds and serves: `run:* --no-bundler` exits after the install, so the build is
-  // recorded before the dev server starts (llp/0004 §Decision table).
   const serveBuild = startDevClientStep('It serves the build the step above installed.', options);
   /** The steps that make and install the app, per the backend that was chosen. */
-  const buildSteps = (reason: string, prebuild: boolean): PlanStep[] =>
+  const buildSteps = (reason: string, prebuild: boolean, devClient = state.usesDevClient) =>
     backend?.runsOn === 'eas'
       ? easRouteSteps(platform, reason, options)
-      : [...(prebuild ? [prebuildStep(platform)] : []), runStep(platform, reason), serveBuild];
+      : localBuildSteps(platform, reason, prebuild, devClient ? serveBuild : null);
   const location = () =>
     backend?.runsOn === 'eas'
       ? easBuildLocation(platform, backend)
@@ -268,7 +266,7 @@ export function decideStartPlan(
         'a-minute',
         'Adds expo-dev-client, which the development build needs to load the dev server.'
       ),
-      ...buildSteps('The first development build of this project has to be made.', true),
+      ...buildSteps('The first development build of this project has to be made.', true, true),
     ],
     [...factsWhen(true), ...targetFacts, ...buildFacts],
     location()
@@ -371,24 +369,6 @@ function plainPlatformNoun(platform: NativePlatform): string {
 }
 
 /**
- * Prebuild, which runs locally and is labelled so.
- *
- * It generates source rather than a binary, and it is still a `local` step: on iOS it ends in a
- * `pod install` that wants Xcode's command line tools, and it is the first half of a build that
- * only ever happens on this machine. A caller who cannot build here needs to know that at this
- * step, not at the next one.
- */
-function prebuildStep(platform: NativePlatform): PlanStep {
-  return step(
-    'prebuild',
-    ['expo', 'prebuild', '--platform', platform],
-    'a-minute',
-    `Generates the ${platform} native project from the app config and the installed packages. Runs ${LOCAL_WHERE}, as the first half of a local build.`,
-    'local'
-  );
-}
-
-/**
  * Put an existing development build on the device, without building and without a bundler.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
@@ -414,16 +394,6 @@ function installStep(platform: NativePlatform): PlanStep {
     ['expo', `run:${platform}`, '--no-bundler'],
     'a-minute',
     `Installs the existing ${platform} development build on the device and launches it. The project fingerprint matches the recorded build, so there is nothing to compile and this reuses what ${platform === 'ios' ? 'Xcode' : 'Gradle'} already built — a machine whose build cache is cold compiles first, which takes minutes. --no-bundler because the next step is the dev server.`,
-    'local'
-  );
-}
-
-function runStep(platform: NativePlatform, reason: string): PlanStep {
-  return step(
-    'run',
-    ['expo', `run:${platform}`, '--no-bundler'],
-    'many-minutes',
-    `Builds the ${platform} app ${LOCAL_WHERE} (a local build, which needs ${localRequirement(platform)}) and installs it. --no-bundler because the next step is the dev server. ${reason}`,
     'local'
   );
 }

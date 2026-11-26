@@ -7,7 +7,8 @@ import { vol } from 'memfs';
 import os from 'os';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
-import { stopAppOnDeviceAsync } from '../../runtime/appProcess';
+import { buildStopAppCommand } from '../../runtime/appProcess';
+import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { bindingFor, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
@@ -17,7 +18,7 @@ import { readDevServerLockAsync } from '../../devLock/client';
 import type { DevServerLockInfo } from '../../devLock/types';
 import type { FollowUp } from '../../followups';
 import { emitStartPlan } from '../../plan/emit';
-import { readLastBuildRecord, recordLastBuildFingerprint } from '../../plan/lastBuild';
+import { readLastBuildRecord } from '../../plan/lastBuild';
 import { resolveStartPlanAsync } from '../../plan/resolveAsync';
 import { probeProjectStateAsync } from '../../project/probe';
 import { probeBundlerAsync } from '../../runtime/bundlerStatus';
@@ -72,12 +73,9 @@ vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
 vi.mock('../../deviceBinding/preview', () => ({ previewExplicitDeviceAsync: vi.fn() }));
-vi.mock('../../runtime/appProcess', () => ({
-  stopAppOnDeviceAsync: vi.fn(async () => ({ ok: true })),
-}));
-vi.mock('../../runtime/appId', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../runtime/appId')>()),
-  readConfiguredAppId: vi.fn(() => 'com.example.app'),
+// The device tools (`simctl`, `adb`) are subprocesses; nothing here may reach a real device.
+vi.mock('../../utils/spawnCapture', () => ({
+  spawnCaptureAsync: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
 }));
 vi.mock('../../devLock/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../devLock/client')>()),
@@ -274,6 +272,7 @@ describe(devAsync, () => {
           signal: expect.any(AbortSignal),
           easPlatform: null,
           lock: expect.any(RunLock),
+          phase: 'serving',
           onDevServer: expect.any(Function),
         }
       );
@@ -287,40 +286,6 @@ describe(devAsync, () => {
 
       expect(withLeaseExtendedAsync).toHaveBeenCalledTimes(2);
       expect(withLeaseExtendedAsync).toHaveBeenCalledWith(projectRoot, expect.any(Function));
-    });
-  });
-
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table — F121. The stub `expo`'s
-  // launch failure prints a fixed stderr, never the Automation refusal, and `bare-app`, whose
-  // `run:ios` can die of that refusal, has no fingerprint to record.
-  describe('a build step that failed', () => {
-    // Exit 7, because the launch step is `osascript`, and the Automation refusal is a stop only a
-    // person can clear. The record is written **before** that handoff is thrown.
-    it(`should record the build when the step failed at the launch after installing the app`, async () => {
-      mockStaleDevClientState();
-      vi.mocked(isInteractive).mockReturnValue(false);
-      vi.mocked(spawnExpoAsync).mockImplementation(async (_root, args) => ({
-        cli: { command: 'expo', args: [] },
-        result:
-          args[0] === 'run:ios'
-            ? {
-                exitCode: 1,
-                stdout:
-                  '› Build Succeeded\n› Installing on iPhone 17 Pro\n› Opening on iPhone 17 Pro',
-                stderr: 'Error: osascript -e tell app "System Events" exited with non-zero code: 1',
-              }
-            : { exitCode: 0, stdout: '', stderr: '' },
-      }));
-
-      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
-        exitCode: 7,
-        message: expect.stringContaining('the app it built is installed on the simulator already'),
-      });
-
-      expect(recordLastBuildFingerprint).toHaveBeenCalledWith(projectRoot, 'ios', {
-        hash: 'abc123def4567890',
-        sources: null,
-      });
     });
   });
 
@@ -698,6 +663,14 @@ describe(devAsync, () => {
       `stops the app the %s build step launched, before the dev server starts`,
       async (platform, bound, deviceId) => {
         mockStaleDevClientState();
+        vol.fromJSON({
+          [`${projectRoot}/app.json`]: JSON.stringify({
+            expo: {
+              ios: { bundleIdentifier: 'com.example.app' },
+              android: { package: 'com.example.app' },
+            },
+          }),
+        });
         vi.mocked(acquireDeviceAsync).mockResolvedValue({
           device: bound,
           justBooted: false,
@@ -706,14 +679,15 @@ describe(devAsync, () => {
 
         await devAsync(projectRoot, resolveDevOptions([`--${platform}`, '--local']));
 
-        expect(stopAppOnDeviceAsync).toHaveBeenCalledWith({
-          platform,
-          deviceId,
-          appId: 'com.example.app',
-        });
-        expect(vi.mocked(stopAppOnDeviceAsync).mock.invocationCallOrder[0]).toBeLessThan(
-          vi.mocked(runDevServerAsync).mock.invocationCallOrder[0]!
-        );
+        const stops = vi
+          .mocked(spawnCaptureAsync)
+          .mock.calls.map(([bin, args], index) => ({ bin, args, index }))
+          .filter(({ args }) => args.includes('terminate') || args.includes('force-stop'));
+        expect(stops.map(({ args }) => args)).toEqual([
+          buildStopAppCommand({ platform, deviceId, appId: 'com.example.app' }).args,
+        ]);
+        const stopOrder = vi.mocked(spawnCaptureAsync).mock.invocationCallOrder[stops[0]!.index]!;
+        expect(stopOrder).toBeLessThan(vi.mocked(runDevServerAsync).mock.invocationCallOrder[0]!);
       }
     );
 

@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** the open itself (`src/dev/openApp.ts`); the hook it hangs on (`src/start/startAsync.ts`, `src/dev/runDevServerStep.ts`); the plan's argv and reasons (`src/plan/decide.ts`, `src/plan/platformFlags.ts` §isNativePlatformFlag); the stub tier's device switch (`e2e/utils.ts`, `AGENT_CLI_NO_DEVICE`)
+**Systems:** the open itself (`src/dev/openApp.ts`); the hook it hangs on (`src/start/startAsync.ts`, `src/dev/runDevServerStep.ts`); the plan's argv and reasons (`src/plan/decide.ts`, `src/plan/platformFlags.ts` §isNativePlatformFlag); the grace-window gate (`src/dev/childVerdict.ts` §stepOpensPlatform); the stub tier's device switch (`e2e/utils.ts`, `AGENT_CLI_NO_DEVICE`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-09-05
 **Related:** [[0025-dev-requires-platform]], [[0005-runtime-loop-tools]], [[0010-agent-conventions]]
@@ -15,7 +15,7 @@ Now they do. `dev` opens the app itself, through the same modules `smoke` and `n
 
 ## How it hangs together
 
-The dev server's port is only knowable after the spawn, and the subprocess does not return until the server stops. So `runDevServerAsync` gained one hook: `onDevServer`, told the moment the project lock resolves the port. `dev` arms it for the `expo start` step of a run — never for `--plan`, `--web` or `--no-open`. A build step is `expo run:* --no-bundler`, which ends before the dev server starts ([[0004-smart-start-and-project-state]] §Decision table).
+The dev server's port is only knowable after the spawn, and the subprocess does not return until the server stops. So `runDevServerAsync` gained one hook: `onDevServer`, told the moment the project lock resolves the port. `dev` arms it for the `expo start` step of a run — never for `--plan`, `--web`, `--no-open`, or `expo run:*`, which installs and launches itself.
 
 The open is fire-and-forget from the dev server's point of view. It narrates each slow act on stderr (a boot, an Expo Go download), reports the outcome the same way, and a failure is a warning with `navigate /` in it — the dev server is still doing its job, and taking it down over a failed open would invert their importance. `stillWanted` stops the staging when the server dies mid-open.
 
@@ -27,7 +27,7 @@ For a person at a terminal, the Simulator window is surfaced with `open -a Simul
 
 - **The platform flag never reaches `expo start`** (`isNativePlatformFlag`). `--web` still does: serving the web bundle is that CLI's own job.
 - **`--no-open` now means "skip `dev`'s own open"** — same caller intent as in 0025, one mechanism instead of two. `smoke` starts its dev server with it and keeps opening through its own phases, whose budgets and verdicts a gate needs.
-- **No F140 grace window.** No step serves and launches the app in one process: the open is in `dev`'s process, and `expo run:* --no-bundler` exits before the dev server starts. So nothing can kill the dev server after the bundler answers, and a detached run reports at once.
+- **The F140 grace window narrowed to `expo run:*`** (`stepOpensPlatform`). A `start` step has no outstanding work that can kill it after the bundler answers, because the open is in `dev`'s process now; `run:*` still launches through AppleScript and keeps the grace.
 - **The Automation-refusal recovery** is now "run `dev --<platform> --detach` again": the build was recorded (F121), so the re-run starts the dev server and opens through `simctl` — the fifteen-minute walk that recovery used to cost is gone entirely.
 
 ## The stub tier and devices

@@ -7,7 +7,7 @@
 import { vol } from 'memfs';
 
 import type { BundlerReadyResult } from '../../runtime/waitReady';
-import { notReadyError, resolveDetachFailure } from '../detachHealth';
+import { needsOpenPlatformGrace, notReadyError, resolveDetachFailure } from '../detachHealth';
 import { buildDetachSpawn } from '../detachAsync';
 import { detachFollowUps, type DevDetachResultJson } from '../detachReport';
 import { detachedLogPath, openDetachedLogSync, readDetachedLogSync } from '../logFile';
@@ -124,6 +124,43 @@ describe(resolveDetachFailure, () => {
 
   it(`should refuse a bundler that stopped answering under a live child`, () => {
     expect(resolveDetachFailure({ ...healthy, statusAnswering: false })).toBe('not-answering');
+  });
+});
+
+// @ref llp/0021-honest-reports.rfc.md §The rules — F140. The verdict table above
+// is checked once, at the moment of return, and `expo start --ios` can die a quarter of a second
+// later. This decides which runs are re-checked for a while before the claim is printed.
+describe(needsOpenPlatformGrace, () => {
+  it(`re-checks a run whose dev-server step also opens the app`, () => {
+    expect(needsOpenPlatformGrace({ ready: true, opensPlatform: true })).toBe(true);
+  });
+
+  // The whole cost of this is paid by the runs it is for: a plan that opens nothing has no late
+  // rejection on its way, so it pays nothing.
+  it(`does not re-check a run that opens nothing`, () => {
+    expect(needsOpenPlatformGrace({ ready: true, opensPlatform: false })).toBe(false);
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md §The rules — the correction of 2026-09-03.
+  //
+  // This used to be `false`, on the reasoning that "a run that asked for no readiness claims
+  // nothing". It claims plenty: `dev --detach --ios` prints `Dev server <url> · detached` and a
+  // pid, and exits 0. Live, that pid was gone and nothing was listening on that URL within the
+  // second — `expo start --go --ios` had been refused Automation permission by macOS and taken the
+  // dev server with it [observed — macOS 25.5, no Automation grant, 2026-09-03: exit 0 beside a
+  // `curl` of the printed URL answering 000]. Adding `--wait-ready` caught it, which is what
+  // located the hole: the grace this decides was the fix for exactly that failure, and the one
+  // flag it was gated on was the flag that was missing.
+  //
+  // What the grace checks for such a run is narrowed rather than the same — see
+  // {@link resolveDetachFailure} and the `statusAnswering: null` it is given.
+  it(`re-checks a run that claimed no readiness but printed a dev server`, () => {
+    expect(needsOpenPlatformGrace({ ready: null, opensPlatform: true })).toBe(true);
+  });
+
+  // The failure has already been raised by then; a grace period on top of it would only delay it.
+  it(`does not re-check a run whose bundler never answered`, () => {
+    expect(needsOpenPlatformGrace({ ready: false, opensPlatform: true })).toBe(false);
   });
 });
 

@@ -185,7 +185,8 @@ function settleStepFailure(
   platform: PlanPlatform
 ): StepFailure | null {
   if (run.exitCode === 0) return null;
-  if (step.id === 'install' && appReachedDevice(`${run.stdout}\n${run.stderr}`)) {
+  // A build or install that ran without a bundler: the dev server step opens the app itself.
+  if (step.argv.includes('--no-bundler') && appReachedDevice(`${run.stdout}\n${run.stderr}`)) {
     Log.warn(
       `The ${step.argv[1]} install put the app on the device, then exited with ${run.exitCode} — most likely the launch, which the dev server's own open replaces. Continuing.`
     );
@@ -469,7 +470,8 @@ async function stopLaunchedAppAsync(
   acquired: AcquireResult | null
 ): Promise<void> {
   const platform = resolveBuildPlatform(step);
-  if (platform == null || acquired == null || acquired.device.backend === 'cloud') return;
+  if (platform == null || !step.argv.includes('--no-bundler')) return;
+  if (acquired == null || acquired.device.backend === 'cloud') return;
   const appId = readConfiguredAppId(projectRoot, platform);
   if (appId == null) return;
   const stopped = await stopAppOnDeviceAsync({

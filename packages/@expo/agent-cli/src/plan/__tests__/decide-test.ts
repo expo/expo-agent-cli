@@ -722,6 +722,8 @@ describe(decideStartPlan, () => {
       expect(plan.steps[0]!.timeClass).toBe('many-minutes');
     });
 
+    // @ref ../localBuild §localBuildSteps — an app without expo-dev-client cannot be moved to the
+    // dev server after launch, so one step builds and serves on the port `dev` gives it.
     it(`should build a bare project that has no expo-dev-client dependency`, () => {
       const plan = decideStartPlan(
         createProjectState({ nativeDirs: { ios: false, android: true } }),
@@ -731,10 +733,7 @@ describe(decideStartPlan, () => {
       );
 
       expect(plan.rule).toBe('bare-stale');
-      expect(argvOf(plan.steps)).toEqual([
-        ['expo', 'run:android', '--no-bundler'],
-        ['expo', 'start', '--dev-client'],
-      ]);
+      expect(argvOf(plan.steps)).toEqual([['expo', 'run:android']]);
     });
 
     it(`should build the requested platform when both native directories exist`, () => {

@@ -245,20 +245,26 @@ describe('@expo/agent-cli dev --detach', () => {
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-  // `bare-app` plans `expo run:ios --no-bundler`, then `expo start` (`plan-test.ts`). The stub build
-  // holds on a gate, which is what a compiler looks like from here. The run's lock says `building`,
-  // so the detach reports the run at once, with the port the dev server will take.
+  // `bare-app`, whose plan is the single step `expo run:ios` (`plan-test.ts`), and a stub that
+  // stays alive without ever serving, which is what a compiler looks like from here. The run's lock
+  // says `building`, so the detach reports the run at once, with the port the dev server will take.
   it('says the plan is building rather than that a dev server started', async () => {
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
     const port = await freePortAsync();
-    const gate = path.join(projectRoot, 'build-gate');
 
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--detach', '--ios', '--local', '--json', '--port', String(port)],
-        { env: { ...stubExpoEnv(projectRoot), STUB_EXPO_BUILD_GATE: gate } }
+        {
+          env: {
+            ...stubExpoEnv(projectRoot),
+            // Longer than the port watch, so the step is still running when the lock is published:
+            // a build holds the lock for minutes after it appears.
+            STUB_EXPO_DELAY_MS: '45000',
+          },
+        }
       );
 
       expect(result.exitCode).toBe(0);
@@ -269,7 +275,6 @@ describe('@expo/agent-cli dev --detach', () => {
       expect(report.ready).toBeNull();
       expect(report.url).toBe(`http://127.0.0.1:${port}`);
     } finally {
-      await fs.promises.writeFile(gate, '');
       await cleanUpDetachedAsync(projectRoot);
     }
   });
@@ -443,8 +448,7 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(report.portMoved).toEqual({ from: 8081, to: report.port });
         expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: report.port });
         expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
-          ['run:ios', '--no-bundler'],
-          ['start', '--dev-client', '--port', String(report.port)],
+          ['run:ios', '--port', String(report.port)],
         ]);
         // Said once, by the plan, and not again by the step it moved.
         const log = await fs.promises.readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8');
@@ -490,8 +494,8 @@ describe('@expo/agent-cli dev --detach', () => {
     });
 
     // The race the probe cannot close: the port it picked is taken while `expo run:ios` compiles,
-    // and `expo start` then stops on it.
-    it('retries the dev server whose port was taken while the app compiled', async () => {
+    // and the Expo CLI stops with "became busy" and exit 1.
+    it('retries a run:* step whose port became busy while it compiled', async () => {
       const projectRoot = await setupFixtureAsync('bare-app');
       await installStubFingerprintAsync(projectRoot);
 
@@ -515,9 +519,8 @@ describe('@expo/agent-cli dev --detach', () => {
         expect(report.portMoved).toEqual({ from: 8471, to: report.port });
         expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: report.port });
         expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
-          ['run:ios', '--no-bundler'],
-          ['start', '--dev-client', '--port', '8471'],
-          ['start', '--dev-client', '--port', String(report.port)],
+          ['run:ios', '--port', '8471'],
+          ['run:ios', '--port', String(report.port)],
         ]);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
@@ -559,13 +562,14 @@ describe('@expo/agent-cli dev --detach', () => {
           suggestedCommand: 'npx @expo/agent-cli dev:logs',
         });
 
-        // `expo start` takes the lock at its spawn on 8473, then stops on the busy port, and the
-        // retry publishes its own port on the same lock.
-        const retried = async () => {
-          const lock = await readDevLockAsync(projectRoot);
-          return lock?.phase === 'serving' && lock.port !== 8473;
-        };
-        expect(await waitForAsync(retried, 20_000, 250)).toBe(true);
+        const deadline = Date.now() + 20_000;
+        let lock = await readDevLockAsync(projectRoot);
+        while (lock?.phase !== 'serving' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          lock = await readDevLockAsync(projectRoot);
+        }
+        expect(lock).toMatchObject({ phase: 'serving' });
+        expect(lock!.port).not.toBe(8473);
       } finally {
         await cleanUpDetachedAsync(projectRoot);
       }
@@ -765,6 +769,100 @@ describe('@expo/agent-cli dev --detach', () => {
     } finally {
       await cleanUpDetachedAsync(projectRoot);
     }
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md §The rules — **F140**, the hole the
+  // section above left open and this wave closes.
+  //
+  // The acceptance walk ran `dev --detach --wait-ready --ios` and was told `Bundler ready`, exit 0,
+  // for a dev server that was already on its way out — three times in a row, and then honestly on a
+  // fourth identical run, because it is a race. Both halves of it are true at once: the bundler
+  // *did* answer, and `expo start --ios` was *about* to be refused permission to drive
+  // Simulator.app. The rejection is an un-awaited promise inside the same process, so it lands after
+  // the dev server is up and after every check the parent makes [measured 215–263ms later].
+  //
+  // The stub reproduces exactly that ordering without a simulator, an AppleScript or a race: it
+  // binds the port, answers `/status` — which is the readiness probe itself — and dies a fixed time
+  // after that answer.
+  //
+  // The step under test is `expo run:ios` now (`bare-app`'s one-step plan): a plain `expo start`
+  // cannot die of the Automation refusal any more, because `dev` keeps the platform flag away from
+  // it and opens the app itself (llp/0026). `run:*` still launches through AppleScript, so it is
+  // the step the grace window still exists for.
+  describe('a dev server that dies just after its bundler answered', () => {
+    /** Environment for a stub that comes up, answers `/status`, and then dies the way a launch does. */
+    function diesAfterReadyEnv(projectRoot: string, port: number): Record<string, string> {
+      return {
+        ...stubExpoEnv(projectRoot),
+        STUB_EXPO_DEV_SERVER_PORT: String(port),
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+        // Comfortably inside the grace window, and after the readiness claim rather than racing it:
+        // the answer that starts this clock is the claim.
+        STUB_EXPO_DIE_AFTER_STATUS_MS: '400',
+      };
+    }
+
+    it('refuses to report ready for a child that is about to be gone', async () => {
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--detach', '--wait-ready', '--ios', '--local', '--json'],
+          { env: diesAfterReadyEnv(projectRoot, 8393), reject: false }
+        );
+
+        // 7, not 0: the CLI worked, and the macOS Automation grant the stub's stderr names is a
+        // step only a person can complete. The child classified it and this parent relayed it.
+        expect(
+          result.exitCode,
+          `${result.all}\nDetached child log:\n${await fs.promises
+            .readFile(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8')
+            .catch(() => '(unavailable)')}`
+        ).toBe(7);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.needsHuman).toMatchObject({
+          scenario: 'macos-automation',
+          detectedBy: 'detached-child-log',
+        });
+        // The two words the finding is about, on neither stream.
+        expect(result.stdout).not.toContain('"ready": true');
+        expect(result.all).not.toContain('Bundler      ready');
+      } finally {
+        await cleanUpDetachedAsync(projectRoot);
+      }
+    });
+
+    // The other half, and the one that keeps the grace honest: a `--ios` run whose dev server stays
+    // up still reports ready and still exits 0. A check that failed both would only have moved the
+    // dishonesty to the other side.
+    it('still reports ready for a child that stays up', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--detach', '--wait-ready', '--ios', '--json'],
+          {
+            env: {
+              ...diesAfterReadyEnv(projectRoot, 8392),
+              STUB_EXPO_DIE_AFTER_STATUS_MS: '0',
+            },
+          }
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          port: 8392,
+          ready: true,
+          phase: 'serving',
+        });
+      } finally {
+        await cleanUpDetachedAsync(projectRoot);
+      }
+    });
   });
 
   it('rejects --wait-ready on its own, which would wait for nothing', async () => {

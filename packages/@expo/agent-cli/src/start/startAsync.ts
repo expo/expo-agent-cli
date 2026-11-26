@@ -58,13 +58,15 @@ export async function startAsync(projectRoot: string, options: StartOptions): Pr
     runDevServerAsync(projectRoot, ['start', ...options.expoArgs], {
       agentSkills: options.agentSkills,
       lock,
+      phase: 'serving',
     })
   );
   return run.exitCode;
 }
 
 /**
- * Run `expo start`, publish where its dev server listens, and sync skills a few seconds later.
+ * Run an `expo` command that starts a dev server (`start`, `run:ios`, `run:android`), publish
+ * where that dev server listens, and sync skills a few seconds later.
  *
  * The delay keeps the dependency scan away from the first bundle, and the timer is
  * cancelled when the dev server exits first, so a failed start syncs nothing.
@@ -85,6 +87,7 @@ export async function runDevServerAsync(
     onDevServer,
     easPlatform = null,
     lock: runLock,
+    phase,
     signal,
   }: {
     agentSkills: boolean;
@@ -96,6 +99,11 @@ export async function runDevServerAsync(
      * the release to the run (llp/0004 §Dev-server lock).
      */
     lock: RunLock;
+    /**
+     * What the lock says at the spawn: `building` for a step that compiles before it serves. The
+     * lock then says `serving` once /status answers for this project.
+     */
+    phase: 'building' | 'serving';
     /** Aborted before the spawn, no dev server starts and the call rejects with its reason. */
     signal?: AbortSignal;
     /**
@@ -135,17 +143,21 @@ export async function runDevServerAsync(
       onDevServer?.(server);
     }
   };
-  // @ref llp/0026-dev-owns-the-open.rfc.md — a step that opens the app opens it once this
-  // project's Metro answers `/status`. The wait reads the latest port each time, so a port Metro
-  // reports later counts. Plain `start` opens nothing, and sends no probe.
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a step that builds says
+  // `serving` once this project's Metro answers `/status`, and a step that opens the app opens it
+  // then. The wait reads the latest port each time, so a port Metro reports later counts. Plain
+  // `start` neither builds nor opens, and sends no probe.
+  const answers = phase === 'building' || onDevServer != null;
   let waiting = false;
   const waitForAnswer = (first: ResolvedDevServerPort) => {
     waiting = true;
-    const wanted = () => running && !opened;
+    // A step that does not build has nothing left to wait for once its open went on Metro's report.
+    const wanted = () => running && (phase === 'building' || !opened);
     void waitForOwnMetroAsync(() => serverAt(port ?? first).url, projectRoot, wanted).then(
       (answered) => {
-        // Metro that exited meanwhile has nothing to open the app on.
+        // Metro that exited meanwhile has nothing to answer for or to open the app on.
         if (!answered || !running) return;
+        runLock.apply({ type: 'status-answered' });
         open(serverAt(port ?? first));
       }
     );
@@ -158,6 +170,7 @@ export async function runDevServerAsync(
   const published = publishDevServerPortAsync(projectRoot, args, {
     since: startedAt,
     isRunning: () => running,
+    phase,
     easPlatform,
     lock: runLock,
     // With `lsof`, never a request: a request to Metro is not the record's to make. Only a sole
@@ -181,7 +194,9 @@ export async function runDevServerAsync(
     onResolved: (resolved) => {
       port = resolved;
       if (resolved.source === 'reported') open(serverAt(resolved));
-      if (onDevServer && !waiting && resolved.source !== 'default') waitForAnswer(resolved);
+      // A building step waits on any port: the answer must come from this project's Metro anyway.
+      const worthWaiting = resolved.source !== 'default' || phase === 'building';
+      if (answers && !waiting && worthWaiting) waitForAnswer(resolved);
     },
   });
 

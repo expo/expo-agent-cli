@@ -22,7 +22,15 @@ import { detachedLogPath, readDetachedLogSync } from './logFile';
 import type { DevOptions } from './resolveOptions';
 import { RUN_PHASE } from './runPhase';
 
-const VERDICT_POLL_MS = 100;
+/**
+ * Time to catch an app-open failure after the bundler starts answering. Expo CLI has no
+ * app-open success signal, so a later failure can still land after the deadline.
+ *
+ * @ref llp/0021-honest-reports.rfc.md §The rules — F140
+ */
+export const OPEN_PLATFORM_GRACE_MS = 1500;
+
+const OPEN_PLATFORM_POLL_MS = 100;
 
 export async function isOwnBundlerAnsweringAsync(
   projectRoot: string,
@@ -30,6 +38,89 @@ export async function isOwnBundlerAnsweringAsync(
 ): Promise<boolean> {
   const probe = await probeBundlerAsync(url, { projectRoot });
   return probe.answering && probe.projectRootMatched !== false;
+}
+
+/**
+ * The app open can fail after the dev server starts, even without `--wait-ready`.
+ * An explicit readiness failure needs no grace.
+ *
+ * @ref llp/0021-honest-reports.rfc.md §The rules
+ */
+export function needsOpenPlatformGrace({
+  ready,
+  opensPlatform,
+}: {
+  ready: boolean | null;
+  opensPlatform: boolean;
+}): boolean {
+  return ready !== false && opensPlatform;
+}
+
+type GraceState =
+  | { status: 'watching'; failure: null; verdict: DetachedChildVerdict | null }
+  | {
+      status: 'failed';
+      failure: Exclude<DetachFailureKind, 'needs-human'>;
+      verdict: DetachedChildVerdict | null;
+    }
+  | { status: 'handoff'; failure: 'needs-human'; verdict: DetachedChildVerdict };
+
+/** A failure stays failed; only the child's handoff can supersede the first failure. */
+function observeGrace(state: GraceState, check: DetachCheck): GraceState {
+  if (state.status === 'handoff') return state;
+  if (check.verdict?.scenario != null) {
+    return { status: 'handoff', failure: 'needs-human', verdict: check.verdict };
+  }
+  if (state.status === 'failed') return { ...state, verdict: check.verdict };
+  if (check.exited || check.statusAnswering === false) {
+    return {
+      status: 'failed',
+      failure: check.exited ? 'child-exited' : 'not-answering',
+      verdict: check.verdict,
+    };
+  }
+  return { status: 'watching', failure: null, verdict: check.verdict };
+}
+
+/**
+ * Keep the first failure, but keep polling for a needs-human verdict. The bundler can stop
+ * answering before its wrapper finishes writing the handoff.
+ */
+export async function watchOpenPlatformGraceAsync(
+  projectRoot: string,
+  url: string,
+  {
+    hasExited,
+    budgetMs,
+    watchStatus,
+  }: {
+    hasExited: () => boolean;
+    budgetMs: number;
+    /** Only probe status when the run already established readiness. */
+    watchStatus: boolean;
+  }
+): Promise<{ failure: DetachFailureKind | null; verdict: DetachedChildVerdict | null }> {
+  const deadline = Date.now() + budgetMs;
+  let state: GraceState = {
+    status: 'watching',
+    failure: null,
+    verdict: readChildVerdictSync(projectRoot),
+  };
+  while (Date.now() < deadline) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(OPEN_PLATFORM_POLL_MS, deadline - Date.now()))
+    );
+    const statusAnswering = watchStatus ? await isOwnBundlerAnsweringAsync(projectRoot, url) : null;
+    const verdict = readChildVerdictSync(projectRoot);
+    state = observeGrace(state, {
+      exited: hasExited(),
+      verdict,
+      statusAnswering,
+    });
+    if (state.status === 'handoff') return state;
+  }
+
+  return state;
 }
 
 const VERDICT_WAIT_MS = 2_000;
@@ -46,7 +137,7 @@ export async function waitForChildVerdictAsync(
   const deadline = Date.now() + VERDICT_WAIT_MS;
   // The code row is the last line `reportCmdError` writes, so a verdict with one is complete.
   while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, VERDICT_POLL_MS));
+    await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
     verdict = readChildVerdictSync(projectRoot, since) ?? verdict;
   }
   return verdict;

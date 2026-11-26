@@ -156,7 +156,7 @@ Four layers, in priority order:
 2. **Nobody can answer.** A captured child gets no stdin, and its stdout is a pipe, never a terminal.
    - An `eas` command that can prompt also gets `--non-interactive`, or `--json`, which implies it.
    - An `expo` command gets `CI=1` in its environment, because the Expo CLI rejects `--non-interactive`.
-   - The exception is the captured run that starts a dev server (`expo start`), because `CI` also turns off Metro's file watcher. That child inherits the caller's environment unchanged, not even `CI=0`. The pipe still tells it that nobody can answer.
+   - The exception is the captured run that starts a dev server (`expo start`, `expo run:*`), because `CI` also turns off Metro's file watcher. That child inherits the caller's environment unchanged, not even `CI=0`. The pipe still tells it that nobody can answer.
 3. **Classify the output.** Match the captured output against the registry. The patterns that matter most: eas-cli's `Either log in with … EXPO_TOKEN`, `@expo/cli`'s `is in non-interactive mode`, and the `in non-interactive mode` fragment that eas-cli's prompts share.
 4. **Generic prompt fallback.** Only for a captured child, and only when the caller opts in. If the child writes nothing for `AGENT_CLI_PROMPT_TIMEOUT_MS` (default 20 s), _and_ its last non-empty line looks like a prompt, the CLI kills the child. The line is quoted as untrusted text.
 
