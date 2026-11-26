@@ -11,12 +11,6 @@ import type { BundleCheckOutcome } from '../runtime/bundleCheck';
 import type { SmokeAppMismatchKind } from '../smoke/contract';
 import { capFollowUps, type FollowUp } from './types';
 
-/**
- * The manifest error types of a config plugin that does not resolve: `@expo/cli`'s `PluginError`
- * code, and the class name that a body without a code carries (llp/0010 §Upstream asks).
- */
-const MISSING_PLUGIN_TYPES = new Set(['PLUGIN_NOT_FOUND', 'PluginError']);
-
 export interface SmokeFollowUpInput {
   outcome: 'passed' | 'failed' | 'inconclusive';
   /** Whether a dev server answered at all. */
@@ -29,8 +23,8 @@ export interface SmokeFollowUpInput {
   bundleOutcome: BundleCheckOutcome | null;
   /** The file the bundler stopped on, when it named one. */
   bundleFile: string | null;
-  /** The error type the dev server reported for a broken bundle or manifest. */
-  bundleErrorType: string | null;
+  /** Whether the dev server could not read the app config because a plugin does not resolve. */
+  missingPlugin: boolean;
   /** Debugger targets attached, or null when the run never read them. */
   appsConnected: number | null;
   /** Whether the runtime answered an evaluation; null when it was never asked. */
@@ -256,7 +250,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   // A bundle that does not compile is the whole answer: nothing that reads the app can mean
   // anything until the file the bundler named parses.
   if (input.bundleOutcome === 'broken') {
-    const fix = MISSING_PLUGIN_TYPES.has(input.bundleErrorType ?? '')
+    const fix = input.missingPlugin
       ? {
           id: 'install',
           why: 'The dev server could not read the app config: a plugin it names does not resolve from node_modules. This installs what package.json declares; when package.json does not list the plugin, pass its package name.',

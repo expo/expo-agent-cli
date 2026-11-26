@@ -16,7 +16,7 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     foreignDevServer: false,
     bundleOutcome: 'ok',
     bundleFile: null,
-    bundleErrorType: null,
+    missingPlugin: false,
     appsConnected: 1,
     runtimeSupported: true,
     failing: 0,
@@ -99,15 +99,6 @@ describe(buildSmokeFollowUps, () => {
 
     expect(followups[0]!.command).toBe('npx @expo/agent-cli typecheck');
     expect(followups[0]!.why).toContain('src/app/notes.tsx');
-  });
-
-  it.each([
-    ['PLUGIN_NOT_FOUND', 'npx @expo/agent-cli install'],
-    ['INVALID_PLUGIN_IMPORT', 'npx @expo/agent-cli typecheck'],
-  ])(`answers a broken manifest of type %s with %s`, (bundleErrorType, first) => {
-    expect(commands({ bundleOutcome: 'broken', outcome: 'failed', bundleErrorType })[0]).toBe(
-      first
-    );
   });
 
   it(`answers no connected app with the command that opens one`, () => {

@@ -582,6 +582,30 @@ describe('the entry bundle gate', () => {
     }
   });
 
+  // The runtime commands share the check, so a manifest error refuses them as it refuses smoke.
+  it(`stops runtime:tree at exit 20 on a manifest the dev server cannot build`, async () => {
+    const devServer = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      bundle: 'manifest-error',
+      inspectorEvaluate: () => treeAnswer(),
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:tree', '--dev-server-url', devServer.url, '--json'],
+        { reject: false, env: stubExpoEnv(projectRoot) }
+      );
+
+      expect(result.exitCode).toBe(20);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        reason: 'bundle-broken',
+        bundle: { ok: false, error: { type: 'PluginError' } },
+      });
+    } finally {
+      await devServer.close();
+    }
+  });
+
   it(`stops runtime:tap before it calls the handler, and says what to run`, async () => {
     const devServer = await startStubDevServerAsync({
       targets: [EXPO_GO_TARGET],

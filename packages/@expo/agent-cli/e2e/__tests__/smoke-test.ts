@@ -554,34 +554,42 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    it('exits 20 for a manifest the dev server cannot build, and leads with install', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
-      await installStubXcrunAsync(projectRoot);
-      const stub = await startStubDevServerAsync({
-        projectRoot,
-        targets: [EXPO_GO_TARGET],
-        bundle: 'manifest-error',
-      });
-      const release = await holdLockForAsync(projectRoot, stub);
-
-      try {
-        const result = await executeAgentCliAsync(projectRoot, ['smoke', '--ios', '--json'], {
-          env: stubExpoEnv(projectRoot),
-          reject: false,
+    it.each(['ios', 'android'])(
+      'exits 20 for a manifest the dev server cannot build on %s, and leads with install',
+      async (platform) => {
+        const projectRoot = await setupFixtureAsync('go-app');
+        await installStubXcrunAsync(projectRoot);
+        const stub = await startStubDevServerAsync({
+          projectRoot,
+          targets: [EXPO_GO_TARGET],
+          bundle: 'manifest-error',
         });
+        const release = await holdLockForAsync(projectRoot, stub);
 
-        expect(result.exitCode).toBe(20);
-        const report = JSON.parse(result.stdout);
-        expect(report.bundle).toMatchObject({
-          ok: false,
-          error: { type: 'PluginError', message: STUB_MANIFEST_ERROR },
-        });
-        expect(report.followups[0].command).toBe('npx @expo/agent-cli install');
-      } finally {
-        release();
-        await stub.close();
+        try {
+          const result = await executeAgentCliAsync(
+            projectRoot,
+            ['smoke', `--${platform}`, '--json'],
+            {
+              env: stubExpoEnv(projectRoot),
+              reject: false,
+            }
+          );
+
+          expect(result.exitCode).toBe(20);
+          const report = JSON.parse(result.stdout);
+          expect(report.bundle).toMatchObject({
+            platform,
+            ok: false,
+            error: { type: 'PluginError', message: STUB_MANIFEST_ERROR },
+          });
+          expect(report.followups[0].command).toBe('npx @expo/agent-cli install');
+        } finally {
+          release();
+          await stub.close();
+        }
       }
-    });
+    );
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief. A dev server that proved it

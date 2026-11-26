@@ -3,7 +3,7 @@
 // are recorded from a live SDK 57 dev server on 2026-08-23 — including the ANSI codes Metro's
 // worker farm always emits, which is why stripping them is asserted rather than assumed.
 
-import { checkEntryBundleAsync } from '../bundleCheck';
+import { checkEntryBundleAsync, isMissingPluginError } from '../bundleCheck';
 
 const devServerUrl = 'http://127.0.0.1:8123';
 
@@ -213,6 +213,15 @@ describe(checkEntryBundleAsync, () => {
         message: 'PluginError: Failed to resolve plugin for module "expo-camera"',
       },
     });
+  });
+
+  // Only `@expo/cli`'s 500 carries its error body; a proxy's or middleware's `{error}` is not one.
+  it.each([404, 502])(`should answer unknown for a %s with an error body`, async (status) => {
+    mockFetch({ 'http://127.0.0.1:8123/': { status, json: { error: 'Bad Gateway' } } });
+
+    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
+
+    expect(result).toMatchObject({ outcome: 'unknown', error: null });
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief
@@ -605,5 +614,40 @@ describe(checkEntryBundleAsync, () => {
     const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
 
     expect(result.outcome).toBe('ok');
+  });
+});
+
+// Released `@expo/cli` sends no `code`, so the wording decides; the messages are
+// `@expo/config-plugins`' `plugin-resolver.ts`.
+describe(isMissingPluginError, () => {
+  const error = (type: string, message: string) => ({
+    type,
+    message,
+    filename: null,
+    lineNumber: null,
+    column: null,
+    snippet: null,
+  });
+
+  it.each([
+    [
+      'PluginError',
+      'PluginError: Failed to resolve plugin for module "expo-camera" relative to "/p".',
+      true,
+    ],
+    [
+      'PluginError',
+      'PluginError: Plugin "./plugin.js" must export a function from file: /p/plugin.js.',
+      false,
+    ],
+    ['PluginError', 'PluginError: /p/plugin.js: Unexpected token (1:4)', false],
+    ['PLUGIN_NOT_FOUND', 'PluginError: Failed to resolve plugin for module "expo-camera"', true],
+    [
+      'INVALID_PLUGIN_TYPE',
+      'PluginError: Failed to resolve plugin for module "expo-camera"',
+      false,
+    ],
+  ])(`should read %s "%s" as %s`, (type, message, expected) => {
+    expect(isMissingPluginError(error(type, message))).toBe(expected);
   });
 });
