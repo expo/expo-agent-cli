@@ -6,7 +6,7 @@
 //
 // The probe used to be its own command, `@expo/agent-cli context`. It is now the `probe` key of
 // `@expo/agent-cli status --json`, which is where these tests read it from — the fixture matrix is what
-// this file is for, and the rest of the status report is covered in `status-test.ts`.
+// this file is for, and the rest of the status report is covered in `status-test.ts` and the `status-*-test.ts` files beside it.
 import { executeAgentCliAsync, installStubFingerprintAsync, setupFixtureAsync } from '../utils';
 
 /** The hash the stub `@expo/fingerprint` bin of `dev-client-fresh-app` prints. */
