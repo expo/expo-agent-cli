@@ -214,6 +214,7 @@ describe(checkEntryBundleAsync, () => {
   it.each([
     { error: 'Upstream unavailable', code: 'ECONNRESET' },
     { error: 'Error: upstream unavailable' },
+    { error: 'AssertionError [ERR_ASSERTION]: upstream unavailable' },
     { error: 'PluginError:' },
     { error: 'PluginError: ' + 'x'.repeat(65536) },
   ])('leaves an unrecognized or oversized diagnostic unknown', async (json) => {
@@ -253,13 +254,20 @@ describe(checkEntryBundleAsync, () => {
       },
       'TypeError',
     ],
+    [
+      {
+        error:
+          'AssertionError [ERR_ASSERTION]: Wrong number of arguments provided for static config plugin, expected either 1 or 2, got 3',
+      },
+      'AssertionError',
+    ],
     [{ error: 'EmptyJsonFileError: Cannot parse an empty JSON string' }, 'EmptyJsonFileError'],
     [{ error: 'Could not export manifest assets', code: 'MANIFEST_ASSET' }, 'MANIFEST_ASSET'],
   ] as const)('recognizes Expo manifest middleware errors', async (json, type) => {
     mockFetch({ [devServerUrl + '/']: { status: 500, json } });
     expect(
-      (await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })).error
-    ).toMatchObject({ source: 'manifest', type });
+      await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })
+    ).toMatchObject({ outcome: 'broken', error: { source: 'manifest', type } });
   });
 
   // A proxy can return the same JSON shape, including on HTTP 500.
@@ -598,22 +606,25 @@ describe(checkEntryBundleAsync, () => {
     });
   });
 
-  it('times out when the manifest sends 500 headers but never finishes the body', async () => {
-    globalThis.fetch = async (_url, init) =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason));
-          },
-        }),
-        { status: 500 }
-      );
-    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 50 });
-    expect(result).toMatchObject({
-      outcome: 'timeout',
-      reason: 'timed out after 50ms while reading the native manifest',
-    });
-  });
+  it.each([200, 500])(
+    'times out when the native manifest sends HTTP %s headers but stalls',
+    async (status) => {
+      globalThis.fetch = async (_url, init) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason));
+            },
+          }),
+          { status }
+        );
+      const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 50 });
+      expect(result).toMatchObject({
+        outcome: 'timeout',
+        reason: 'timed out after 50ms while reading the native manifest',
+      });
+    }
+  );
 
   // A first build of a cold dev server compiles the whole app, so the budget has to be able to
   // expire — and expiring is "look again", not "the project is broken".

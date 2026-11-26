@@ -503,6 +503,7 @@ async function readManifestBundleUrlAsync(
   try {
     payload = await response.json();
   } catch {
+    signal.throwIfAborted();
     // The exception is a `SyntaxError` about byte 0 of the body, which says nothing a reader can
     // act on. What they need is what the dev server sent instead.
     const contentType = response.headers.get('content-type')?.split(';')[0]?.trim();

@@ -4,6 +4,7 @@ import * as Log from '../../log';
 import { type NativePlatform, type PlanPlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
+import { wrapUntrustedAppOutput } from '../untrusted';
 import { describeManifestFailure } from '../manifestFailure';
 import { describeSkippedApps } from '../targetSelection';
 import { hasTargetOutcomes, keepsPageId, settledAttempt, summarizeTargetOutcomes } from './attempt';
@@ -104,7 +105,7 @@ export function printHumanReport(report: ReloadResultJson, options: ReloadOption
           : chalk.red('no')
       }${
         report.bundlesAfterReload.line
-          ? chalk`{dim  · ${report.bundlesAfterReload.line}}`
+          ? `\n${wrapUntrustedAppOutput(report.bundlesAfterReload.line)}`
           : report.bundlesAfterReload.reason
             ? chalk`{dim  · ${report.bundlesAfterReload.reason}}`
             : ''
@@ -252,9 +253,12 @@ function explainBrokenBundle(error: ReloadResultJson['bundle']['error']): string
     .join(':');
   return [
     chalk.red(`This project's entry bundle does not compile, so the app was not reloaded.`),
-    `Why: a reload makes the app fetch the served bundle again, and that bundle is the one the bundler stopped on${where ? ` at ${where}` : ''} — ${error?.message ?? 'the bundler reported an error'}. Reloading would have replaced the screen the app is on with the same failure, and reported success for it.`,
-    `How: fix ${where || 'the file the bundler named'} and run this command again; the dev server rebuilds on save, so no restart is needed. Pass --no-bundle-check to reload without asking, which is only useful when you mean to reload onto a bundle you know is broken.`,
-    ...(error?.snippet ? [error.snippet] : []),
+    wrapUntrustedAppOutput(
+      [where, error?.message, error?.snippet].filter(Boolean).join('\n') ||
+        'No diagnostic supplied.'
+    ),
+    'Fix the reported build error and run this command again. The dev server rebuilds on save.',
+    'Pass --no-bundle-check to reload the currently served bundle anyway.',
   ].join('\n');
 }
 

@@ -20,6 +20,14 @@ const MANIFEST_CODES = new Set([
   'EJSONEMPTY',
 ]);
 
+const MANIFEST_ERROR_CLASSES = new Set([
+  'PluginError',
+  'ConfigError',
+  'JsonFileError',
+  'EmptyJsonFileError',
+  'CommandError',
+]);
+
 export async function readManifestFailureAsync(
   response: Response
 ): Promise<BundleCheckError | null> {
@@ -65,18 +73,25 @@ function parseManifestFailure(text: string): BundleCheckError | null {
   if (!detail) return null;
 
   const code = 'code' in payload && typeof payload.code === 'string' ? payload.code.trim() : '';
-  const expoClass =
-    prefix &&
-    (['PluginError', 'ConfigError', 'JsonFileError', 'EmptyJsonFileError', 'CommandError'].includes(
-      prefix[1]!
-    ) ||
-      detail.startsWith('Error reading Expo config at '));
-  if (!MANIFEST_CODES.has(code) && !expoClass) return null;
+  const errorClass = prefix?.[1] ?? '';
+  const configReadFailure = errorClass !== '' && detail.startsWith('Error reading Expo config at ');
+  // @expo/config-plugins normalizeStaticPlugin uses a Node assertion for this config error.
+  const invalidPluginEntry =
+    errorClass === 'AssertionError' &&
+    detail.startsWith('Wrong number of arguments provided for static config plugin,');
+  if (
+    !MANIFEST_CODES.has(code) &&
+    !MANIFEST_ERROR_CLASSES.has(errorClass) &&
+    !configReadFailure &&
+    !invalidPluginEntry
+  ) {
+    return null;
+  }
 
   const [message, ...lines] = diagnostic.split('\n');
   return {
     source: 'manifest',
-    type: code || prefix?.[1] || null,
+    type: code || errorClass,
     message: message!.trim(),
     snippet: lines.join('\n').trim() || null,
     filename: null,
