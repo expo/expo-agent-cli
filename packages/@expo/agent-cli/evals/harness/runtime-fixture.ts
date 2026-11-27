@@ -3,7 +3,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { holdDevLockAsync, startStubDevServerAsync, STUB_TRANSFORM_ERROR } from '../../e2e/utils';
+import { holdDevLockAsync } from '../../e2e/utils';
+import { startStubDevServerAsync, STUB_TRANSFORM_ERROR } from '../../e2e/stubDevServer';
 import { detachedLogPath } from '../../src/dev/logFile';
 import { readDevServerLockAsync } from '../../src/devLock';
 

@@ -6,12 +6,8 @@ import path from 'node:path';
 
 import { bindOtherWorktreeAsync, runtimeTarget } from '../runtimeTargetFixtures';
 import { writeCloudBindingAsync } from '../stubEas';
-import {
-  executeAgentCliAsync,
-  expoHomeOf,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-} from '../utils';
+import { executeAgentCliAsync, expoHomeOf, setupFixtureAsync } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import { bindingFixture, BOOTED_SIMULATOR, installStubXcrunAsync } from './installedAppStubs';
 
 const CLONE = { udid: 'SIM-CLONE', name: 'agent-cli c4ed0a60', state: 'Booted' } as const;

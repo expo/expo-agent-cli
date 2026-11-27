@@ -5,12 +5,8 @@ import path from 'node:path';
 
 import { runtimeTarget } from '../runtimeTargetFixtures';
 import { cloudBindingFile, writeCloudBindingAsync } from '../stubEas';
-import {
-  executeAgentCliAsync,
-  expoHomeOf,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-} from '../utils';
+import { executeAgentCliAsync, expoHomeOf, setupFixtureAsync } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import {
   bindingFixture,
   BOOTED_SIMULATOR,

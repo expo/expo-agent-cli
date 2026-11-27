@@ -1,11 +1,7 @@
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes — a device tool that refused is a tool error,
 // so `--json` prints the error envelope with the device's answer in `data`, never a report.
-import {
-  executeAgentCliAsync,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-  stubExpoEnv,
-} from '../utils';
+import { executeAgentCliAsync, setupFixtureAsync, stubExpoEnv } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
 const EXPO_GO_TARGET = {

@@ -13,13 +13,8 @@ import {
   writeCloudBindingAsync,
   writeCloudSessionFileAsync,
 } from '../stubEas';
-import {
-  executeAgentCliAsync,
-  expoHomeOf,
-  holdDevLockAsync,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-} from '../utils';
+import { executeAgentCliAsync, expoHomeOf, holdDevLockAsync, setupFixtureAsync } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import {
   bindingFixture,
   BOOTED_SIMULATOR,

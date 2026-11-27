@@ -26,9 +26,9 @@ import {
   expoHomeOf,
   holdDevLockAsync,
   setupFixtureAsync,
-  startStubDevServerAsync,
   type ExecuteResult,
 } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import { makeTarget } from '../../src/runtime/__tests__/targetSelectionFixtures';
 import { BOOTED_SIMULATOR, bindingFixture, installStubXcrunAsync } from './installedAppStubs';
 

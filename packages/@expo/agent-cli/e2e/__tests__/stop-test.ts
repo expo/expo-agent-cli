@@ -19,11 +19,11 @@ import {
   readRunRecord,
   setupFixtureAsync,
   spawnAgentCli,
-  startStubDevServerAsync,
   stubExpoEnv,
   waitForAsync,
   waitForDevLockAsync,
 } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
 const EXPO_GO_TARGET = {

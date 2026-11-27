@@ -15,10 +15,9 @@ import {
   holdLockForAsync,
   installStubBinAsync,
   setupFixtureAsync,
-  NO_ANSWER,
-  startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
+import { NO_ANSWER, startStubDevServerAsync } from '../stubDevServer';
 import { appRuntime, runtimeTarget } from '../runtimeTargetFixtures';
 import {
   appStartedMarkerPath,

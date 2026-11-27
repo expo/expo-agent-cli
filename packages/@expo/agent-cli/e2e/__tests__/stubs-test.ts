@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { readStubEasInvocations, STUB_EAS_SCRIPT } from '../stubEas';
-import { getTemporaryPath, installStubBinAsync, startStubDevServerAsync } from '../utils';
+import { getTemporaryPath, installStubBinAsync } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 
 /** Run one of the installed shims the way a command under test spawns a resolved bin. */
 async function runBinAsync(
