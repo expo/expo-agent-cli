@@ -1110,7 +1110,15 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       expect(invocations.map((args) => args[0])).not.toContain('build');
       const start = invocations.find((args) => args[0] === 'simulator')!;
       expect(start).toContain('--expo-go');
-      expect(start[start.indexOf('--open-url') + 1]).toBe(`exp://${TUNNEL_HOST}`);
+      const openUrl = new URL(start[start.indexOf('--open-url') + 1] ?? '');
+      expect(openUrl.protocol).toBe('exp:');
+      expect(openUrl.host).toBe(TUNNEL_HOST);
+      expect(openUrl.pathname).toBe('');
+      expect(Object.fromEntries(openUrl.searchParams)).toEqual({
+        __expo_disable_onboarding: '1',
+        __expo_disable_fab: '1',
+        __expo_disable_auto_launch: '1',
+      });
       expect(expoInvocationArgs(projectRoot)).toContainEqual([
         'start',
         '--go',
