@@ -31,6 +31,11 @@ export function smokeResultToJson(
   followups: FollowUp[]
 ): SmokeResultJson {
   const failing = run.errors.filter(isFailingRecord).length;
+  const untrusted = ['errors.records'];
+  const failedBundlePhase = run.phases.findIndex(isFailedBundlePhase);
+  if (failedBundlePhase !== -1) {
+    untrusted.push('bundle.error', `phases[${failedBundlePhase}].reason`);
+  }
   return {
     ok: run.outcome === 'passed',
     outcome: run.outcome,
@@ -71,11 +76,7 @@ export function smokeResultToJson(
     },
     screenshot: run.screenshot,
     durationMs: run.durationMs,
-    // @ref llp/0008-guardrails.rfc.md — every string in here came out of the app.
-    untrusted:
-      run.bundle?.error?.source === 'manifest'
-        ? ['errors.records', 'bundle.error', 'phases']
-        : ['errors.records'],
+    untrusted,
     followups,
   };
 }
@@ -93,7 +94,7 @@ export function formatSmokeResult(run: SmokeRun, options: SmokeOptions): string 
       'dev server',
       `${run.devServerUrl}${SEPARATOR}${chalk.dim(`via ${run.discovery?.source ?? 'default'}${run.started ? ', started by this run' : ''}`)}`
     ),
-    ...run.phases.map((phase) => row('', phaseLine(phase, displayPhaseReason(phase, run)))),
+    ...run.phases.map((phase) => row('', phaseLine(phase, displayPhaseReason(phase)))),
   ];
 
   if (run.screenshot.ok) {
@@ -228,8 +229,12 @@ function outcomeValue(run: SmokeRun): string {
   }
 }
 
-export function displayPhaseReason(phase: SmokePhase, run: SmokeRun): string | null {
-  return phase.id === 'bundle' && run.bundle?.error?.source === 'manifest' && phase.reason
+function isFailedBundlePhase(phase: SmokePhase): boolean {
+  return phase.id === 'bundle' && phase.status === 'failed';
+}
+
+export function displayPhaseReason(phase: SmokePhase): string | null {
+  return isFailedBundlePhase(phase) && phase.reason
     ? '\n' + wrapUntrustedAppOutput(phase.reason)
     : phase.reason;
 }

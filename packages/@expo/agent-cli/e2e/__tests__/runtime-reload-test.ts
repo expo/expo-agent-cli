@@ -172,7 +172,9 @@ describe('@expo/agent-cli runtime:reload', () => {
         env: stubExpoEnv(projectRoot),
       });
 
-      expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
+      const report = JSON.parse(result.stdout);
+      expect(report.untrusted).toEqual(['bundle.error', 'bundlesAfterReload.line']);
+      expect(Object.keys(report).sort()).toEqual([
         'appsConnected',
         'appsReconnected',
         // F95: a zero on the count above is three different facts, and this is which one.
@@ -197,6 +199,7 @@ describe('@expo/agent-cli runtime:reload', () => {
         'routeCheck',
         'scope',
         'skippedApps',
+        'untrusted',
         'url',
         'verifiedBy',
         'waitedMs',

@@ -139,7 +139,7 @@ function explainOutcome(run: SmokeRun): string {
       ? `The smoke gate failed at "${culprit?.id ?? 'an unknown phase'}".`
       : `The smoke gate could not decide, at "${culprit?.id ?? 'an unknown phase'}".`;
   const why =
-    (culprit && displayPhaseReason(culprit, run)) ??
+    (culprit && displayPhaseReason(culprit)) ??
     'no phase reported a reason, which is a bug in this command.';
   const how =
     run.outcome === 'failed'
