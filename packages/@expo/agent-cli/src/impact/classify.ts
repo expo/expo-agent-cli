@@ -4,6 +4,7 @@
 // the same whether it came from the local CLI or from EAS.
 
 import {
+  diffItemMovesHash,
   diffItemSource,
   type FingerprintDiffItem,
   type FingerprintSource,
@@ -269,7 +270,7 @@ export interface DiffClassification {
  * splits "Fast Refresh picks it up" from "restart Metro".
  */
 export function classifyFingerprintDiff(items: FingerprintDiffItem[]): DiffClassification {
-  const changedSources = items.map(classifyDiffItem);
+  const changedSources = items.filter(diffItemMovesHash).map(classifyDiffItem);
 
   let impactClass: ImpactClass = IMPACT_CLASS_ORDER[0]!;
   for (const source of changedSources) {

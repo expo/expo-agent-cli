@@ -2,7 +2,7 @@
 // Naming what moved between two fingerprints: the same identity rule `status` diffs with, a readable
 // name per source, and the project/dependency split that decides which names a message may use.
 
-import { diffItemSource, type FingerprintSource } from './fingerprint';
+import { diffItemMovesHash, diffItemSource, type FingerprintSource } from './fingerprint';
 import { diffFingerprintSourcesLocally } from './localDiff';
 
 export interface SourceChange {
@@ -18,10 +18,12 @@ export function diffSources(
   before: FingerprintSource[],
   after: FingerprintSource[]
 ): SourceChange[] {
-  return diffFingerprintSourcesLocally(before, after).map((item) => ({
-    ...describeSource(diffItemSource(item)),
-    change: item.op,
-  }));
+  return diffFingerprintSourcesLocally(before, after)
+    .filter(diffItemMovesHash)
+    .map((item) => ({
+      ...describeSource(diffItemSource(item)),
+      change: item.op,
+    }));
 }
 
 /** The project sources of `changes`, as a phrase. Empty when only dependencies moved. */

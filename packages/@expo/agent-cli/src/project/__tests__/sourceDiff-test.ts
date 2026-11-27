@@ -15,6 +15,13 @@ describe(diffSources, () => {
       )
     ).toEqual([]);
   });
+
+  // The gitignored ios/ of a CNG project has no hash, so the fingerprint hash leaves it out.
+  it('names no source whose hash is null', () => {
+    const cngIosDir = { type: 'dir', filePath: 'ios', reasons: ['bareNativeDir'], hash: null };
+    expect(diffSources([], [cngIosDir])).toEqual([]);
+    expect(diffSources([cngIosDir], [])).toEqual([]);
+  });
 });
 
 describe(describeSource, () => {
