@@ -12,6 +12,10 @@ const posix = { platform: 'darwin' as NodeJS.Platform };
 const win32 = { platform: 'win32' as NodeJS.Platform };
 
 describe(lockAddressFor, () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it(`puts a socket file in the project's .expo on posix`, () => {
     const projectRoot = path.resolve(path.sep, 'a', 'project');
 
@@ -59,18 +63,41 @@ describe(lockAddressFor, () => {
     // A unix socket path is capped at ~104 bytes. An in-project path over the cap cannot be
     // bound at all, so the address is derived the way a pipe name is instead.
     const deep = path.resolve(path.sep, ...Array.from({ length: 20 }, (_, index) => `dir${index}`));
+    // Pinned short, so the assertion does not depend on how long the host's tmpdir is.
+    const shortTmp = path.resolve(path.sep, 'short-tmp');
+    vi.spyOn(os, 'tmpdir').mockReturnValue(shortTmp);
     const { kind, address } = lockAddressFor(deep, posix);
 
     expect(kind).toBe('unix');
     // Normalized: on a Windows host the forced-posix branch still joins with host separators,
-    // so the mocked '/tmp' comes back as '\\tmp'. Same directory either way.
-    expect(path.normalize(path.dirname(address))).toBe(path.normalize(os.tmpdir()));
+    // so '/short-tmp' comes back as '\\short-tmp'. Same directory either way.
+    expect(path.normalize(path.dirname(address))).toBe(path.normalize(shortTmp));
     expect(path.basename(address)).toMatch(
       new RegExp(`^${DEV_LOCK_PIPE_PREFIX}[0-9a-f]{16}\\.sock$`)
     );
     // Still one address per project, and still the same one every time.
     expect(lockAddressFor(deep, posix).address).toBe(address);
     expect(lockAddressFor(path.join(deep, 'other'), posix).address).not.toBe(address);
+  });
+
+  it(`skips a temporary directory that is itself too deep for the kernel's path limit`, () => {
+    // A long TMPDIR (a sandboxed or per-run temporary directory) makes the fallback just as
+    // unbindable as the in-project path: `listen` fails with EINVAL. /tmp always fits.
+    const deep = path.resolve(path.sep, ...Array.from({ length: 20 }, (_, index) => `dir${index}`));
+    const longTmp = path.resolve(
+      path.sep,
+      ...Array.from({ length: 12 }, (_, index) => `tmp-segment-${index}`)
+    );
+    vi.spyOn(os, 'tmpdir').mockReturnValue(longTmp);
+    const { kind, address } = lockAddressFor(deep, posix);
+
+    expect(kind).toBe('unix');
+    expect(address.length).toBeLessThanOrEqual(100);
+    expect(path.normalize(path.dirname(address))).toBe(path.normalize('/tmp'));
+    expect(path.basename(address)).toMatch(
+      new RegExp(`^${DEV_LOCK_PIPE_PREFIX}[0-9a-f]{16}\\.sock$`)
+    );
+    expect(lockAddressFor(deep, posix).address).toBe(address);
   });
 
   it(`keeps the socket in the project when the path fits`, () => {
