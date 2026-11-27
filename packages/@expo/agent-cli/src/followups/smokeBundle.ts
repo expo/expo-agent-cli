@@ -16,12 +16,11 @@ export function brokenBundleFollowUps(
       },
     ];
   }
-  const bundleFile = error?.filename;
   return [
     {
       id: 'typecheck',
       command: `${PROGRAM_PREFIX} typecheck`,
-      why: `The entry bundle does not compile${bundleFile ? ` (${bundleFile})` : ''}, and the compiler reports every error in the project rather than only the one the bundler stopped on.`,
+      why: 'The entry bundle failed to compile. Typecheck the project for additional errors.',
     },
     {
       id: 'smoke-again',

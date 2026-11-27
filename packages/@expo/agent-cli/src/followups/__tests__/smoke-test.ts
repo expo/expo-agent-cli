@@ -91,7 +91,7 @@ describe(buildSmokeFollowUps, () => {
 
   // A bundle that does not compile is the whole answer, and the compiler sees more of it than the
   // bundler does — the bundler stops at the first file that will not transform.
-  it(`answers a broken bundle with the compiler, and names the file`, () => {
+  it(`suggests typecheck for a broken bundle without repeating the diagnostic filename`, () => {
     const followups = buildSmokeFollowUps(
       input({
         bundle: {
@@ -110,7 +110,9 @@ describe(buildSmokeFollowUps, () => {
     );
 
     expect(followups[0]!.command).toBe('npx @expo/agent-cli typecheck');
-    expect(followups[0]!.why).toContain('src/app/notes.tsx');
+    for (const followup of followups) {
+      expect(followup.why).not.toContain('src/app/notes.tsx');
+    }
   });
 
   it(`answers no connected app with the command that opens one`, () => {
