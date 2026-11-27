@@ -89,7 +89,7 @@ export interface BuildConnectUrlsParams {
    * [decided, 2026-08-26].
    */
   certain: boolean;
-  /** Suppress development-build onboarding, the Tools button and automatic menu opening. */
+  /** Suppress the dev menu's onboarding, the Tools button and automatic menu opening. */
   automation?: boolean;
 }
 
@@ -114,7 +114,7 @@ export function buildConnectUrls({
   const expoGo: ConnectUrl = {
     target: 'expo-go',
     label: 'Expo Go',
-    url: expoGoConnectUrl(host),
+    url: automationConnectUrl(expoGoConnectUrl(host), automation ?? false),
   };
   // A project whose scheme could not be read has no development-build URL to offer, and a line with
   // a hole in it is not one either (llp/0005 §Verifying the route, the same rule as `--scheme`).

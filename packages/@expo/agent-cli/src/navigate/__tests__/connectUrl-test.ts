@@ -64,19 +64,24 @@ describe(devClientConnectUrl, () => {
 describe(buildConnectUrls, () => {
   const lan = { host: '192.168.1.5:8081', hostType: 'lan' as const, scheme: 'myapp' };
 
-  it('applies automation options to the development-build connect URL', () => {
-    const urls = buildConnectUrls({
-      ...lan,
-      isExpoGo: false,
-      certain: true,
-      automation: true,
+  // An EAS Simulator session opens Expo Go from this URL, where no device-side write can mark the
+  // dev menu's onboarding as seen.
+  it.each([
+    ['Expo Go', true],
+    ['development build', false],
+  ])('hides the dev menu in the %s connect URL', (label, isExpoGo) => {
+    const [entry] = buildConnectUrls({ ...lan, isExpoGo, certain: true, automation: true });
+
+    expect(entry!.label).toBe(label);
+    expect(Object.fromEntries(new URL(entry!.url).searchParams)).toMatchObject({
+      __expo_disable_onboarding: '1',
+      __expo_disable_fab: '1',
+      __expo_disable_auto_launch: '1',
     });
-    expect(urls).toHaveLength(1);
-    expect(new URL(urls[0]!.url).searchParams.get('__expo_disable_fab')).toBe('1');
   });
 
   it(`names Expo Go alone when Expo Go is what runs this project`, () => {
-    expect(buildConnectUrls({ ...lan, isExpoGo: true, certain: true, automation: true })).toEqual([
+    expect(buildConnectUrls({ ...lan, isExpoGo: true, certain: true })).toEqual([
       {
         target: 'expo-go',
         label: 'Expo Go',
@@ -153,6 +158,6 @@ describe(expoGoProjectOpenOf, () => {
     ['explicit scheme', 'local-ios', { ...options, scheme: 'example' }, resolved],
     ['full URL', 'local-ios', options, { ...resolved, route: 'exp://localhost:8081/--/explore' }],
   ] as const)('leaves %s on the direct dispatch path', (_name, backend, openOptions, route) => {
-    expect(expoGoProjectOpenOf(backend, openOptions, route, true)).toBeNull();
+    expect(expoGoProjectOpenOf(backend, openOptions, route)).toBeNull();
   });
 });

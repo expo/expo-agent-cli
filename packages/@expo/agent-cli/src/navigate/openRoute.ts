@@ -33,7 +33,6 @@ import {
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
 import { scopedAppReaderAsync, type LoadedAppWaiter } from '../runtime/scopedAppReader';
 import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
-import { automationConnectUrl } from './connectUrl';
 import { isFullUrlRoute, openUrlOnDeviceAsync } from './deepLink';
 import {
   resolveDeviceAsync,
@@ -261,8 +260,7 @@ export interface AlertCheck {
 export function expoGoProjectOpenOf(
   backend: DeviceBackend,
   { expoGoProjectOpen, scheme }: Pick<OpenRouteOptions, 'expoGoProjectOpen' | 'scheme'>,
-  resolved: Pick<ResolvedRoute, 'isExpoGo' | 'route' | 'connect'>,
-  automation: boolean
+  resolved: Pick<ResolvedRoute, 'isExpoGo' | 'route' | 'connect'>
 ) {
   if (
     !expoGoProjectOpen ||
@@ -274,7 +272,7 @@ export function expoGoProjectOpenOf(
     return null;
   }
   const project = resolved.connect.find((entry) => entry.target === 'expo-go');
-  return project ? { url: automationConnectUrl(project.url, automation), expoGoProjectOpen } : null;
+  return project ? { url: project.url, expoGoProjectOpen } : null;
 }
 
 /**
@@ -349,7 +347,7 @@ export async function openRouteAsync(
     budgetMs,
   });
 
-  const projectOpen = expoGoProjectOpenOf(device.backend, options, resolved, facts.automation);
+  const projectOpen = expoGoProjectOpenOf(device.backend, options, resolved);
   const openedUrl = projectOpen?.url ?? resolved.url;
   const result = await openUrlOnBackendAsync(
     device,
