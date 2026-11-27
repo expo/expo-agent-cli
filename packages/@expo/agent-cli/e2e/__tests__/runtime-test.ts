@@ -7,14 +7,8 @@
 // llp/0002 §Tier 0 doubles the dev server, not the app. Its stub inspector answers `Runtime.evaluate`
 // with a canned value or a thrown error, so this file proves the exit code of each answer, not
 // what the app computes.
-import {
-  executeAgentCliAsync,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-  holdLockForAsync,
-  InspectorThrows,
-  stubExpoEnv,
-} from '../utils';
+import { executeAgentCliAsync, setupFixtureAsync, holdLockForAsync, stubExpoEnv } from '../utils';
+import { startStubDevServerAsync, InspectorThrows } from '../stubDevServer';
 
 /**
  * A debugger target the default selector will consider.

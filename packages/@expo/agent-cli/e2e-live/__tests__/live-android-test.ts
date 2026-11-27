@@ -9,7 +9,7 @@
 //
 // Three things it pins that no other tier can:
 //
-//  1. **The refusal, against the real thing.** `e2e/utils.ts`'s `no-debugger` inspector socket is a
+//  1. **The refusal, against the real thing.** `e2e/stubDevServer.ts`'s `no-debugger` inspector socket is a
 //     double for this runtime, and a good one — but it is a double written from a measurement. Here
 //     the `-32601` comes from Hermes, and the exit codes come out of the published bundle.
 //  2. **The reload rung that works without CDP.** `runtime:reload`'s first rung is a `/message`
@@ -403,7 +403,7 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
 
   // --- the wall: five commands that cannot answer, and refuse -------------------------------------
 
-  // @ref llp/0005 §Android — and `e2e/utils.ts`'s `no-debugger` socket, which
+  // @ref llp/0005 §Android — and `e2e/stubDevServer.ts`'s `no-debugger` socket, which
   // is the double for exactly this. The stub tier pins the *shape*; these rows pin that Hermes really
   // answers this way, in the published bundle, on this SDK.
   //

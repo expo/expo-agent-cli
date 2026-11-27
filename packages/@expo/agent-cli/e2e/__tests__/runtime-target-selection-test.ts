@@ -4,12 +4,8 @@ import fs from 'node:fs';
 
 import { bindOtherWorktreeAsync, runtimeTarget } from '../runtimeTargetFixtures';
 import { installStubEasAsync, writeCloudBindingAsync } from '../stubEas';
-import {
-  executeAgentCliAsync,
-  expoHomeOf,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-} from '../utils';
+import { executeAgentCliAsync, expoHomeOf, setupFixtureAsync } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import {
   bindingFixture,
   BOOTED_SIMULATOR,

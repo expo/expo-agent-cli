@@ -11,12 +11,8 @@
 // spike-view-tree/` recorded. What the expression *computes* is not under test here — it has its
 // own suite, which runs it against fibers.
 
-import {
-  executeAgentCliAsync,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-  stubExpoEnv,
-} from '../utils';
+import { executeAgentCliAsync, setupFixtureAsync, stubExpoEnv } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 
 const EXPO_GO_TARGET = {
   id: '1',

@@ -3,13 +3,8 @@
 // JavaScript bundle. `smoke` is never `passed` for that app. The `runtime` evaluate does not read
 // the platform, so the two long rows run on iOS only.
 import { appRuntime, expoGoRuntimeTarget } from '../runtimeTargetFixtures';
-import {
-  executeAgentCliAsync,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-  stubExpoEnv,
-  type StubDevServerOptions,
-} from '../utils';
+import { executeAgentCliAsync, setupFixtureAsync, stubExpoEnv } from '../utils';
+import { startStubDevServerAsync, type StubDevServerOptions } from '../stubDevServer';
 import { appStartedMarkerPath, BOOTED_SIMULATOR, installStubXcrunAsync } from './installedAppStubs';
 
 type Row = {

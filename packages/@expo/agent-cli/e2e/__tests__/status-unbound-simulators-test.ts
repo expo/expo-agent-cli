@@ -13,8 +13,8 @@ import {
   expoHomeOf,
   installStubFingerprintAsync,
   setupFixtureAsync,
-  startStubDevServerAsync,
 } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import {
   BOOTED_SIMULATOR,
   SECOND_SIMULATOR,

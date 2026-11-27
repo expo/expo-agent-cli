@@ -17,10 +17,10 @@ import {
   lastBuildFilePath,
   setupFixtureAsync,
   spawnAgentCli,
-  startStubDevServerAsync,
   waitForAsync,
   waitForExitAsync,
 } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import {
   EMBEDDED_HASH,
   EMULATOR_NAME,

@@ -23,13 +23,12 @@ import {
   pathEnvVars,
   readDevLockAsync,
   setupFixtureAsync,
-  startStubDevServerAsync,
   readStubExpoInvocations,
   stubExpoEnv,
-  type StubDevServer,
   holdLockForAsync,
   readEvents,
 } from '../utils';
+import { startStubDevServerAsync, type StubDevServer } from '../stubDevServer';
 import { appStartedMarkerPath } from './installedAppStubs';
 import {
   SIMULATOR_UDID,

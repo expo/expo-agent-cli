@@ -16,10 +16,9 @@ import {
   holdDevLockAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
-  startStubDevServerAsync,
   stubExpoEnv,
-  type StubDevServerOptions,
 } from '../utils';
+import { startStubDevServerAsync, type StubDevServerOptions } from '../stubDevServer';
 import {
   appStartedMarkerPath,
   BOOTED_SIMULATOR,

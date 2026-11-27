@@ -11,8 +11,8 @@ import {
   expoHomeOf,
   readStubExpoInvocations,
   setupFixtureAsync,
-  startStubDevServerAsync,
 } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import { bindingFixture, BOOTED_SIMULATOR, installStubXcrunAsync } from './installedAppStubs';
 
 it('smoke evaluates the cloud app selected by deviceBackend config without --eas', async () => {

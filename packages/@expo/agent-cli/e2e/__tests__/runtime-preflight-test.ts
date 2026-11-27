@@ -23,10 +23,9 @@ import {
   expoHomeOf,
   installStubBinAsync,
   setupFixtureAsync,
-  startStubDevServerAsync,
   stubExpoEnv,
-  type StubDevServer,
 } from '../utils';
+import { startStubDevServerAsync, type StubDevServer } from '../stubDevServer';
 import {
   appStartedMarkerPath,
   installStubXcrunAsync as installStatefulXcrunAsync,

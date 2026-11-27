@@ -18,8 +18,8 @@ import {
   stubExpoEnv,
   waitForAsync,
   waitForDevLockAsync,
-  startStubDevServerAsync,
 } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import { appRuntime, runtimeTarget } from '../runtimeTargetFixtures';
 import {
   androidBindingFixture,

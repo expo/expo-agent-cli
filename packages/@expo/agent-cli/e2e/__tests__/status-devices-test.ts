@@ -10,13 +10,8 @@ import path from 'node:path';
 
 import { installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
 import { writeCloudBindingAsync, writeCloudSessionFileAsync } from '../stubEas';
-import {
-  executeAgentCliAsync,
-  expoHomeOf,
-  holdDevLockAsync,
-  pathEnvVars,
-  startStubDevServerAsync,
-} from '../utils';
+import { executeAgentCliAsync, expoHomeOf, holdDevLockAsync, pathEnvVars } from '../utils';
+import { startStubDevServerAsync } from '../stubDevServer';
 import {
   type StatusReport,
   CDP_TARGET,

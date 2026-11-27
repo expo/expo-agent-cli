@@ -5,14 +5,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {
-  executeAgentCliAsync,
-  setupFixtureAsync,
-  startStubDevServerAsync,
-  stubExpoEnv,
-  type StubDevServer,
-  holdLockForAsync,
-} from '../utils';
+import { executeAgentCliAsync, setupFixtureAsync, stubExpoEnv, holdLockForAsync } from '../utils';
+import { startStubDevServerAsync, type StubDevServer } from '../stubDevServer';
 import { simulatorDeviceDir } from '../../src/device/installedApps';
 import {
   bindingFixture,

@@ -10,13 +10,12 @@ import { appRuntime, bindOtherWorktreeAsync, expoGoRuntimeTarget } from '../runt
 import {
   executeAgentCliAsync,
   setupFixtureAsync,
-  startStubDevServerAsync,
   stubExpoEnv,
-  type StubDevServer,
   expoHomeOf,
   holdLockForAsync,
   readEvents,
 } from '../utils';
+import { startStubDevServerAsync, type StubDevServer } from '../stubDevServer';
 import { createdSimulatorName } from '../../src/deviceBinding/choose';
 import { digestForRoot } from '../../src/deviceBinding/registry';
 import {
