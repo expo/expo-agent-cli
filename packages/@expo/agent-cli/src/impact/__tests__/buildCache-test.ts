@@ -24,6 +24,87 @@ describe(describeLookupFailure, () => {
     expect(reason).not.toContain('Run one of the following');
   });
 
+  it.each([
+    {
+      accountsWithProjectCreationPermission: ['one-org'],
+      accountName: undefined,
+      account: 'one-org',
+    },
+    {
+      accountsWithProjectCreationPermission: ['one org'],
+      accountName: undefined,
+      account: '<account-name>',
+    },
+    {
+      accountsWithProjectCreationPermission: ['one-org', 'two-orgs'],
+      accountName: 'two-orgs',
+      account: 'two-orgs',
+    },
+  ])(
+    'uses the accounts reported by build:list --json: $accountsWithProjectCreationPermission',
+    ({ accountsWithProjectCreationPermission, accountName, account }) => {
+      const stdout = JSON.stringify({
+        error: {
+          errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
+          accountsWithProjectCreationPermission,
+          accountName,
+        },
+      });
+      const reason = describeLookupFailure(
+        { exitCode: 1, stdout, stderr: 'Not logged in' },
+        INVOCATION
+      );
+      expect(reason).toContain(`init --account ${account} --non-interactive`);
+      expect(reason).toContain(accountName ?? accountsWithProjectCreationPermission[0]!);
+    }
+  );
+
+  it('lists the eligible choices when the owner is unspecified', () => {
+    const stdout = JSON.stringify({
+      error: {
+        errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
+        accountsWithProjectCreationPermission: ['one-org', 'two-orgs'],
+      },
+    });
+    const reason = describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION);
+    expect(reason).toContain('init --account <account-name>');
+    expect(reason).toContain('"one-org", "two-orgs"');
+  });
+
+  it.each([
+    { accountsWithProjectCreationPermission: [], accountName: undefined },
+    { accountsWithProjectCreationPermission: ['different org'], accountName: 'owner' },
+  ])(
+    'suggests linking when the project cannot be created under the requested owner: $accountsWithProjectCreationPermission',
+    ({ accountsWithProjectCreationPermission, accountName }) => {
+      const stdout = JSON.stringify({
+        error: {
+          errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
+          accountsWithProjectCreationPermission,
+          accountName,
+        },
+      });
+      const reason = describeLookupFailure({ exitCode: 1, stdout, stderr: '' }, INVOCATION);
+      expect(reason).toContain('init --id <project-id> --non-interactive');
+      expect(reason).not.toContain('init --account');
+    }
+  );
+
+  it.each([
+    JSON.stringify({
+      error: { errorCode: 'SOMETHING_ELSE', accountsWithProjectCreationPermission: ['bob'] },
+    }),
+    JSON.stringify({
+      error: {
+        errorCode: 'EAS_PROJECT_NOT_CONFIGURED',
+        accountsWithProjectCreationPermission: [false],
+      },
+    }),
+  ])('keeps the EAS diagnostic for an unrecognized failure payload %s', (stdout) => {
+    const stderr = 'Build lookup failed.';
+    expect(describeLookupFailure({ exitCode: 1, stdout, stderr }, INVOCATION)).toBe(stderr);
+  });
+
   it('quotes the explanation the CLI put on stdout, not the one sentence on stderr', () => {
     expect(
       describeLookupFailure(
