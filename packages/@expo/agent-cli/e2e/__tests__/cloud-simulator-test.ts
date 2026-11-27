@@ -1316,7 +1316,15 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
       const invocations = easInvocations(projectRoot);
       const start = invocations.find((argv) => argv[0] === 'simulator')!;
       expect(start).toContain('--expo-go');
-      expect(start[start.indexOf('--open-url') + 1]).toBe('exp://stub-tunnel.example');
+      const openUrl = new URL(start[start.indexOf('--open-url') + 1] ?? '');
+      expect(openUrl.protocol).toBe('exp:');
+      expect(openUrl.host).toBe('stub-tunnel.example');
+      expect(openUrl.pathname).toBe('');
+      expect(Object.fromEntries(openUrl.searchParams)).toEqual({
+        __expo_disable_onboarding: '1',
+        __expo_disable_fab: '1',
+        __expo_disable_auto_launch: '1',
+      });
       expect(start[start.indexOf('--name') + 1]).toContain('agent-cli smoke');
       // The session it started is the device the rest of the run drove…
       expect(report.deviceId).toBe('sess-e2e-started');

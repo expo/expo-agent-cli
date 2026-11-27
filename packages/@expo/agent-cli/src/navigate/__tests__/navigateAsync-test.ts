@@ -1,7 +1,7 @@
 import { getConfig } from '@expo/config';
 import { spawn } from 'child_process';
 import { vol } from 'memfs';
-import { devClientConnectUrl } from '../connectUrl';
+import { automationConnectUrl, devClientConnectUrl, expoGoConnectUrl } from '../connectUrl';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
@@ -401,7 +401,13 @@ describe(navigateAsync, () => {
       resolution: expect.stringContaining('Expo Go'),
       target: expect.stringContaining('Expo Go'),
       hostType: 'localhost',
-      connect: [{ target: 'expo-go', label: 'Expo Go', url: 'exp://127.0.0.1:8081' }],
+      connect: [
+        {
+          target: 'expo-go',
+          label: 'Expo Go',
+          url: automationConnectUrl(expoGoConnectUrl('127.0.0.1:8081'), true),
+        },
+      ],
       printUrl: false,
       deviceBackend: 'local-ios',
       platform: 'ios',
@@ -918,7 +924,11 @@ describe(navigateAsync, () => {
 
       const report = JSON.parse(printed());
       expect(report.connect).toEqual([
-        { target: 'expo-go', label: 'Expo Go', url: 'exp://127.0.0.1:8081' },
+        {
+          target: 'expo-go',
+          label: 'Expo Go',
+          url: automationConnectUrl(expoGoConnectUrl('127.0.0.1:8081'), true),
+        },
         {
           target: 'dev-build',
           label: 'development build',

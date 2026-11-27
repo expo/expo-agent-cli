@@ -121,7 +121,7 @@ The origin is `https` for a tunnel host, else `http`. The scheme is `--scheme`, 
 
 A connect URL loads an app; a route link navigates a loaded one (§Loading the app is not navigating it). `navigate --print-url` prints a `Connect` line beside `URL`. `connect` is always in `--json`. When the app kind cannot be told (no app attached, no `--app-id`, no `expo-dev-client`, a native directory checked in), both forms print, Expo Go first.
 
-`navigate` and `smoke` add `__expo_disable_onboarding=1`, `__expo_disable_fab=1` and `__expo_disable_auto_launch=1` to development-build connect URLs. Cold local iOS `smoke` also applies them to the Expo Go project URL. `EXPO_NO_DEV_MENU=0` disables these additions. Generated route links and caller-supplied full URLs carry their original parameters.
+Connect URLs generated for `navigate`, `smoke`, and EAS Simulator launches carry `__expo_disable_onboarding=1`, `__expo_disable_fab=1` and `__expo_disable_auto_launch=1`, for Expo Go and development builds alike. An EAS Simulator session opens its first app from that URL, and no device-side write can mark the onboarding as seen there. `EXPO_NO_DEV_MENU=0` disables these additions. Generated route links and caller-supplied full URLs carry their original parameters.
 
 One device scope decides the app kind, the URL, the launcher choice and the attachment. An open counts only the apps attached on the device it opens (§Which app a run reads).
 
