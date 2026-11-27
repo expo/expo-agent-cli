@@ -224,6 +224,30 @@ describe(checkEntryBundleAsync, () => {
     ).toBe('unknown');
   });
 
+  it.each([
+    ['ios', '{"extra":"unrelated",!}', '1:22'],
+    ['android', '{\n  "extra": "unrelated",\n  !\n}', '3:3'],
+  ] as const)(
+    'omits the JSON document and code frame on %s',
+    async (platform, document, location) => {
+      const cause = `JSON5: invalid character '!' at ${location}`;
+      const error = [
+        `JsonFileError: Error parsing JSON: ${document}`,
+        '├─ File: /project/app.json',
+        `└─ Cause: SyntaxError: ${cause}`,
+        '> 1 | {"extra":"unrelated",!}',
+      ].join('\n');
+      mockFetch({ [devServerUrl + '/']: { status: 500, json: { error } } });
+
+      const result = await checkEntryBundleAsync(devServerUrl, { platform, timeoutMs: 5000 });
+      expect(result).toMatchObject({
+        outcome: 'broken',
+        error: { message: 'Invalid JSON in /project/app.json', snippet: cause },
+      });
+      expect(JSON.stringify(result)).not.toContain('unrelated');
+    }
+  );
+
   it('preserves the cause of a dynamic config failure', async () => {
     mockFetch({
       [devServerUrl + '/']: {

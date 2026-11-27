@@ -88,7 +88,11 @@ function parseManifestFailure(text: string): BundleCheckError | null {
     return null;
   }
 
-  const [message, ...lines] = diagnostic.split('\n');
+  const summary =
+    errorClass === 'JsonFileError' && detail.includes('Error parsing JSON:')
+      ? summarizeJsonParseError(detail)
+      : diagnostic;
+  const [message, ...lines] = summary.split('\n');
   return {
     source: 'manifest',
     type: code || errorClass,
@@ -98,6 +102,19 @@ function parseManifestFailure(text: string): BundleCheckError | null {
     lineNumber: null,
     column: null,
   };
+}
+
+// @expo/json-file includes the entire input before its File/Cause footer and can repeat it in
+// a code frame after the cause. Native JSON.parse messages can quote the input as well.
+function summarizeJsonParseError(detail: string): string {
+  const causeMarker = '\n└─ Cause: SyntaxError: ';
+  const causeIndex = detail.lastIndexOf(causeMarker);
+  if (causeIndex < 0) return 'Invalid JSON';
+
+  const file = /\n├─ File: ([^\r\n]+)$/.exec(detail.slice(0, causeIndex))?.[1];
+  const message = file ? `Invalid JSON in ${file}` : 'Invalid JSON';
+  const cause = detail.slice(causeIndex + causeMarker.length).split('\n', 1)[0];
+  return cause?.startsWith('JSON5:') ? `${message}\n${cause}` : message;
 }
 
 export function manifestRepairAdvice(error: BundleCheckError): string {
