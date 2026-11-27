@@ -10,7 +10,7 @@ export const runtimeReloadHelp: CommandHelp = {
   command: 'runtime:reload',
   usage: `${PROGRAM_PREFIX} runtime:reload`,
   options: [
-    `--route <route>         Open this route once the app is back`,
+    `--route <route>         Open this route after reload. Without it, the current route may reset.`,
     `--method <method>       auto (default), dev-server, runtime, or device`,
     `--ios, --platform ios   Reload the app on the iOS simulator bound to this worktree`,
     `--android               Reload the app on the Android emulator bound to this worktree`,

@@ -351,11 +351,12 @@ describe('@expo/agent-cli runtime:reload', () => {
     const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
-      const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['runtime:reload'], {
         env: stubExpoEnv(projectRoot),
       });
 
-      expect(JSON.parse(result.stdout)).toMatchObject({ reloaded: true });
+      expect(result.stdout).toContain('Reloaded yes');
+      expect(result.stdout).toContain('Use --route <path>');
     } finally {
       releaseLock();
       await stub.close();

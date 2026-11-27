@@ -140,6 +140,10 @@ export function printHumanReport(report: ReloadResultJson, options: ReloadOption
     lines.push(
       chalk`{bold Route} ${report.route}${report.url ? chalk`{dim  · ${report.url}}` : ''}`
     );
+  } else if (report.reloaded) {
+    lines.push(
+      chalk`{bold Route} The current route may reset on reload. Use --route <path> to reopen a specific screen.`
+    );
   }
   for (const attempt of report.attempts) {
     lines.push(chalk`{dim  ${attempt.method}: ${attempt.reason}}`);
