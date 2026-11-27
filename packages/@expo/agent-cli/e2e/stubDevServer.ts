@@ -52,8 +52,10 @@ export type StubDevServerOptions = {
    * - `broken` — building it answers 500 with the `TransformError` body Metro sends.
    * - `no-manifest` — `GET /` 404s, which is the "cannot decide" case a dev server too old to
    *   answer produces.
+   * - `manifest-error` — the native manifest answers 500 with the `{error}` body `@expo/cli` sends
+   *   when it cannot read the app config.
    */
-  bundle?: 'compiles' | 'broken' | 'no-manifest';
+  bundle?: 'compiles' | 'broken' | 'no-manifest' | 'manifest-error';
   /**
    * Origin the manifest's `launchAsset.url` carries, instead of this stub's own `127.0.0.1` one.
    *
@@ -182,6 +184,13 @@ export const STUB_TRANSFORM_ERROR = {
   errors: [{ description: 'Unexpected keyword', filename: 'src/app/index.tsx', lineNumber: 101 }],
 };
 
+/**
+ * The body `@expo/cli` 58.1.21 answers a manifest request with when a config plugin's package is
+ * missing: status 500 and no content type [observed — habitkit with `expo-camera` in `plugins`].
+ */
+export const STUB_MANIFEST_ERROR =
+  'PluginError: Failed to resolve plugin for module "expo-camera" relative to "/project". Do you have node modules installed?';
+
 /** Path of the entry bundle the stub manifest names, matching an Expo Router project. */
 const STUB_BUNDLE_PATH = '/node_modules/expo-router/entry.bundle';
 
@@ -269,6 +278,10 @@ export async function startStubDevServerAsync({
     if (route === '/' && request.headers['expo-platform']) {
       if (bundle === 'no-manifest') {
         response.writeHead(404).end();
+        return;
+      }
+      if (bundle === 'manifest-error') {
+        response.writeHead(500).end(JSON.stringify({ error: STUB_MANIFEST_ERROR }));
         return;
       }
       response.writeHead(200, { 'Content-Type': 'application/json' });

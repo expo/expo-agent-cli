@@ -37,6 +37,7 @@ import { stripVTControlCharacters } from 'util';
 
 import type { TargetSelection, DeviceInventory } from './targetSelection';
 import type { CdpTarget } from './cdpClient';
+import { readManifestFailureAsync } from './manifestFailure';
 import { normalizeDevServerUrl } from './devServer';
 
 /** Platforms the bundle can be built for. The same set `expo-platform` accepts. */
@@ -105,7 +106,10 @@ export async function resolveBundleCheckPlatformsAsync(
 
 /** What the bundler reported, reshaped into the fields worth acting on. */
 export interface BundleCheckError {
+  /** Present when manifest generation failed before the entry bundle could be requested. */
+  source?: 'manifest';
   /**
+   * For a manifest failure, the Expo diagnostic code or the error class. Otherwise,
    * Metro's own class for the failure, e.g. `TransformError` or `UnableToResolveError`.
    *
    * Native gets it from the bundler's own payload. Web has no such payload — see
@@ -124,9 +128,9 @@ export interface BundleCheckError {
   filename: string | null;
   lineNumber: number | null;
   column: number | null;
-  /** The error itself: the first line of Metro's message, without the frame or its ANSI codes. */
+  /** The first line of the diagnostic, with ANSI codes removed. */
   message: string;
-  /** The code frame Metro printed, ANSI stripped. Null when it printed none. */
+  /** The remaining manifest diagnostic or the Metro code frame, ANSI stripped. Null when absent. */
   snippet: string | null;
 }
 
@@ -140,7 +144,7 @@ export interface BundleCheckError {
 export type BundleCheckOutcome =
   /** The entry bundle compiled. */
   | 'ok'
-  /** The bundler answered with an error: the project's own code does not compile. */
+  /** Manifest generation or the entry bundle build failed. */
   | 'broken'
   /** The budget expired before the bundler answered. */
   | 'timeout'
@@ -190,6 +194,7 @@ export async function checkEntryBundleAsync(
   const origin = normalizeDevServerUrl(devServerUrl);
 
   const controller = new AbortController();
+  let timeoutStage = platform === 'web' ? 'reading the entry page' : 'reading the native manifest';
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -219,6 +224,7 @@ export async function checkEntryBundleAsync(
     if (entry.url == null) {
       return finish({ outcome: 'unknown', url: null, error: null, reason: entry.reason });
     }
+    timeoutStage = 'checking the entry bundle';
     const url = toDevServerUrl(entry.url, origin);
 
     // HEAD, so a bundle that compiles costs a status line instead of megabytes of JavaScript.
@@ -245,7 +251,7 @@ export async function checkEntryBundleAsync(
         outcome: 'timeout',
         url: null,
         error: null,
-        reason: `the bundler did not finish building the entry bundle within ${timeoutMs}ms`,
+        reason: `timed out after ${timeoutMs}ms while ${timeoutStage}`,
       });
     }
     return finish({
@@ -282,9 +288,9 @@ interface EntryBundleUrl {
   /**
    * The build failure the *document* reported, when reading it was already the answer.
    *
-   * Only web can reach this. Its dev server renders the page on the server, so a project that does
-   * not compile never produces a page with a script tag in it — it produces an error page carrying
-   * the whole failure, and there is no bundle URL left to fetch.
+   * Web reaches this through its error page: the web dev server renders the page on the server, so
+   * a project that does not compile produces an error page carrying the whole failure. Native
+   * reaches it through a failed manifest, which a config the dev server cannot read produces.
    */
   error?: BundleCheckError;
 }
@@ -483,6 +489,10 @@ async function readManifestBundleUrlAsync(
   });
 
   if (!response.ok) {
+    const failure = response.status === 500 ? await readManifestFailureAsync(response) : null;
+    if (failure) {
+      return { url: null, error: failure };
+    }
     return {
       url: null,
       reason: `${manifestUrl} answered ${response.status} ${response.statusText} for the ${platform} manifest, so the entry bundle URL is unknown`,
@@ -493,6 +503,7 @@ async function readManifestBundleUrlAsync(
   try {
     payload = await response.json();
   } catch {
+    signal.throwIfAborted();
     // The exception is a `SyntaxError` about byte 0 of the body, which says nothing a reader can
     // act on. What they need is what the dev server sent instead.
     const contentType = response.headers.get('content-type')?.split(';')[0]?.trim();

@@ -172,7 +172,9 @@ describe('@expo/agent-cli runtime:reload', () => {
         env: stubExpoEnv(projectRoot),
       });
 
-      expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
+      const report = JSON.parse(result.stdout);
+      expect(report.untrusted).toEqual(['bundle.error', 'bundlesAfterReload.line']);
+      expect(Object.keys(report).sort()).toEqual([
         'appsConnected',
         'appsReconnected',
         // F95: a zero on the count above is three different facts, and this is which one.
@@ -197,6 +199,7 @@ describe('@expo/agent-cli runtime:reload', () => {
         'routeCheck',
         'scope',
         'skippedApps',
+        'untrusted',
         'url',
         'verifiedBy',
         'waitedMs',
@@ -273,42 +276,52 @@ describe('@expo/agent-cli runtime:reload', () => {
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief — friction run 4, F38.
   // The check runs against the dev server, so this is the tier that can prove the two requests it
   // makes and, more importantly, that the broadcast never goes out.
-  it('refuses to reload onto an entry bundle that does not compile', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({
-      projectRoot,
-      targets: [EXPO_GO_TARGET],
-      bundle: 'broken',
-    });
-    const releaseLock = await holdLockForAsync(projectRoot, stub);
-    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
-      simulators: [BOOTED_SIMULATOR],
-    });
-
-    try {
-      const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
-        env: stubExpoEnv(projectRoot),
-        reject: false,
+  it.each([
+    [
+      'broken',
+      { type: 'TransformError', filename: 'src/app/index.tsx', lineNumber: 101 },
+      'does not compile',
+    ],
+    ['manifest-error', { type: 'PluginError', source: 'manifest' }, 'The native manifest failed'],
+  ] as const)(
+    'refuses to reload when the bundle gate reports %s',
+    async (bundle, error, explanation) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        bundle,
+      });
+      const releaseLock = await holdLockForAsync(projectRoot, stub);
+      const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
       });
 
-      expect(result.exitCode).toBe(20);
-      const report: ReloadReport = JSON.parse(result.stdout);
-      expect(report.reloaded).toBe(false);
-      expect(report.method).toBe(null);
-      expect(report.bundle).toMatchObject({
-        checked: true,
-        ok: false,
-        error: { type: 'TransformError', filename: 'src/app/index.tsx', lineNumber: 101 },
-      });
-      // Nothing was reloaded and no device was touched: the gate is before the broadcast.
-      expect(report.attempts).toEqual([]);
-      expect(readXcrun()).toEqual([]);
-      expect(result.stderr).toContain('does not compile');
-    } finally {
-      releaseLock();
-      await stub.close();
+      try {
+        const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+
+        expect(result.exitCode).toBe(20);
+        const report: ReloadReport = JSON.parse(result.stdout);
+        expect(report.reloaded).toBe(false);
+        expect(report.method).toBe(null);
+        expect(report.bundle).toMatchObject({
+          checked: true,
+          ok: false,
+          error,
+        });
+        // Nothing was reloaded and no device was touched: the gate is before the broadcast.
+        expect(report.attempts).toEqual([]);
+        expect(readXcrun()).toEqual([]);
+        expect(result.stderr).toContain(explanation);
+      } finally {
+        releaseLock();
+        await stub.close();
+      }
     }
-  });
+  );
 
   it('reloads onto a broken bundle when --no-bundle-check says to', async () => {
     const projectRoot = await setupFixtureAsync('go-app');

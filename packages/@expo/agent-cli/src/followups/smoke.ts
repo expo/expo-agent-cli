@@ -6,11 +6,16 @@
 // stay exactly as they are however many times the gate runs, and the shipped follow-ups of the
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
+import { quoteArgument } from '../utils/consent';
 import { PROGRAM_PREFIX } from '../programName';
+import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { SmokeAppMismatchKind } from '../smoke/contract';
+import { brokenBundleFollowUps } from './smokeBundle';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface SmokeFollowUpInput {
+  /** Original smoke arguments for a repeat of the same gate after a repair. */
+  argv: readonly string[];
   outcome: 'passed' | 'failed' | 'inconclusive';
   /** Whether a dev server answered at all. */
   devServerFound: boolean;
@@ -18,10 +23,8 @@ export interface SmokeFollowUpInput {
   bootstrap: boolean;
   /** Whether the dev server proved it serves another project. */
   foreignDevServer: boolean;
-  /** Whether the entry bundle was reported broken. */
-  bundleBroken: boolean;
-  /** The file the bundler stopped on, when it named one. */
-  bundleFile: string | null;
+  /** How the entry-bundle check ended, or null when the run never reached it. */
+  bundle: Pick<BundleCheckResult, 'outcome' | 'error'> | null;
   /** Debugger targets attached, or null when the run never read them. */
   appsConnected: number | null;
   /** Whether the runtime answered an evaluation; null when it was never asked. */
@@ -244,21 +247,9 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     ]);
   }
 
-  // A bundle that does not compile is the whole answer: nothing that reads the app can mean
-  // anything until the file the bundler named parses.
-  if (input.bundleBroken) {
-    return capFollowUps([
-      {
-        id: 'typecheck',
-        command: `${PROGRAM_PREFIX} typecheck`,
-        why: `The entry bundle does not compile${input.bundleFile ? ` (${input.bundleFile})` : ''}, and the compiler reports every error in the project rather than only the one the bundler stopped on.`,
-      },
-      {
-        id: 'smoke-again',
-        command: `${PROGRAM_PREFIX} smoke${same}`,
-        why: 'The dev server rebuilds on save, so this is the gate to run again once the file parses.',
-      },
-    ]);
+  if (input.bundle?.outcome === 'broken') {
+    const retry = [PROGRAM_PREFIX, 'smoke', ...input.argv.map(quoteArgument)].join(' ');
+    return brokenBundleFollowUps(input.bundle.error, retry);
   }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
@@ -397,7 +388,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     {
       id: 'typecheck',
       command: `${PROGRAM_PREFIX} typecheck`,
-      why: 'Nothing threw and the bundle compiled, which is not the same as the types being right — a value that is undefined renders rather than throwing.',
+      why: `Nothing threw${input.bundle?.outcome === 'ok' ? ' and the bundle compiled' : ''}, which is not the same as the types being right — a value that is undefined renders rather than throwing.`,
     },
   ];
   if (input.screenshotPath) {

@@ -582,6 +582,45 @@ describe('the entry bundle gate', () => {
     }
   });
 
+  // The runtime commands share the check, so a manifest error refuses them as it refuses smoke.
+  it(`stops runtime:tree at exit 20 on a manifest the dev server cannot build`, async () => {
+    const devServer = await startStubDevServerAsync({
+      targets: [EXPO_GO_TARGET],
+      bundle: 'manifest-error',
+      inspectorEvaluate: () => treeAnswer(),
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:tree', '--dev-server-url', devServer.url, '--json'],
+        { reject: false, env: stubExpoEnv(projectRoot) }
+      );
+
+      expect(result.exitCode).toBe(20);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        reason: 'bundle-broken',
+        bundle: { ok: false, error: { type: 'PluginError' } },
+      });
+      expect(JSON.parse(result.stdout).untrusted).toContain('bundle.error');
+      expect(result.stderr).toMatch(
+        /BEGIN UNTRUSTED APP OUTPUT ---\nPluginError:[\s\S]+END UNTRUSTED APP OUTPUT ---\nCheck the plugin entry/
+      );
+      expect(result.stderr).toContain('The native manifest failed');
+      expect(result.stderr).toContain('Check the plugin entry');
+      expect(result.stderr).toContain('repeat your original command');
+      expect(result.stderr).not.toContain('Try:');
+      const human = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:tree', '--dev-server-url', devServer.url],
+        { reject: false, env: stubExpoEnv(projectRoot) }
+      );
+      expect(human.stdout).toContain('Native manifest failed');
+      expect(human.stdout).not.toContain('does not compile');
+    } finally {
+      await devServer.close();
+    }
+  });
+
   it(`stops runtime:tap before it calls the handler, and says what to run`, async () => {
     const devServer = await startStubDevServerAsync({
       targets: [EXPO_GO_TARGET],

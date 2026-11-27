@@ -5,6 +5,8 @@
 
 import { checkEntryBundleAsync } from '../bundleCheck';
 
+import { isMissingPluginError } from '../manifestFailure';
+
 const devServerUrl = 'http://127.0.0.1:8123';
 
 const BUNDLE_URL =
@@ -54,20 +56,14 @@ function mockFetch(answers: { [key: string]: Answer }) {
     }
     const status = answer.status ?? 200;
     const body = answer.text ?? JSON.stringify(answer.json ?? {});
-    return {
-      ok: status >= 200 && status < 300,
+    return new Response(status === 304 ? null : body, {
       status,
       statusText: status === 500 ? 'Internal Server Error' : 'OK',
       headers: {
-        get: (name: string) =>
-          name.toLowerCase() === 'content-type'
-            ? (answer.contentType ??
-              (answer.text ? 'text/html; charset=utf-8' : 'application/json'))
-            : null,
+        'content-type':
+          answer.contentType ?? (answer.text ? 'text/html; charset=utf-8' : 'application/json'),
       },
-      text: async () => body,
-      json: async () => JSON.parse(body),
-    };
+    });
   }) as unknown as typeof fetch;
   return calls;
 }
@@ -188,6 +184,123 @@ describe(checkEntryBundleAsync, () => {
     expect(result.outcome).toBe('broken');
     expect(result.error!.message).toContain('500');
     expect(result.error!.message).toContain('Proxy error');
+  });
+
+  // The class name before `:` is the fallback; e2e `smoke-test.ts` covers it.
+  it(`should type a failed manifest by the code its error body carries`, async () => {
+    mockFetch({
+      'http://127.0.0.1:8123/': {
+        status: 500,
+        json: {
+          error: 'PluginError: Failed to resolve plugin for module "expo-camera"',
+          name: 'PluginError',
+          code: 'PLUGIN_NOT_FOUND',
+        },
+      },
+    });
+
+    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
+
+    expect(result).toMatchObject({
+      outcome: 'broken',
+      url: null,
+      error: {
+        type: 'PLUGIN_NOT_FOUND',
+        message: 'PluginError: Failed to resolve plugin for module "expo-camera"',
+      },
+    });
+  });
+
+  it.each([
+    { error: 'Upstream unavailable', code: 'ECONNRESET' },
+    { error: 'Error: upstream unavailable' },
+    { error: 'AssertionError [ERR_ASSERTION]: upstream unavailable' },
+    { error: 'PluginError:' },
+    { error: 'PluginError: ' + 'x'.repeat(65536) },
+  ])('leaves an unrecognized or oversized diagnostic unknown', async (json) => {
+    mockFetch({ [devServerUrl + '/']: { status: 500, json } });
+    expect(
+      (await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })).outcome
+    ).toBe('unknown');
+  });
+
+  it.each([
+    ['ios', '{"extra":"unrelated",!}', '1:22'],
+    ['android', '{\n  "extra": "unrelated",\n  !\n}', '3:3'],
+  ] as const)(
+    'omits the JSON document and code frame on %s',
+    async (platform, document, location) => {
+      const cause = `JSON5: invalid character '!' at ${location}`;
+      const error = [
+        `JsonFileError: Error parsing JSON: ${document}`,
+        '├─ File: /project/app.json',
+        `└─ Cause: SyntaxError: ${cause}`,
+        '> 1 | {"extra":"unrelated",!}',
+      ].join('\n');
+      mockFetch({ [devServerUrl + '/']: { status: 500, json: { error } } });
+
+      const result = await checkEntryBundleAsync(devServerUrl, { platform, timeoutMs: 5000 });
+      expect(result).toMatchObject({
+        outcome: 'broken',
+        error: { message: 'Invalid JSON in /project/app.json', snippet: cause },
+      });
+      expect(JSON.stringify(result)).not.toContain('unrelated');
+    }
+  );
+
+  it('preserves the cause of a dynamic config failure', async () => {
+    mockFetch({
+      [devServerUrl + '/']: {
+        status: 500,
+        json: {
+          error: 'Error: Error reading Expo config at /project/app.config.js:\n\nMissing APP_ENV',
+        },
+      },
+    });
+    expect(
+      (await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })).error
+    ).toMatchObject({
+      source: 'manifest',
+      type: 'Error',
+      snippet: 'Missing APP_ENV',
+    });
+  });
+
+  it.each([
+    [
+      { error: 'CommandError: Unable to determine runtime version for platform ios' },
+      'CommandError',
+    ],
+    [
+      {
+        error:
+          'TypeError [ERR_INVALID_ARG_TYPE]: Error reading Expo config at /app.config.js:\n\nInvalid path',
+      },
+      'TypeError',
+    ],
+    [
+      {
+        error:
+          'AssertionError [ERR_ASSERTION]: Wrong number of arguments provided for static config plugin, expected either 1 or 2, got 3',
+      },
+      'AssertionError',
+    ],
+    [{ error: 'EmptyJsonFileError: Cannot parse an empty JSON string' }, 'EmptyJsonFileError'],
+    [{ error: 'Could not export manifest assets', code: 'MANIFEST_ASSET' }, 'MANIFEST_ASSET'],
+  ] as const)('recognizes Expo manifest middleware errors', async (json, type) => {
+    mockFetch({ [devServerUrl + '/']: { status: 500, json } });
+    expect(
+      await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 })
+    ).toMatchObject({ outcome: 'broken', error: { source: 'manifest', type } });
+  });
+
+  // A proxy can return the same JSON shape, including on HTTP 500.
+  it.each([404, 500, 502])(`should answer unknown for a %s with an error body`, async (status) => {
+    mockFetch({ 'http://127.0.0.1:8123/': { status, json: { error: 'Bad Gateway' } } });
+
+    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
+
+    expect(result).toMatchObject({ outcome: 'unknown', error: null });
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief
@@ -517,6 +630,26 @@ describe(checkEntryBundleAsync, () => {
     });
   });
 
+  it.each([200, 500])(
+    'times out when the native manifest sends HTTP %s headers but stalls',
+    async (status) => {
+      globalThis.fetch = async (_url, init) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason));
+            },
+          }),
+          { status }
+        );
+      const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 50 });
+      expect(result).toMatchObject({
+        outcome: 'timeout',
+        reason: 'timed out after 50ms while reading the native manifest',
+      });
+    }
+  );
+
   // A first build of a cold dev server compiles the whole app, so the budget has to be able to
   // expire — and expiring is "look again", not "the project is broken".
   it(`should answer timeout when the bundler does not finish in the budget`, async () => {
@@ -580,5 +713,40 @@ describe(checkEntryBundleAsync, () => {
     const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
 
     expect(result.outcome).toBe('ok');
+  });
+});
+
+// Released `@expo/cli` sends no `code`, so the wording decides; the messages are
+// `@expo/config-plugins`' `plugin-resolver.ts`.
+describe(isMissingPluginError, () => {
+  const error = (type: string, message: string) => ({
+    type,
+    message,
+    filename: null,
+    lineNumber: null,
+    column: null,
+    snippet: null,
+  });
+
+  it.each([
+    [
+      'PluginError',
+      'PluginError: Failed to resolve plugin for module "expo-camera" relative to "/p".',
+      true,
+    ],
+    [
+      'PluginError',
+      'PluginError: Plugin "./plugin.js" must export a function from file: /p/plugin.js.',
+      false,
+    ],
+    ['PluginError', 'PluginError: /p/plugin.js: Unexpected token (1:4)', false],
+    ['PLUGIN_NOT_FOUND', 'PluginError: Failed to resolve plugin for module "expo-camera"', true],
+    [
+      'INVALID_PLUGIN_TYPE',
+      'PluginError: Failed to resolve plugin for module "expo-camera"',
+      false,
+    ],
+  ])(`should read %s "%s" as %s`, (type, message, expected) => {
+    expect(isMissingPluginError(error(type, message))).toBe(expected);
   });
 });

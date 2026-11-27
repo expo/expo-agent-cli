@@ -87,7 +87,7 @@ export async function bundleStep(walk: PhaseWalk): Promise<Step<null>> {
         case 'timeout':
           return {
             status: 'inconclusive' as const,
-            reason: 'the bundler was still building it when the budget ran out',
+            reason: result.reason ?? 'the entry bundle check timed out',
             value: result,
           };
         default:
@@ -107,23 +107,22 @@ export async function bundleStep(walk: PhaseWalk): Promise<Step<null>> {
   if (bundle.outcome === 'broken') {
     // Nothing after this is worth doing: the app cannot be running code that does not compile, and
     // an error window against the red screen would report the bundler's own error as the app's.
-    walk.skipRest('app', 'the entry bundle does not compile, so there is no working app to read');
+    const reason =
+      bundle.error?.source === 'manifest'
+        ? 'the native manifest failed'
+        : 'the entry bundle does not compile';
+    walk.skipRest('app', `${reason}, so smoke skipped the app checks`);
     return {
       stop: walk.done('failed', {
-        screenshot: noScreenshot('the entry bundle does not compile, so nothing was photographed'),
+        screenshot: noScreenshot(`${reason}, so nothing was photographed`),
       }),
     };
   }
   if (bundle.outcome === 'timeout') {
-    walk.skipRest(
-      'app',
-      'the entry bundle was still building, so nothing is known about the app yet'
-    );
+    walk.skipRest('app', 'the entry bundle check timed out, so smoke skipped the app checks');
     return {
       stop: walk.done('inconclusive', {
-        screenshot: noScreenshot(
-          'the entry bundle was still building, so nothing was photographed'
-        ),
+        screenshot: noScreenshot('the entry bundle check timed out, so nothing was photographed'),
       }),
     };
   }

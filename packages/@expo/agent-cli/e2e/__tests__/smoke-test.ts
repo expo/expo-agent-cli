@@ -28,7 +28,7 @@ import {
   holdLockForAsync,
   readEvents,
 } from '../utils';
-import { startStubDevServerAsync, type StubDevServer } from '../stubDevServer';
+import { startStubDevServerAsync, STUB_MANIFEST_ERROR, type StubDevServer } from '../stubDevServer';
 import { appStartedMarkerPath } from './installedAppStubs';
 import {
   SIMULATOR_UDID,
@@ -553,6 +553,48 @@ describe('@expo/agent-cli smoke', () => {
         await stub.close();
       }
     });
+
+    it.each(['ios', 'android'])(
+      'exits 20 for a manifest the dev server cannot build on %s, and explains package and local plugin references',
+      async (platform) => {
+        const projectRoot = await setupFixtureAsync('go-app');
+        await installStubXcrunAsync(projectRoot);
+        const stub = await startStubDevServerAsync({
+          projectRoot,
+          targets: [EXPO_GO_TARGET],
+          bundle: 'manifest-error',
+        });
+        const release = await holdLockForAsync(projectRoot, stub);
+
+        try {
+          const result = await executeAgentCliAsync(
+            projectRoot,
+            ['smoke', `--${platform}`, '--no-start', '--no-reload', '--json'],
+            {
+              env: stubExpoEnv(projectRoot),
+              reject: false,
+            }
+          );
+
+          expect(result.exitCode).toBe(20);
+          const report = JSON.parse(result.stdout);
+          expect(report.bundle).toMatchObject({
+            platform,
+            ok: false,
+            error: { type: 'PluginError', message: STUB_MANIFEST_ERROR },
+          });
+          expect(report.followups.map((item: { id: string }) => item.id)).toEqual(['smoke-again']);
+          expect(report.followups[0].command).toBe(
+            `npx @expo/agent-cli smoke --${platform} --no-start --no-reload --json`
+          );
+          expect(report.followups[0].why).toContain('make sure it is installed');
+          expect(report.followups[0].why).toContain('check that its path exists');
+        } finally {
+          release();
+          await stub.close();
+        }
+      }
+    );
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief. A dev server that proved it

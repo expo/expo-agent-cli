@@ -130,7 +130,7 @@ export const agentCliSmoke: Command = async (argv) => {
     const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
 
     const { smokeAsync } = require('./smokeAsync') as typeof import('./smokeAsync');
-    const code = await smokeAsync(projectRoot, options);
+    const code = await smokeAsync(projectRoot, options, argv ?? []);
     // An outcome, not an error: it has already printed everything it has to say, and the code is
     // what the caller branches on (llp/0010 §Exit codes).
     return code;

@@ -14,6 +14,7 @@
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import type { BundleCheckJson } from '../bundleCheck';
+import { describeManifestFailure } from '../manifestFailure';
 import { wrapUntrustedAppOutput } from '../untrusted';
 import type {
   RuntimeTapJson,
@@ -476,7 +477,7 @@ function capitalize(text: string): string {
 export function explainBundleRefusal(
   bundle: BundleCheckJson,
   { what, rerun }: { what: string; rerun: string }
-): InteractFailure {
+): { message: string; suggestedCommand: string | null } {
   if (bundle.ok !== false) {
     // The interact commands read a native app, so the bundle's platform is `ios` or `android` on
     // every path that reaches here. When it somehow is not, name both flags in the prose and let
@@ -485,8 +486,8 @@ export function explainBundleRefusal(
     const smoke = smokePlatform ? smokeCommand(smokePlatform) : `${PROGRAM_PREFIX} smoke --ios`;
     return {
       message: [
-        `The bundler had not finished building this project's entry bundle, so ${what}.`,
-        `Why: ${bundle.reason ?? 'the bundler gave no answer about the entry bundle'}. Until that build finishes it is not known whether the app is running the code that is on disk, and this command would have described a runtime nobody can place.`,
+        `The entry bundle check could not confirm the current build, so ${what}.`,
+        `Why: ${bundle.reason ?? 'the bundler gave no answer about the entry bundle'}. It is unknown whether the app is running the code on disk.`,
         `How: run "${smoke}"${smokePlatform ? '' : '" or "--android"'} to wait for the bundle and the app together, then run "${rerun}" again. Pass --no-bundle-check to read the app without asking about the bundle first.`,
       ].join('\n'),
       suggestedCommand: smokePlatform ? smoke : rerun,
@@ -494,6 +495,12 @@ export function explainBundleRefusal(
   }
 
   const error = bundle.error;
+  if (error?.source === 'manifest') {
+    return {
+      message: `The native manifest failed, so ${what}.\n${describeManifestFailure(error)}\nThen repeat your original command.`,
+      suggestedCommand: null,
+    };
+  }
   const where = [error?.filename, error?.lineNumber, error?.column]
     .filter((part) => part != null)
     .join(':');

@@ -310,15 +310,19 @@ function refuseForBundle(
   if (json) {
     Log.log(JSON.stringify(report, null, 2));
   } else {
-    Log.log(
-      `Bundle ${report.bundle.ok === false ? 'does not compile' : 'not checked'}${
-        report.bundle.platform ? ` · for ${report.bundle.platform}` : ''
-      }`
-    );
+    const summary =
+      report.bundle.error?.source === 'manifest'
+        ? 'Native manifest failed'
+        : report.bundle.ok === false
+          ? 'Bundle does not compile'
+          : 'Bundle not checked';
+    Log.log(`${summary}${report.bundle.platform ? ` · for ${report.bundle.platform}` : ''}`);
   }
   const failure = explainBundleRefusal(report.bundle, { what, rerun });
   Log.error(failure.message);
-  Log.warn(`Try: ${failure.suggestedCommand}`);
+  if (failure.suggestedCommand) {
+    Log.warn(`Try: ${failure.suggestedCommand}`);
+  }
   return EXIT_OUTCOME_FAILED;
 }
 
@@ -351,7 +355,7 @@ function unreadTreeReport(
     reason: refusal,
     ok: false,
     followups: [],
-    untrusted: UNTRUSTED_TREE_FIELDS,
+    untrusted: [...UNTRUSTED_TREE_FIELDS, 'bundle.error'],
   };
 }
 
@@ -545,7 +549,7 @@ function unreadCallFields(
     reason: refusal,
     ok: false,
     followups: [] as FollowUp[],
-    untrusted: UNTRUSTED_CALL_FIELDS,
+    untrusted: [...UNTRUSTED_CALL_FIELDS, 'bundle.error'],
   };
 }
 

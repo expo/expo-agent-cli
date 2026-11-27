@@ -212,6 +212,43 @@ describe(smokeResultToJson, () => {
     expect(smokeResultToJson(run(), options(), []).untrusted).toEqual(['errors.records']);
   });
 
+  it.each(['PluginError', 'TransformError'])(
+    'marks the %s bundle diagnostic in both outputs',
+    (type) => {
+      const reason = type + ': invalid project file';
+      const report = run({
+        outcome: 'failed',
+        bundle: {
+          outcome: 'broken',
+          platform: 'ios',
+          waitedMs: 1,
+          url: type === 'PluginError' ? null : 'http://localhost/index.bundle',
+          error: {
+            type,
+            message: reason,
+            filename: null,
+            lineNumber: null,
+            column: null,
+            snippet: null,
+            ...(type === 'PluginError' ? { source: 'manifest' as const } : {}),
+          },
+        },
+        phases: [
+          { id: 'dev-server', status: 'ok', ms: 2, reason: null },
+          { id: 'bundle', status: 'failed', ms: 1, reason },
+        ],
+      });
+      expect(smokeResultToJson(report, options(), []).untrusted).toEqual([
+        'errors.records',
+        'bundle.error',
+        'phases[1].reason',
+      ]);
+      expect(stripVTControlCharacters(formatSmokeResult(report, options()))).toContain(
+        `--- BEGIN UNTRUSTED APP OUTPUT ---\n${reason}\n--- END UNTRUSTED APP OUTPUT ---`
+      );
+    }
+  );
+
   // The same object `dev:wait` and `runtime:reload` print, from the same function: one question
   // asked in three commands must not have three shapes.
   it(`prints the bundle in the shape dev:wait prints it`, () => {

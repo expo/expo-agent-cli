@@ -10,12 +10,12 @@ import { MAX_FOLLOWUPS } from '../types';
 
 function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput {
   return {
+    argv: ['--ios'],
     outcome: 'passed',
     devServerFound: true,
     bootstrap: true,
     foreignDevServer: false,
-    bundleBroken: false,
-    bundleFile: null,
+    bundle: { outcome: 'ok', error: null },
     appsConnected: 1,
     runtimeSupported: true,
     failing: 0,
@@ -48,7 +48,7 @@ describe(buildSmokeFollowUps, () => {
     for (const overrides of [
       {},
       { devServerFound: false },
-      { bundleBroken: true },
+      { bundle: { outcome: 'broken' as const, error: null } },
       { appsConnected: 0 },
       { runtimeSupported: false },
       { failing: 2, outcome: 'failed' as const },
@@ -91,13 +91,28 @@ describe(buildSmokeFollowUps, () => {
 
   // A bundle that does not compile is the whole answer, and the compiler sees more of it than the
   // bundler does — the bundler stops at the first file that will not transform.
-  it(`answers a broken bundle with the compiler, and names the file`, () => {
+  it(`suggests typecheck for a broken bundle without repeating the diagnostic filename`, () => {
     const followups = buildSmokeFollowUps(
-      input({ bundleBroken: true, outcome: 'failed', bundleFile: 'src/app/notes.tsx' })
+      input({
+        bundle: {
+          outcome: 'broken',
+          error: {
+            filename: 'src/app/notes.tsx',
+            message: 'syntax error',
+            type: null,
+            lineNumber: null,
+            column: null,
+            snippet: null,
+          },
+        },
+        outcome: 'failed',
+      })
     );
 
     expect(followups[0]!.command).toBe('npx @expo/agent-cli typecheck');
-    expect(followups[0]!.why).toContain('src/app/notes.tsx');
+    for (const followup of followups) {
+      expect(followup.why).not.toContain('src/app/notes.tsx');
+    }
   });
 
   it(`answers no connected app with the command that opens one`, () => {
@@ -272,6 +287,35 @@ describe(buildSmokeFollowUps, () => {
     expect(commands()[0]).toBe('npx @expo/agent-cli typecheck');
   });
 
+  it('reports an invalid plugin export before asking to retry smoke', () => {
+    const message = 'PluginError: Plugin "./local.js" must export a function';
+    const followups = buildSmokeFollowUps(
+      input({
+        bundle: {
+          outcome: 'broken',
+          error: {
+            source: 'manifest',
+            type: 'PluginError',
+            message,
+            filename: null,
+            lineNumber: null,
+            column: null,
+            snippet: null,
+          },
+        },
+      })
+    );
+    expect(followups.map(({ id }) => id)).toEqual(['smoke-again']);
+    expect(followups[0]!.why).toContain('generating the manifest');
+  });
+
+  it(`claims a compiled bundle only when the bundle check passed`, () => {
+    const why = (bundleOutcome: 'ok' | 'unknown') =>
+      buildSmokeFollowUps(input({ bundle: { outcome: bundleOutcome, error: null } }))[0]!.why;
+    expect(why('ok')).toContain('the bundle compiled');
+    expect(why('unknown')).not.toContain('the bundle compiled');
+  });
+
   it(`points at the picture it took, when it took one`, () => {
     expect(commands()).toContain('open /project/.expo/agent-cli/smoke.png');
     expect(commands({ screenshotTaken: false, screenshotPath: null }).join(' ')).not.toContain(
@@ -283,9 +327,14 @@ describe(buildSmokeFollowUps, () => {
     expect(commands({ devServerFound: false, bootstrap: false, route: '/notes' })).toContain(
       'npx @expo/agent-cli smoke --ios --route /notes'
     );
-    expect(commands({ bundleBroken: true, outcome: 'failed', route: '/notes' })).toContain(
-      'npx @expo/agent-cli smoke --ios --route /notes'
-    );
+    expect(
+      commands({
+        bundle: { outcome: 'broken', error: null },
+        outcome: 'failed',
+        route: '/notes',
+        argv: ['--ios', '--route', '/notes'],
+      })
+    ).toContain('npx @expo/agent-cli smoke --ios --route /notes');
   });
 });
 

@@ -80,6 +80,9 @@ export function showingReason(showing: ScreenshotSubject): string | null {
 
 /** The bundler's own error, as one sentence with the location in it. */
 export function bundleErrorSentence(bundle: BundleCheckResult): string {
+  if (bundle.error?.source === 'manifest') {
+    return [bundle.error.message, bundle.error.snippet].filter(Boolean).join('\n');
+  }
   const where = [bundle.error?.filename, bundle.error?.lineNumber, bundle.error?.column]
     .filter((part) => part != null)
     .join(':');
