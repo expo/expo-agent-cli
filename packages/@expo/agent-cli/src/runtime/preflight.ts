@@ -41,6 +41,7 @@ import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import { readAppLoadedAsync } from './appLoaded';
 import { emptyRuntimeWarning } from './appLoadedText';
+import { assertOwnBundleAsync } from './bundleOrigin';
 import type { CdpTarget } from './cdpClient';
 import {
   APP_RECONNECT_GRACE_MS,
@@ -185,7 +186,8 @@ const APP_RECONNECT_POLL_MS = 250;
  *
  * @throws {CommandError} `NO_DEV_SERVER` when nothing answers and the command needs one,
  * `NO_APP_CONNECTED` when the dev server runs and names no runtime this command may read,
- * `APP_NOT_LOADED` when the runtime that the command reads answered that no bundle ran.
+ * `APP_NOT_LOADED` when the runtime that the command reads answered that no bundle ran,
+ * `FOREIGN_BUNDLE` when that runtime ran another project's bundle.
  */
 export async function preflightRuntimeAsync(
   {
@@ -294,6 +296,8 @@ export async function preflightRuntimeAsync(
     const refusal = { devServerUrl: url, cloud, platform, debuggerTargets: targets.length };
     const bundleDeadline = Date.now() + unspentMs;
     await bundleStepAsync(classifiedTargets.read, bundleDeadline, readsEmptyRuntime, refusal);
+    const servedBy = { devServerSource: discovery.source, projectRoot: context.projectRoot };
+    await assertOwnBundleAsync(classifiedTargets.read, { ...refusal, ...servedBy });
   }
   reportScope(targetSelection, classifiedTargets);
   return base;
