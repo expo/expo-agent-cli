@@ -258,7 +258,8 @@ describe('detection', () => {
 
     expect(argvOf(plan)).toEqual([
       ['expo', 'prebuild', '--platform', 'ios'],
-      ['expo', 'run:ios'],
+      ['expo', 'run:ios', '--no-bundler'],
+      ['expo', 'start', '--dev-client'],
     ]);
     expect(plan.buildLocation).toMatchObject({ runsOn: 'local' });
   });
@@ -428,7 +429,8 @@ describe('a flag on the command line', () => {
 
     expect(argvOf(plan)).toEqual([
       ['expo', 'prebuild', '--platform', 'ios'],
-      ['expo', 'run:ios'],
+      ['expo', 'run:ios', '--no-bundler'],
+      ['expo', 'start', '--dev-client'],
     ]);
     expect(plan.buildLocation!.selection).toMatchObject({ source: 'flag', doomed: true });
     expect(plan.reasons).toContain(

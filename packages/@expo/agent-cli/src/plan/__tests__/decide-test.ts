@@ -377,7 +377,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -419,7 +420,10 @@ describe(decideStartPlan, () => {
 
       expect(plan.rule).toBe('dev-client-rebuild');
       expect(plan.target).toBe('dev-client');
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
       expect(plan.reasons.join('\n')).toMatch(/Nothing that prebuild writes has changed/);
     });
 
@@ -473,7 +477,10 @@ describe(decideStartPlan, () => {
       });
 
       expect(plan.rule).toBe('dev-client-rebuild');
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
     });
 
     // Removing one is the same fact in the other direction: `pod install` and the Gradle
@@ -491,7 +498,10 @@ describe(decideStartPlan, () => {
       });
 
       expect(plan.rule).toBe('dev-client-rebuild');
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
     });
   });
 
@@ -514,7 +524,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -536,7 +547,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -558,7 +570,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -569,9 +582,14 @@ describe(decideStartPlan, () => {
       expect(plan.target).toBe('dev-client');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
-      expect(plan.steps.map((step) => step.timeClass)).toEqual(['a-minute', 'many-minutes']);
+      expect(plan.steps.map((step) => step.timeClass)).toEqual([
+        'a-minute',
+        'many-minutes',
+        'seconds',
+      ]);
       expect(plan.reasons.join('\n')).toMatch(/No development build recorded for ios/);
     });
 
@@ -584,7 +602,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'android'],
-        ['expo', 'run:android'],
+        ['expo', 'run:android', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
       expect(plan.reasons.join('\n')).toMatch(/differs from the last recorded build/);
     });
@@ -603,7 +622,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
       expect(plan.reasons.join('\n')).toMatch(/stored only a hash/);
     });
@@ -622,7 +642,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -638,7 +659,8 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('dev-client-stale');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
       expect(plan.reasons.join('\n')).toMatch(/app config changed/);
     });
@@ -693,10 +715,15 @@ describe(decideStartPlan, () => {
 
       expect(plan.rule).toBe('bare-stale');
       expect(plan.target).toBe('bare');
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
       expect(plan.steps[0]!.timeClass).toBe('many-minutes');
     });
 
+    // @ref ../localBuild §localBuildSteps — an app without expo-dev-client cannot be moved to the
+    // dev server after launch, so one step builds and serves on the port `dev` gives it.
     it(`should build a bare project that has no expo-dev-client dependency`, () => {
       const plan = decideStartPlan(
         createProjectState({ nativeDirs: { ios: false, android: true } }),
@@ -716,7 +743,10 @@ describe(decideStartPlan, () => {
       );
 
       expect(plan.rule).toBe('bare-stale');
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:android']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:android', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
     });
 
     it(`should default to iOS when both native directories exist and no platform is requested`, () => {
@@ -724,7 +754,10 @@ describe(decideStartPlan, () => {
         createDevClientState({ nativeDirs: { ios: true, android: true } })
       );
 
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
     });
 
     it(`should infer the platform from the only native directory`, () => {
@@ -732,7 +765,10 @@ describe(decideStartPlan, () => {
         createDevClientState({ nativeDirs: { ios: false, android: true } })
       );
 
-      expect(argvOf(plan.steps)).toEqual([['expo', 'run:android']]);
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:android', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
     });
   });
 
@@ -760,12 +796,14 @@ describe(decideStartPlan, () => {
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'install', 'expo-dev-client'],
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
       expect(plan.steps.map((step) => step.timeClass)).toEqual([
         'a-minute',
         'a-minute',
         'many-minutes',
+        'seconds',
       ]);
       expect(plan.reasons.join('\n')).toMatch(/react-native-mmkv is not bundled in Expo Go/);
     });
@@ -882,7 +920,7 @@ describe(decideStartPlan, () => {
     it(`should say the plan builds for an inferred platform when a step does`, () => {
       const plan = decideStartPlan(createDevClientState(), { platform: 'android' });
 
-      expect(plan.steps.at(-1)!.argv).toEqual(['expo', 'run:android']);
+      expect(plan.steps.map((step) => step.id)).toContain('run');
       expect(plan.reasons).toContain(
         'No platform was named; this host suggests android, and the plan builds for it.'
       );
@@ -1035,7 +1073,8 @@ describe(decideStartPlan, () => {
 
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
       expect(plan.buildLocation).toMatchObject({ runsOn: 'local', selection: chosen });
       expect(plan.reasons).toContain(chosen.why);
@@ -1066,7 +1105,8 @@ describe(decideStartPlan, () => {
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'install', 'expo-dev-client'],
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 

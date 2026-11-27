@@ -144,10 +144,9 @@ reads the dev server's log.
 
 **Its prerequisite is an artifact, not a project.** Every other suite scaffolds. A development build
 costs about fifteen minutes of Gradle, and no suite here may spend that. So somebody runs
-`npx @expo/agent-cli dev --android` in a project once. Since wave 30 that is enough on its own. The
-build record is written when the app reaches the device, so a launch that then fails, or a run you
-stop with Ctrl-C, still leaves a recorded build (F121). Before it you had to let the step _exit_,
-which meant `npx @expo/agent-cli dev:stop` as well. The gate checks the installed package _and_ the record,
+`npx @expo/agent-cli dev --android` in a project once. The build record is written when the app
+reaches the device, before the dev server starts, so a launch that then fails, or a run you stop
+with Ctrl-C, still leaves a recorded build. The gate checks the installed package _and_ the record,
 and a missing record is the difference between a 25-second suite and a fifteen-minute one.
 
 **It drives somebody else's project, in place.** It makes no EAS call, so the scratch-outside-git

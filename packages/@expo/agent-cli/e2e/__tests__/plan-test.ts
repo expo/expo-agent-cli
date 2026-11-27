@@ -335,12 +335,13 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(plan.target).toBe('dev-client');
       expect(plan.steps.map((step) => step.argv)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios', ...PORT_ARGS],
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client', ...PORT_ARGS],
       ]);
       expect(plan.reasons.length).toBeGreaterThan(0);
       // The port is probed now and picked again when the plan runs.
       expect(plan.devServerPort).toEqual({
-        port: Number(plan.steps[1]!.argv.at(-1)),
+        port: Number(plan.steps[2]!.argv.at(-1)),
         movedFrom: expect.toBeOneOf([null, expect.any(Number)]),
         state: 'picked',
       });
@@ -378,6 +379,7 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(plan.steps.map((step) => [step.id, step.runsOn])).toEqual([
         ['prebuild', 'local'],
         ['run', 'local'],
+        ['start', null],
       ]);
       expect(plan.buildLocation).toMatchObject({
         runsOn: 'local',
@@ -520,7 +522,8 @@ describe('@expo/agent-cli dev --plan', () => {
       const plan: StartPlan = JSON.parse(result.stdout);
       expect(plan.steps.map((step) => step.argv.join(' '))).toEqual([
         'expo prebuild --platform ios',
-        expect.stringMatching(/^expo run:ios --port \d+$/),
+        'expo run:ios --no-bundler',
+        expect.stringMatching(/^expo start --dev-client --port \d+$/),
       ]);
       expect(plan.buildLocation).toMatchObject({
         runsOn: 'local',
@@ -589,7 +592,8 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(plan.steps.map((step) => step.argv.join(' '))).toEqual([
         'expo install expo-dev-client',
         'expo prebuild --platform ios',
-        expect.stringMatching(/^expo run:ios --port \d+$/),
+        'expo run:ios --no-bundler',
+        expect.stringMatching(/^expo start --dev-client --port \d+$/),
       ]);
       // Labelled, so a reader can tell a plan the config changed from one it did not.
       expect(plan.reasons).toContain(

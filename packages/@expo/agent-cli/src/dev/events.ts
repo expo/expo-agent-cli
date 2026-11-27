@@ -25,6 +25,8 @@ declare module '2g' {
     // @ref llp/0026-dev-owns-the-open.rfc.md — the acts of the open, so an agent watching the
     // stream sees the same walk the stderr narration describes.
     'dev:open_app_install_expo_go': { platform: string; replaced: boolean };
+    /** The app a `run:* --no-bundler` step launched, stopped before the dev server opens it. */
+    'dev:launched_app_stopped': { platform: string; appId: string; ok: boolean };
     /** `dev --eas` added the simulator dev-client profile to `eas.json` before the build. */
     'dev:eas_json_profile_added': { profile: string };
     /** The `eas build` step finished, and this is the build EAS lists for it. */

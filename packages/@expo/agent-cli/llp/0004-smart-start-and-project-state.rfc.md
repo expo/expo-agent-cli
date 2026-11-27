@@ -5,7 +5,7 @@
 **Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); app presence on a device (`src/device/appPresence.ts`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-11-16
+**Revised:** 2026-11-26
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0005-runtime-loop-tools]], [[0008-guardrails]], [[0010-agent-conventions]], [[0011-impact-and-freshness]], [[0015-backend-selection-and-config]], [[0021-honest-reports]], [[0023-fingerprint-caching]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]], [[0035-one-device-per-worktree]]
 
 ## Summary
@@ -25,24 +25,24 @@ Decisions:
 
 The first row that matches decides. `rule` is the plan's `rule` in `--json`.
 
-| #   | `rule`                       | State                                                                                      | Steps                                                              |
-| --- | ---------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| 1   | `not-expo-app`               | `package.json` declares no `expo` (§Not an Expo app)                                       | none; `target: none`                                               |
-| 2   | `dependencies-not-installed` | `expo` is declared, and no installed `expo` resolves (§Dependencies not installed)         | none; `target: none`                                               |
-| 3   | `web`                        | `--web`                                                                                    | `expo start --web`                                                 |
-| 4   | `bare-fresh`                 | a checked-in `ios/` or `android/`; the fingerprint matches the recorded build              | `expo start --dev-client`                                          |
-| 5   | `bare-install`               | as 4, and the device answered `missing`                                                    | `expo run:<platform> --no-bundler`, then `expo start --dev-client` |
-| 6   | `bare-stale`                 | a checked-in native directory; the fingerprint does not match                              | build: `expo run:<platform>`, or the EAS route                     |
-| 7   | `dev-client-fresh`           | CNG with `expo-dev-client`; the fingerprint matches                                        | `expo start --dev-client`                                          |
-| 8   | `dev-client-install`         | as 7, and the device answered `missing`                                                    | `expo run:<platform> --no-bundler`, then `expo start --dev-client` |
-| 9   | `dev-client-stale`           | as 7, the fingerprint moved, and a source `prebuild` writes from moved, or nobody can tell | prebuild, then build                                               |
-| 10  | `dev-client-rebuild`         | as 7, the fingerprint moved, and nothing `prebuild` writes from moved                      | build, no prebuild                                                 |
-| 11  | `expo-go`                    | no `expo-dev-client`; Expo Go compatible; the run target is not `dev-build`                | `expo start --go`                                                  |
-| 12  | `needs-dev-client`           | everything else                                                                            | `expo install expo-dev-client`, prebuild, build                    |
+| #   | `rule`                       | State                                                                                      | Steps                                                                                                                |
+| --- | ---------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| 1   | `not-expo-app`               | `package.json` declares no `expo` (§Not an Expo app)                                       | none; `target: none`                                                                                                 |
+| 2   | `dependencies-not-installed` | `expo` is declared, and no installed `expo` resolves (§Dependencies not installed)         | none; `target: none`                                                                                                 |
+| 3   | `web`                        | `--web`                                                                                    | `expo start --web`                                                                                                   |
+| 4   | `bare-fresh`                 | a checked-in `ios/` or `android/`; the fingerprint matches the recorded build              | `expo start --dev-client`                                                                                            |
+| 5   | `bare-install`               | as 4, and the device answered `missing`                                                    | `expo run:<platform> --no-bundler`, then `expo start --dev-client`                                                   |
+| 6   | `bare-stale`                 | a checked-in native directory; the fingerprint does not match                              | build, then `expo start --dev-client`; one serving `expo run:<platform>` without `expo-dev-client`; or the EAS route |
+| 7   | `dev-client-fresh`           | CNG with `expo-dev-client`; the fingerprint matches                                        | `expo start --dev-client`                                                                                            |
+| 8   | `dev-client-install`         | as 7, and the device answered `missing`                                                    | `expo run:<platform> --no-bundler`, then `expo start --dev-client`                                                   |
+| 9   | `dev-client-stale`           | as 7, the fingerprint moved, and a source `prebuild` writes from moved, or nobody can tell | prebuild, build, then `expo start --dev-client`                                                                      |
+| 10  | `dev-client-rebuild`         | as 7, the fingerprint moved, and nothing `prebuild` writes from moved                      | build, then `expo start --dev-client`; no prebuild                                                                   |
+| 11  | `expo-go`                    | no `expo-dev-client`; Expo Go compatible; the run target is not `dev-build`                | `expo start --go`                                                                                                    |
+| 12  | `needs-dev-client`           | everything else                                                                            | `expo install expo-dev-client`, prebuild, build, `expo start --dev-client`                                           |
 
-On an EAS device, a stale row whose fingerprint EAS already has a finished simulator build for plans `*-fresh` instead, and the session installs that build ([[0027-everything-on-eas]] §Reuse). The local route builds with `expo run:<platform>`; the EAS route is `eas build` then `expo start --dev-client`, with no prebuild, and with `eas build:configure` first when the project has no `eas.json` and the device is not on EAS ([[0015-backend-selection-and-config]]).
+On an EAS device, a stale row whose fingerprint EAS already has a finished simulator build for plans `*-fresh` instead, and the session installs that build ([[0027-everything-on-eas]] §Reuse). "Build" on the local route is `expo run:<platform> --no-bundler`: it builds, installs and launches a development build and exits, and `expo start --dev-client` serves it. An app without `expo-dev-client` cannot be moved to another server after launch, so it keeps one `expo run:<platform>` step that builds and serves on the port `dev` gives it (Risk 10); the EAS route is `eas build` then `expo start --dev-client`, with no prebuild, and with `eas build:configure` first when the project has no `eas.json` and the device is not on EAS ([[0015-backend-selection-and-config]]).
 
-"Checked-in" means present and not gitignored: `expo prebuild` writes `ios/` and `android/` that the template `.gitignore` covers, and those are still CNG. Freshness is the probe's fingerprint against `.expo/agent-cli-last-build.json`, per platform. A build is recorded when the app reaches the device (the `› Installing` line of `@expo/cli`), whatever the launch then does; the recorded hash is the probe's hash from before the build. An unrecorded project is stale, so the table over-plans a build at worst.
+"Checked-in" means present and not gitignored: `expo prebuild` writes `ios/` and `android/` that the template `.gitignore` covers, and those are still CNG. Freshness is the probe's fingerprint against `.expo/agent-cli-last-build.json`, per platform. A build is recorded when the app reaches the device: when a `--no-bundler` build step ends, before the dev server starts (e2e `dev-detach-record-test.ts`), and on the `› Installing` line of `@expo/cli` when a step fails after it. A `--no-bundler` step whose launch fails after the install does not stop the run, because the dev server's open replaces the launch. The one serving step of an app without `expo-dev-client` is recorded when it ends (Risk 10). The recorded hash is the probe's hash from before the build. An unrecorded project is stale, so the table over-plans a build at worst.
 
 ### A current build is not an installed app
 
@@ -358,6 +358,8 @@ The verdict is the `installed` section of `status`: one row per platform, the st
 6. The How of `DEV_DETACH_STILL_BUILDING` says the same command follows the run. That holds for an EAS run; a local re-run stops with `DEV_SERVER_RUNNING`.
 7. Beside a lock that is `starting`, `status` reads the lock's `serving` and can name a `dev --port <n>`. That `dev` stops and names `status`.
 8. In `status`, the probe's fingerprint run and the `expo config` of the OTA verdict have no deadline, so a hung one hangs `status`.
+9. `expo run:<platform> --no-bundler` launches the app with the dev-client URL of port 8081, the Expo CLI default, and refuses `--port`. When another project serves on 8081, the app starts to load from it; on Android a foreign bundle kept the app from attaching to this run's dev server. So `dev` stops the app on the bound device right after a `--no-bundler` build or install step, and its open starts the app cold (`devAsync-test.ts` "stops the app the … build step launched"). With `--no-open` the app stays stopped until something opens it, which beats an app running another project's code; `smoke` opens it in its own phase. The stop uses the app id from the app config, which a bare project can set apart from its native project. A released `@expo/cli` that takes `--port` with `--no-bundler` removes the 8081 launch.
+10. A bare app without `expo-dev-client` is built by one serving `expo run:<platform>`, because `--no-bundler` compiles port 8081 into it. Its build is recorded when that step ends, at `dev:stop`, so `status` compares against the previous record while it serves. This lasts until a released `@expo/cli` takes `--port` with `--no-bundler`.
 
 ## Open questions
 
