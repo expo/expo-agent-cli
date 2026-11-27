@@ -9,12 +9,11 @@
 // Nothing here ever throws. A preflight that cannot run is not an answer of "no": it is no answer,
 // and the caller falls back to recognising the failure when it happens (layer 3).
 
-import { stripVTControlCharacters } from 'util';
+import { readWhoamiAnswer } from './whoami';
 
 import { easCliArgs, mayDownloadEasCli, resolveEasCli } from '../utils/easCli';
 import { resolveProjectBin } from '../utils/projectBin';
 import { spawnSubprocessAsync, type SubprocessResult } from '../utils/subprocess';
-import { looksLikeWrapperCrash } from '../utils/wrapperCrash';
 
 /** Who the Expo CLI family acts as on this machine. */
 export interface AuthPreflight {
@@ -126,42 +125,17 @@ async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Aske
     return null;
   }
 
-  const result = await spawnSubprocessAsync(easCli.command, easCliArgs(easCli, ['whoami']), {
-    cwd: projectRoot,
-    output: 'capture',
-    timeoutMs,
-  });
+  const result = await spawnSubprocessAsync(
+    easCli.command,
+    easCliArgs(easCli, ['whoami', '--json']),
+    {
+      cwd: projectRoot,
+      output: 'capture',
+      timeoutMs,
+    }
+  );
 
-  if (result.spawnError || looksLikeWrapperCrash({ tool: 'eas', ...result })) {
-    return null;
-  }
   return fromWhoami(result, 'eas whoami');
-}
-
-/**
- * What a `whoami` run answered.
- *
- * Only the two texts the CLIs print for nobody signed in say no [observed — eas-cli 27.7.2 and
- * expo 58.1.4, both at exit 1]: `Not logged in` is `signed-out`, and `The bearer token is
- * invalid.` is `token-rejected`, which a login cannot fix. A network failure exits 1 as well, and a child a signal
- * stopped can report exit 0, so both are `failed`: neither says who is signed in.
- */
-export function classifyWhoami(
-  result: Pick<SubprocessResult, 'exitCode' | 'stdout' | 'stderr' | 'signal'>
-): 'signed-in' | 'signed-out' | 'token-rejected' | 'failed' {
-  if (result.signal) {
-    return 'failed';
-  }
-  if (result.exitCode === 0) {
-    return 'signed-in';
-  }
-  // Colour wraps the text in escapes when the CLI thinks it writes to a terminal [observed —
-  // eas-cli with FORCE_COLOR=1 prints `\x1b[33mNot logged in\x1b[39m`].
-  const said = stripVTControlCharacters(`${result.stdout}\n${result.stderr}`);
-  if (/The bearer token is invalid\./.test(said)) {
-    return 'token-rejected';
-  }
-  return /^Not logged in\s*$/m.test(said) ? 'signed-out' : 'failed';
 }
 
 /**
@@ -188,9 +162,6 @@ async function askProjectExpoAsync(projectRoot: string, timeoutMs: number): Prom
     timeoutMs,
     env: { CI: '1' },
   });
-  if (result.spawnError || looksLikeWrapperCrash({ tool: 'expo', ...result })) {
-    return null;
-  }
   return fromWhoami(result, 'expo whoami');
 }
 
@@ -200,16 +171,16 @@ async function askProjectExpoAsync(projectRoot: string, timeoutMs: number): Prom
  * variable is set" would get wrong.
  */
 function fromWhoami(result: SubprocessResult, source: 'eas whoami' | 'expo whoami'): Asked {
-  if (result.timedOut) {
-    return UNVERIFIED;
-  }
-  switch (classifyWhoami(result)) {
+  const answer = readWhoamiAnswer(result, source === 'eas whoami' ? 'eas' : 'expo');
+  switch (answer.status) {
     case 'signed-in':
-      return { loggedIn: true, user: parseWhoamiUser(result.stdout), source };
+      return { loggedIn: true, user: answer.user, source };
     case 'signed-out':
       return { loggedIn: false, user: null, source };
     case 'token-rejected':
       return { loggedIn: false, user: null, source, tokenRejected: true };
+    case 'unavailable':
+      return null;
     case 'failed':
       return UNVERIFIED;
   }
@@ -227,44 +198,3 @@ function fromTokenAlone(): AuthPreflight {
     ? { loggedIn: true, user: null, source: 'EXPO_TOKEN' }
     : { loggedIn: null, user: null, source: null };
 }
-
-/**
- * The account name out of a `whoami` run, exported for the `whoami` command's own JSON.
- *
- * The same parse for both CLIs: `expo whoami` prints the display name alone [observed —
- * `@expo/cli` `whoami/whoamiAsync.ts`], and `eas whoami` prints it above more.
- *
- * The **first** line that looks like one name, not the last. `eas whoami` prints the name, then the
- * email, then — for an actor belonging to more than their own personal account — a blank line,
- * `Accounts:`, and one `• <name> (Role: <role>)` per account [observed — the recorded payload in
- * `src/__fixtures__/eas/whoami.txt`, and `eas-cli/build/commands/account/view.js`, 22.4.0]. So the
- * last line of a real signed-in machine's answer is a role, and reading it reported `user: null`
- * for every account that is on a team.
- *
- * Scanning forward for the first line that *looks like* a name rather than taking line one keeps
- * what the previous rule was for: a notice printed above the answer has spaces in it, fails the
- * shape test, and is skipped. The email matches the shape too, but it comes second, so the name
- * still wins.
- *
- * The `(authenticated using EXPO_TOKEN)` note the CLI appends when the session came from the
- * variable is dropped: it says how the account was reached, not which account it is.
- */
-export function parseWhoamiUser(stdout: string): string | null {
-  for (const raw of stdout.split('\n')) {
-    // Everything below this belongs to the account list, and every line of it is a role.
-    if (raw.trim() === ACCOUNT_LIST_HEADING) {
-      return null;
-    }
-    const line = raw.trim().replace(EXPO_TOKEN_NOTE, '').trim();
-    if (line && /^[\w.@+-]+$/.test(line)) {
-      return line;
-    }
-  }
-  return null;
-}
-
-/** The line `eas whoami` prints above the account list, and the end of anything worth reading. */
-const ACCOUNT_LIST_HEADING = 'Accounts:';
-
-/** How `eas whoami` notes that the session came from the variable rather than from a login. */
-const EXPO_TOKEN_NOTE = /\s*\(authenticated using EXPO_TOKEN\)$/;

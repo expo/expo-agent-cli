@@ -236,16 +236,14 @@ function spawnNowAsync(
     const toOut = printerFor(process.stdout, printFilter);
     const toErr = printerFor(process.stderr, printFilter);
 
-    child.stdout?.on('data', (chunk) => {
-      const text = chunk.toString();
+    child.stdout?.setEncoding('utf8').on('data', (text: string) => {
       stdout += text;
       guard?.sawOutput();
       if (output === 'tee') {
         toOut.write(text);
       }
     });
-    child.stderr?.on('data', (chunk) => {
-      const text = chunk.toString();
+    child.stderr?.setEncoding('utf8').on('data', (text: string) => {
       stderr += text;
       guard?.sawOutput();
       if (output === 'tee' || output === 'capture-stdout') {

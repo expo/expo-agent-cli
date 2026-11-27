@@ -110,6 +110,10 @@ if (verb === 'whoami' && process.env.STUB_WHOAMI === 'network') {
 if (verb === 'whoami' && process.env.STUB_WHOAMI === 'killed') {
   process.kill(process.pid, 'SIGTERM');
 }
+if (spec.startsWith('eas-cli') && verb === 'whoami' && rest[2] === '--json') {
+  process.stdout.write(JSON.stringify({status: 'signed-in', actor: {id: 'member', type: 'User', displayName: 'team-member'}, accounts: [{name: 'organization'}]}));
+  process.exit(0);
+}
 if (spec.startsWith('eas-cli') && verb === 'whoami') {
   process.stdout.write('alice\\nalice@example.com\\n\\nAccounts:\\n• alice (Role: Owner)\\n');
 }
@@ -183,9 +187,6 @@ describe('auth commands outside an Expo project', () => {
     expect(result.stderr).not.toContain(path.join(os.homedir(), '.expo', 'state.json'));
   });
 
-  // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — live run S7. `--json` is
-  // this CLI's contract and neither CLI it forwards to has such a flag, so the flag was ignored and
-  // an agent that asked for one object got a line of prose.
   it(`should answer whoami --json with one object`, async () => {
     const dir = await setupBareDirAsync(['eas']);
 
@@ -195,13 +196,12 @@ describe('auth commands outside an Expo project', () => {
 
     expect(JSON.parse(result.stdout)).toEqual({
       loggedIn: true,
-      user: 'alice',
+      user: 'team-member',
       source: 'eas whoami',
       sessionFile: path.join(os.homedir(), '.expo', 'state.json'),
       cli: expect.stringContaining('eas'),
     });
-    // The flag is this CLI's, so it is not passed on to a CLI that has no such option.
-    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami']);
+    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami', '--json']);
   });
 
   // A `--json` after `--` belongs to the forwarded CLI, as it does for every other command
